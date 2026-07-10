@@ -146,6 +146,26 @@ export class GameState {
     return gv;
   }
 
+  /** Place a craft directly in a circular equatorial orbit (scenarios/tests). */
+  spawnInOrbit(craft: Craft, name: string, bodyId: string, altitude: number): GameVessel {
+    const body = this.universe.get(bodyId);
+    const runtime = createVesselRuntime(this.newVesselId(), name, craft, bodyId);
+    const r = body.radius + altitude;
+    const vCirc = Math.sqrt(body.mu / r);
+    runtime.pos.set(r, 0, 0);
+    runtime.vel.set(0, vCirc, 0);
+    runtime.att.setLookRotation(new Vec3(0, 0, 1), new Vec3(0, 1, 0));
+    runtime.situation = 'orbit';
+    const gv: GameVessel = {
+      runtime,
+      regime: 'active',
+      rails: { elements: null, landedPos: null, landedAtt: null },
+    };
+    this.vessels.push(gv);
+    this.activeVesselId = runtime.id;
+    return gv;
+  }
+
   /** Fire the next stage of a vessel. Returns true if something fired. */
   fireStage(gv: GameVessel): boolean {
     const v = gv.runtime;

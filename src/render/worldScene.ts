@@ -11,6 +11,7 @@ import { Vec3 } from '../core/vec3';
 import { GameState, GameVessel } from '../sim/state';
 import type { Body } from '../sim/universe';
 import { PlanetRenderer, PLANET_QUALITY, PlanetQuality } from './planet';
+import { CloudLayer } from './clouds';
 import { buildVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import { makeStarfield } from './starfield';
 
@@ -29,6 +30,7 @@ export class WorldScene {
   private readonly ambient: THREE.AmbientLight;
   private readonly sunSprite: THREE.Sprite;
   private planetRenderers = new Map<string, PlanetRenderer>();
+  private cloudLayers = new Map<string, CloudLayer>();
   private distantBodies = new Map<string, THREE.Mesh>();
   private vesselVisuals = new Map<string, VesselVisual>();
   private quality: PlanetQuality = PLANET_QUALITY.medium;
@@ -210,7 +212,19 @@ export class WorldScene {
         pr.group.visible = true;
         const distant = this.distantBodies.get(b.id);
         if (distant) distant.visible = false;
+        // Cloud layer for atmospheric worlds.
+        if (b.def.atmosphere && b.def.terrain.amplitude > 0) {
+          let clouds = this.cloudLayers.get(b.id);
+          if (!clouds) {
+            clouds = new CloudLayer(b);
+            this.cloudLayers.set(b.id, clouds);
+            this.scene.add(clouds.mesh);
+          }
+          clouds.update(_rel, spin, t, dist - b.radius);
+        }
       } else {
+        const clouds = this.cloudLayers.get(b.id);
+        if (clouds) clouds.mesh.visible = false;
         // Far: single sphere.
         const mesh = this.distantFor(b);
         mesh.position.set(_rel.x, _rel.y, _rel.z);
@@ -302,5 +316,7 @@ export class WorldScene {
   dispose(): void {
     for (const pr of this.planetRenderers.values()) pr.dispose();
     this.planetRenderers.clear();
+    for (const cl of this.cloudLayers.values()) cl.dispose();
+    this.cloudLayers.clear();
   }
 }
