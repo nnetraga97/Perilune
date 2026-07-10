@@ -1,0 +1,387 @@
+/**
+ * Planet surface renderer: cube-sphere quadtree LOD.
+ *
+ * - Six cube faces, each a quadtree of chunks; chunks split by distance.
+ * - Chunk vertices are chunk-local f32; each chunk's origin is kept in f64
+ *   body-fixed coordinates and converted to camera-relative world position
+ *   every frame (floating origin — the GPU never sees planet-scale floats).
+ * - Terrain height comes from src/sim/terrain.ts, the same function physics
+ *   uses, so rendering and ground contact can never disagree.
+ * - Skirts hide LOD cracks; horizon + frustum culling keep draw calls low.
+ * - Chunk builds are budgeted per frame to avoid hitches.
+ */
+import * as THREE from 'three';
+import { Vec3 } from '../core/vec3';
+import type { Body } from '../sim/universe';
+import { terrainHeight } from '../sim/terrain';
+
+interface FaceBasis {
+  n: Vec3;
+  ua: Vec3;
+  va: Vec3;
+}
+
+const FACES: FaceBasis[] = [
+  { n: new Vec3(1, 0, 0), ua: new Vec3(0, 1, 0), va: new Vec3(0, 0, 1) },
+  { n: new Vec3(-1, 0, 0), ua: new Vec3(0, -1, 0), va: new Vec3(0, 0, 1) },
+  { n: new Vec3(0, 1, 0), ua: new Vec3(0, 0, 1), va: new Vec3(1, 0, 0) },
+  { n: new Vec3(0, -1, 0), ua: new Vec3(0, 0, -1), va: new Vec3(1, 0, 0) },
+  { n: new Vec3(0, 0, 1), ua: new Vec3(1, 0, 0), va: new Vec3(0, 1, 0) },
+  { n: new Vec3(0, 0, -1), ua: new Vec3(-1, 0, 0), va: new Vec3(0, 1, 0) },
+];
+
+const _p = new Vec3();
+const _dir = new Vec3();
+const _e = new Vec3();
+const _w = new Vec3();
+
+/** Map cube-face UV (with tan warp for even angular spacing) to unit sphere dir. */
+function faceToDir(face: FaceBasis, u: number, v: number, out: Vec3): Vec3 {
+  const su = Math.tan(u * (Math.PI / 4));
+  const sv = Math.tan(v * (Math.PI / 4));
+  out.set(
+    face.n.x + face.ua.x * su + face.va.x * sv,
+    face.n.y + face.ua.y * su + face.va.y * sv,
+    face.n.z + face.ua.z * su + face.va.z * sv,
+  );
+  return out.normalize();
+}
+
+interface Chunk {
+  key: string;
+  mesh: THREE.Mesh;
+  /** Chunk origin in body-fixed f64 coordinates. */
+  origin: Vec3;
+  lastUsed: number;
+}
+
+interface QuadNode {
+  face: number;
+  depth: number;
+  u0: number;
+  v0: number;
+  size: number; // uv span
+  centerDir: Vec3; // unit, body-fixed
+  worldSize: number; // approx meters
+}
+
+export interface PlanetQuality {
+  /** Grid resolution per chunk edge (vertices). */
+  gridRes: number;
+  /** Distance multiple that triggers subdivision. */
+  splitFactor: number;
+  /** Cap on cached chunk meshes. */
+  cacheSize: number;
+  /** Chunk builds allowed per update call. */
+  buildBudget: number;
+}
+
+export const PLANET_QUALITY: Record<'low' | 'medium' | 'high', PlanetQuality> = {
+  low: { gridRes: 9, splitFactor: 2.0, cacheSize: 320, buildBudget: 3 },
+  medium: { gridRes: 17, splitFactor: 2.5, cacheSize: 480, buildBudget: 4 },
+  high: { gridRes: 33, splitFactor: 3.0, cacheSize: 640, buildBudget: 5 },
+};
+
+export class PlanetRenderer {
+  readonly body: Body;
+  readonly group = new THREE.Group();
+  private readonly chunks = new Map<string, Chunk>();
+  private readonly material: THREE.Material;
+  private readonly oceanMaterial: THREE.Material | null = null;
+  private readonly maxDepth: number;
+  private quality: PlanetQuality;
+  private frame = 0;
+  private buildsThisUpdate = 0;
+  private readonly palette: { low: THREE.Color; mid: THREE.Color; high: THREE.Color };
+  private ocean: THREE.Mesh | null = null;
+  /** Stats for the perf overlay. */
+  stats = { chunks: 0, visible: 0, built: 0, triangles: 0 };
+
+  constructor(body: Body, quality: PlanetQuality = PLANET_QUALITY.medium) {
+    this.body = body;
+    this.quality = quality;
+    this.maxDepth = Math.max(6, Math.min(16, Math.ceil(Math.log2(body.radius / 30))));
+    this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.palette = {
+      low: new THREE.Color(body.def.terrain.colorLow),
+      mid: new THREE.Color(body.def.terrain.colorMid),
+      high: new THREE.Color(body.def.terrain.colorHigh),
+    };
+    if (body.def.terrain.oceanLevel > 0 && body.def.terrain.colorOcean) {
+      this.oceanMaterial = new THREE.MeshPhongMaterial({
+        color: new THREE.Color(body.def.terrain.colorOcean),
+        shininess: 90,
+        specular: new THREE.Color('#8fb8cc'),
+        transparent: true,
+        opacity: 0.94,
+      });
+      // Ocean as a moderately tessellated sphere; near-ground the terrain
+      // shoreline detail carries the look. Positioned camera-relative with
+      // the group each frame.
+      const geo = new THREE.SphereGeometry(1, 96, 64);
+      this.ocean = new THREE.Mesh(geo, this.oceanMaterial);
+      this.ocean.scale.setScalar(body.radius);
+      this.group.add(this.ocean);
+    }
+  }
+
+  setQuality(q: PlanetQuality): void {
+    this.quality = q;
+  }
+
+  /**
+   * Update LOD selection and chunk placement.
+   * @param camBodyFixed camera position in body-fixed f64 coordinates
+   * @param spin body rotation angle (rad) — chunks are drawn rotated
+   * @param originWorld position of the BODY CENTER in camera-relative world
+   *        coordinates (f64 subtraction happens before this call)
+   */
+  update(camBodyFixed: Readonly<Vec3>, spin: number, originWorld: Readonly<Vec3>): void {
+    this.frame++;
+    this.buildsThisUpdate = 0;
+    this.stats.visible = 0;
+    this.stats.built = 0;
+    this.stats.triangles = 0;
+
+    const camDist = camBodyFixed.length();
+    const camDir = _dir.copy(camBodyFixed).normalize();
+    // Conservative horizon cull: chunks whose center is more than
+    // horizonAngle + margin away from the camera direction can't be seen.
+    const horizonCos =
+      camDist > this.body.radius * 1.01
+        ? Math.cos(Math.acos(Math.min(1, this.body.radius / camDist)) + 0.35)
+        : -0.2; // near/below surface: keep a generous hemisphere
+
+    const wanted = new Set<string>();
+    for (let f = 0; f < 6; f++) {
+      this.selectNode(
+        { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(FACES[f], 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
+        camBodyFixed,
+        camDir,
+        horizonCos,
+        wanted,
+      );
+    }
+
+    // Hide unneeded chunks, show wanted ones, place camera-relative.
+    const sinS = Math.sin(spin);
+    const cosS = Math.cos(spin);
+    for (const chunk of this.chunks.values()) {
+      const inUse = wanted.has(chunk.key);
+      chunk.mesh.visible = inUse;
+      if (inUse) {
+        chunk.lastUsed = this.frame;
+        // world = rotZ(spin) * origin + originWorld  (all f64, then cast)
+        const ox = chunk.origin.x * cosS - chunk.origin.y * sinS;
+        const oy = chunk.origin.x * sinS + chunk.origin.y * cosS;
+        chunk.mesh.position.set(
+          ox + originWorld.x,
+          oy + originWorld.y,
+          chunk.origin.z + originWorld.z,
+        );
+        chunk.mesh.rotation.set(0, 0, spin);
+        this.stats.visible++;
+        const geo = chunk.mesh.geometry as THREE.BufferGeometry;
+        const idx = geo.getIndex();
+        this.stats.triangles += idx ? idx.count / 3 : 0;
+      }
+    }
+    if (this.ocean) {
+      this.ocean.position.set(originWorld.x, originWorld.y, originWorld.z);
+    }
+
+    this.evictStale();
+    this.stats.chunks = this.chunks.size;
+  }
+
+  private selectNode(
+    node: QuadNode,
+    cam: Readonly<Vec3>,
+    camDir: Readonly<Vec3>,
+    horizonCos: number,
+    wanted: Set<string>,
+  ): void {
+    // Horizon cull (skip for shallow nodes which can wrap the horizon).
+    if (node.depth >= 3) {
+      const chunkAngular = node.worldSize / this.body.radius;
+      if (Vec3.dot(node.centerDir, camDir) < horizonCos - chunkAngular) return;
+    }
+
+    const center = _p.copy(node.centerDir).scale(this.body.radius);
+    const dist = Math.max(1, center.distanceTo(cam) - node.worldSize * 0.5);
+    if (node.depth < this.maxDepth && dist < node.worldSize * this.quality.splitFactor) {
+      const half = node.size / 2;
+      for (let q = 0; q < 4; q++) {
+        const cu = node.u0 + (q & 1 ? half : 0);
+        const cv = node.v0 + (q & 2 ? half : 0);
+        const childDir = faceToDir(FACES[node.face], cu + half / 2, cv + half / 2, new Vec3());
+        this.selectNode(
+          {
+            face: node.face,
+            depth: node.depth + 1,
+            u0: cu,
+            v0: cv,
+            size: half,
+            centerDir: childDir,
+            worldSize: node.worldSize / 2,
+          },
+          cam,
+          camDir,
+          horizonCos,
+          wanted,
+        );
+      }
+      return;
+    }
+
+    const key = `${node.face}:${node.depth}:${node.u0.toFixed(6)}:${node.v0.toFixed(6)}`;
+    wanted.add(key);
+    if (!this.chunks.has(key) && this.buildsThisUpdate < this.quality.buildBudget) {
+      this.buildsThisUpdate++;
+      this.stats.built++;
+      this.buildChunk(key, node);
+    }
+  }
+
+  private buildChunk(key: string, node: QuadNode): void {
+    const res = this.quality.gridRes;
+    const face = FACES[node.face];
+    const vertCount = res * res + res * 4; // grid + skirt ring
+    const positions = new Float32Array(vertCount * 3);
+    const normals = new Float32Array(vertCount * 3);
+    const colors = new Float32Array(vertCount * 3);
+
+    // Chunk origin: center of chunk at ground level (f64, body-fixed).
+    const centerDir = faceToDir(face, node.u0 + node.size / 2, node.v0 + node.size / 2, _dir);
+    const originH = this.body.radius + terrainHeight(this.body, centerDir);
+    const origin = new Vec3(centerDir.x * originH, centerDir.y * originH, centerDir.z * originH);
+
+    const eps = Math.max(1e-5, node.size / (res * 8));
+    let vi = 0;
+    const color = new THREE.Color();
+    const writeVertex = (u: number, v: number, sink: number) => {
+      const dir = faceToDir(face, u, v, _p);
+      const h = terrainHeight(this.body, dir);
+      const r = this.body.radius + h - sink;
+      positions[vi * 3] = dir.x * r - origin.x;
+      positions[vi * 3 + 1] = dir.y * r - origin.y;
+      positions[vi * 3 + 2] = dir.z * r - origin.z;
+
+      // Normal from central differences of the height field.
+      const du = faceToDir(face, u + eps, v, _e);
+      const hu = terrainHeight(this.body, du);
+      du.scale(this.body.radius + hu);
+      const dv = faceToDir(face, u, v + eps, _w);
+      const hv = terrainHeight(this.body, dv);
+      dv.scale(this.body.radius + hv);
+      const px = dir.x * (this.body.radius + h);
+      const py = dir.y * (this.body.radius + h);
+      const pz = dir.z * (this.body.radius + h);
+      du.set(du.x - px, du.y - py, du.z - pz);
+      dv.set(dv.x - px, dv.y - py, dv.z - pz);
+      const n = Vec3.cross(du, dv, du).normalize();
+      // Cube faces wind inconsistently; force outward-facing normals.
+      if (n.x * dir.x + n.y * dir.y + n.z * dir.z < 0) n.negate();
+      normals[vi * 3] = n.x;
+      normals[vi * 3 + 1] = n.y;
+      normals[vi * 3 + 2] = n.z;
+
+      // Altitude/slope palette.
+      const t = this.body.def.terrain;
+      const rel = Math.min(1, Math.max(0, h / (t.amplitude * 0.8) + 0.5));
+      if (rel < 0.5) {
+        color.lerpColors(this.palette.low, this.palette.mid, rel * 2);
+      } else {
+        color.lerpColors(this.palette.mid, this.palette.high, (rel - 0.5) * 2);
+      }
+      const slopeShade = 0.75 + 0.25 * Math.max(0, n.x * dir.x + n.y * dir.y + n.z * dir.z);
+      colors[vi * 3] = color.r * slopeShade;
+      colors[vi * 3 + 1] = color.g * slopeShade;
+      colors[vi * 3 + 2] = color.b * slopeShade;
+      vi++;
+    };
+
+    for (let j = 0; j < res; j++) {
+      for (let i = 0; i < res; i++) {
+        const u = node.u0 + (node.size * i) / (res - 1);
+        const v = node.v0 + (node.size * j) / (res - 1);
+        writeVertex(u, v, 0);
+      }
+    }
+    // Skirt ring: copies of border vertices sunk toward the planet center.
+    const skirtDepth = Math.max(2, node.worldSize * 0.05);
+    const border: Array<[number, number]> = [];
+    for (let i = 0; i < res; i++) border.push([i, 0]);
+    for (let i = 0; i < res; i++) border.push([i, res - 1]);
+    for (let j = 0; j < res; j++) border.push([0, j]);
+    for (let j = 0; j < res; j++) border.push([res - 1, j]);
+    for (const [i, j] of border) {
+      const u = node.u0 + (node.size * i) / (res - 1);
+      const v = node.v0 + (node.size * j) / (res - 1);
+      writeVertex(u, v, skirtDepth);
+    }
+
+    // Indices: grid triangles + skirt quads.
+    const indices: number[] = [];
+    for (let j = 0; j < res - 1; j++) {
+      for (let i = 0; i < res - 1; i++) {
+        const a = j * res + i;
+        const b = a + 1;
+        const c = a + res;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+    const skirtBase = res * res;
+    const edge = (list: number[], skirtOffset: number) => {
+      for (let k = 0; k < list.length - 1; k++) {
+        const g0 = list[k];
+        const g1 = list[k + 1];
+        const s0 = skirtBase + skirtOffset + k;
+        const s1 = s0 + 1;
+        indices.push(g0, s0, g1, g1, s0, s1);
+      }
+    };
+    edge(Array.from({ length: res }, (_, i) => i), 0); // v=0 edge
+    edge(Array.from({ length: res }, (_, i) => (res - 1) * res + i), res); // v=1
+    edge(Array.from({ length: res }, (_, j) => j * res), res * 2); // u=0
+    edge(Array.from({ length: res }, (_, j) => j * res + (res - 1)), res * 3); // u=1
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setIndex(indices);
+    geo.computeBoundingSphere();
+
+    const mesh = new THREE.Mesh(geo, this.material);
+    mesh.frustumCulled = true;
+    mesh.matrixAutoUpdate = true;
+    this.group.add(mesh);
+    this.chunks.set(key, { key, mesh, origin, lastUsed: this.frame });
+  }
+
+  private evictStale(): void {
+    if (this.chunks.size <= this.quality.cacheSize) return;
+    const entries = [...this.chunks.values()].sort((a, b) => a.lastUsed - b.lastUsed);
+    const toRemove = this.chunks.size - this.quality.cacheSize;
+    for (let i = 0; i < toRemove; i++) {
+      const chunk = entries[i];
+      if (chunk.lastUsed === this.frame) break; // never evict in-use chunks
+      this.group.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+      this.chunks.delete(chunk.key);
+    }
+  }
+
+  dispose(): void {
+    for (const chunk of this.chunks.values()) {
+      this.group.remove(chunk.mesh);
+      chunk.mesh.geometry.dispose();
+    }
+    this.chunks.clear();
+    this.material.dispose();
+    this.oceanMaterial?.dispose();
+    if (this.ocean) this.ocean.geometry.dispose();
+  }
+}
