@@ -10,7 +10,7 @@ import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from '../sim/state';
 import { defOf, analyzeCraft } from '../sim/vessel';
 import type { SasMode } from '../sim/flight';
 import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
-import { stateToElements, periapsisOf, apoapsisOf, periodOf } from '../core/orbit';
+import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -295,16 +295,19 @@ export class FlightHud {
     this.situationEl.textContent = v.situation.toUpperCase();
     this.warpEl.textContent = `${game.warpRate}×`;
 
-    // Orbit readouts.
+    // Orbit readouts with time-to-apsis ETAs.
     const el0 = stateToElements(body.mu, v.pos, v.vel, game.time);
     if (el0.e < 1) {
       const ap = apoapsisOf(el0) - body.radius;
       this.apEl.textContent = fmtDistance(ap);
-      const T = periodOf(el0);
-      this.apTimeEl.textContent = '';
-      this.peTimeEl.textContent = '';
+      const tApo = timeToTrueAnomaly(el0, game.time, Math.PI);
+      const tPe = timeToTrueAnomaly(el0, game.time, 0);
+      this.apTimeEl.textContent = tApo > 1 ? `T−${fmtTime(tApo)}` : '';
+      this.peTimeEl.textContent = tPe > 1 ? `T−${fmtTime(tPe)}` : '';
     } else {
       this.apEl.textContent = '(escape)';
+      this.apTimeEl.textContent = '';
+      this.peTimeEl.textContent = '';
     }
     const pe = periapsisOf(el0) - body.radius;
     this.peEl.textContent = fmtDistance(pe);

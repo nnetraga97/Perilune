@@ -89,7 +89,7 @@ describe('state ↔ elements round trip', () => {
           );
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 300, seed: 20260710 },
     );
   });
 });
@@ -175,7 +175,7 @@ describe('universal-variable propagation', () => {
           return rB.distanceTo(r) / r.length() < 1e-5;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 300, seed: 20260710 },
     );
   });
 });

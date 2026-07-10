@@ -262,16 +262,9 @@ export class WorldScene {
         continue;
       }
       vis.group.visible = true;
-      vis.group.position.set(
-        _rel.x - rv.massProps.com.x, // group origin is craft origin; offset so CoM lands on pos
-        _rel.y,
-        _rel.z,
-      );
-      // Position: vessel pos refers to craft origin; account attitude:
+      // rv.pos tracks the craft CoM; shift the model so its CoM lands there.
       vis.group.position.set(_rel.x, _rel.y, _rel.z);
       vis.group.quaternion.set(rv.att.x, rv.att.y, rv.att.z, rv.att.w);
-      // The craft origin: rv.pos tracks the craft CoM? (we integrate CoM).
-      // Shift so the CoM of the model sits at _rel.
       const com = rv.massProps.com;
       const offset = new THREE.Vector3(-com.x, -com.y, -com.z).applyQuaternion(vis.group.quaternion);
       vis.group.position.x += offset.x;

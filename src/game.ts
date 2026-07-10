@@ -48,6 +48,7 @@ class PeriluneGame {
   private launchedCraft: Craft | null = null;
   private missionStart = 0;
   private nodeRemainingDv = 0;
+  private lastAutosave = 0;
   private nodeBurnDir = new Vec3(1, 0, 0);
   private dialogEl: HTMLElement | null = null;
 
@@ -497,6 +498,12 @@ class PeriluneGame {
       if (this.pendingWarpStop !== null && this.game.time >= this.pendingWarpStop) {
         this.game.setWarp(0, false);
         this.pendingWarpStop = null;
+      }
+
+      // Periodic autosave (wall-clock; skips high warp to avoid stutter).
+      if (now - this.lastAutosave > 120_000 && this.game.warpRate <= 5) {
+        this.lastAutosave = now;
+        void writeSave(this.game, 'auto', 'autosave');
       }
 
       // Destruction dialog.
