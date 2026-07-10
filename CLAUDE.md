@@ -10,3 +10,4 @@ This is a test repository ("fable-test", described as "Testing model" in the REA
 
 - There are no build, lint, or test commands yet. If code is added, update this file with the relevant commands and architecture notes.
 - The default branch is `main`.
+- This repo is a sandbox for testing: it can be used freely — experiment, add, modify, or remove files without special caution.
