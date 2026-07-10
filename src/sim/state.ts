@@ -374,7 +374,44 @@ export class GameState {
     return steps;
   }
 
+  /** Make a vessel the active (controlled) one. */
+  setActive(id: string): void {
+    const gv = this.vessels.find((x) => x.runtime.id === id);
+    if (!gv) return;
+    this.activeVesselId = id;
+    this.setWarp(0, false);
+    this.toActive(gv);
+  }
+
+  /**
+   * Physics bubble management: vessels near the active one run full physics;
+   * everyone else rides rails. Called each physics step.
+   */
+  private manageBubble(): void {
+    const active = this.active;
+    if (!active) return;
+    this.toActive(active);
+    for (const gv of this.vessels) {
+      if (gv === active) continue;
+      const v = gv.runtime;
+      if (v.bodyId !== active.runtime.bodyId) {
+        if (gv.regime === 'active') this.toRails(gv);
+        continue;
+      }
+      // Same SOI: compare positions (rails vessels evaluated analytically).
+      if (gv.regime === 'rails') {
+        this.railsPosition(gv, _r);
+        const d = _r.distanceTo(active.runtime.pos);
+        if (d < 2_500) this.toActive(gv);
+      } else {
+        const d = v.pos.distanceTo(active.runtime.pos);
+        if (d > 4_000 && !v.isDebris) this.toRails(gv);
+      }
+    }
+  }
+
   private stepPhysics(dt: number): void {
+    this.manageBubble();
     // Sun direction for each vessel's body frame (approx: from body to star).
     for (const gv of this.vessels) {
       if (gv.regime !== 'active') continue;
@@ -434,8 +471,172 @@ export class GameState {
       this.checkSoiTransitionActive(gv);
     }
 
+    // Docking capture between nearby active vessels.
+    this.checkDocking();
+
     // Cull far/landed debris to keep vessel count bounded.
     this.cullDebris();
+  }
+
+  // ---------------------------------------------------------------- docking
+  /**
+   * Free docking faces on a vessel: ports whose outward node is unoccupied.
+   * Face dir is craft-local (+Y top face, −Y bottom face).
+   */
+  private freeDockFaces(gv: GameVessel): Array<{ part: PartInstance; face: 1 | -1 }> {
+    const v = gv.runtime;
+    const out: Array<{ part: PartInstance; face: 1 | -1 }> = [];
+    for (const p of v.craft.parts) {
+      if (p.defId !== 'dock-port-s') continue;
+      // A part hanging below its parent connects via its TOP node; one
+      // sitting above the parent connects via its BOTTOM node.
+      const topUsedByParent = p.parentKey !== null && p.attach === 'stack-bottom';
+      const bottomUsedByParent = p.parentKey !== null && p.attach === 'stack-top';
+      const topChild = v.craft.parts.some((c) => c.parentKey === p.key && c.attach === 'stack-top');
+      const bottomChild = v.craft.parts.some((c) => c.parentKey === p.key && c.attach === 'stack-bottom');
+      if (!topUsedByParent && !topChild) out.push({ part: p, face: 1 });
+      if (!bottomUsedByParent && !bottomChild) out.push({ part: p, face: -1 });
+    }
+    return out;
+  }
+
+  /** Check active vessel pairs for docking capture. */
+  private checkDocking(): void {
+    const actives = this.vessels.filter((gv) => gv.regime === 'active' && !gv.runtime.isDebris);
+    for (let i = 0; i < actives.length; i++) {
+      for (let j = i + 1; j < actives.length; j++) {
+        const a = actives[i];
+        const b = actives[j];
+        if (a.runtime.bodyId !== b.runtime.bodyId) continue;
+        if (a.runtime.pos.distanceTo(b.runtime.pos) > 80) continue;
+        if (this.tryDockPair(a, b)) return; // one merge per tick
+      }
+    }
+  }
+
+  private tryDockPair(a: GameVessel, b: GameVessel): boolean {
+    const facesA = this.freeDockFaces(a);
+    const facesB = this.freeDockFaces(b);
+    if (!facesA.length || !facesB.length) return false;
+    const va = a.runtime;
+    const vb = b.runtime;
+    const closing = _r.copy(va.vel).sub(vb.vel).length();
+    if (closing > 1.6) return false;
+
+    for (const fa of facesA) {
+      for (const fb of facesB) {
+        // World positions of the port faces.
+        const pa = portFaceWorld(va, fa.part, fa.face, _br);
+        const pb = portFaceWorld(vb, fb.part, fb.face, _bv);
+        if (pa.distanceTo(pb) > 0.7) continue;
+        // Facing check: face normals opposed.
+        const na = portFaceNormal(va, fa.face, _r);
+        const nb = portFaceNormal(vb, fb.face, _v);
+        if (Vec3.dot(na, nb) > -0.8) continue;
+        this.mergeVessels(a, b, fa.part, fa.face, fb.part);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Merge vessel B into A at the given ports. */
+  private mergeVessels(
+    a: GameVessel,
+    b: GameVessel,
+    portA: PartInstance,
+    faceA: 1 | -1,
+    portB: PartInstance,
+  ): void {
+    const va = a.runtime;
+    const vb = b.runtime;
+    // Relative transform B→A (craft frames).
+    const qaInv = va.att.clone().conjugate();
+    const qRel = qaInv.clone().multiply(vb.att);
+    const keyOffset = va.craft.nextKey;
+
+    const comA = va.massProps.com;
+    const comB = vb.massProps.com;
+    const dPos = _r.copy(vb.pos).sub(va.pos);
+    qaInv.rotate(dPos, dPos); // into A craft frame
+
+    // Momentum-conserving velocity of the merged stack.
+    const mA = va.massProps.mass;
+    const mB = vb.massProps.mass;
+    va.vel.scale(mA / (mA + mB)).addScaled(vb.vel, mB / (mA + mB));
+
+    const tmp = new Vec3();
+    for (const p of vb.craft.parts) {
+      const local = tmp.set(p.position.x - comB.x, p.position.y - comB.y, p.position.z - comB.z);
+      qRel.rotate(local, local);
+      const rot = new Quat(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w).premultiply(qRel);
+      const newPart: PartInstance = {
+        ...p,
+        key: p.key + keyOffset,
+        parentKey: p.parentKey === null ? null : p.parentKey + keyOffset,
+        position: {
+          x: comA.x + dPos.x + local.x,
+          y: comA.y + dPos.y + local.y,
+          z: comA.z + dPos.z + local.z,
+        },
+        rotation: { x: rot.x, y: rot.y, z: rot.z, w: rot.w },
+        resources: { ...p.resources },
+      };
+      va.craft.parts.push(newPart);
+    }
+    // Link B's port under A's port.
+    const newPortB = va.craft.parts.find((p) => p.key === portB.key + keyOffset)!;
+    // Re-root B's tree at its port (so the link direction is consistent).
+    rerootSubtree(va.craft, newPortB.key);
+    newPortB.parentKey = portA.key;
+    newPortB.attach = faceA === 1 ? 'stack-top' : 'stack-bottom';
+
+    // Stages append with remapped keys.
+    for (const st of vb.craft.stages) {
+      va.craft.stages.push({ partKeys: st.partKeys.map((k) => k + keyOffset) });
+    }
+    va.craft.nextKey = keyOffset + vb.craft.nextKey;
+    va.crew = [...va.crew, ...vb.crew];
+    va.charge.amount += vb.charge.amount;
+    refreshDerived(va);
+    logEvent(va, this.time, `Docking confirmed: ${vb.name} + ${va.name}`);
+    this.vessels = this.vessels.filter((x) => x !== b);
+    if (this.activeVesselId === vb.id) this.activeVesselId = va.id;
+  }
+
+  /** Undock at a docked port pair (child port whose parent is a port). */
+  undock(gv: GameVessel, childPortKey: number): boolean {
+    const v = gv.runtime;
+    const child = v.craft.parts.find((p) => p.key === childPortKey);
+    if (!child || child.defId !== 'dock-port-s' || child.parentKey === null) return false;
+    const parent = v.craft.parts.find((p) => p.key === child.parentKey);
+    if (!parent || parent.defId !== 'dock-port-s') return false;
+    const crewBefore = [...v.crew];
+    this.detachSubtree(gv, child, 60);
+    const newVessel = this.vessels[this.vessels.length - 1];
+    if (newVessel && newVessel.runtime.id !== v.id) {
+      newVessel.runtime.isDebris = false;
+      newVessel.runtime.name = `${v.name} segment`;
+      // Split crew by pod capacity on each side.
+      const capOf = (craft: Craft) =>
+        craft.parts.reduce((s, p) => s + (defOf(p).pod?.crew ?? 0), 0);
+      const capA = capOf(v.craft);
+      v.crew = crewBefore.slice(0, capA);
+      newVessel.runtime.crew = crewBefore.slice(capA, capA + capOf(newVessel.runtime.craft));
+      logEvent(v, this.time, 'Undocked.');
+    }
+    return true;
+  }
+
+  /** Docked port pairs available for undocking. */
+  dockedJoints(gv: GameVessel): Array<{ childKey: number }> {
+    const out: Array<{ childKey: number }> = [];
+    for (const p of gv.runtime.craft.parts) {
+      if (p.defId !== 'dock-port-s' || p.parentKey === null) continue;
+      const parent = gv.runtime.craft.parts.find((q) => q.key === p.parentKey);
+      if (parent?.defId === 'dock-port-s') out.push({ childKey: p.key });
+    }
+    return out;
   }
 
   private destroyVessel(gv: GameVessel, reason: string): void {
@@ -550,6 +751,59 @@ export class GameState {
 }
 
 const _tmpDist = new Vec3();
+const _pf = new Vec3();
+
+/** World position of a dock port's mating face. */
+function portFaceWorld(v: VesselRuntime, port: PartInstance, face: 1 | -1, out: Vec3): Vec3 {
+  const def = defOf(port);
+  const com = v.massProps.com;
+  _pf.set(
+    port.position.x - com.x,
+    port.position.y - com.y + (face * def.shape.height) / 2,
+    port.position.z - com.z,
+  );
+  // Apply the part's own rotation to the face offset direction? Ports are
+  // stack parts; their local axis follows the part rotation.
+  const pq = new Quat(port.rotation.x, port.rotation.y, port.rotation.z, port.rotation.w);
+  const local = new Vec3(0, (face * def.shape.height) / 2, 0);
+  pq.rotate(local, local);
+  _pf.set(
+    port.position.x - com.x + local.x,
+    port.position.y - com.y + local.y,
+    port.position.z - com.z + local.z,
+  );
+  v.att.rotate(_pf, out.copy(_pf));
+  return out.add(v.pos);
+}
+
+/** World direction the port face points (outward normal). */
+function portFaceNormal(v: VesselRuntime, face: 1 | -1, out: Vec3): Vec3 {
+  return v.att.rotate(out.set(0, face, 0), out);
+}
+
+/**
+ * Re-root a craft subtree at the given part: reverse parent links along the
+ * path from the new root up to the old root of its connected component.
+ */
+function rerootSubtree(craft: Craft, newRootKey: number): void {
+  const byKey = new Map(craft.parts.map((p) => [p.key, p]));
+  const path: PartInstance[] = [];
+  let cur = byKey.get(newRootKey);
+  while (cur) {
+    path.push(cur);
+    cur = cur.parentKey !== null ? byKey.get(cur.parentKey) : undefined;
+  }
+  const flip = (attach: string): PartInstance['attach'] =>
+    attach === 'stack-top' ? 'stack-bottom' : attach === 'stack-bottom' ? 'stack-top' : 'surface';
+  for (let i = path.length - 1; i > 0; i--) {
+    const parent = path[i];
+    const child = path[i - 1];
+    parent.parentKey = child.key;
+    parent.attach = flip(child.attach);
+  }
+  const root = byKey.get(newRootKey)!;
+  root.parentKey = null;
+}
 
 function craftHasCrewPod(craft: Craft): boolean {
   return craft.parts.some((p) => (defOf(p).pod?.crew ?? 0) > 0);

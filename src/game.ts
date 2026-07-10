@@ -22,6 +22,7 @@ import {
   scienceSituation,
 } from './content/science';
 import { logEvent } from './sim/flight';
+import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { nodeBurnDirection, nodeDeltaV } from './sim/maneuver';
 import { stateToElements } from './core/orbit';
 
@@ -49,6 +50,9 @@ class PeriluneGame {
   private missionStart = 0;
   private nodeRemainingDv = 0;
   private lastAutosave = 0;
+  private comms: CommsStatus = { connected: true, path: [], strength: 1 };
+  private lastCommsCheck = 0;
+  private controlBlocked = false;
   private nodeBurnDir = new Vec3(1, 0, 0);
   private dialogEl: HTMLElement | null = null;
 
@@ -222,6 +226,10 @@ class PeriluneGame {
   private stage(): void {
     const gv = this.game.active;
     if (!gv) return;
+    if (this.controlBlocked) {
+      logEvent(gv.runtime, this.game.time, 'No signal: cannot command staging.', 'warning');
+      return;
+    }
     this.game.fireStage(gv);
     this.world.invalidateVessel(gv.runtime.id);
   }
@@ -447,7 +455,22 @@ class PeriluneGame {
       case 'Period':
         this.stepWarp(1);
         break;
+      case 'BracketLeft':
+        this.cycleVessel(-1);
+        break;
+      case 'BracketRight':
+        this.cycleVessel(1);
+        break;
     }
+  }
+
+  private cycleVessel(dir: number): void {
+    const list = this.game.vessels.filter((gv) => !gv.runtime.isDebris);
+    if (list.length < 2) return;
+    const idx = list.findIndex((gv) => gv.runtime.id === this.game.activeVesselId);
+    const next = list[(idx + dir + list.length) % list.length];
+    this.game.setActive(next.runtime.id);
+    this.hud.setMissionStart(this.game.time);
   }
 
   private stepWarp(dir: number): void {
@@ -490,7 +513,17 @@ class PeriluneGame {
 
     const simStart = this.perf.beginSim();
     if (this.screen === 'flight') {
-      this.applyContinuousInput(dt);
+      // Comms: re-evaluate twice a second; probes need a link for control.
+      if (now - this.lastCommsCheck > 500) {
+        this.lastCommsCheck = now;
+        const gv = this.game.active;
+        if (gv) {
+          this.comms = evaluateComms(this.game, gv);
+          this.controlBlocked = needsCommsForControl(gv) && !this.comms.connected;
+          this.hud.setComms(this.comms, this.controlBlocked);
+        }
+      }
+      if (!this.controlBlocked) this.applyContinuousInput(dt);
       this.updateNodeAssist(dt);
       this.game.update(dt);
 

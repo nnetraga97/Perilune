@@ -9,6 +9,7 @@ import { Vec3 } from '../core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from '../sim/state';
 import { defOf, analyzeCraft } from '../sim/vessel';
 import type { SasMode } from '../sim/flight';
+import type { CommsStatus } from '../sim/comms';
 import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 
@@ -193,6 +194,27 @@ export class FlightHud {
 
     // ---- event feed
     this.eventFeed = el('div', 'hud-events', this.root);
+
+    // ---- comms indicator (top bar)
+    this.commsEl = el('div', 'hud-comms', top, '⇅ —');
+  }
+
+  private commsEl!: HTMLElement;
+
+  setComms(status: CommsStatus, blocked: boolean): void {
+    if (blocked) {
+      this.commsEl.textContent = '⇅ NO SIGNAL';
+      this.commsEl.style.color = 'var(--ui-danger)';
+      this.commsEl.title = 'Probe control requires a comms link';
+    } else if (status.connected) {
+      this.commsEl.textContent = `⇅ ${(status.strength * 100).toFixed(0)}%`;
+      this.commsEl.style.color = 'var(--ui-good)';
+      this.commsEl.title = status.path.join(' → ');
+    } else {
+      this.commsEl.textContent = '⇅ local';
+      this.commsEl.style.color = '#7d8b96';
+      this.commsEl.title = 'Crewed vessel: no link needed';
+    }
   }
 
   private warpStep(dir: number): void {
