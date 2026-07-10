@@ -63,6 +63,18 @@ export class GameState {
   private nextVesselSerial = 1;
   /** Set when the active vessel was destroyed this frame (UI reacts). */
   lastDestruction: { vesselId: string; reason: string } | null = null;
+  /** Recovered science points (spendable in later milestones). */
+  sciencePoints = 0;
+  /** Completed experiment keys (experimentId@body-situation). */
+  completedExperiments = new Set<string>();
+  /** Progress/tutorial flags. */
+  flags: Record<string, boolean> = {};
+
+  /** Keep the vessel id serial ahead of restored ids after loading a save. */
+  noteRestoredVessel(id: string): void {
+    const m = /^vessel-(\d+)$/.exec(id);
+    if (m) this.nextVesselSerial = Math.max(this.nextVesselSerial, Number(m[1]) + 1);
+  }
 
   get active(): GameVessel | null {
     return this.vessels.find((gv) => gv.runtime.id === this.activeVesselId) ?? null;

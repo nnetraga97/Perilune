@@ -1,0 +1,118 @@
+/**
+ * Versioned save schema. Everything in a save is plain JSON data.
+ *
+ * Rules:
+ *  - SAVE_VERSION bumps on any breaking shape change.
+ *  - migrateSave() upgrades old saves step by step; it never throws away a
+ *    campaign silently — unknown versions fail loudly BEFORE overwriting.
+ *  - Writes are transactional: new value is verified (round-trip parse +
+ *    validate) before replacing the previous slot, and a backup rotation
+ *    keeps the last 3 good saves.
+ */
+import type { Vec3Like } from '../core/vec3';
+import type { QuatLike } from '../core/quat';
+import type { Craft, Stage, PartInstance } from '../sim/vessel';
+import type { SasMode, Situation } from '../sim/flight';
+
+export const SAVE_VERSION = 1;
+
+export interface SavedPart {
+  key: number;
+  defId: string;
+  parentKey: number | null;
+  attach: string;
+  position: Vec3Like;
+  rotation: QuatLike;
+  resources: Record<string, number>;
+  symmetry: number;
+  activated?: boolean;
+  deployed?: boolean;
+  temperature?: number;
+}
+
+export interface SavedCraft {
+  name: string;
+  version: number;
+  parts: SavedPart[];
+  stages: Stage[];
+  nextKey: number;
+}
+
+export interface SavedVessel {
+  id: string;
+  name: string;
+  craft: SavedCraft;
+  bodyId: string;
+  regime: 'active' | 'rails';
+  pos: Vec3Like;
+  vel: Vec3Like;
+  att: QuatLike;
+  angVel: Vec3Like;
+  situation: Situation;
+  sas: SasMode;
+  throttle: number;
+  currentStage: number;
+  isDebris: boolean;
+  crew: string[];
+  charge: number;
+  science: Record<string, number>;
+  railsElements: {
+    a: number;
+    e: number;
+    i: number;
+    raan: number;
+    argPe: number;
+    meanAnomaly0: number;
+    epoch: number;
+    mu: number;
+  } | null;
+  railsLandedPos: Vec3Like | null;
+  railsLandedAtt: QuatLike | null;
+}
+
+export interface SaveGame {
+  saveVersion: number;
+  createdAt: number;
+  label: string;
+  time: number;
+  activeVesselId: string | null;
+  vessels: SavedVessel[];
+  /** Recovered science points and completed experiment keys. */
+  science: { points: number; completed: string[] };
+  /** Tutorial / progress flags. */
+  flags: Record<string, boolean>;
+}
+
+export function validateSave(raw: unknown): raw is SaveGame {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const s = raw as Partial<SaveGame>;
+  if (typeof s.saveVersion !== 'number') return false;
+  if (typeof s.time !== 'number' || !Number.isFinite(s.time)) return false;
+  if (!Array.isArray(s.vessels)) return false;
+  for (const v of s.vessels) {
+    if (typeof v.id !== 'string' || typeof v.bodyId !== 'string') return false;
+    if (!v.craft || !Array.isArray(v.craft.parts)) return false;
+    for (const p of v.craft.parts) {
+      if (typeof p.defId !== 'string' || typeof p.key !== 'number') return false;
+      if (!p.position || !Number.isFinite(p.position.x)) return false;
+    }
+    if (!v.pos || !Number.isFinite(v.pos.x) || !Number.isFinite(v.vel?.x ?? NaN)) return false;
+  }
+  return true;
+}
+
+/** Upgrade an older save to the current version. Throws on unknown versions. */
+export function migrateSave(raw: SaveGame): SaveGame {
+  let save = raw;
+  if (save.saveVersion > SAVE_VERSION) {
+    throw new Error(
+      `Save is from a newer version (${save.saveVersion} > ${SAVE_VERSION}); refusing to load.`,
+    );
+  }
+  // Future migrations chain here:
+  // if (save.saveVersion === 1) save = migrate1to2(save);
+  if (save.saveVersion !== SAVE_VERSION) {
+    throw new Error(`No migration path from save version ${save.saveVersion}.`);
+  }
+  return save;
+}
