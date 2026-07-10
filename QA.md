@@ -1,0 +1,42 @@
+# Perilune — QA Strategy
+
+## Test pyramid
+
+1. **Unit + property tests** (vitest + fast-check): orbital math round-trips,
+   Kepler solvers, conservation laws, craft graph invariants, structural
+   solver, save schema validation/corruption/migration guards, maneuver
+   planning. Property tests randomize orbits and assert invariants
+   (energy conservation, back-propagation returns to start, no NaN).
+2. **Integration mission tests** (vitest, real sim loop): full ascent →
+   orbit → deorbit → chute landing; full Palla round trip (transfer,
+   finite burns with corrections, SOI transitions, moon landing, return,
+   aerobrake). These are the strongest regression net in the project: any
+   physics/staging/warp regression breaks a mission.
+3. **Browser e2e** (Playwright, real Chromium): terrain descent orbit→3 m
+   (perf + memory gates); full playable loop through the real UI (build by
+   mouse clicks on attachment nodes, launch, throttle, stage, climb,
+   quicksave/quickload, map view) with a zero-console-error gate.
+4. **Benchmarks** (vitest bench): numeric hot paths with CI budgets
+   (PERFORMANCE.md).
+
+## Gates for every milestone
+
+- `npm test` green, `npm run typecheck` clean, `npm run build` succeeds.
+- Both e2e suites green with zero console errors.
+- Benchmarks within budget.
+- Manual play of the milestone loop (recorded in CHANGELOG).
+
+## Defect policy
+
+Release blockers (crash, save corruption, NaN physics, spontaneous vessel
+destruction, broken controls, missing acceptance scenario) stop feature
+work until fixed. Bugs found by tests get a regression test with the fix.
+
+## Notable defects caught by this net (kept as regression tests)
+
+- Gimbal torque axis cross-wiring (vacuum attitude divergence).
+- Ground contact using inertial instead of surface-relative velocity
+  (pad destruction, phantom friction).
+- Heating exposure ignoring flight direction (retro entry cooked the nose).
+- `#ui-root > *` CSS specificity swallowing canvas clicks.
+- Property-test find: near-parabolic elements ill-conditioning at apoapsis.
