@@ -156,6 +156,20 @@ export class GameState {
     return true;
   }
 
+  /** Replace the queue from validated save data while preserving stable ids. */
+  restoreAlarms(alarms: readonly GameAlarm[]): void {
+    this.alarms.splice(0, this.alarms.length);
+    let maxSerial = 0;
+    for (const alarm of alarms) {
+      if (alarm.time <= this.time) continue;
+      this.alarms.push({ ...alarm });
+      const match = /^alarm-(\d+)$/.exec(alarm.id);
+      if (match) maxSerial = Math.max(maxSerial, Number(match[1]));
+    }
+    this.nextAlarmSerial = Math.max(this.nextAlarmSerial, maxSerial + 1);
+    this.sortAlarms();
+  }
+
   private sortAlarms(): void {
     this.alarms.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
   }

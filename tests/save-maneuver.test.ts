@@ -61,6 +61,24 @@ describe('save system', () => {
     expect(validateSave(JSON.parse(JSON.stringify(good)))).toBe(true);
     expect(() => migrateSave({ ...good, saveVersion: SAVE_VERSION + 1 })).toThrow(/newer/);
   });
+
+  it('round-trips alarms and migrates version 2 saves with an empty queue', () => {
+    const game = new GameState();
+    game.addAlarm(1234, 'Window: Rusk', 'transfer');
+
+    const saved = serializeGame(game, 'alarm');
+    expect(saved.saveVersion).toBe(3);
+    expect(restoreGame(saved).alarms[0]).toMatchObject({
+      time: 1234,
+      label: 'Window: Rusk',
+      kind: 'transfer',
+    });
+
+    const v2 = JSON.parse(JSON.stringify(saved));
+    v2.saveVersion = 2;
+    delete v2.alarms;
+    expect(migrateSave(v2).alarms).toEqual([]);
+  });
 });
 
 describe('maneuver planning', () => {
