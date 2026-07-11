@@ -61,7 +61,7 @@ class PeriluneGame {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.uiRoot = document.getElementById('ui-root') as HTMLElement;
     this.ctx = await createRenderContext(canvas);
-    this.world = new WorldScene();
+    this.world = new WorldScene(this.ctx);
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
@@ -276,7 +276,7 @@ class PeriluneGame {
     if (!save) return;
     this.game = restoreGame(save);
     this.world.dispose();
-    this.world = new WorldScene();
+    this.world = new WorldScene(this.ctx);
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }

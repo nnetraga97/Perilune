@@ -12,11 +12,13 @@ import { Quat } from '../core/quat';
 import { GameState, GameVessel, LAUNCH_PAD_DECK_HEIGHT, launchSiteDirection } from '../sim/state';
 import { groundRadiusInertial } from '../sim/terrain';
 import type { Body } from '../sim/universe';
-import { PlanetRenderer, PLANET_QUALITY, PlanetQuality } from './planet';
-import { CloudLayer } from './clouds';
-import { buildVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
+import type { PlanetQuality } from './planet';
+import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
+import type { RenderContext } from './context';
+import type { BodyRenderer, QualityTier } from './bodyRenderer';
+import { createBodyRendererCandidate } from './bodyRendererFactory';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -26,6 +28,8 @@ const _camBF = new Vec3();
 const _sunDir = new Vec3();
 const _tmp = new Vec3();
 const _bodyQ = new Quat();
+const _starAbs = new Vec3();
+const _bodySunDir = new Vec3();
 
 export function sunLightPosition(
   sunDirection: Readonly<Vec3>,
@@ -38,51 +42,39 @@ export function sunLightPosition(
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
-  private readonly sun: THREE.DirectionalLight;
   private readonly ambient: THREE.AmbientLight;
-  private readonly sunSprite: THREE.Sprite;
-  private planetRenderers = new Map<string, PlanetRenderer>();
-  private cloudLayers = new Map<string, CloudLayer>();
-  private distantBodies = new Map<string, THREE.Mesh>();
+  private readonly starfield: THREE.Points;
+  private bodyRenderers = new Map<string, BodyRenderer>();
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly launchSite: THREE.Group;
-  private quality: PlanetQuality = PLANET_QUALITY.medium;
+  private quality: QualityTier = 'medium';
+  private readonly resizeHandler: () => void;
+  private disposed = false;
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
   camPitch = 0.35;
   camDist = 18;
 
-  constructor() {
+  constructor(private readonly context: RenderContext) {
     this.camera = new THREE.PerspectiveCamera(
       62,
       window.innerWidth / window.innerHeight,
       0.3,
       6e8,
     );
-    window.addEventListener('resize', () => {
+    this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
-    });
+    };
+    window.addEventListener('resize', this.resizeHandler);
     this.scene.background = new THREE.Color('#04070a');
-    this.scene.add(makeStarfield(4200));
+    this.starfield = makeStarfield(4200);
+    this.scene.add(this.starfield);
     this.launchSite = this.buildLaunchSite();
     this.scene.add(this.launchSite);
-    this.sun = new THREE.DirectionalLight('#fff4e0', 2.6);
-    this.scene.add(this.sun);
     this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
     this.scene.add(this.ambient);
-
-    const spriteMat = new THREE.SpriteMaterial({
-      color: '#fff7dd',
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-      depthTest: false,
-    });
-    this.sunSprite = new THREE.Sprite(spriteMat);
-    this.sunSprite.scale.setScalar(4e6);
-    this.scene.add(this.sunSprite);
   }
 
   private buildLaunchSite(): THREE.Group {
@@ -111,43 +103,38 @@ export class WorldScene {
     return group;
   }
 
-  setQuality(q: PlanetQuality): void {
-    this.quality = q;
-    for (const pr of this.planetRenderers.values()) pr.setQuality(q);
+  setQuality(q: PlanetQuality | QualityTier): void {
+    const tier = typeof q === 'string'
+      ? q
+      : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
+    if (tier === this.quality) return;
+    this.quality = tier;
+    for (const renderer of this.bodyRenderers.values()) {
+      this.scene.remove(renderer.root);
+      renderer.dispose();
+    }
+    this.bodyRenderers.clear();
   }
 
   planetStats(): { chunks: number; visible: number } {
     let chunks = 0;
     let visible = 0;
-    for (const pr of this.planetRenderers.values()) {
-      chunks += pr.stats.chunks;
-      visible += pr.stats.visible;
+    for (const renderer of this.bodyRenderers.values()) {
+      const stats = renderer.stats();
+      chunks += stats.chunks;
+      visible += stats.visible;
     }
     return { chunks, visible };
   }
 
-  private planetFor(body: Body): PlanetRenderer {
-    let pr = this.planetRenderers.get(body.id);
-    if (!pr) {
-      pr = new PlanetRenderer(body, this.quality);
-      this.planetRenderers.set(body.id, pr);
-      this.scene.add(pr.group);
+  private rendererFor(body: Body): BodyRenderer {
+    let renderer = this.bodyRenderers.get(body.id);
+    if (!renderer) {
+      renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
+      this.bodyRenderers.set(body.id, renderer);
+      this.scene.add(renderer.root);
     }
-    return pr;
-  }
-
-  private distantFor(body: Body): THREE.Mesh {
-    let mesh = this.distantBodies.get(body.id);
-    if (!mesh) {
-      mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 28, 18),
-        new THREE.MeshLambertMaterial({ color: body.def.color }),
-      );
-      mesh.scale.setScalar(body.radius);
-      this.distantBodies.set(body.id, mesh);
-      this.scene.add(mesh);
-    }
-    return mesh;
+    return renderer;
   }
 
   visualFor(gv: GameVessel): VesselVisual {
@@ -166,6 +153,7 @@ export class WorldScene {
     for (const [id, vis] of this.vesselVisuals) {
       if (!alive.has(id)) {
         this.scene.remove(vis.group);
+        disposeVesselVisual(vis);
         this.vesselVisuals.delete(id);
       }
     }
@@ -176,6 +164,7 @@ export class WorldScene {
     const vis = this.vesselVisuals.get(id);
     if (vis) {
       this.scene.remove(vis.group);
+      disposeVesselVisual(vis);
       this.vesselVisuals.delete(id);
     }
   }
@@ -216,70 +205,51 @@ export class WorldScene {
     _vesselAbs.copy(_bodyAbs).add(v.pos);
     _camAbs.copy(_vesselAbs).add(camOffset);
 
-    // ---- sun light: from camera toward the star (star at origin).
-    _sunDir.copy(_camAbs).scale(-1).normalize();
-    sunLightPosition(_sunDir, 1e4, this.sun.position);
-    this.sun.target.position.set(0, 0, 0);
-    this.sun.target.updateMatrixWorld();
-    // Sun sprite at great distance toward the star.
-    this.sunSprite.position.set(_sunDir.x * 3e8, _sunDir.y * 3e8, _sunDir.z * 3e8);
+    // Keep star direction in f64 until the final camera-relative conversion.
+    game.universe.absolutePosition(game.universe.root, t, _starAbs);
+    _sunDir.copy(_starAbs).sub(_camAbs).normalize();
 
     // ---- planets: full LOD for the SOI body and its close family; simple
     // spheres beyond.
     const renderSet = new Set<string>();
-    const considerBodies: Body[] = [body];
-    if (body.parent) considerBodies.push(body.parent);
-    for (const child of body.children) considerBodies.push(child);
+    const considerBodies: Body[] = [];
+    const consider = (candidate: Body | null): void => {
+      if (candidate && !considerBodies.some((existing) => existing.id === candidate.id)) considerBodies.push(candidate);
+    };
+    consider(body);
+    consider(game.universe.root);
+    consider(body.parent);
+    for (const child of body.children) consider(child);
     for (const sibling of body.parent?.children ?? []) {
-      if (!considerBodies.includes(sibling)) considerBodies.push(sibling);
+      consider(sibling);
     }
 
     for (const b of considerBodies) {
-      if (b.def.isStar) continue;
       game.universe.absolutePosition(b, t, _bodyAbs);
       Vec3.sub(_bodyAbs, _camAbs, _rel); // body center in camera-relative world
       const dist = _rel.length();
       renderSet.add(b.id);
-      if (dist < b.radius * 60) {
-        // Near: quadtree terrain.
-        const pr = this.planetFor(b);
-        // camera in body-fixed frame
-        _tmp.copy(_camAbs).sub(_bodyAbs);
-        inertialToBodyFixed(b, t, _tmp, _camBF);
-        bodyOrientation(b, t, _bodyQ);
-        pr.update(_camBF, _bodyQ, _rel);
-        pr.group.visible = true;
-        const distant = this.distantBodies.get(b.id);
-        if (distant) distant.visible = false;
-        // Cloud layer for atmospheric worlds.
-        if (b.def.atmosphere && b.def.terrain.amplitude > 0) {
-          let clouds = this.cloudLayers.get(b.id);
-          if (!clouds) {
-            clouds = new CloudLayer(b);
-            this.cloudLayers.set(b.id, clouds);
-            this.scene.add(clouds.mesh);
-          }
-          clouds.update(_rel, _bodyQ, t, dist - b.radius);
-        }
-      } else {
-        const clouds = this.cloudLayers.get(b.id);
-        if (clouds) clouds.mesh.visible = false;
-        // Far: single sphere.
-        const mesh = this.distantFor(b);
-        mesh.position.set(_rel.x, _rel.y, _rel.z);
-        bodyOrientation(b, t, _bodyQ);
-        mesh.quaternion.set(_bodyQ.x, _bodyQ.y, _bodyQ.z, _bodyQ.w);
-        mesh.visible = true;
-        const pr = this.planetRenderers.get(b.id);
-        if (pr) pr.group.visible = false;
-      }
+      _tmp.copy(_camAbs).sub(_bodyAbs);
+      inertialToBodyFixed(b, t, _tmp, _camBF);
+      bodyOrientation(b, t, _bodyQ);
+      _bodySunDir.copy(_starAbs).sub(_bodyAbs);
+      if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
+      const renderer = this.rendererFor(b);
+      renderer.root.visible = true;
+      renderer.update({
+        cameraRelativeOrigin: _rel,
+        cameraBodyFixed: _camBF,
+        orientation: _bodyQ,
+        cameraSunDirection: _sunDir,
+        bodySunDirection: _bodySunDir,
+        time: t,
+        altitude: dist - b.radius,
+        allowFlightTerrain: b.id === body.id && b.def.surfaceKind === 'solid',
+      });
     }
     // Hide renderers of bodies no longer relevant.
-    for (const [id, pr] of this.planetRenderers) {
-      if (!renderSet.has(id)) pr.group.visible = false;
-    }
-    for (const [id, mesh] of this.distantBodies) {
-      if (!renderSet.has(id)) mesh.visible = false;
+    for (const [id, renderer] of this.bodyRenderers) {
+      if (!renderSet.has(id)) renderer.root.visible = false;
     }
 
     // Cape Skyward is a single persistent world object, positioned from the
@@ -367,9 +337,38 @@ export class WorldScene {
   }
 
   dispose(): void {
-    for (const pr of this.planetRenderers.values()) pr.dispose();
-    this.planetRenderers.clear();
-    for (const cl of this.cloudLayers.values()) cl.dispose();
-    this.cloudLayers.clear();
+    if (this.disposed) return;
+    this.disposed = true;
+    window.removeEventListener('resize', this.resizeHandler);
+    for (const renderer of this.bodyRenderers.values()) {
+      this.scene.remove(renderer.root);
+      renderer.dispose();
+    }
+    this.bodyRenderers.clear();
+    for (const visual of this.vesselVisuals.values()) {
+      this.scene.remove(visual.group);
+      disposeVesselVisual(visual);
+    }
+    this.vesselVisuals.clear();
+    disposeOwnedGroup(this.launchSite);
+    this.starfield.geometry.dispose();
+    const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];
+    for (const material of starfieldMaterials) material.dispose();
+    this.scene.clear();
   }
+}
+
+/** Dispose geometry/materials wholly owned by one scene group, once each. */
+function disposeOwnedGroup(root: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    geometries.add(object.geometry);
+    const owned = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of owned) materials.add(material);
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
+  root.clear();
 }

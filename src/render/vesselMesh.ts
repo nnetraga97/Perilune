@@ -68,6 +68,8 @@ export interface VesselVisual {
   partMeshes: Map<number, THREE.Object3D>;
   /** Plume meshes keyed by engine part key. */
   plumes: Map<number, THREE.Mesh>;
+  /** Geometries created for this visual rather than borrowed from shared caches. */
+  ownedGeometries: Set<THREE.BufferGeometry>;
   craftVersionSeen: number;
 }
 
@@ -86,7 +88,7 @@ const plumeCoreMaterial = new THREE.MeshBasicMaterial({
   depthWrite: false,
 });
 
-function buildPartMesh(part: PartInstance): THREE.Object3D {
+function buildPartMesh(part: PartInstance, ownedGeometries: Set<THREE.BufferGeometry>): THREE.Object3D {
   const def = defOf(part);
   const holder = new THREE.Group();
   const body = new THREE.Mesh(geometryFor(def), materialFor(def.color ?? '#c8cdd2'));
@@ -98,8 +100,10 @@ function buildPartMesh(part: PartInstance): THREE.Object3D {
     (def.shape.kind === 'cone' && Math.abs((def.shape.radiusTop ?? 0) - (def.shape.radiusBottom ?? 0)) < 1e-6);
   if (def.accent && isStraightStack && !def.pod && !def.probe) {
     const r = Math.max(def.shape.radiusTop ?? 0.1, def.shape.radiusBottom ?? 0.1);
+    const bandGeometry = new THREE.CylinderGeometry(r * 1.012, r * 1.012, def.shape.height * 0.12, 20);
+    ownedGeometries.add(bandGeometry);
     const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(r * 1.012, r * 1.012, def.shape.height * 0.12, 20),
+      bandGeometry,
       materialFor(def.accent, 0.2, 0.6),
     );
     band.position.y = def.shape.height * 0.28;
@@ -114,19 +118,24 @@ export function buildVesselVisual(craft: Craft): VesselVisual {
   const group = new THREE.Group();
   const partMeshes = new Map<number, THREE.Object3D>();
   const plumes = new Map<number, THREE.Mesh>();
+  const ownedGeometries = new Set<THREE.BufferGeometry>();
   for (const part of craft.parts) {
-    const mesh = buildPartMesh(part);
+    const mesh = buildPartMesh(part, ownedGeometries);
     partMeshes.set(part.key, mesh);
     group.add(mesh);
     const def = defOf(part);
     if (def.engine) {
       const scale = def.engine.plumeScale;
+      const plumeGeometry = new THREE.CylinderGeometry(0.08 * scale, 0.5 * scale, 4 * scale, 12, 1, true);
+      const coreGeometry = new THREE.CylinderGeometry(0.04 * scale, 0.22 * scale, 2.4 * scale, 10, 1, true);
+      ownedGeometries.add(plumeGeometry);
+      ownedGeometries.add(coreGeometry);
       const plume = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08 * scale, 0.5 * scale, 4 * scale, 12, 1, true),
+        plumeGeometry,
         plumeMaterial,
       );
       const core = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04 * scale, 0.22 * scale, 2.4 * scale, 10, 1, true),
+        coreGeometry,
         plumeCoreMaterial,
       );
       core.position.y = 0.6 * scale;
@@ -142,7 +151,23 @@ export function buildVesselVisual(craft: Craft): VesselVisual {
       plumes.set(part.key, plume);
     }
   }
-  return { group, partMeshes, plumes, craftVersionSeen: craft.parts.length };
+  return { group, partMeshes, plumes, ownedGeometries, craftVersionSeen: craft.parts.length };
+}
+
+function disposeOwnedGeometries(visual: VesselVisual, object: THREE.Object3D): void {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !visual.ownedGeometries.has(child.geometry)) return;
+    child.geometry.dispose();
+    visual.ownedGeometries.delete(child.geometry);
+  });
+}
+
+/** Releases per-vessel geometry while intentionally preserving shared geometry/material caches. */
+export function disposeVesselVisual(visual: VesselVisual): void {
+  disposeOwnedGeometries(visual, visual.group);
+  visual.group.clear();
+  visual.partMeshes.clear();
+  visual.plumes.clear();
 }
 
 /**
@@ -161,10 +186,12 @@ export function syncVesselVisual(
     const alive = new Set(craft.parts.map((p) => p.key));
     for (const [key, mesh] of visual.partMeshes) {
       if (!alive.has(key)) {
+        disposeOwnedGeometries(visual, mesh);
         visual.group.remove(mesh);
         visual.partMeshes.delete(key);
         const plume = visual.plumes.get(key);
         if (plume) {
+          disposeOwnedGeometries(visual, plume);
           visual.group.remove(plume);
           visual.plumes.delete(key);
         }
