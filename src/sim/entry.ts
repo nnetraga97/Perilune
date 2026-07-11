@@ -150,9 +150,11 @@ export function predictEntry(
       );
       const speed = airVelocity.length();
       const density = body.densityAt(altitude);
-      if (speed > 0 && density > 0 && cdA > 0) {
-        acceleration.addScaled(airVelocity, -(0.5 * density * speed * cdA) / mass);
+      if (speed > 0 && density > 0) {
         peakHeatFlux = Math.max(peakHeatFlux, 0.5 * density * speed * speed * speed);
+        if (cdA > 0) {
+          acceleration.addScaled(airVelocity, -(0.5 * density * speed * cdA) / mass);
+        }
       }
     }
 

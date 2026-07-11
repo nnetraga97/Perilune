@@ -228,4 +228,23 @@ describe('entry prediction', () => {
     expect(pred.lands).toBe(false);
     expect(pred.samples.every((sample) => sample.isFinite())).toBe(true);
   });
+
+  it('reports atmospheric heating independently of the drag-area approximation', () => {
+    const game = new GameState();
+    const veyra = game.universe.get('veyra');
+    const craft = buildProbe();
+    const model = { ...buildAeroModel(craft), areaAxial: 0 };
+    const mass = computeMassProperties(craft).mass;
+    const pred = predictEntry(
+      veyra,
+      model,
+      mass,
+      new Vec3(veyra.radius + 40_000, 0, 0),
+      new Vec3(-500, 0, 0),
+      game.time,
+    );
+
+    expect(pred.willEnter).toBe(true);
+    expect(pred.peakHeatFlux).toBeGreaterThan(0);
+  });
 });
