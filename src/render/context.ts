@@ -1,5 +1,6 @@
 /** Renderer bootstrap and the WebGL2 capability contract. */
 import * as THREE from 'three';
+import { RenderContextLifecycle } from './contextLifecycle';
 
 const ANALYTIC_HIGHP = { precision: 23, rangeMin: 127, rangeMax: 127 } as const;
 const LOOKUP_HIGHP = { precision: 16, rangeMin: 31, rangeMax: 31 } as const;
@@ -29,6 +30,8 @@ export interface RenderContext {
   renderer: THREE.WebGLRenderer;
   caps: RenderCaps;
   canvas: HTMLCanvasElement;
+  lifecycle: RenderContextLifecycle;
+  readonly renderPaused: boolean;
 }
 
 export class RenderCapabilityError extends Error {
@@ -102,10 +105,17 @@ export async function createRenderContext(canvas: HTMLCanvasElement): Promise<Re
   renderer.toneMappingExposure = 1.0;
 
   const caps = probeRenderCaps(gl, renderer);
+  const lifecycle = new RenderContextLifecycle(canvas);
 
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
   });
 
-  return { renderer, caps, canvas };
+  return {
+    renderer,
+    caps,
+    canvas,
+    lifecycle,
+    get renderPaused() { return lifecycle.renderPaused; },
+  };
 }

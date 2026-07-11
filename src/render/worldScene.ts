@@ -70,6 +70,7 @@ export class WorldScene {
   private readonly launchSite: THREE.Group;
   private quality: QualityTier = 'medium';
   private readonly resizeHandler: () => void;
+  private readonly unsubscribeRestoration: () => void;
   private disposed = false;
   private flightTerrainBodyId: string | null = null;
   private flightPromotedBodyId: string | null = null;
@@ -107,6 +108,9 @@ export class WorldScene {
       this.camera.updateProjectionMatrix();
     };
     window.addEventListener('resize', this.resizeHandler);
+    this.unsubscribeRestoration = context.lifecycle.subscribeRestoration(
+      () => this.rebuildCommittedRenderers(),
+    );
     this.scene.background = new THREE.Color('#04070a');
     this.starfield = makeStarfield(4200);
     this.scene.add(this.starfield);
@@ -299,6 +303,23 @@ export class WorldScene {
     this.flightPromotionFailed.delete(bodyId);
     this.promoteFlightRenderer(bodyId);
     return true;
+  }
+
+  /** Rebuild every renderer owned by this live scene after WebGL restoration. */
+  async rebuildCommittedRenderers(): Promise<void> {
+    if (this.disposed) return;
+    const managers = [...this.bodyRendererManagers.entries()];
+    const results = await Promise.allSettled(managers.map(async ([bodyId, manager]) => {
+      await manager.rebuildCommitted();
+      if (this.disposed || this.bodyRendererManagers.get(bodyId) !== manager) return;
+      const renderer = manager.current();
+      if (renderer) this.bodyRenderers.set(bodyId, renderer);
+    }));
+    if (this.disposed) return;
+    const failedBodies = results.flatMap((result, index) => result.status === 'rejected' ? [managers[index][0]] : []);
+    if (failedBodies.length > 0) {
+      throw new Error(`Failed to restore body renderers: ${failedBodies.join(', ')}`);
+    }
   }
 
   visualFor(gv: GameVessel): VesselVisual {
@@ -518,6 +539,7 @@ export class WorldScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.unsubscribeRestoration();
     window.removeEventListener('resize', this.resizeHandler);
     for (const manager of this.bodyRendererManagers.values()) manager.dispose();
     this.bodyRendererManagers.clear();

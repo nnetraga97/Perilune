@@ -610,10 +610,10 @@ class PeriluneGame {
     if (this.screen === 'flight') {
       if (this.map.visible) {
         this.map.update(this.game);
-        this.ctx.renderer.render(this.map.scene, this.map.camera);
+        if (!this.ctx.renderPaused) this.ctx.renderer.render(this.map.scene, this.map.camera);
       } else {
         this.world.update(this.game, dt);
-        this.ctx.renderer.render(this.world.scene, this.world.camera);
+        if (!this.ctx.renderPaused) this.ctx.renderer.render(this.world.scene, this.world.camera);
       }
       this.hud.update(this.game, this.map.node);
       if (this.hud.pendingWarpStep !== 0) {
@@ -624,10 +624,10 @@ class PeriluneGame {
       this.perf.setExtra('chunks', stats.visible);
     } else if (this.screen === 'editor') {
       this.editor.update();
-      this.ctx.renderer.render(this.editor.scene, this.editor.camera);
+      if (!this.ctx.renderPaused) this.ctx.renderer.render(this.editor.scene, this.editor.camera);
     } else {
       // Menu: idle starfield via world scene if available.
-      this.ctx.renderer.clear();
+      if (!this.ctx.renderPaused) this.ctx.renderer.clear();
     }
     this.perf.endRender(renderStart);
     this.perf.frame(dtMs, this.ctx.renderer);
