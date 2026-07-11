@@ -13,9 +13,12 @@ import {
 import { observeSanitizedMacHost } from './lib/host-observation.mjs';
 import {
   allocateLoopbackPort,
+  assertFeasibilityProfilerPlatform,
   stopProcessTree,
   waitForServerOrExit,
 } from './lib/profiler-process.mjs';
+
+assertFeasibilityProfilerPlatform(process.platform);
 
 const root = resolve(import.meta.dirname, '..');
 const values = new Map();
@@ -35,7 +38,7 @@ if (!Number.isInteger(stage) || stage < 0 || stage > 5) throw new Error('stage m
 
 const reference = values.get('reference') ?? null;
 const expectedReference = expectedReferenceForTier(tier);
-const host = process.platform === 'darwin' ? observeSanitizedMacHost() : null;
+const host = observeSanitizedMacHost();
 const metadata = Object.fromEntries(
   FEASIBILITY_METADATA_KEYS.map((key) => [key, values.get(key) ?? '']),
 );
@@ -45,7 +48,7 @@ if (missingMetadata.length > 0) {
   throw new Error(`A certifying reference run requires: ${missingMetadata.join(', ')}`);
 }
 
-const build = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
+const build = spawnSync('npm', ['run', 'build'], {
   cwd: root,
   stdio: 'inherit',
 });
@@ -54,12 +57,12 @@ if (build.status !== 0) process.exit(build.status ?? 1);
 const port = await allocateLoopbackPort();
 const runNonce = randomBytes(32).toString('hex');
 const preview = spawn(
-  process.platform === 'win32' ? 'npm.cmd' : 'npm',
+  'npm',
   ['run', 'preview', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
   {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
+    detached: true,
   },
 );
 preview.stdout.on('data', (chunk) => process.stdout.write(chunk));

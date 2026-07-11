@@ -1,5 +1,13 @@
 import { createServer } from 'node:net';
-import { spawn } from 'node:child_process';
+
+export function assertFeasibilityProfilerPlatform(platform) {
+  if (platform !== 'darwin') {
+    throw new Error(
+      `The feasibility certification profiler is macOS-only because its sole approved ` +
+      `reference platform is the Apple M3 Max; received ${platform}`,
+    );
+  }
+}
 
 export function allocateLoopbackPort() {
   return new Promise((resolve, reject) => {
@@ -77,52 +85,8 @@ async function waitForProcessGroupExit(pid, timeoutMs) {
   return true;
 }
 
-function executeCommand(command) {
-  return new Promise((resolve, reject) => {
-    const process = spawn(command.file, command.args, {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    process.once('error', reject);
-    process.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-}
-
-export async function terminateWindowsProcessTree(pid, executor = executeCommand) {
-  const command = Object.freeze({
-    file: 'taskkill',
-    args: Object.freeze(['/PID', String(pid), '/T', '/F']),
-  });
-  const result = await executor(command);
-  if (result.code !== 0) {
-    throw new Error(`taskkill failed for preview process tree ${pid} with exit code ${result.code}`);
-  }
-}
-
-function waitForDirectChildExit(child, timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const onExit = () => {
-      clearTimeout(timeout);
-      resolve(true);
-    };
-    const timeout = setTimeout(() => {
-      child.off('exit', onExit);
-      resolve(false);
-    }, timeoutMs);
-    child.once('exit', onExit);
-  });
-}
-
 export async function stopProcessTree(child, options = {}) {
   if (!child?.pid) return;
-  if (process.platform === 'win32') {
-    await terminateWindowsProcessTree(child.pid);
-    if (!await waitForDirectChildExit(child, options.killMs ?? 2_000)) {
-      throw new Error(`Preview process ${child.pid} did not exit after taskkill`);
-    }
-    return;
-  }
   const processGroupId = child.pid;
   signalProcessGroup(processGroupId, 'SIGTERM');
   if (await waitForProcessGroupExit(processGroupId, options.graceMs ?? 3_000)) return;

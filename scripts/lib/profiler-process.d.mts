@@ -1,14 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 
-export interface ProcessCommand {
-  readonly file: string;
-  readonly args: readonly string[];
-}
-
-export function terminateWindowsProcessTree(
-  pid: number,
-  executor?: (command: ProcessCommand) => Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
-): Promise<void>;
+export function assertFeasibilityProfilerPlatform(platform: NodeJS.Platform): void;
 
 export function allocateLoopbackPort(): Promise<number>;
 export function waitForServerOrExit(

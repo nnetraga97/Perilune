@@ -3,10 +3,9 @@ import { request } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
   allocateLoopbackPort,
+  assertFeasibilityProfilerPlatform,
   stopProcessTree,
-  terminateWindowsProcessTree,
   waitForServerOrExit,
-  type ProcessCommand,
 } from '../scripts/lib/profiler-process.mjs';
 
 function canConnect(port: number): Promise<boolean> {
@@ -22,21 +21,10 @@ function canConnect(port: number): Promise<boolean> {
 }
 
 describe('profiler process ownership', () => {
-  it('uses taskkill tree and force flags for Windows cleanup', async () => {
-    let observed: ProcessCommand | undefined;
-    await terminateWindowsProcessTree(731, async (command) => {
-      observed = command;
-      return { code: 0, signal: null };
-    });
-    expect(observed).toEqual({
-      file: 'taskkill',
-      args: ['/PID', '731', '/T', '/F'],
-    });
-  });
-
-  it('reports taskkill failures', async () => {
-    await expect(terminateWindowsProcessTree(731, async () => ({ code: 128, signal: null })))
-      .rejects.toThrow(/taskkill.*128/i);
+  it('guards the profiler as macOS-only before lifecycle work begins', () => {
+    expect(() => assertFeasibilityProfilerPlatform('darwin')).not.toThrow();
+    expect(() => assertFeasibilityProfilerPlatform('linux')).toThrow(/macOS-only.*M3 Max/i);
+    expect(() => assertFeasibilityProfilerPlatform('win32')).toThrow(/macOS-only.*M3 Max/i);
   });
 
   it('allocates an available ephemeral loopback port', async () => {
@@ -74,7 +62,7 @@ describe('profiler process ownership', () => {
     await expect.poll(() => canConnect(port), { timeout: 3_000 }).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('kills a stubborn descendant after the npm-like parent exits', async () => {
+  it('kills a stubborn descendant after the npm-like parent exits', async () => {
     const port = await allocateLoopbackPort();
     const descendant = `
       process.on('SIGTERM', () => {});

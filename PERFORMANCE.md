@@ -122,6 +122,13 @@ npm run profile:feasibility -- --mode=reference --tier=medium --reference=m3-max
 npm run profile:feasibility -- --mode=reference --tier=low --reference=m3-max-30c --model="MacBook Pro (Mac15,10)" --firmware="<observed firmware>" --driver="<WebGL vendor> / <WebGL renderer>" --os="macOS <version> (<build>)" --power="<Battery Power or AC Power>; powermode 0" --sustained-power="powermode 0; automatic thermal management"
 ```
 
+`npm run profile:feasibility` is intentionally macOS-only and fails before
+building or spawning a preview process on any other operating system. The only
+approved certification target is the Apple M3 Max reference Mac above, so the
+profiler lifecycle uses macOS/POSIX process-group ownership. This restriction
+applies only to the certification profiler; Perilune's game/runtime platform
+support is unchanged.
+
 The supplied CLI strings must exactly match the sanitized host observation
 and the WebGL vendor/renderer captured by the headed browser; a label alone
 cannot substitute for observed evidence. Reference mode requires the installed
@@ -129,7 +136,7 @@ stable Google Chrome executable at `/Applications/Google Chrome.app/Contents/Mac
 Playwright's bundled Chromium remains smoke-only.
 
 The script writes a JSON record under `artifacts/performance/`, exits nonzero
-for a failing eligible reference run, and labels any other hardware
+for a failing eligible reference run, and labels non-reference Mac hardware
 non-certifying. Reviewed reference records are moved to
 `docs/performance/reference/` before Phase 2 is signed off.
 
