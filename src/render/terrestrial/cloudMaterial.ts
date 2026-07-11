@@ -66,7 +66,7 @@ export function createCloudMaterial(
     `,
     transparent: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
   });
   return material;
 }

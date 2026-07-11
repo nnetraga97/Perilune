@@ -17,6 +17,7 @@ const frame = {
   orientation: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.37),
   bodySunDirection: { x: 0, y: 3, z: 0 },
   time: 12_345,
+  altitude: 1_000,
 };
 
 describe('Veyra two-scale clouds', () => {
@@ -63,6 +64,24 @@ describe('Veyra two-scale clouds', () => {
     expect(medium.group.children.some((child) => child instanceof THREE.DirectionalLight)).toBe(false);
     low.dispose();
     medium.dispose();
+  });
+
+  it('uses one shell face, fades through crossings, and orders transparent shells outside-in', () => {
+    const deck = new TerrestrialCloudDeck(veyra, 'medium', cloudTexture());
+    const weather = deck.shells[0];
+    const wisps = deck.shells[1];
+    expect(wisps.mesh.renderOrder).toBeLessThan(weather.mesh.renderOrder);
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.5);
+    expect(wisps.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.25);
+
+    deck.update({ ...frame, altitude: weather.altitude - 5_000 });
+    expect(weather.mesh.material.side).toBe(THREE.BackSide);
+    deck.update({ ...frame, altitude: weather.altitude });
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBe(0);
+    deck.update({ ...frame, altitude: weather.altitude + 5_000 });
+    expect(weather.mesh.material.side).toBe(THREE.FrontSide);
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBeGreaterThan(0);
+    deck.dispose();
   });
 
   it('disposes owned geometry/materials once without disposing the borrowed cloud texture', () => {

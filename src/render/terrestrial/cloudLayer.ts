@@ -11,6 +11,7 @@ export interface TerrestrialCloudShell {
   readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   readonly altitude: number;
   readonly driftRate: number;
+  readonly baseOpacity: number;
 }
 
 export class TerrestrialCloudDeck {
@@ -44,16 +45,17 @@ export class TerrestrialCloudDeck {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `terrestrial-cloud:${body.id}:${name}`;
       mesh.scale.setScalar(body.radius + altitude);
-      mesh.renderOrder = name === 'weather' ? 30 : 31;
+      // Outside the deck, render the outer transparent shell before the inner.
+      mesh.renderOrder = name === 'wisps' ? 30 : 31;
       if (name === 'weather' && quality !== 'low') {
         mesh.customDepthMaterial = createCloudShadowMaterial(cloudTexture, textureScale);
       }
-      return Object.freeze({ name, mesh, altitude, driftRate });
+      return Object.freeze({ name, mesh, altitude, driftRate, baseOpacity: opacity });
     };
     const segments: readonly [number, number] = quality === 'low' ? [48, 30] : quality === 'medium' ? [72, 44] : [96, 60];
     this.shells = Object.freeze([
-      makeShell('weather', 0.11, 9e-6, 1, 0.88, segments),
-      makeShell('wisps', 0.22, -3.5e-6, 3, 0.42, segments),
+      makeShell('weather', 0.11, 9e-6, 1, 0.46, segments),
+      makeShell('wisps', 0.22, -3.5e-6, 3, 0.2, segments),
     ]) as unknown as readonly [TerrestrialCloudShell, TerrestrialCloudShell];
     this.group.name = `terrestrial-cloud-deck:${body.id}`;
     this.group.add(this.shells[0].mesh, this.shells[1].mesh);
@@ -70,7 +72,7 @@ export class TerrestrialCloudDeck {
     this.shells[1].mesh.castShadow = false;
   }
 
-  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'orientation' | 'bodySunDirection' | 'time'>): void {
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'>): void {
     if (this.disposed) return;
     const origin = frame.cameraRelativeOrigin;
     this.group.position.set(origin.x, origin.y, origin.z);
@@ -85,6 +87,14 @@ export class TerrestrialCloudDeck {
         frame.bodySunDirection.z,
       ).normalize();
       shell.mesh.material.uniforms.uTime.value = frame.time;
+      const distanceFromShell = Math.abs(frame.altitude - shell.altitude);
+      const crossingFade = Math.max(0, Math.min(1, (distanceFromShell - 1_200) / 4_000));
+      shell.mesh.material.uniforms.uOpacity.value = shell.baseOpacity * crossingFade;
+      const desiredSide = frame.altitude >= shell.altitude ? THREE.FrontSide : THREE.BackSide;
+      if (shell.mesh.material.side !== desiredSide) {
+        shell.mesh.material.side = desiredSide;
+        shell.mesh.material.needsUpdate = true;
+      }
     }
   }
 
