@@ -14,6 +14,7 @@ import type { CommsStatus } from '../sim/comms';
 import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading, projectNavDirection } from './navball';
+import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -325,8 +326,8 @@ export class FlightHud {
     const alt = r - body.radius;
 
     // Speed: surface-relative in atmosphere / near ground, orbital above.
-    const om = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-    const surfSpeed = Math.hypot(v.vel.x + om * v.pos.y, v.vel.y - om * v.pos.x, v.vel.z);
+    const surfaceVel = surfaceVelocity(body, v.pos, new Vec3());
+    const surfSpeed = new Vec3().copy(v.vel).sub(surfaceVel).length();
     const orbSpeed = v.vel.length();
     const surfaceMode =
       alt < (body.def.atmosphere?.height ?? Math.max(10_000, body.radius * 0.08));
@@ -493,11 +494,7 @@ export class FlightHud {
         this.oreHereEl.textContent = 'Ore here: ?? (survey from orbit)';
       } else {
         const body = game.bodyOf(gv);
-        const ang = -body.rotationAngle(game.time);
-        const c = Math.cos(ang);
-        const s = Math.sin(ang);
-        const p = v.pos;
-        const dir = new Vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z).normalize();
+        const dir = inertialToBodyFixed(body, game.time, v.pos, new Vec3()).normalize();
         const conc = oreConcentration(body, dir);
         this.oreHereEl.textContent = `Ore here: ${(conc * 100).toFixed(0)}%`;
       }

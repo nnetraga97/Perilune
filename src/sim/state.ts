@@ -28,6 +28,13 @@ import {
 import { evaluateStructure, splitAtJoint } from './structure';
 import { groundRadiusInertial } from './terrain';
 import { stepIsru } from './resources';
+import {
+  bodyFixedAttitudeToInertial,
+  bodyFixedToInertial,
+  inertialAttitudeToBodyFixed,
+  inertialToBodyFixed,
+  surfaceVelocity,
+} from './bodyOrientation';
 
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
@@ -69,13 +76,10 @@ export const LAUNCH_PAD_DECK_HEIGHT = 2;
 
 /** Cape Skyward surface normal in the inertial frame at a given time. */
 export function launchSiteDirection(body: Body, time: number, out: Vec3): Vec3 {
-  const spin = body.rotationAngle(time);
   const x = Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON);
   const y = Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON);
   const z = Math.sin(LAUNCH_SITE_LAT);
-  const cs = Math.cos(spin);
-  const ss = Math.sin(spin);
-  return out.set(x * cs - y * ss, x * ss + y * cs, z).normalize();
+  return bodyFixedToInertial(body, time, out.set(x, y, z), out).normalize();
 }
 
 export class GameState {
@@ -208,8 +212,7 @@ export class GameState {
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
     // Surface rotation velocity.
-    const omega = (Math.PI * 2) / veyra.def.rotationPeriod;
-    runtime.vel.set(-omega * runtime.pos.y, omega * runtime.pos.x, 0);
+    surfaceVelocity(veyra, runtime.pos, runtime.vel);
     // Point up.
     runtime.att.setLookRotation(
       new Vec3(-dirI.y, dirI.x, 0).normalize(), // forward: east-ish tangent
@@ -368,15 +371,8 @@ export class GameState {
     const body = this.bodyOf(gv);
     if (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') {
       // Store body-fixed pose.
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(-spin);
-      const ss = Math.sin(-spin);
-      gv.rails.landedPos = new Vec3(
-        v.pos.x * cs - v.pos.y * ss,
-        v.pos.x * ss + v.pos.y * cs,
-        v.pos.z,
-      );
-      gv.rails.landedAtt = v.att.clone();
+      gv.rails.landedPos = inertialToBodyFixed(body, this.time, v.pos, new Vec3());
+      gv.rails.landedAtt = inertialAttitudeToBodyFixed(body, this.time, v.att, new Quat());
       gv.rails.elements = null;
     } else {
       gv.rails.elements = stateToElements(body.mu, v.pos, v.vel, this.time);
@@ -391,14 +387,11 @@ export class GameState {
     const v = gv.runtime;
     const body = this.bodyOf(gv);
     if (gv.rails.landedPos) {
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
-      const bf = gv.rails.landedPos;
-      v.pos.set(bf.x * cs - bf.y * ss, bf.x * ss + bf.y * cs, bf.z);
-      const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-      v.vel.set(-omega * v.pos.y, omega * v.pos.x, 0);
-      if (gv.rails.landedAtt) v.att.copy(gv.rails.landedAtt);
+      bodyFixedToInertial(body, this.time, gv.rails.landedPos, v.pos);
+      surfaceVelocity(body, v.pos, v.vel);
+      if (gv.rails.landedAtt) {
+        bodyFixedAttitudeToInertial(body, this.time, gv.rails.landedAtt, v.att);
+      }
     } else if (gv.rails.elements) {
       elementsAtTime(gv.rails.elements, this.time, v.pos, v.vel);
     }
@@ -409,15 +402,8 @@ export class GameState {
   railsPosition(gv: GameVessel, outR: Vec3, outV?: Vec3): void {
     const body = this.bodyOf(gv);
     if (gv.rails.landedPos) {
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
-      const bf = gv.rails.landedPos;
-      outR.set(bf.x * cs - bf.y * ss, bf.x * ss + bf.y * cs, bf.z);
-      if (outV) {
-        const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-        outV.set(-omega * outR.y, omega * outR.x, 0);
-      }
+      bodyFixedToInertial(body, this.time, gv.rails.landedPos, outR);
+      if (outV) surfaceVelocity(body, outR, outV);
     } else if (gv.rails.elements) {
       elementsAtTime(gv.rails.elements, this.time, outR, outV ?? _v);
     }

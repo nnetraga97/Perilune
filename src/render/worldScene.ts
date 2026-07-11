@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import { Quat } from '../core/quat';
 import { GameState, GameVessel, LAUNCH_PAD_DECK_HEIGHT, launchSiteDirection } from '../sim/state';
 import { groundRadiusInertial } from '../sim/terrain';
 import type { Body } from '../sim/universe';
@@ -15,6 +16,7 @@ import { PlanetRenderer, PLANET_QUALITY, PlanetQuality } from './planet';
 import { CloudLayer } from './clouds';
 import { buildVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import { makeStarfield } from './starfield';
+import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -23,6 +25,7 @@ const _rel = new Vec3();
 const _camBF = new Vec3();
 const _sunDir = new Vec3();
 const _tmp = new Vec3();
+const _bodyQ = new Quat();
 
 export function sunLightPosition(
   sunDirection: Readonly<Vec3>,
@@ -240,13 +243,11 @@ export class WorldScene {
       if (dist < b.radius * 60) {
         // Near: quadtree terrain.
         const pr = this.planetFor(b);
-        const spin = b.rotationAngle(t);
         // camera in body-fixed frame
         _tmp.copy(_camAbs).sub(_bodyAbs);
-        const cs = Math.cos(-spin);
-        const ss = Math.sin(-spin);
-        _camBF.set(_tmp.x * cs - _tmp.y * ss, _tmp.x * ss + _tmp.y * cs, _tmp.z);
-        pr.update(_camBF, spin, _rel);
+        inertialToBodyFixed(b, t, _tmp, _camBF);
+        bodyOrientation(b, t, _bodyQ);
+        pr.update(_camBF, _bodyQ, _rel);
         pr.group.visible = true;
         const distant = this.distantBodies.get(b.id);
         if (distant) distant.visible = false;
@@ -258,7 +259,7 @@ export class WorldScene {
             this.cloudLayers.set(b.id, clouds);
             this.scene.add(clouds.mesh);
           }
-          clouds.update(_rel, spin, t, dist - b.radius);
+          clouds.update(_rel, _bodyQ, t, dist - b.radius);
         }
       } else {
         const clouds = this.cloudLayers.get(b.id);
@@ -266,6 +267,8 @@ export class WorldScene {
         // Far: single sphere.
         const mesh = this.distantFor(b);
         mesh.position.set(_rel.x, _rel.y, _rel.z);
+        bodyOrientation(b, t, _bodyQ);
+        mesh.quaternion.set(_bodyQ.x, _bodyQ.y, _bodyQ.z, _bodyQ.w);
         mesh.visible = true;
         const pr = this.planetRenderers.get(b.id);
         if (pr) pr.group.visible = false;

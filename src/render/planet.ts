@@ -12,6 +12,7 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import type { Quat } from '../core/quat';
 import type { Body } from '../sim/universe';
 import { terrainHeight } from '../sim/terrain';
 
@@ -54,6 +55,7 @@ const _p = new Vec3();
 const _dir = new Vec3();
 const _e = new Vec3();
 const _w = new Vec3();
+const _rotatedOrigin = new Vec3();
 
 /** Map cube-face UV (with tan warp for even angular spacing) to unit sphere dir. */
 function faceToDir(face: FaceBasis, u: number, v: number, out: Vec3): Vec3 {
@@ -182,11 +184,15 @@ export class PlanetRenderer {
   /**
    * Update LOD selection and chunk placement.
    * @param camBodyFixed camera position in body-fixed f64 coordinates
-   * @param spin body rotation angle (rad) — chunks are drawn rotated
+   * @param orientation body-fixed to inertial orientation
    * @param originWorld position of the BODY CENTER in camera-relative world
    *        coordinates (f64 subtraction happens before this call)
    */
-  update(camBodyFixed: Readonly<Vec3>, spin: number, originWorld: Readonly<Vec3>): void {
+  update(
+    camBodyFixed: Readonly<Vec3>,
+    orientation: Readonly<Quat>,
+    originWorld: Readonly<Vec3>,
+  ): void {
     this.frame++;
     this.buildsThisUpdate = 0;
     this.stats.visible = 0;
@@ -217,22 +223,23 @@ export class PlanetRenderer {
     this.stats.overlapChunks = countLodOverlaps(wanted);
 
     // Hide unneeded chunks, show wanted ones, place camera-relative.
-    const sinS = Math.sin(spin);
-    const cosS = Math.cos(spin);
     for (const chunk of this.chunks.values()) {
       const inUse = wanted.has(chunk.key);
       chunk.mesh.visible = inUse;
       if (inUse) {
         chunk.lastUsed = this.frame;
-        // world = rotZ(spin) * origin + originWorld  (all f64, then cast)
-        const ox = chunk.origin.x * cosS - chunk.origin.y * sinS;
-        const oy = chunk.origin.x * sinS + chunk.origin.y * cosS;
+        orientation.rotate(chunk.origin, _rotatedOrigin);
         chunk.mesh.position.set(
-          ox + originWorld.x,
-          oy + originWorld.y,
-          chunk.origin.z + originWorld.z,
+          _rotatedOrigin.x + originWorld.x,
+          _rotatedOrigin.y + originWorld.y,
+          _rotatedOrigin.z + originWorld.z,
         );
-        chunk.mesh.rotation.set(0, 0, spin);
+        chunk.mesh.quaternion.set(
+          orientation.x,
+          orientation.y,
+          orientation.z,
+          orientation.w,
+        );
         this.stats.visible++;
         const geo = chunk.mesh.geometry as THREE.BufferGeometry;
         const idx = geo.getIndex();
@@ -241,6 +248,12 @@ export class PlanetRenderer {
     }
     if (this.ocean) {
       this.ocean.position.set(originWorld.x, originWorld.y, originWorld.z);
+      this.ocean.quaternion.set(
+        orientation.x,
+        orientation.y,
+        orientation.z,
+        orientation.w,
+      );
     }
 
     this.evictStale();

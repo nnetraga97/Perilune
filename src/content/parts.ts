@@ -898,7 +898,7 @@ export const PARTS: PartDef[] = [
     stackBottom: true,
     crossfeed: false,
     maxTemp: 3300,
-    crashTolerance: 10,
+    crashTolerance: 12,
     resources: { ablator: 120 },
     heatShield: true,
     color: '#8e5a2e',

@@ -7,6 +7,11 @@
 import * as THREE from 'three';
 import { fbm3 } from '../core/noise';
 import type { Body } from '../sim/universe';
+import type { Quat } from '../core/quat';
+
+const CLOUD_AXIS = new THREE.Vector3(0, 0, 1);
+const CLOUD_BASE = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+const CLOUD_DRIFT = new THREE.Quaternion();
 
 export function makeCloudTexture(seed: number, size = 512): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -61,12 +66,20 @@ export class CloudLayer {
 
   /**
    * @param originWorld body center in camera-relative coordinates
-   * @param spin body rotation (clouds drift slightly faster than the ground)
+   * @param orientation body-fixed to inertial orientation
    * @param cameraAltitude camera altitude above surface (m)
    */
-  update(originWorld: { x: number; y: number; z: number }, spin: number, time: number, cameraAltitude: number): void {
+  update(
+    originWorld: { x: number; y: number; z: number },
+    orientation: Readonly<Quat>,
+    time: number,
+    cameraAltitude: number,
+  ): void {
     this.mesh.position.set(originWorld.x, originWorld.y, originWorld.z);
-    this.mesh.rotation.set(Math.PI / 2, 0, spin + time * 1.2e-5, 'ZXY');
+    this.mesh.quaternion
+      .set(orientation.x, orientation.y, orientation.z, orientation.w)
+      .multiply(CLOUD_DRIFT.setFromAxisAngle(CLOUD_AXIS, time * 1.2e-5))
+      .multiply(CLOUD_BASE);
     // Fade when the camera is close to / inside the layer.
     const d = Math.abs(cameraAltitude - this.altitude);
     const fade = Math.max(0, Math.min(1, (d - 800) / 2500));

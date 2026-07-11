@@ -23,6 +23,7 @@ import { AeroModel, buildAeroModel, evaluateAero, newAeroForces, AeroForces } fr
 import type { Body } from './universe';
 import { groundRadiusInertial } from './terrain';
 import { RESOURCE_DENSITY } from '../content/parts';
+import { surfaceVelocity } from './bodyOrientation';
 
 export type SasMode =
   | 'off'
@@ -275,8 +276,7 @@ export function stepVessel(
   const density = body.densityAt(altitude);
   const sos = body.speedOfSoundAt(altitude);
   // Air co-rotates with the planet: v_wind = ω × r.
-  const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-  _wind.set(-omega * v.pos.y, omega * v.pos.x, 0);
+  surfaceVelocity(body, v.pos, _wind);
   Vec3.sub(v.vel, _wind, _vAir);
 
   // ------------------------------------------------------------ attitude control
@@ -600,8 +600,6 @@ function stepWheeledContact(
   const hasCharge = v.charge.amount > 0.01;
   const drive = hasCharge ? clamp(v.controls.wheelDrive, -1, 1) : 0;
   const steer = clamp(v.controls.wheelSteer, -1, 1);
-  const planetOmega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-
   // World-frame angular velocity for contact-point velocities.
   v.att.rotate(v.angVel, _wWorld);
 
@@ -625,10 +623,11 @@ function stepWheeledContact(
 
     // Contact-point velocity relative to the rotating ground:
     // v + ω_craft×offset − ω_planet×r.
+    surfaceVelocity(body, _cPt, _wind);
     _cVp.set(
-      v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y + planetOmega * _cPt.y,
-      v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - planetOmega * _cPt.x,
-      v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x,
+      v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y - _wind.x,
+      v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - _wind.y,
+      v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x - _wind.z,
     );
     const vRad = Vec3.dot(_cVp, _cUp);
 
@@ -726,10 +725,11 @@ function stepWheeledContact(
     if (pen > -0.3) anyNear = true;
     if (pen > 0) {
       contacts++;
+      surfaceVelocity(body, _cPt, _wind);
       _cVp.set(
-        v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y + planetOmega * _cPt.y,
-        v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - planetOmega * _cPt.x,
-        v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x,
+        v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y - _wind.x,
+        v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - _wind.y,
+        v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x - _wind.z,
       );
       const vRad = Vec3.dot(_cVp, _cUp);
       if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
@@ -918,12 +918,8 @@ function computeCommandTorque(v: VesselRuntime, body: Body, out: Vec3, dt: numbe
   const altNow = rNow - body.radius;
   const surfaceRef =
     altNow < (body.def.atmosphere?.height ?? Math.max(10_000, body.radius * 0.08));
-  const om = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
   _refVel.copy(v.vel);
-  if (surfaceRef && om !== 0) {
-    _refVel.x += om * v.pos.y;
-    _refVel.y -= om * v.pos.x;
-  }
+  if (surfaceRef) _refVel.sub(surfaceVelocity(body, v.pos, _wind));
   const dir = _err;
   switch (v.sas) {
     case 'prograde':
@@ -990,8 +986,7 @@ function updateSituation(
 
   if (inContact) {
     // Surface speed relative to rotating ground.
-    const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-    _wind.set(-omega * v.pos.y, omega * v.pos.x, 0);
+    surfaceVelocity(body, v.pos, _wind);
     const groundSpeed = _tmp.copy(v.vel).sub(_wind).length();
     // Rolling on wheels still counts as landed (drive ≠ fly).
     if (groundSpeed < 0.6 || (onWheels && !overOcean)) {

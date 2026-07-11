@@ -26,6 +26,7 @@ import {
 } from '../sim/maneuver';
 import { makeStarfield } from '../render/starfield';
 import { depositSites, DepositSite } from '../sim/resources';
+import { bodyFixedToInertial } from '../sim/bodyOrientation';
 
 const SCALE = 1e-5;
 
@@ -360,9 +361,6 @@ export class MapView {
         sites = depositSites(body, 6);
         this.depositCache.set(body.id, sites);
       }
-      const spin = body.rotationAngle(t);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
       for (let i = 0; i < sites.length; i++) {
         let sprite = this.depositMarkers[i];
         if (!sprite) {
@@ -372,7 +370,8 @@ export class MapView {
         }
         const d = sites[i].dir;
         const r = body.radius * 1.02 * SCALE;
-        sprite.position.set((d.x * cs - d.y * ss) * r, (d.x * ss + d.y * cs) * r, d.z * r);
+        const inertial = bodyFixedToInertial(body, t, d, new Vec3());
+        sprite.position.set(inertial.x * r, inertial.y * r, inertial.z * r);
         sprite.scale.setScalar(this.camDist * 0.01);
         sprite.visible = true;
       }

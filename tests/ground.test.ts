@@ -10,6 +10,7 @@ import { addPart, createCraft, Craft } from '../src/sim/vessel';
 import { partById, PARTS, RESOURCE_DENSITY } from '../src/content/parts';
 import { groundRadiusInertial } from '../src/sim/terrain';
 import type { GameVessel } from '../src/sim/state';
+import { surfaceVelocity } from '../src/sim/bodyOrientation';
 
 // ---------------------------------------------------------------- helpers
 
@@ -47,8 +48,7 @@ function spawnRoverLanded(game: GameState, craft: Craft): GameVessel {
   v.att.setLookRotation(up, east);
   const ground = groundRadiusInertial(veyra, up, game.time);
   v.pos.copy(up).scale(ground + 1.0);
-  const omega = (Math.PI * 2) / veyra.def.rotationPeriod;
-  v.vel.set(-omega * v.pos.y, omega * v.pos.x, 0);
+  surfaceVelocity(veyra, v.pos, v.vel);
   v.situation = 'landed';
   v.sas = 'off';
   return gv;
@@ -58,8 +58,7 @@ function spawnRoverLanded(game: GameState, craft: Craft): GameVessel {
 function groundSpeed(game: GameState, gv: GameVessel): number {
   const v = gv.runtime;
   const body = game.bodyOf(gv);
-  const omega = (Math.PI * 2) / body.def.rotationPeriod;
-  const wind = new Vec3(-omega * v.pos.y, omega * v.pos.x, 0);
+  const wind = surfaceVelocity(body, v.pos, new Vec3());
   return new Vec3().copy(v.vel).sub(wind).length();
 }
 

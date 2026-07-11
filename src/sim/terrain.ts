@@ -8,6 +8,7 @@
 import { Vec3 } from '../core/vec3';
 import { fbm3, ridged3, noise3 } from '../core/noise';
 import type { Body } from './universe';
+import { inertialToBodyFixed } from './bodyOrientation';
 
 /**
  * Terrain height (m) above the body's reference sphere for a unit direction
@@ -61,15 +62,6 @@ const _dir = new Vec3();
  * body's INERTIAL frame at time t (accounts for body rotation).
  */
 export function groundRadiusInertial(body: Body, dirInertial: Readonly<Vec3>, t: number): number {
-  // Rotate inertial direction into the surface-fixed frame: rotate by -angle
-  // about +Z (bodies spin about their local Z axis in this model).
-  const ang = -body.rotationAngle(t);
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
-  _dir.set(
-    dirInertial.x * c - dirInertial.y * s,
-    dirInertial.x * s + dirInertial.y * c,
-    dirInertial.z,
-  ).normalize();
+  inertialToBodyFixed(body, t, dirInertial, _dir).normalize();
   return body.radius + surfaceHeight(body, _dir);
 }

@@ -10,6 +10,7 @@ import { Vec3 } from '../core/vec3';
 import type { AeroModel } from './aero';
 import { groundRadiusInertial } from './terrain';
 import type { Body } from './universe';
+import { inertialToBodyFixed, surfaceVelocity } from './bodyOrientation';
 
 export interface EntryPrediction {
   willEnter: boolean;
@@ -47,15 +48,7 @@ function inertialDirectionToBodyFixed(
   position: Readonly<Vec3>,
   time: number,
 ): Vec3 {
-  const direction = new Vec3(position.x, position.y, position.z).normalize();
-  const angle = -body.rotationAngle(time);
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  return new Vec3(
-    direction.x * c - direction.y * s,
-    direction.x * s + direction.y * c,
-    direction.z,
-  ).normalize();
+  return inertialToBodyFixed(body, time, position, new Vec3()).normalize();
 }
 
 function canReachEntryBoundary(
@@ -119,8 +112,7 @@ export function predictEntry(
   const endTime = startTime + Math.max(1, horizon);
   const atmosphereTop = body.def.atmosphere?.height ?? 0;
   const cdA = Math.max(0, model.areaAxial * model.cdAxial);
-  const rotationRate =
-    body.def.rotationPeriod === 0 ? 0 : (Math.PI * 2) / body.def.rotationPeriod;
+  const rotatingSurfaceVelocity = new Vec3();
   let time = startTime;
   let entered = false;
   let peakHeatFlux = 0;
@@ -143,10 +135,8 @@ export function predictEntry(
       -body.mu / (radius * radius * radius),
     );
     if (atmospheric) {
-      const airVelocity = new Vec3(
-        v.x + rotationRate * r.y,
-        v.y - rotationRate * r.x,
-        v.z,
+      const airVelocity = new Vec3(v.x, v.y, v.z).sub(
+        surfaceVelocity(body, r, rotatingSurfaceVelocity),
       );
       const speed = airVelocity.length();
       const density = body.densityAt(altitude);
@@ -173,12 +163,9 @@ export function predictEntry(
       const landingPosition = Vec3.lerp(previousR, r, fraction, new Vec3());
       const landingVelocity = Vec3.lerp(previousV, v, fraction, new Vec3());
       const landingTime = previousTime + dt * fraction;
-      const surfaceVelocity = new Vec3(
-        -rotationRate * landingPosition.y,
-        rotationRate * landingPosition.x,
-        0,
-      );
-      const impactSpeed = landingVelocity.sub(surfaceVelocity).length();
+      const impactSpeed = landingVelocity
+        .sub(surfaceVelocity(body, landingPosition, rotatingSurfaceVelocity))
+        .length();
       return {
         willEnter: true,
         lands: true,

@@ -10,6 +10,7 @@ import { RESOURCE_DENSITY, PartDef } from '../content/parts';
 import { defOf } from './vessel';
 import type { Body } from './universe';
 import type { GameState, GameVessel } from './state';
+import { inertialToBodyFixed } from './bodyOrientation';
 
 /**
  * Ore concentration 0..1 for a unit direction in the body's rotating
@@ -77,11 +78,8 @@ function siteDirection(game: GameState, gv: GameVessel, out: Vec3): Vec3 {
     return out.copy(gv.rails.landedPos).normalize();
   }
   const body = game.universe.get(gv.runtime.bodyId);
-  const ang = -body.rotationAngle(game.time);
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
   const p = gv.runtime.pos;
-  return out.set(p.x * c - p.y * s, p.x * s + p.y * c, p.z).normalize();
+  return inertialToBodyFixed(body, game.time, p, out).normalize();
 }
 
 /**

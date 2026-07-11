@@ -7,6 +7,8 @@ import { buildVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import { PlanetRenderer, PLANET_QUALITY } from '../src/render/planet';
 import * as planet from '../src/render/planet';
 import { groundRadiusInertial, terrainHeight } from '../src/sim/terrain';
+import { bodyOrientation } from '../src/sim/bodyOrientation';
+import { Quat } from '../src/core/quat';
 import * as worldScene from '../src/render/worldScene';
 import * as THREE from 'three';
 import { Vec3 } from '../src/core/vec3';
@@ -55,7 +57,11 @@ describe('M2 release blockers', () => {
     const game = new GameState();
     const body = game.universe.get('veyra');
     const renderer = new PlanetRenderer(body, { ...PLANET_QUALITY.medium, buildBudget: 1 });
-    renderer.update(new Vec3(body.radius + 100, 0, 0), 0, new Vec3());
+    renderer.update(
+      new Vec3(body.radius + 100, 0, 0),
+      bodyOrientation(body, 0, new Quat()),
+      new Vec3(),
+    );
     expect(renderer.stats.coverageGaps).toBe(0);
     expect(renderer.stats.overlapChunks).toBe(0);
     renderer.dispose();
