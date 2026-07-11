@@ -192,12 +192,14 @@ export class WorldScene {
     const body = this.planetStats();
     let rendererFailures = 0;
     let transitionActive = false;
-    let transitionMs = 0;
+    let activeTransitionMs = 0;
+    let completedTransitionMs = 0;
     for (const manager of this.bodyRendererManagers.values()) {
       const stats = manager.platformStats();
       rendererFailures += stats.failures;
       transitionActive ||= stats.transactionActive;
-      transitionMs = Math.max(transitionMs, stats.transitionMs);
+      if (stats.transactionActive) activeTransitionMs = Math.max(activeTransitionMs, stats.transitionMs);
+      else completedTransitionMs = Math.max(completedTransitionMs, stats.transitionMs);
     }
     return Object.freeze({
       chunks: body.chunks,
@@ -207,7 +209,7 @@ export class WorldScene {
       residentPackGpuBytes: this.rendererLedger.snapshot()?.gpuBytes ?? 0,
       rendererFailures,
       transitionActive,
-      transitionMs,
+      transitionMs: transitionActive ? activeTransitionMs : completedTransitionMs,
       contextFallback: this.context.lifecycle.state === 'fallback',
     });
   }

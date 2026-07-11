@@ -146,6 +146,7 @@ or saturated rings never delay a frame; begin/end are balanced even when a
 render throws. Delayed valid/disjoint/invalid results plus pending,
 unavailable, and saturation counts feed typed F3 overlay fields alongside
 draws, triangles, renderer managers, checked-pack residency, transaction
-duration, failures, and context fallback. A restored context always receives
-a fresh query ring, so pre-loss queries are never reused. No decorative status
-dots are used.
+duration, failures, and context fallback. Restoration drops pre-loss query
+references without GL work while paused; the first subsequent renderable
+flight/map submission lazily creates one fresh ring, so old queries are never
+reused. No decorative status dots are used.

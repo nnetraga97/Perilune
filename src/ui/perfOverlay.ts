@@ -65,6 +65,7 @@ const EMPTY_RENDERER_METRICS: RendererPlatformMetrics = Object.freeze({
 /** Game-lifetime owner for delayed GPU query rings around production submissions. */
 export class GpuSubmissionProfiler {
   private timer: GpuTimerOwner | null = null;
+  private lazyAllocationPending = false;
   private flightGpuMs: number | null = null;
   private mapGpuMs: number | null = null;
   private disposed = false;
@@ -77,6 +78,11 @@ export class GpuSubmissionProfiler {
     if (this.disposed) {
       render();
       return;
+    }
+    if (this.lazyAllocationPending) {
+      // Clear before attempting so a failed restored allocation is not retried every frame.
+      this.lazyAllocationPending = false;
+      this.timer = this.allocateTimer();
     }
     let needsEnd = false;
     try {
@@ -130,12 +136,21 @@ export class GpuSubmissionProfiler {
     });
   }
 
-  /** Context restoration invalidates all previous queries, even if the GL object is reused. */
-  recreate(options: { readonly disposePrevious?: boolean } = {}): void {
+  /** Explicit replacement outside a lost/restoring lifecycle window. */
+  recreate(): void {
     if (this.disposed) return;
-    if (options.disposePrevious === false) this.timer = null;
-    else this.disableTimer();
+    this.disableTimer();
     this.timer = this.allocateTimer();
+    this.lazyAllocationPending = false;
+    this.flightGpuMs = null;
+    this.mapGpuMs = null;
+  }
+
+  /** Drop context-invalid queries without issuing GL calls; allocation is lazy on the next draw. */
+  invalidateAfterContextLoss(): void {
+    if (this.disposed) return;
+    this.timer = null;
+    this.lazyAllocationPending = true;
     this.flightGpuMs = null;
     this.mapGpuMs = null;
   }
@@ -143,6 +158,7 @@ export class GpuSubmissionProfiler {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.lazyAllocationPending = false;
     this.disableTimer();
   }
 
@@ -172,7 +188,7 @@ export interface PerfSnapshot {
   frames: number;
   drawingBufferWidth: number;
   drawingBufferHeight: number;
-  estimatedGpuMB: number;
+  estimatedGpuMB: number | null;
   scatterInstances: number;
   physicalProxies: number;
   disjointQueries: number;
@@ -306,7 +322,7 @@ export class PerfOverlay {
       frames: this.frames,
       drawingBufferWidth: renderer?.getDrawingBufferSize(new THREE.Vector2()).x ?? 0,
       drawingBufferHeight: renderer?.getDrawingBufferSize(new THREE.Vector2()).y ?? 0,
-      estimatedGpuMB: Number(this.extra['gpu MB'] ?? 0),
+      estimatedGpuMB: this.extra['gpu MB'] === undefined ? null : Number(this.extra['gpu MB']),
       scatterInstances: Number(this.extra['scatter'] ?? 0),
       physicalProxies: Number(this.extra['proxies'] ?? 0),
       disjointQueries: this.gpuMetrics ? gpuMetrics.gpuQueriesDisjoint : Number(this.extra['disjoint'] ?? 0),

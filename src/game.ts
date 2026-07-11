@@ -77,8 +77,8 @@ class PeriluneGame {
       () => new GpuTimerRing(this.ctx.renderer.getContext() as WebGL2RenderingContext, 12),
     );
     this.unsubscribeGpuRestoration = this.ctx.lifecycle.subscribeRestoration(async () => {
-      // Context loss already invalidated old queries; do not call GL cleanup while restoration is paused.
-      this.gpuProfiler.recreate({ disposePrevious: false });
+      // Context loss invalidated old queries. Drop references now; allocate lazily on a renderable draw.
+      this.gpuProfiler.invalidateAfterContextLoss();
     });
     this.world = new WorldScene(this.ctx);
     this.perf = new PerfOverlay(this.uiRoot);

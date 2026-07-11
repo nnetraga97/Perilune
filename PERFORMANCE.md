@@ -90,8 +90,10 @@ Only actual flight and map `renderer.render` submissions are enclosed by the
 available and are attributed as valid, disjoint, invalid, pending,
 unavailable-poll, or saturated-begin counts. Unsupported or broken profiling
 is disabled without skipping or changing a render. Lost/restoring contexts
-issue neither draw nor query calls, and restoration replaces the ring before
-rendering resumes so old query objects are never reused. Editor rendering is
+issue neither draw nor query calls. Restoration drops invalid query references
+without GL cleanup while paused; the first subsequent renderable flight/map
+submission makes one lazy replacement attempt, so old query objects are never
+reused and allocation failure is not retried every frame. Editor rendering is
 not included in these flight/map GPU fields.
 
 The production manager swap is currently atomic rather than a visual crossfade;

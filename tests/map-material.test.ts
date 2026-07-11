@@ -16,6 +16,7 @@ import { Universe } from '../src/sim/universe';
 import { bodyOrientation } from '../src/sim/bodyOrientation';
 import type { GpuTimerSnapshot, GpuTimingSample } from '../src/render/gpuTimer';
 import { WorldScene } from '../src/render/worldScene';
+import { RenderContextLifecycle } from '../src/render/contextLifecycle';
 
 const universe = new Universe(structuredClone(AUREN_SYSTEM));
 
@@ -163,7 +164,8 @@ describe('production GPU submission profiling', () => {
     expect(source).toContain("gpuProfiler.submit('flight'");
     expect(source).not.toContain("gpuProfiler.submit('editor'");
     expect(source).toMatch(/if \(!this\.ctx\.renderPaused\)[\s\S]*gpuProfiler\.poll\(\)/);
-    expect(source).toContain('recreate({ disposePrevious: false })');
+    expect(source).toContain('invalidateAfterContextLoss()');
+    expect(source).not.toContain('recreate({ disposePrevious: false })');
     expect(source).toContain('if (event.persisted) return');
     expect(source).toContain("window.removeEventListener('pagehide', this.onPageHide)");
     expect(source).not.toContain("addEventListener('pagehide', this.onPageHide, { once: true })");
@@ -186,7 +188,9 @@ describe('production GPU submission profiling', () => {
       },
     });
 
-    expect(overlay.snapshot()).toMatchObject({ chunks: 5, disjointQueries: 0, transitionMs: 0 });
+    expect(overlay.snapshot()).toMatchObject({
+      chunks: 5, disjointQueries: 0, transitionMs: 0, estimatedGpuMB: null,
+    });
   });
 
   test('WorldScene reports manager, resource, transition, and fallback state without invented pack data', () => {
@@ -198,7 +202,7 @@ describe('production GPU submission profiling', () => {
       ]),
       bodyRendererManagers: new Map([
         ['veyra', { platformStats: () => ({ transactionActive: true, transitionMs: 18, failures: 2 }) }],
-        ['auren', { platformStats: () => ({ transactionActive: false, transitionMs: 7, failures: 0 }) }],
+        ['auren', { platformStats: () => ({ transactionActive: false, transitionMs: 70, failures: 0 }) }],
       ]),
       rendererLedger: {
         residentFlightBodyIds: () => ['veyra'],
@@ -296,6 +300,45 @@ describe('production GPU submission profiling', () => {
     expect(first.dispose).toHaveBeenCalledOnce();
     expect(first.begin).not.toHaveBeenCalled();
     expect(second.begin).toHaveBeenCalledWith('map');
+  });
+
+  test('defers restored query allocation until the lifecycle is renderable', async () => {
+    const canvas = new EventTarget();
+    const lifecycle = new RenderContextLifecycle(canvas);
+    const first = timer();
+    const second = timer();
+    const factory = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const profiler = new GpuSubmissionProfiler(factory);
+    lifecycle.subscribeRestoration(async () => profiler.invalidateAfterContextLoss());
+    let releaseRestoration!: () => void;
+    const holdRestoration = new Promise<void>((resolve) => { releaseRestoration = resolve; });
+    lifecycle.subscribeRestoration(() => holdRestoration);
+
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    canvas.dispatchEvent(new Event('webglcontextrestored'));
+    await vi.waitFor(() => expect(lifecycle.state).toBe('restoring'));
+    expect(factory).toHaveBeenCalledOnce();
+    expect(first.dispose).not.toHaveBeenCalled();
+    releaseRestoration();
+    await vi.waitFor(() => expect(lifecycle.state).toBe('ready'));
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(first.dispose).not.toHaveBeenCalled();
+    profiler.submit('flight', vi.fn());
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(second.begin).toHaveBeenCalledWith('flight');
+  });
+
+  test('does not retry a failed lazy restored allocation every frame', () => {
+    const first = timer();
+    const factory = vi.fn().mockReturnValueOnce(first).mockImplementationOnce(() => { throw new Error('still unavailable'); });
+    const profiler = new GpuSubmissionProfiler(factory);
+    profiler.invalidateAfterContextLoss();
+
+    profiler.submit('flight', vi.fn());
+    profiler.submit('flight', vi.fn());
+
+    expect(factory).toHaveBeenCalledTimes(2);
   });
 
   test('disables timing safely when poll or restored allocation fails', () => {
