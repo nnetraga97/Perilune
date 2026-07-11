@@ -102,6 +102,8 @@ export interface PartDef {
   resourceScanner?: { power: number };
   /** Refinery: converts ore into propellant. */
   converter?: { rate: number; power: number; yield: number }; // ore units/s in, propellant = rate·yield
+  /** Ore storage capacity (bins start empty, unlike fuel tanks). */
+  oreCapacity?: number;
   color?: string;
   accent?: string;
 }
@@ -1018,7 +1020,7 @@ export const PARTS: PartDef[] = [
     crossfeed: true,
     maxTemp: 1600,
     crashTolerance: 14,
-    resources: { ore: 300 },
+    oreCapacity: 300,
     color: '#8e5a2e',
     accent: '#5c6670',
   },

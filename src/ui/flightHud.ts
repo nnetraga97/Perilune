@@ -8,6 +8,7 @@
 import { Vec3 } from '../core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from '../sim/state';
 import { defOf, analyzeCraft } from '../sim/vessel';
+import { oreConcentration, oreCapacityOf } from '../sim/resources';
 import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
 import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
@@ -25,6 +26,10 @@ export interface HudCallbacks {
   onSetSas(mode: SasMode): void;
   onSetWarp(index: number, rails: boolean): void;
   onExitToEditor(): void;
+  /** Toggle an ISRU system part (drill/converter) on the active vessel. */
+  onToggleSystem(partKey: number): void;
+  /** Run an orbital resource survey. */
+  onSurvey(): void;
 }
 
 const SAS_MODES: Array<{ mode: SasMode; label: string; title: string }> = [
@@ -95,6 +100,10 @@ export class FlightHud {
   private nodeInfoEl: HTMLElement;
   private lastStageRender = '';
   private missionStart = 0;
+  private oreRow!: HTMLElement;
+  private sysPanel!: HTMLElement;
+  private lastSysRender = '';
+  private oreHereEl: HTMLElement | null = null;
 
   constructor(uiRoot: HTMLElement, cb: HudCallbacks) {
     this.cb = cb;
@@ -180,13 +189,23 @@ export class FlightHud {
     this.nodeInfoEl = el('div', 'hud-node-info', orbitBox);
 
     const resBox = el('div', 'hud-panel', right);
-    for (const res of ['propellant', 'monoprop', 'charge'] as const) {
+    for (const res of ['propellant', 'monoprop', 'charge', 'ore'] as const) {
       const row = el('div', 'hud-gauge', resBox);
-      el('span', 'hud-key', row, res === 'propellant' ? 'FUEL' : res === 'monoprop' ? 'MONO' : 'CHG');
+      el(
+        'span',
+        'hud-key',
+        row,
+        res === 'propellant' ? 'FUEL' : res === 'monoprop' ? 'MONO' : res === 'charge' ? 'CHG' : 'ORE',
+      );
       const track = el('div', 'hud-gauge-track', row);
       this.gaugeFills.set(res, el('div', 'hud-gauge-fill', track));
       this.gaugeTexts.set(res, el('span', 'hud-gauge-text', row, ''));
+      if (res === 'ore') this.oreRow = row;
     }
+
+    // ---- ISRU systems panel (drills/converters/survey), shown when present
+    this.sysPanel = el('div', 'hud-panel hud-systems', right);
+    this.sysPanel.style.display = 'none';
 
     const stagePanel = el('div', 'hud-panel hud-stages', right);
     const stageBtn = el('button', 'hud-btn hud-stage-btn', stagePanel, 'STAGE (Space)');
@@ -272,6 +291,9 @@ export class FlightHud {
       .hud-gauge-track { flex: 1; height: 8px; background: #101c26; border-radius: 4px; overflow: hidden; }
       .hud-gauge-fill { height: 100%; width: 0%; background: var(--ui-accent); }
       .hud-gauge-text { font-family: var(--ui-mono); font-size: 10px; color: #9fb4c4; min-width: 50px; text-align: right; }
+      .hud-systems { display: flex; flex-direction: column; gap: 4px; }
+      .hud-sys-toggle { width: 100%; text-align: left; font-size: 11px; }
+      .hud-sys-toggle.active { border-color: var(--ui-good); color: #cfe8d6; }
       .hud-stages { max-height: 40vh; overflow-y: auto; }
       .hud-stage-btn { width: 100%; margin-bottom: 6px; border-color: var(--ui-warn); }
       .hud-stage-list { display: flex; flex-direction: column-reverse; gap: 4px; }
@@ -348,17 +370,25 @@ export class FlightHud {
     let fuel = 0,
       fuelMax = 0,
       mono = 0,
-      monoMax = 0;
+      monoMax = 0,
+      ore = 0,
+      oreMax = 0;
     for (const p of v.craft.parts) {
       fuel += p.resources.propellant ?? 0;
       mono += p.resources.monoprop ?? 0;
+      ore += p.resources.ore ?? 0;
       const d = defOf(p);
       fuelMax += d.resources?.propellant ?? 0;
       monoMax += d.resources?.monoprop ?? 0;
+      oreMax += oreCapacityOf(d);
     }
     this.setGauge('propellant', fuel, fuelMax);
     this.setGauge('monoprop', mono, monoMax);
     this.setGauge('charge', v.charge.amount, v.charge.capacity);
+    this.oreRow.style.display = oreMax > 0 ? '' : 'none';
+    if (oreMax > 0) this.setGauge('ore', ore, oreMax);
+
+    this.updateSystems(game);
 
     // SAS highlight.
     for (const [mode, btn] of this.sasButtons) {
@@ -403,6 +433,75 @@ export class FlightHud {
     }
 
     this.drawNavball(game, node);
+  }
+
+  /** ISRU systems panel: drill/converter toggles, survey, local ore. */
+  private updateSystems(game: GameState): void {
+    const gv = game.active!;
+    const v = gv.runtime;
+    const systems = v.craft.parts.filter((p) => {
+      const d = defOf(p);
+      return d.drill || d.converter;
+    });
+    const hasScanner = v.craft.parts.some((p) => defOf(p).resourceScanner);
+    const landed = v.situation === 'landed' || v.situation === 'prelaunch';
+    const scanned = game.scannedBodies.has(v.bodyId);
+
+    const sig = `${systems.map((p) => `${p.key}:${p.activated ? 1 : 0}`).join('|')}~${hasScanner}~${landed}~${scanned}~${v.situation}`;
+    if (sig !== this.lastSysRender) {
+      this.lastSysRender = sig;
+      this.sysPanel.innerHTML = '';
+      this.oreHereEl = null;
+      if (!systems.length && !hasScanner) {
+        this.sysPanel.style.display = 'none';
+      } else {
+        this.sysPanel.style.display = '';
+        const title = el('div', 'hud-stage-title', this.sysPanel, 'SYSTEMS');
+        void title;
+        for (const p of systems) {
+          const d = defOf(p);
+          const b = el(
+            'button',
+            'hud-btn hud-sys-toggle',
+            this.sysPanel,
+            `${d.drill ? '⛏' : '⚗'} ${d.name}: ${p.activated ? 'ON' : 'OFF'}`,
+          );
+          b.classList.toggle('active', !!p.activated);
+          b.title = d.drill
+            ? 'Drill extracts ore while landed (uses charge)'
+            : 'Converter refines ore into propellant (uses charge)';
+          b.onclick = () => this.cb.onToggleSystem(p.key);
+        }
+        if (hasScanner) {
+          const b = el('button', 'hud-btn hud-sys-toggle', this.sysPanel, '🛰 Survey resources');
+          b.title = scanned
+            ? 'This body is already surveyed'
+            : 'Survey the resource field (needs stable orbit above 25 km, 20 charge)';
+          b.onclick = () => this.cb.onSurvey();
+        }
+        if (systems.some((p) => defOf(p).drill)) {
+          this.oreHereEl = el('div', 'hud-node-info', this.sysPanel, '');
+        }
+      }
+    }
+
+    // Live local-ore readout (cheap noise sample; only while landed).
+    if (this.oreHereEl) {
+      if (!landed) {
+        this.oreHereEl.textContent = '';
+      } else if (!scanned) {
+        this.oreHereEl.textContent = 'Ore here: ?? (survey from orbit)';
+      } else {
+        const body = game.bodyOf(gv);
+        const ang = -body.rotationAngle(game.time);
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        const p = v.pos;
+        const dir = new Vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z).normalize();
+        const conc = oreConcentration(body, dir);
+        this.oreHereEl.textContent = `Ore here: ${(conc * 100).toFixed(0)}%`;
+      }
+    }
   }
 
   private setGauge(key: string, value: number, max: number): void {

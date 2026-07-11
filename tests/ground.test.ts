@@ -96,7 +96,7 @@ describe('part catalog: ground & ISRU families', () => {
     expect(partById('drill-auger').drill).toBeDefined();
     expect(partById('conv-kiln').converter).toBeDefined();
     expect(partById('scan-prospector').resourceScanner).toBeDefined();
-    expect(partById('bin-ore').resources?.ore).toBeGreaterThan(0);
+    expect(partById('bin-ore').oreCapacity).toBeGreaterThan(0);
     expect(RESOURCE_DENSITY.ore).toBeGreaterThan(0);
 
     const delta = partById('wing-delta');

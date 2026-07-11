@@ -27,6 +27,7 @@ import {
 } from './flight';
 import { evaluateStructure, splitAtJoint } from './structure';
 import { groundRadiusInertial } from './terrain';
+import { stepIsru } from './resources';
 
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
@@ -86,6 +87,8 @@ export class GameState {
   completedExperiments = new Set<string>();
   /** Progress/tutorial flags. */
   flags: Record<string, boolean> = {};
+  /** Bodies whose resource fields have been surveyed from orbit. */
+  scannedBodies = new Set<string>();
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
   noteRestoredVessel(id: string): void {
@@ -398,8 +401,10 @@ export class GameState {
     let steps = 0;
     if (this.railsWarp && this.warpIndex > 0) {
       // Rails warp: pure analytic time advance.
-      this.time += realDt * this.warpRate;
+      const dtSim = realDt * this.warpRate;
+      this.time += dtSim;
       this.checkSoiTransitionsRails();
+      this.stepBackgroundSystems(dtSim);
       return 0;
     }
 
@@ -408,10 +413,40 @@ export class GameState {
     while (this.accumulator >= PHYSICS_DT) {
       this.accumulator -= PHYSICS_DT;
       this.stepPhysics(PHYSICS_DT);
+      this.stepBackgroundSystems(PHYSICS_DT);
       this.time += PHYSICS_DT;
       steps++;
     }
     return steps;
+  }
+
+  /** Slow systems that run for every vessel in any regime (ISRU, etc.). */
+  private stepBackgroundSystems(dt: number): void {
+    for (const gv of this.vessels) stepIsru(this, gv, dt);
+  }
+
+  /**
+   * Survey the current body's resource field. Requires a resource scanner
+   * aboard, an orbit above 25 km, and 20 units of charge.
+   */
+  performScan(gv: GameVessel): { ok: boolean; reason?: string } {
+    const v = gv.runtime;
+    const hasScanner = v.craft.parts.some((p) => defOf(p).resourceScanner);
+    if (!hasScanner) return { ok: false, reason: 'No resource scanner aboard' };
+    if (v.situation !== 'orbit') {
+      return { ok: false, reason: 'A survey needs a stable orbit' };
+    }
+    const body = this.bodyOf(gv);
+    const alt = v.pos.length() - body.radius;
+    if (alt < 25_000) return { ok: false, reason: 'Orbit too low for a survey (25 km minimum)' };
+    if (this.scannedBodies.has(v.bodyId)) {
+      return { ok: false, reason: `${body.name} is already surveyed` };
+    }
+    if (v.charge.amount < 20) return { ok: false, reason: 'Insufficient charge (20 needed)' };
+    v.charge.amount -= 20;
+    this.scannedBodies.add(v.bodyId);
+    logEvent(v, this.time, `Resource survey of ${body.name} complete`);
+    return { ok: true };
   }
 
   /** Make a vessel the active (controlled) one. */

@@ -14,7 +14,7 @@ import type { QuatLike } from '../core/quat';
 import type { Craft, Stage, PartInstance } from '../sim/vessel';
 import type { SasMode, Situation } from '../sim/flight';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface SavedPart {
   key: number;
@@ -81,6 +81,8 @@ export interface SaveGame {
   science: { points: number; completed: string[] };
   /** Tutorial / progress flags. */
   flags: Record<string, boolean>;
+  /** ISRU state: bodies surveyed for resources (added in v2). */
+  isru?: { scanned: string[] };
 }
 
 export function validateSave(raw: unknown): raw is SaveGame {
@@ -109,8 +111,10 @@ export function migrateSave(raw: SaveGame): SaveGame {
       `Save is from a newer version (${save.saveVersion} > ${SAVE_VERSION}); refusing to load.`,
     );
   }
-  // Future migrations chain here:
-  // if (save.saveVersion === 1) save = migrate1to2(save);
+  // Migrations chain version by version.
+  if (save.saveVersion === 1) {
+    save = { ...save, saveVersion: 2, isru: { scanned: [] } };
+  }
   if (save.saveVersion !== SAVE_VERSION) {
     throw new Error(`No migration path from save version ${save.saveVersion}.`);
   }

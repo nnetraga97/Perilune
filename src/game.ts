@@ -81,6 +81,26 @@ class PeriluneGame {
       },
       onSetWarp: (i, rails) => this.game.setWarp(i, rails),
       onExitToEditor: () => this.toEditor(),
+      onToggleSystem: (partKey) => {
+        const gv = this.game.active;
+        if (!gv) return;
+        const p = gv.runtime.craft.parts.find((q) => q.key === partKey);
+        if (!p) return;
+        p.activated = !p.activated;
+        logEvent(
+          gv.runtime,
+          this.game.time,
+          `${defOf(p).name} ${p.activated ? 'started' : 'stopped'}`,
+        );
+      },
+      onSurvey: () => {
+        const gv = this.game.active;
+        if (!gv) return;
+        const res = this.game.performScan(gv);
+        if (!res.ok && res.reason) {
+          logEvent(gv.runtime, this.game.time, res.reason, 'warning');
+        }
+      },
     });
     this.hud.root.style.display = 'none';
     this.map = new MapView(this.uiRoot, {

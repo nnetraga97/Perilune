@@ -25,6 +25,7 @@ import {
   TrajectoryPrediction,
 } from '../sim/maneuver';
 import { makeStarfield } from '../render/starfield';
+import { depositSites, DepositSite } from '../sim/resources';
 
 const SCALE = 1e-5;
 
@@ -100,6 +101,9 @@ export class MapView {
   private vesselMarker: THREE.Sprite;
   private nodeMarker: THREE.Sprite;
   private encounterMarker: THREE.Sprite;
+  private depositMarkers: THREE.Sprite[] = [];
+  private depositCache = new Map<string, DepositSite[]>();
+  private mkDepositSprite!: () => THREE.Sprite;
 
   private camYaw = 0.8;
   private camPitch = 0.9;
@@ -155,6 +159,7 @@ export class MapView {
     this.nodeMarker = mkSprite('#e8c76b', 4);
     this.encounterMarker = mkSprite('#c88be8', 4);
     this.scene.add(this.vesselMarker, this.nodeMarker, this.encounterMarker);
+    this.mkDepositSprite = () => mkSprite('#e2b13c', 3);
 
     // ---- DOM panel
     this.panel = el('div', 'map-panel', uiRoot);
@@ -346,6 +351,36 @@ export class MapView {
     }
     for (const [id, soi] of this.soiMeshes) {
       soi.visible = shown.has(id);
+    }
+
+    // Ore deposit markers on the focus body (after an orbital survey).
+    if (game.scannedBodies.has(body.id)) {
+      let sites = this.depositCache.get(body.id);
+      if (!sites) {
+        sites = depositSites(body, 6);
+        this.depositCache.set(body.id, sites);
+      }
+      const spin = body.rotationAngle(t);
+      const cs = Math.cos(spin);
+      const ss = Math.sin(spin);
+      for (let i = 0; i < sites.length; i++) {
+        let sprite = this.depositMarkers[i];
+        if (!sprite) {
+          sprite = this.mkDepositSprite();
+          this.depositMarkers.push(sprite);
+          this.scene.add(sprite);
+        }
+        const d = sites[i].dir;
+        const r = body.radius * 1.02 * SCALE;
+        sprite.position.set((d.x * cs - d.y * ss) * r, (d.x * ss + d.y * cs) * r, d.z * r);
+        sprite.scale.setScalar(this.camDist * 0.01);
+        sprite.visible = true;
+      }
+      for (let i = sites.length; i < this.depositMarkers.length; i++) {
+        this.depositMarkers[i].visible = false;
+      }
+    } else {
+      for (const m of this.depositMarkers) m.visible = false;
     }
 
     // Vessel conic.

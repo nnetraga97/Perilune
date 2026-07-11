@@ -78,6 +78,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
     vessels,
     science: { points: game.sciencePoints, completed: [...game.completedExperiments] },
     flags: { ...game.flags },
+    isru: { scanned: [...game.scannedBodies] },
   };
 }
 
@@ -89,6 +90,7 @@ export function restoreGame(save: SaveGame): GameState {
   game.sciencePoints = migrated.science?.points ?? 0;
   game.completedExperiments = new Set(migrated.science?.completed ?? []);
   game.flags = { ...(migrated.flags ?? {}) };
+  game.scannedBodies = new Set(migrated.isru?.scanned ?? []);
 
   for (const sv of migrated.vessels) {
     const craft: Craft = {
