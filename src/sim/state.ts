@@ -132,6 +132,7 @@ export class GameState {
       const def = defOf(p);
       let bottom = p.position.y - def.shape.height / 2;
       if (def.leg) bottom -= def.leg.length;
+      if (def.wheel) bottom = Math.min(bottom, p.position.y - def.wheel.radius);
       minY = Math.min(minY, bottom);
     }
     const comY = runtime.massProps.com.y;

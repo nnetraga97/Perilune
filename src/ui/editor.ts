@@ -49,6 +49,7 @@ const CATEGORIES: Array<{ id: PartDef['category']; label: string }> = [
   { id: 'utility', label: 'Utility' },
   { id: 'science', label: 'Science' },
   { id: 'thermal', label: 'Thermal' },
+  { id: 'ground', label: 'Ground' },
 ];
 
 export interface EditorCallbacks {

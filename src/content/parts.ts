@@ -6,7 +6,7 @@
  * vertical slice. Sizes: stack class S = 0.6 m radius, M = 1.25 m radius.
  */
 
-export type ResourceId = 'propellant' | 'solidFuel' | 'monoprop' | 'charge' | 'ablator';
+export type ResourceId = 'propellant' | 'solidFuel' | 'monoprop' | 'charge' | 'ablator' | 'ore';
 
 export const RESOURCE_DENSITY: Record<ResourceId, number> = {
   propellant: 5, // kg per unit
@@ -14,6 +14,7 @@ export const RESOURCE_DENSITY: Record<ResourceId, number> = {
   monoprop: 4,
   charge: 0, // massless
   ablator: 1,
+  ore: 6, // raw regolith concentrate
 };
 
 export interface PartShape {
@@ -36,6 +37,11 @@ export interface EngineDef {
   minThrottle: number; // 0..1 (solid boosters: 1 = unthrottleable)
   /** Exhaust visual scale. */
   plumeScale: number;
+  /**
+   * Air-breathing: thrust scales with air density and vanishes in vacuum.
+   * `thrustVac` is then the rated sea-level thrust.
+   */
+  airBreathing?: boolean;
 }
 
 export interface PartDef {
@@ -51,7 +57,8 @@ export interface PartDef {
     | 'aero'
     | 'utility'
     | 'science'
-    | 'thermal';
+    | 'thermal'
+    | 'ground';
   massDry: number; // kg
   cost: number;
   shape: PartShape;
@@ -81,6 +88,20 @@ export interface PartDef {
   heatShield?: boolean;
   leg?: { length: number; strength: number };
   reactionWheel?: { torque: number };
+  /** Ground wheel: sphere contact of `radius` at the part center. */
+  wheel?: {
+    radius: number; // m
+    driveForce: number; // N of traction at full drive (0 = free-rolling gear)
+    maxSpeed: number; // m/s driven speed limit
+    steering: boolean;
+    brakeForce: number; // N
+  };
+  /** Surface drill: extracts ore from deposits when landed. */
+  drill?: { rate: number; power: number }; // ore units/s, charge/s
+  /** Orbital resource scanner: reveals deposits from orbit. */
+  resourceScanner?: { power: number };
+  /** Refinery: converts ore into propellant. */
+  converter?: { rate: number; power: number; yield: number }; // ore units/s in, propellant = rate·yield
   color?: string;
   accent?: string;
 }
@@ -898,6 +919,187 @@ export const PARTS: PartDef[] = [
     heatShield: true,
     color: '#8e5a2e',
     accent: '#3f4750',
+  },
+  // ------------------------------------------------------------- ground
+  {
+    id: 'wheel-scout',
+    name: 'Burro Wheel',
+    blurb: 'A patient motorized wheel. Happiest below walking pace, capable of more.',
+    category: 'ground',
+    massDry: 45,
+    cost: 450,
+    shape: { kind: 'cylinder', radiusTop: 0.28, radiusBottom: 0.28, height: 0.2 },
+    surfaceAttach: true,
+    crossfeed: false,
+    maxTemp: 1400,
+    crashTolerance: 26,
+    wheel: { radius: 0.28, driveForce: 2600, maxSpeed: 12, steering: true, brakeForce: 3600 },
+    color: '#3f4750',
+    accent: '#e2b13c',
+  },
+  {
+    id: 'wheel-mesa',
+    name: 'Mesa Wheel',
+    blurb: 'Heavy-duty traction for serious expedition rovers.',
+    category: 'ground',
+    massDry: 160,
+    cost: 1300,
+    shape: { kind: 'cylinder', radiusTop: 0.5, radiusBottom: 0.5, height: 0.34 },
+    surfaceAttach: true,
+    crossfeed: false,
+    maxTemp: 1500,
+    crashTolerance: 32,
+    wheel: { radius: 0.5, driveForce: 9500, maxSpeed: 19, steering: true, brakeForce: 12_000 },
+    color: '#3f4750',
+    accent: '#b4562e',
+  },
+  {
+    id: 'gear-skid',
+    name: 'Roadrunner Gear',
+    blurb: 'Free-rolling landing gear with honest brakes. Runways optional.',
+    category: 'ground',
+    massDry: 75,
+    cost: 520,
+    shape: { kind: 'box', height: 0.85, width: 0.2, depth: 0.3 },
+    surfaceAttach: true,
+    crossfeed: false,
+    maxTemp: 1700,
+    crashTolerance: 42,
+    wheel: { radius: 0.24, driveForce: 0, maxSpeed: 0, steering: false, brakeForce: 7000 },
+    color: '#8a9299',
+    accent: '#3f4750',
+  },
+  {
+    id: 'drill-auger',
+    name: 'Groundhog Drill',
+    blurb: 'Chews regolith into hopper-ready concentrate. Loud, proud, effective.',
+    category: 'ground',
+    massDry: 350,
+    cost: 2400,
+    shape: { kind: 'cylinder', radiusTop: 0.18, radiusBottom: 0.28, height: 1.4 },
+    surfaceAttach: true,
+    crossfeed: true,
+    maxTemp: 1600,
+    crashTolerance: 10,
+    drill: { rate: 0.8, power: 1.4 },
+    color: '#8e5a2e',
+    accent: '#e2b13c',
+  },
+  {
+    id: 'conv-kiln',
+    name: 'Ember Kiln',
+    blurb: 'Bakes ore into propellant through chemistry best not discussed at dinner.',
+    category: 'ground',
+    massDry: 1250,
+    cost: 5200,
+    shape: { kind: 'cylinder', radiusTop: M * 0.85, radiusBottom: M * 0.85, height: 1.6 },
+    stackTop: true,
+    stackBottom: true,
+    acceptsSurfaceAttach: true,
+    crossfeed: true,
+    maxTemp: 2000,
+    crashTolerance: 9,
+    converter: { rate: 0.5, power: 3, yield: 0.9 },
+    color: '#5c6670',
+    accent: '#b4562e',
+  },
+  {
+    id: 'bin-ore',
+    name: 'Hopper Bin',
+    blurb: 'A rugged box of future fuel. Smells like progress and gravel.',
+    category: 'ground',
+    massDry: 180,
+    cost: 700,
+    shape: { kind: 'box', height: 0.9, width: 1.1, depth: 1.1 },
+    stackTop: true,
+    stackBottom: true,
+    surfaceAttach: true,
+    acceptsSurfaceAttach: true,
+    crossfeed: true,
+    maxTemp: 1600,
+    crashTolerance: 14,
+    resources: { ore: 300 },
+    color: '#8e5a2e',
+    accent: '#5c6670',
+  },
+  {
+    id: 'scan-prospector',
+    name: 'Prospector Eye',
+    blurb: 'Sees riches under the surface from a polite orbital distance.',
+    category: 'science',
+    massDry: 90,
+    cost: 1800,
+    shape: { kind: 'box', height: 0.4, width: 0.5, depth: 0.3 },
+    surfaceAttach: true,
+    stackBottom: true,
+    crossfeed: false,
+    maxTemp: 1300,
+    crashTolerance: 8,
+    resourceScanner: { power: 1.1 },
+    color: '#20364a',
+    accent: '#7fb8a4',
+  },
+  // ------------------------------------------------- aero (M2 additions)
+  {
+    id: 'wing-delta',
+    name: 'Delta Wing',
+    blurb: 'A broad delta panel. Carries aircraft, dreams, and modest payloads.',
+    category: 'aero',
+    massDry: 420,
+    cost: 1500,
+    shape: { kind: 'panel', height: 3.6, width: 2.2, depth: 0.12 },
+    surfaceAttach: true,
+    acceptsSurfaceAttach: true,
+    crossfeed: false,
+    maxTemp: 1750,
+    crashTolerance: 12,
+    wing: { liftArea: 6.8 },
+    color: '#dfe3e6',
+    accent: '#b4562e',
+  },
+  {
+    id: 'ctrl-elevon',
+    name: 'Elevon Flap',
+    blurb: 'A powered control surface that argues with the airflow and usually wins.',
+    category: 'aero',
+    massDry: 90,
+    cost: 520,
+    shape: { kind: 'panel', height: 1.2, width: 0.8, depth: 0.06 },
+    surfaceAttach: true,
+    crossfeed: false,
+    maxTemp: 1750,
+    crashTolerance: 12,
+    wing: { liftArea: 1.15, control: true, maxDeflection: 25 },
+    color: '#dfe3e6',
+    accent: '#e2b13c',
+  },
+  // -------------------------------------------- engines (M2 additions)
+  {
+    id: 'eng-whirl',
+    name: 'A-70 "Whirligig"',
+    blurb: 'An air-breathing fan engine. Sips fuel, gulps sky, refuses vacuum.',
+    category: 'engines',
+    massDry: 950,
+    cost: 2900,
+    shape: { kind: 'cylinder', radiusTop: S * 0.95, radiusBottom: S * 0.95, height: 1.3 },
+    stackTop: true,
+    stackBottom: true,
+    surfaceAttach: true,
+    crossfeed: true,
+    maxTemp: 2100,
+    crashTolerance: 9,
+    engine: {
+      thrustVac: 95_000, // rated sea-level thrust (airBreathing)
+      ispVac: 3400,
+      ispSea: 3400,
+      gimbalDeg: 1.5,
+      propellant: 'propellant',
+      minThrottle: 0,
+      plumeScale: 0.5,
+      airBreathing: true,
+    },
+    color: '#4b545c',
+    accent: '#7fb8a4',
   },
 ];
 

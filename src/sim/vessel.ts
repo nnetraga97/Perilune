@@ -410,10 +410,28 @@ export function analyzeCraft(
     let flowSum = 0; // kg/s
     for (const sp of litEngines) {
       const eng = sp.def.engine!;
-      const isp = ispAt(eng);
-      const thrustHere = eng.thrustVac * (isp / eng.ispVac);
+      // Air-breathing engines scale with ambient pressure and die in vacuum.
+      const isp = eng.airBreathing ? eng.ispVac : ispAt(eng);
+      const thrustHere = eng.airBreathing
+        ? eng.thrustVac * Math.min(1, atmPressure / 101_325)
+        : eng.thrustVac * (isp / eng.ispVac);
       thrust += thrustHere;
       flowSum += thrustHere / (isp * G0);
+    }
+    if (flowSum <= 0) {
+      // Engines lit but producing nothing here (air-breathers in vacuum).
+      stages.push({
+        stageIndex: si,
+        deltaV: 0,
+        twrStart: 0,
+        twrEnd: 0,
+        burnTime: 0,
+        massStart,
+        massEnd: massStart,
+        thrust: 0,
+        isp: 0,
+      });
+      continue;
     }
     const effIsp = thrust / (flowSum * G0);
 
