@@ -115,6 +115,13 @@ export function renderedTerrainHeight(height: number, hasOcean: boolean): number
   return height;
 }
 
+export interface PlanetRendererOptions {
+  /** Ownership transfers to PlanetRenderer and is released by dispose(). */
+  readonly material?: THREE.Material;
+  /** Disable the legacy datum sphere when a separate ocean pass owns water. */
+  readonly oceanEnabled?: boolean;
+}
+
 function countLodOverlaps(keys: ReadonlySet<string>): number {
   let overlaps = 0;
   for (const key of keys) {
@@ -164,18 +171,22 @@ export class PlanetRenderer {
     geometryBytes: 0,
   };
 
-  constructor(body: Body, quality: PlanetQuality = PLANET_QUALITY.medium) {
+  constructor(
+    body: Body,
+    quality: PlanetQuality = PLANET_QUALITY.medium,
+    options: Readonly<PlanetRendererOptions> = {},
+  ) {
     this.body = body;
     this.quality = quality;
     this.maxDepth = Math.max(6, Math.min(16, Math.ceil(Math.log2(body.radius / 30))));
-    this.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.material = options.material ?? new THREE.MeshLambertMaterial({ vertexColors: true });
     this.palette = {
       low: new THREE.Color(body.def.terrain.colorLow),
       mid: new THREE.Color(body.def.terrain.colorMid),
       high: new THREE.Color(body.def.terrain.colorHigh),
       ocean: new THREE.Color(body.def.terrain.colorOcean ?? body.def.terrain.colorLow),
     };
-    if (body.def.terrain.oceanLevel > 0 && body.def.terrain.colorOcean) {
+    if (options.oceanEnabled !== false && body.def.terrain.oceanLevel > 0 && body.def.terrain.colorOcean) {
       this.oceanMaterial = new THREE.MeshPhongMaterial({
         color: new THREE.Color(body.def.terrain.colorOcean),
         shininess: 90,
@@ -402,6 +413,7 @@ export class PlanetRenderer {
     const positions = new Float32Array(vertCount * 3);
     const normals = new Float32Array(vertCount * 3);
     const colors = new Float32Array(vertCount * 3);
+    const bodyDirections = new Float32Array(vertCount * 3);
 
     // Chunk origin: center of chunk at ground level (f64, body-fixed).
     const centerDir = faceToDir(face, node.u0 + node.size / 2, node.v0 + node.size / 2, _dir);
@@ -420,6 +432,9 @@ export class PlanetRenderer {
       positions[vi * 3] = dir.x * r - origin.x;
       positions[vi * 3 + 1] = dir.y * r - origin.y;
       positions[vi * 3 + 2] = dir.z * r - origin.z;
+      bodyDirections[vi * 3] = dir.x;
+      bodyDirections[vi * 3 + 1] = dir.y;
+      bodyDirections[vi * 3 + 2] = dir.z;
 
       // Normal from central differences of the height field.
       const du = faceToDir(face, u + eps, v, _e);
@@ -498,6 +513,7 @@ export class PlanetRenderer {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('bodyDirection', new THREE.BufferAttribute(bodyDirections, 3));
     geo.setIndex(indices);
     geo.computeBoundingSphere();
 

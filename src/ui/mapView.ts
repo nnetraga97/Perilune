@@ -33,6 +33,8 @@ import {
   bodyMaterialDescriptor,
   type BodyMaterialDescriptor,
 } from '../render/bodyMaterial';
+import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
+import { createTerrestrialGlobalMaterial } from '../render/terrestrial/globalMaterial';
 
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
@@ -64,12 +66,13 @@ export function compactBodyMesh(descriptor: Readonly<BodyMaterialDescriptor>): T
     colors[index * 3 + 2] = color.b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  installBodyFixedDirectionAttribute(geometry);
 
   const material: THREE.Material = descriptor.identity === 'star'
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
-      : new THREE.MeshLambertMaterial({ vertexColors: true });
+      : createTerrestrialGlobalMaterial(null, descriptor);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `compact-body:${descriptor.bodyId}`;
   mesh.userData.bodyMaterial = {

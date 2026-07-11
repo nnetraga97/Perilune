@@ -1,6 +1,7 @@
 import { BODY_VISUALS } from '../content/bodyVisuals';
 import type { BodyId, BodyRendererKind, BodyVisualDef } from '../content/bodyVisuals';
 import type { Body, BodyDef, SurfaceKind } from '../sim/universe';
+export { bodyFixedUv } from './terrestrial/globalCoordinates';
 
 export interface BodyMaterialDescriptor {
   bodyId: string;
@@ -14,8 +15,6 @@ export interface BodyMaterialDescriptor {
   };
   orientationConvention: 'body-fixed-z-up-atan2-y-x';
 }
-
-type Direction = Readonly<{ x: number; y: number; z: number }>;
 
 function bodyDef(body: Body | BodyDef): BodyDef {
   return 'def' in body ? body.def : body;
@@ -40,17 +39,5 @@ export function bodyMaterialDescriptor(
       ocean: def.terrain.colorOcean ?? null,
     },
     orientationConvention: 'body-fixed-z-up-atan2-y-x',
-  };
-}
-
-/** Equirectangular UVs in the body-fixed frame: +Z north, atan2(y, x) longitude. */
-export function bodyFixedUv(direction: Direction): { u: number; v: number } {
-  const length = Math.hypot(direction.x, direction.y, direction.z);
-  const normalizedZ = length === 0 ? 0 : Math.max(-1, Math.min(1, direction.z / length));
-  const longitude = Math.atan2(direction.y, direction.x) / (Math.PI * 2);
-
-  return {
-    u: longitude < 0 ? longitude + 1 : longitude,
-    v: Math.asin(normalizedZ) / Math.PI + 0.5,
   };
 }

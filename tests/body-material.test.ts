@@ -94,8 +94,8 @@ describe('bodyFixedUv', () => {
     ['+Y', { x: 0, y: 1, z: 0 }, { u: 0.25, v: 0.5 }],
     ['-X', { x: -1, y: 0, z: 0 }, { u: 0.5, v: 0.5 }],
     ['-Y', { x: 0, y: -1, z: 0 }, { u: 0.75, v: 0.5 }],
-    ['north', { x: 0, y: 0, z: 1 }, { u: 0, v: 1 }],
-    ['south', { x: 0, y: 0, z: -1 }, { u: 0, v: 0 }],
+    ['north', { x: 0, y: 0, z: 1 }, { u: 0, v: 0 }],
+    ['south', { x: 0, y: 0, z: -1 }, { u: 0, v: 1 }],
   ])('maps the %s cardinal direction', (_name, direction, expected) => {
     expect(bodyFixedUv(direction)).toEqual(expected);
   });

@@ -26,13 +26,15 @@ describe('compact map body presentation', () => {
     const gas = compactBodyMesh(bodyMaterialDescriptor(universe.get('tyran')));
     const star = compactBodyMesh(bodyMaterialDescriptor(universe.get('auren')));
 
-    expect(solid.material).toBeInstanceOf(THREE.MeshLambertMaterial);
+    expect(solid.material).toBeInstanceOf(THREE.MeshStandardMaterial);
     expect(gas.material).toBeInstanceOf(THREE.MeshPhongMaterial);
     expect(star.material).toBeInstanceOf(THREE.MeshBasicMaterial);
     expect(solid.userData.bodyMaterial).toMatchObject({ bodyId: 'veyra', identity: 'solid' });
     expect(gas.userData.bodyMaterial).toMatchObject({ bodyId: 'tyran', identity: 'gas' });
     expect(star.userData.bodyMaterial).toMatchObject({ bodyId: 'auren', identity: 'star' });
     expect(solid.userData.bodyMaterial.albedo).toEqual(bodyMaterialDescriptor(universe.get('veyra')).albedo);
+    expect(solid.geometry.getAttribute('bodyDirection')).toBeDefined();
+    expect((solid.material as THREE.Material).userData).toMatchObject({ terrestrialGlobal: true, authored: false });
   });
 
   test('colors body-local vertices from the descriptor palette and body-fixed UV convention', () => {
