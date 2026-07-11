@@ -19,6 +19,7 @@ import {
 } from './vessel';
 import {
   createVesselRuntime,
+  engineHasFuel,
   logEvent,
   refreshDerived,
   stepVessel,
@@ -43,6 +44,8 @@ export interface GameVessel {
   runtime: VesselRuntime;
   regime: 'active' | 'rails';
   rails: RailsState;
+  /** Surface-fixed hold-down state while waiting for launch thrust. */
+  prelaunchAnchor?: { bodyFixedPos: Vec3; lastSpin: number };
 }
 
 const _r = new Vec3();
@@ -50,6 +53,8 @@ const _v = new Vec3();
 const _br = new Vec3();
 const _bv = new Vec3();
 const _sun = new Vec3();
+const _spinAxis = new Vec3(0, 0, 1);
+const _anchorRotation = new Quat();
 
 // Broad highland selected from the deterministic terrain field so the pad is
 // never clipped by the ocean or a steep procedural coastline.
@@ -456,6 +461,7 @@ export class GameState {
       if (gv.regime !== 'active') continue;
       const v = gv.runtime;
       const body = this.bodyOf(gv);
+      if (this.holdOnLaunchPad(gv, body, dt)) continue;
       this.universe.absolutePosition(body, this.time, _br);
       _sun.copy(_br).scale(-1).normalize(); // toward the star at origin
 
@@ -515,6 +521,58 @@ export class GameState {
 
     // Cull far/landed debris to keep vessel count bounded.
     this.cullDebris();
+  }
+
+  /** Keep a prelaunch craft rigidly attached to the rotating pad. */
+  private holdOnLaunchPad(gv: GameVessel, body: Body, dt: number): boolean {
+    const v = gv.runtime;
+    if (v.situation !== 'prelaunch') {
+      gv.prelaunchAnchor = undefined;
+      return false;
+    }
+    const producingThrust = v.craft.parts.some((part) => {
+      const engine = defOf(part).engine;
+      if (!engine || !part.activated || !engineHasFuel(v.craft, part)) return false;
+      return engine.propellant === 'solidFuel' || v.controls.throttle > 0.001;
+    });
+    if (producingThrust) {
+      gv.prelaunchAnchor = undefined;
+      return false;
+    }
+
+    const spinNow = body.rotationAngle(this.time);
+    if (!gv.prelaunchAnchor) {
+      const cs = Math.cos(-spinNow);
+      const ss = Math.sin(-spinNow);
+      gv.prelaunchAnchor = {
+        bodyFixedPos: new Vec3(
+          v.pos.x * cs - v.pos.y * ss,
+          v.pos.x * ss + v.pos.y * cs,
+          v.pos.z,
+        ),
+        lastSpin: spinNow,
+      };
+    }
+
+    const anchor = gv.prelaunchAnchor;
+    const spinNext = body.rotationAngle(this.time + dt);
+    const cs = Math.cos(spinNext);
+    const ss = Math.sin(spinNext);
+    const fixed = anchor.bodyFixedPos;
+    v.pos.set(fixed.x * cs - fixed.y * ss, fixed.x * ss + fixed.y * cs, fixed.z);
+
+    let deltaSpin = spinNext - anchor.lastSpin;
+    if (deltaSpin > Math.PI) deltaSpin -= Math.PI * 2;
+    if (deltaSpin < -Math.PI) deltaSpin += Math.PI * 2;
+    _anchorRotation.setFromAxisAngle(_spinAxis, deltaSpin);
+    v.att.premultiply(_anchorRotation).normalize();
+    anchor.lastSpin = spinNext;
+
+    const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
+    v.vel.set(-omega * v.pos.y, omega * v.pos.x, 0);
+    v.angVel.set(0, 0, 0);
+    v.properAccel = 0;
+    return true;
   }
 
   // ---------------------------------------------------------------- docking

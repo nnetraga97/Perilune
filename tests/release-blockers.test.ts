@@ -193,4 +193,30 @@ describe('M2 release blockers', () => {
     expect(plume.scale.x).toBeLessThan(0.02);
   });
 
+  it('holds a new craft stationary on the rotating pad until thrust is available', () => {
+    const craft = createCraft('hold-down test');
+    const pod = addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 2.5, z: 0 });
+    const tank = addPart(craft, 'tank-s4', pod.key, 'stack-bottom', { x: 0, y: 0.7, z: 0 });
+    const engine = addPart(craft, 'eng-pike', tank.key, 'stack-bottom', { x: 0, y: -1.5, z: 0 });
+    const game = new GameState();
+    const gv = game.spawnOnPad(craft, craft.name);
+    const initialRadius = gv.runtime.pos.length();
+
+    for (let frame = 0; frame < 600; frame++) game.update(1 / 60);
+    const body = game.bodyOf(gv);
+    const omega = (Math.PI * 2) / body.def.rotationPeriod;
+    const surfaceVelocity = new Vec3(-omega * gv.runtime.pos.y, omega * gv.runtime.pos.x, 0);
+    expect(gv.runtime.situation).toBe('prelaunch');
+    expect(gv.runtime.pos.length()).toBeCloseTo(initialRadius, 5);
+    expect(gv.runtime.vel.distanceTo(surfaceVelocity)).toBeLessThan(1e-8);
+    expect(gv.runtime.angVel.length()).toBe(0);
+
+    engine.activated = true;
+    gv.runtime.controls.throttle = 1;
+    const fuelBefore = tank.resources.propellant ?? 0;
+    for (let frame = 0; frame < 60; frame++) game.update(1 / 60);
+    expect(tank.resources.propellant).toBeLessThan(fuelBefore);
+    expect(gv.runtime.pos.length()).toBeGreaterThan(initialRadius);
+  });
+
 });

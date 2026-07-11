@@ -40,3 +40,6 @@ production build, and two Chromium interaction/playable-loop tests pass.
 - Placed parts receive a visible selection box.
 - A selected part can be dragged freely on a camera-facing plane; its subtree
   follows while the logical attachment graph remains intact.
+- Prelaunch craft now use a surface-fixed hold-down anchor. Position, attitude,
+  and zero surface-relative velocity follow the rotating pad until an activated
+  engine has fuel and produces thrust.
