@@ -11,6 +11,18 @@ test('parts can be dragged from the palette onto the craft canvas', async ({ pag
 
   await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(1);
 
+  const rootPoint = await page.evaluate(() => window.__TEST__.projectEditor(0, 3, 0));
+  await page.mouse.click(rootPoint.x, rootPoint.y);
+  await expect.poll(() => page.evaluate(() => (window as any).__TEST__.debug().selected)).toBe(1);
+  await expect.poll(() => page.evaluate(() => (window as any).__TEST__.debug().selectionHighlighted)).toBe(true);
+
+  await page.mouse.move(rootPoint.x, rootPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(rootPoint.x + 120, rootPoint.y + 40, { steps: 8 });
+  await page.mouse.up();
+  const moved = await page.evaluate(() => (window as any).__TEST__.parts()[0]);
+  expect(Math.hypot(moved.x, moved.z)).toBeGreaterThan(0.2);
+
   await page.getByRole('button', { name: '▲ LAUNCH' }).click();
   await page.waitForFunction(() => window.__TEST__.screen() === 'flight');
   await page.getByTitle('Prograde').click();

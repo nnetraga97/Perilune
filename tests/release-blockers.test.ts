@@ -3,7 +3,7 @@ import { GameState } from '../src/sim/state';
 import * as state from '../src/sim/state';
 import * as vessel from '../src/sim/vessel';
 import { addPart, createCraft, defOf } from '../src/sim/vessel';
-import { buildVesselVisual } from '../src/render/vesselMesh';
+import { buildVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import { PlanetRenderer, PLANET_QUALITY } from '../src/render/planet';
 import * as planet from '../src/render/planet';
 import { groundRadiusInertial, terrainHeight } from '../src/sim/terrain';
@@ -174,6 +174,23 @@ describe('M2 release blockers', () => {
     expect(indices).toBeTypeOf('function');
     if (!indices) return;
     expect(indices(3).slice(0, 6)).toEqual([0, 1, 3, 1, 4, 3]);
+  });
+
+  it('fades and hides a liquid-engine plume after reachable fuel is exhausted', () => {
+    const craft = createCraft('plume cutoff');
+    const tank = addPart(craft, 'tank-s1', null, 'root', { x: 0, y: 1, z: 0 });
+    const engine = addPart(craft, 'eng-pike', tank.key, 'stack-bottom', { x: 0, y: 0, z: 0 });
+    engine.activated = true;
+    const visual = buildVesselVisual(craft);
+    const sync = syncVesselVisual as unknown as typeof syncVesselVisual & ((...args: [...Parameters<typeof syncVesselVisual>, number]) => void);
+    sync(visual, craft, 1, 1, 1 / 60);
+    const plume = visual.plumes.get(engine.key)!;
+    expect(plume.visible).toBe(true);
+
+    tank.resources.propellant = 0;
+    for (let frame = 0; frame < 120; frame++) sync(visual, craft, 1, 1, 1 / 60);
+    expect(plume.visible).toBe(false);
+    expect(plume.scale.x).toBeLessThan(0.02);
   });
 
 });

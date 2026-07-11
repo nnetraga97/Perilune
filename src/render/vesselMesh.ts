@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import type { Craft, PartInstance } from '../sim/vessel';
 import { defOf } from '../sim/vessel';
 import type { PartDef } from '../content/parts';
+import { engineHasFuel } from '../sim/flight';
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 
@@ -136,6 +137,7 @@ export function buildVesselVisual(craft: Craft): VesselVisual {
         part.position.z,
       );
       plume.visible = false;
+      plume.userData.power = 0;
       group.add(plume);
       plumes.set(part.key, plume);
     }
@@ -152,6 +154,7 @@ export function syncVesselVisual(
   craft: Craft,
   throttle: number,
   pressureFrac: number,
+  dt = 1 / 60,
 ): void {
   // Remove meshes for missing parts.
   if (visual.craftVersionSeen !== craft.parts.length) {
@@ -175,12 +178,18 @@ export function syncVesselVisual(
     if (!plume) continue;
     const def = defOf(part);
     const solid = def.engine!.propellant === 'solidFuel';
-    const fuel = solid ? (part.resources.solidFuel ?? 0) > 0 : true;
-    const power = part.activated && fuel ? (solid ? 1 : throttle) : 0;
-    plume.visible = power > 0.02;
+    const targetPower = part.activated && engineHasFuel(craft, part) ? (solid ? 1 : throttle) : 0;
+    const previousPower = Number(plume.userData.power ?? 0);
+    const response = targetPower > previousPower ? 18 : 7;
+    let power = previousPower + (targetPower - previousPower) * (1 - Math.exp(-response * Math.max(0, dt)));
+    if (Math.abs(power - targetPower) < 0.001) power = targetPower;
+    plume.userData.power = power;
+    plume.visible = power > 0.015;
     if (plume.visible) {
       const vacuumFlare = 1 + (1 - pressureFrac) * 1.3;
       plume.scale.set(power * vacuumFlare, 0.6 + power * 0.7, power * vacuumFlare);
+    } else {
+      plume.scale.set(0, 0, 0);
     }
   }
 }

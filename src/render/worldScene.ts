@@ -332,7 +332,7 @@ export class WorldScene {
         1,
         this.bodyOf(game, gv).pressureAt(rv.pos.length() - this.bodyOf(game, gv).radius) / 101_325,
       );
-      syncVesselVisual(vis, rv.craft, rv.controls.throttle, pressureFrac);
+      syncVesselVisual(vis, rv.craft, rv.controls.throttle, pressureFrac, dt);
     }
 
     // ---- camera orientation: look at the active vessel.

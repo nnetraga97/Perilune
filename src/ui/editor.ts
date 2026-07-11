@@ -66,6 +66,10 @@ export class Editor {
   private ghost: THREE.Object3D | null = null;
   private holdingDef: PartDef | null = null;
   private selectedKey: number | null = null;
+  private selectionHelper: THREE.BoxHelper | null = null;
+  private movingKeys: Set<number> | null = null;
+  private readonly movePlane = new THREE.Plane();
+  private readonly lastMovePoint = new THREE.Vector3();
   private symmetry = 1;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -270,7 +274,7 @@ export class Editor {
       'div',
       'ed-hint',
       this.root,
-      'click a part in the palette, then click a node/surface to attach · click placed part to select · Del removes · X symmetry · drag to orbit · wheel zooms',
+      'drag from palette to place · click a placed part to highlight · drag it again to move freely · Del removes · X symmetry · drag empty space to orbit · wheel zooms',
     );
   }
 
@@ -344,6 +348,103 @@ export class Editor {
       this.scene.remove(this.ghost);
       this.ghost = null;
     }
+  }
+
+  get selectedPartKey(): number | null {
+    return this.selectedKey;
+  }
+
+  get selectionHighlighted(): boolean {
+    return this.selectionHelper !== null && this.selectionHelper.visible;
+  }
+
+  private setSelected(key: number | null): void {
+    this.selectedKey = key;
+    if (this.selectionHelper) {
+      this.scene.remove(this.selectionHelper);
+      this.selectionHelper.geometry.dispose();
+      this.selectionHelper = null;
+    }
+    if (key !== null && this.visual) {
+      const mesh = this.visual.partMeshes.get(key);
+      if (mesh) {
+        const helper = new THREE.BoxHelper(mesh, 0x6db3d6);
+        const material = helper.material as THREE.LineBasicMaterial;
+        material.depthTest = false;
+        material.transparent = true;
+        material.opacity = 0.95;
+        helper.renderOrder = 100;
+        this.selectionHelper = helper;
+        this.scene.add(helper);
+      }
+    }
+    this.statsDirty = true;
+  }
+
+  private partKeyForObject(object: THREE.Object3D): number | null {
+    let current: THREE.Object3D | null = object;
+    while (current) {
+      for (const [key, mesh] of this.visual?.partMeshes ?? []) {
+        if (mesh === current) return key;
+      }
+      current = current.parent;
+    }
+    return null;
+  }
+
+  /** Select a placed part and begin free movement on a camera-facing plane. */
+  beginPartDrag(nx: number, ny: number): boolean {
+    if (this.holdingDef || !this.visual) return false;
+    this.pointer.set(nx, ny);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects([...this.visual.partMeshes.values()], true)[0];
+    if (!hit) return false;
+    const key = this.partKeyForObject(hit.object);
+    if (key === null) return false;
+    this.setSelected(key);
+
+    const moving = new Set<number>([key]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const part of this.craft.parts) {
+        if (part.parentKey !== null && moving.has(part.parentKey) && !moving.has(part.key)) {
+          moving.add(part.key);
+          grew = true;
+        }
+      }
+    }
+    this.movingKeys = moving;
+    const part = craftPart(this.craft, key)!;
+    const point = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
+    const normal = this.camera.getWorldDirection(new THREE.Vector3());
+    this.movePlane.setFromNormalAndCoplanarPoint(normal, point);
+    this.raycaster.ray.intersectPlane(this.movePlane, this.lastMovePoint);
+    return true;
+  }
+
+  dragSelectedPart(nx: number, ny: number): void {
+    if (!this.movingKeys || !this.visual) return;
+    this.pointer.set(nx, ny);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const point = this.raycaster.ray.intersectPlane(this.movePlane, new THREE.Vector3());
+    if (!point) return;
+    const delta = point.sub(this.lastMovePoint);
+    this.lastMovePoint.add(delta);
+    for (const key of this.movingKeys) {
+      const part = craftPart(this.craft, key);
+      if (!part) continue;
+      part.position.x += delta.x;
+      part.position.y += delta.y;
+      part.position.z += delta.z;
+      this.visual.partMeshes.get(key)?.position.set(part.position.x, part.position.y, part.position.z);
+    }
+    this.selectionHelper?.update();
+    this.statsDirty = true;
+  }
+
+  endPartDrag(): void {
+    this.movingKeys = null;
   }
 
   // ------------------------------------------------------ attachment logic
@@ -473,15 +574,14 @@ export class Editor {
       while (obj) {
         for (const [key, mesh] of this.visual.partMeshes) {
           if (mesh === obj) {
-            this.selectedKey = key;
-            this.statsDirty = true;
+            this.setSelected(key);
             return;
           }
         }
         obj = obj.parent;
       }
     }
-    this.selectedKey = null;
+    this.setSelected(null);
   }
 
   private placeHeld(): void {
@@ -537,7 +637,7 @@ export class Editor {
     }
     if (this.selectedKey !== null) {
       removeSubtree(this.craft, this.selectedKey);
-      this.selectedKey = null;
+      this.setSelected(null);
       this.statsDirty = true;
       this.rebuildVisual();
     }
@@ -550,9 +650,15 @@ export class Editor {
 
   // ------------------------------------------------------------- rendering
   rebuildVisual(): void {
+    if (this.selectionHelper) {
+      this.scene.remove(this.selectionHelper);
+      this.selectionHelper.geometry.dispose();
+      this.selectionHelper = null;
+    }
     if (this.visual) this.scene.remove(this.visual.group);
     this.visual = buildVesselVisual(this.craft);
     this.scene.add(this.visual.group);
+    if (this.selectedKey !== null) this.setSelected(this.selectedKey);
   }
 
   orbitCamera(dx: number, dy: number): void {

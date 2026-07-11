@@ -42,6 +42,7 @@ class PeriluneGame {
   private uiRoot!: HTMLElement;
   private keys = new Set<string>();
   private dragging = false;
+  private draggingPart = false;
   private dragMoved = 0;
   private lastX = 0;
   private lastY = 0;
@@ -97,7 +98,7 @@ class PeriluneGame {
       screen: () => this.screen,
       partCount: () => this.editor.craft.parts.length,
       stageCount: () => this.editor.craft.stages.length,
-      parts: () => this.editor.craft.parts.map((p) => ({ defId: p.defId, y: p.position.y })),
+      parts: () => this.editor.craft.parts.map((p) => ({ defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),
       projectEditor: (x: number, y: number, z: number) => {
         const v = new THREE.Vector3(x, y, z).project(this.editor.camera);
         return {
@@ -134,6 +135,8 @@ class PeriluneGame {
           (this.editor as unknown as { holdingDef?: { id: string } }).holdingDef?.id ?? null,
         candidate:
           (this.editor as unknown as { candidate?: { kind: string } }).candidate?.kind ?? null,
+        selected: this.editor.selectedPartKey,
+        selectionHighlighted: this.editor.selectionHighlighted,
       }),
     };
   }
@@ -369,6 +372,16 @@ class PeriluneGame {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     canvas.addEventListener('pointerdown', (e) => {
+      if (this.screen === 'editor') {
+        const nx = (e.clientX / window.innerWidth) * 2 - 1;
+        const ny = -(e.clientY / window.innerHeight) * 2 + 1;
+        if (this.editor.beginPartDrag(nx, ny)) {
+          this.draggingPart = true;
+          this.dragging = false;
+          e.preventDefault();
+          return;
+        }
+      }
       this.dragging = true;
       this.dragMoved = 0;
       this.lastX = e.clientX;
@@ -394,6 +407,10 @@ class PeriluneGame {
       const nx = (e.clientX / window.innerWidth) * 2 - 1;
       const ny = -(e.clientY / window.innerHeight) * 2 + 1;
       if (this.screen === 'editor') this.editor.updatePointer(nx, ny);
+      if (this.draggingPart) {
+        this.editor.dragSelectedPart(nx, ny);
+        return;
+      }
       if (!this.dragging) return;
       const dx = e.clientX - this.lastX;
       const dy = e.clientY - this.lastY;
@@ -408,6 +425,12 @@ class PeriluneGame {
       }
     });
     window.addEventListener('pointerup', () => {
+      if (this.draggingPart) {
+        this.editor.endPartDrag();
+        this.draggingPart = false;
+        this.dragging = false;
+        return;
+      }
       if (this.dragging && this.dragMoved < 6 && this.screen === 'editor') {
         this.editor.click();
       }

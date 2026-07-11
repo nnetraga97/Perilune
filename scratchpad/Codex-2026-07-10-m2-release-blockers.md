@@ -32,3 +32,11 @@
 
 All six repair groups completed. Final gate: 65 unit/integration tests, the
 production build, and two Chromium interaction/playable-loop tests pass.
+
+## Follow-up interaction fixes
+
+- Liquid plumes now query the same crossfeed-aware fuel availability as the
+  flight simulation and ease their scale to zero after flameout.
+- Placed parts receive a visible selection box.
+- A selected part can be dragged freely on a camera-facing plane; its subtree
+  follows while the logical attachment graph remains intact.
