@@ -31,7 +31,16 @@ type FeasibilityMode = 'smoke' | 'reference';
 export interface FeasibilityPublicState {
   readonly mode: FeasibilityMode;
   readonly tier: FeasibilityTier;
+  /** Retained for artifact compatibility; identical to requestedReductionStage. */
   readonly reductionStage: number;
+  readonly requestedReductionStage: number;
+  readonly effectiveReductionStage: number;
+  readonly protocol: {
+    readonly warmupSeconds: number;
+    readonly journeySeconds: number;
+    readonly journeyCount: 3;
+    readonly drainSeconds: number;
+  };
   readonly phase: 'warmup' | 'journey' | 'drain' | 'complete';
   readonly journeyIndex: number;
   readonly caps: {
@@ -49,6 +58,15 @@ export interface FeasibilityPublicState {
   readonly summary: ReferenceRunSummary | null;
   readonly gpuTimer: Readonly<GpuTimerSnapshot>;
   readonly elapsedSeconds: number;
+  readonly telemetry: {
+    readonly drawCalls: number;
+    readonly triangles: number;
+    readonly maxDrawCalls: number;
+    readonly maxTriangles: number;
+    readonly transitionOverlapMs: number;
+    readonly transitionMode: 'forced-combined-fixture';
+    readonly compressedDownloadBytes: 0;
+  };
 }
 
 declare global {
@@ -191,6 +209,11 @@ export async function runFeasibilityProto(): Promise<void> {
   let frameNumber = 0;
   let complete = false;
   let lastPublish = 0;
+  let drawCalls = 0;
+  let triangles = 0;
+  let maxDrawCalls = 0;
+  let maxTriangles = 0;
+  let transitionOverlapMs = 0;
 
   const camBodyFixed = new Vec3();
   const camInertial = new Vec3();
@@ -209,6 +232,14 @@ export async function runFeasibilityProto(): Promise<void> {
       mode,
       tier,
       reductionStage: stage,
+      requestedReductionStage: stage,
+      effectiveReductionStage: features.effectiveStage,
+      protocol: {
+        warmupSeconds,
+        journeySeconds,
+        journeyCount: 3,
+        drainSeconds,
+      },
       phase,
       journeyIndex,
       caps: {
@@ -226,6 +257,15 @@ export async function runFeasibilityProto(): Promise<void> {
       summary,
       gpuTimer: gpuTimer.snapshot(),
       elapsedSeconds,
+      telemetry: {
+        drawCalls,
+        triangles,
+        maxDrawCalls,
+        maxTriangles,
+        transitionOverlapMs,
+        transitionMode: 'forced-combined-fixture',
+        compressedDownloadBytes: 0,
+      },
     };
   };
 
@@ -326,12 +366,19 @@ export async function runFeasibilityProto(): Promise<void> {
     renderer.render(scene, camera);
     const submissionMs = performance.now() - submissionStart;
     if (sample) sample.submissionMs = submissionMs;
+    drawCalls = renderer.info.render.calls;
+    triangles = renderer.info.render.triangles;
+    maxDrawCalls = Math.max(maxDrawCalls, drawCalls);
+    maxTriangles = Math.max(maxTriangles, triangles);
+    if (fixtureStats.profilingGroups.transition) transitionOverlapMs += frameMs;
     if (phase === 'journey') gpuTimer.end();
     perf.endRender(submissionStart);
     perf.setExtra('scatter', fixtureStats.visualScatterCount);
     perf.setExtra('proxies', fixtureStats.physicalProxyCount);
     perf.setExtra('gpu MB', (fixtureStats.estimatedGpuBytes / 1048576).toFixed(1));
     perf.setExtra('disjoint', gpuTimer.snapshot().disjointSamples);
+    perf.setExtra('transition ms', transitionOverlapMs.toFixed(1));
+    perf.setExtra('download bytes', 0);
     perf.setExtra('regime', regime);
     perf.frame(frameMs, renderer);
 

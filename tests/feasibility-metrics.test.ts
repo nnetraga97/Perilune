@@ -80,6 +80,13 @@ describe('feasibility metrics', () => {
     }
   });
 
+  it('exposes Low requested stage 0 as effective stage 4', () => {
+    expect(reductionStage(0, 'low')).toMatchObject({
+      effectiveStage: 4,
+      visualScatterCount: 25_000,
+    });
+  });
+
   it('rejects reduction stages outside the approved range', () => {
     expect(() => reductionStage(-1, 'medium')).toThrow(/stage/i);
     expect(() => reductionStage(6, 'medium')).toThrow(/stage/i);

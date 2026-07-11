@@ -1,6 +1,6 @@
 # Planet Rendering Feasibility Prototype Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Do not begin the Phase 3 renderer platform until both named reference-machine records pass or the approved design spec is revised.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Do not begin the Phase 3 renderer platform until full Medium and Low records pass on the user-approved M3 Max reference or the approved design spec is revised.
 
 **Goal:** Build a bounded, independently switchable WebGL2 prototype that measures the combined terrain, atmosphere, ocean, cloud, transition, scatter, and physical-proxy workload required by the approved planet renderer.
 
@@ -16,7 +16,7 @@
 - GPU samples use a delayed query ring, are read only when available, and are discarded while the WebGL disjoint flag is set.
 - The reference path renders to a fixed 1920×1080 drawing buffer, warms for 30 seconds, and runs three five-minute journeys.
 - Playwright/SwiftShader and non-reference devices provide regression evidence only; they cannot certify Medium or Low.
-- Phase 3 remains gated until the named Iris Xe and UHD 620 records exist and pass, or the design spec is explicitly revised.
+- Phase 3 remains gated until full Medium and Low `m3-max-30c` records exist and pass, or the design spec is explicitly revised.
 
 ---
 
@@ -190,7 +190,7 @@ Record required CPU/GPU/RAM, laptop model, firmware, driver, OS, browser, AC pow
 
 Run: `npm run profile:feasibility -- --mode=smoke`
 
-Record actual local browser/capability/count/stability results and clearly label them non-certifying when the machine is not one of the named references. Do not infer Iris Xe/UHD 620 performance from Apple Silicon or SwiftShader.
+Record actual local browser/capability/count/stability results and clearly label shortened smoke runs non-certifying. Do not infer performance on hardware other than the approved M3 Max from Apple Silicon or SwiftShader results.
 
 - [ ] **Step 3: Run the complete repository gate**
 
@@ -219,4 +219,4 @@ git commit -m "docs: record planet feasibility protocol"
 
 - [ ] **Step 6: Enforce the external Phase 2 gate**
 
-Run the full reference command on the named Iris Xe Medium machine and UHD 620 Low machine. Commit both JSON result records or their stable summarized evidence. If Medium fails, apply only the approved reductions in order and rerun. If either tier still fails after allowed reductions, stop and revise the design spec. If the machines are unavailable, report Phase 2 as awaiting reference-hardware certification and do not begin Phase 3.
+Run the full reference command for Medium and Low on the approved MacBook Pro Mac15,10 / M3 Max 30-core GPU, with actual firmware, driver, OS, browser, and power metadata. Commit both JSON result records or their stable summarized evidence. If Medium fails, apply only the approved reductions in order and rerun. If either tier still fails after allowed reductions, stop and revise the design spec. Do not begin Phase 3 until both records pass.

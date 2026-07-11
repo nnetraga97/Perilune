@@ -24,6 +24,8 @@ export interface PerfSnapshot {
   scatterInstances: number;
   physicalProxies: number;
   disjointQueries: number;
+  transitionMs: number;
+  compressedDownloadBytes: number;
 }
 
 export class PerfOverlay {
@@ -123,6 +125,8 @@ export class PerfOverlay {
       scatterInstances: Number(this.extra['scatter'] ?? 0),
       physicalProxies: Number(this.extra['proxies'] ?? 0),
       disjointQueries: Number(this.extra['disjoint'] ?? 0),
+      transitionMs: Number(this.extra['transition ms'] ?? 0),
+      compressedDownloadBytes: Number(this.extra['download bytes'] ?? 0),
     };
   }
 }

@@ -2,6 +2,13 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
+import {
+  FEASIBILITY_METADATA_KEYS,
+  assessCertificationEligibility,
+  buildCertificationGates,
+  expectedReferenceForTier,
+} from './lib/feasibility-certification.mjs';
+import { observeSanitizedMacHost } from './lib/host-observation.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const values = new Map();
@@ -20,9 +27,12 @@ const stage = Number(values.get('stage') ?? 0);
 if (!Number.isInteger(stage) || stage < 0 || stage > 5) throw new Error('stage must be 0 through 5');
 
 const reference = values.get('reference') ?? null;
-const expectedReference = tier === 'medium' ? 'iris-xe' : 'uhd-620';
-const metadataKeys = ['model', 'firmware', 'driver', 'os', 'power', 'sustained-power'];
-const missingMetadata = reference ? metadataKeys.filter((key) => !values.get(key)) : [];
+const expectedReference = expectedReferenceForTier(tier);
+const host = process.platform === 'darwin' ? observeSanitizedMacHost() : null;
+const metadata = Object.fromEntries(
+  FEASIBILITY_METADATA_KEYS.map((key) => [key, values.get(key) ?? '']),
+);
+const missingMetadata = reference ? FEASIBILITY_METADATA_KEYS.filter((key) => !metadata[key]) : [];
 if (reference && mode !== 'reference') throw new Error('--reference requires --mode=reference');
 if (missingMetadata.length > 0) {
   throw new Error(`A certifying reference run requires: ${missingMetadata.join(', ')}`);
@@ -91,54 +101,48 @@ try {
   const state = await page.evaluate(() => window.__FEASIBILITY__);
   const browserIdentity = await page.evaluate(() => ({
     userAgent: navigator.userAgent,
-    platform: navigator.platform,
-    language: navigator.language,
+    webglRenderer: window.__FEASIBILITY__?.caps.renderer ?? '',
+    webglVendor: window.__FEASIBILITY__?.caps.vendor ?? '',
   }));
   if (!state?.summary) throw new Error('Feasibility harness completed without a summary');
 
-  const activeBudget = tier === 'medium' ? 128 * 1024 * 1024 : 64 * 1024 * 1024;
-  const totalBudget = tier === 'medium' ? 384 * 1024 * 1024 : 256 * 1024 * 1024;
-  const gates = [
-    { name: 'fpsMedian', actual: state.summary.fpsMedian, limit: tier === 'medium' ? 60 : 30, comparison: '>=', pass: state.summary.fpsMedian >= (tier === 'medium' ? 60 : 30) },
-    { name: 'frameP95Ms', actual: state.summary.frameP95Ms, limit: tier === 'medium' ? 16.7 : 33.3, comparison: '<', pass: state.summary.frameP95Ms < (tier === 'medium' ? 16.7 : 33.3) },
-    { name: 'activeGpuBytes', actual: state.scene.estimatedGpuBytes, limit: activeBudget, comparison: '<=', pass: state.scene.estimatedGpuBytes <= activeBudget },
-    { name: 'totalRendererGpuBytes', actual: state.scene.estimatedRendererGpuBytes, limit: totalBudget, comparison: '<=', pass: state.scene.estimatedRendererGpuBytes <= totalBudget },
-  ];
-  if (tier === 'medium') {
-    gates.push(
-      { name: 'submissionP95Ms', actual: state.summary.submissionP95Ms, limit: 4, comparison: '<=', pass: state.summary.submissionP95Ms <= 4 },
-      { name: 'terrainP95Ms', actual: state.summary.terrainP95Ms, limit: 2, comparison: '<=', pass: state.summary.terrainP95Ms <= 2 },
-      {
-        name: 'gpuP95Ms',
-        actual: state.summary.gpuP95Ms,
-        limit: 8,
-        comparison: '<=',
-        pass: state.summary.gpuP95Ms !== null && state.summary.validGpuSamples > 0 && state.summary.gpuP95Ms <= 8,
-      },
-    );
-  }
-
-  const eligible = mode === 'reference' && reference === expectedReference &&
-    missingMetadata.length === 0 && !values.get('disabled');
+  const gates = buildCertificationGates(state, tier);
+  const eligibility = assessCertificationEligibility({
+    mode,
+    tier,
+    reference,
+    metadata,
+    disabled,
+    requestedStage: stage,
+    host,
+    browser: browserIdentity,
+    state,
+    runtimeErrors,
+  });
+  const eligible = eligibility.eligible;
   const record = {
     schemaVersion: 1,
     recordedAt: new Date().toISOString(),
     mode,
     tier,
     reductionStage: stage,
+    requestedReductionStage: stage,
+    effectiveReductionStage: state.effectiveReductionStage,
     reference,
-    metadata: Object.fromEntries(metadataKeys.map((key) => [key, values.get(key) ?? null])),
+    metadata,
+    host,
     browser: browserIdentity,
     runtimeErrors,
     state,
     certification: {
       eligible,
       expectedReference,
-      passed: eligible && runtimeErrors.length === 0 && gates.every((gate) => gate.pass),
+      reasons: eligibility.reasons,
+      passed: eligible && gates.every((gate) => gate.pass),
       gates,
       note: eligible
         ? 'Reference hardware record; gate result is authoritative for this run.'
-        : 'Non-certifying observation; do not infer Iris Xe or UHD 620 performance from this run.',
+        : 'Non-certifying observation; only complete m3-max-30c reference records certify this project.',
     },
   };
 

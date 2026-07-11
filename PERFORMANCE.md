@@ -82,34 +82,49 @@ two cloud scales, one shadow receiver, complementary transition overlap,
 50,000 visible instanced scatter items, and 128 active physical proxies. Low
 may reduce visual work but retains identical physical terrain and proxy IDs.
 
-### Required reference machines
+### Required reference machine
 
 | Tier | CPU / GPU | Memory | Drawing buffer | Gate |
 |---|---|---:|---:|---|
-| Medium | Intel Core i5-1135G7 / Iris Xe 80-EU | 16 GiB dual-channel | 1920×1080 | ≥60 FPS median; frame <16.7 ms p95; submission ≤4 ms p95; terrain schedule/install ≤2 ms p95; valid GPU work ≤8 ms p95 |
-| Low | Intel Core i5-8250U / UHD 620 | 16 GiB dual-channel | 1920×1080 | ≥30 FPS median; frame <33.3 ms p95 |
+| Medium | Apple M3 Max, 14-core CPU / 30-core GPU (Mac15,10) | 36 GiB unified | 1920×1080 | ≥60 FPS median; frame <16.7 ms p95; submission ≤4 ms p95; terrain schedule/install ≤2 ms p95; valid GPU work ≤8 ms p95 |
+| Low | Same approved M3 Max; reduced quality/resource contract | 36 GiB unified | 1920×1080 | Same timing gates; 64/256 MiB active/total ceilings |
 
-Both runs use AC power, the operating system's performance mode, no browser
-zoom, no supersampling, and device scale 1. Record laptop model, firmware,
-graphics driver, OS build, stable browser build, power mode, and sustained
-package-power configuration. The application drawing buffer—not only the CSS
-viewport—must report exactly 1920×1080.
+Both runs use normal power mode (`powermode 0`), no browser zoom, no
+supersampling, and device scale 1. Record laptop model, firmware, ANGLE/Metal
+identity, OS build, stable browser build, current battery/AC condition, power
+mode, and automatic package-power configuration. A battery run is accepted
+when recorded and is treated as the conservative condition for this device.
+The application drawing buffer—not only the CSS viewport—must report exactly
+1920×1080. These results certify this project on the user's M3 Max; they do
+not claim performance on untested Intel integrated GPUs.
 
 Each run warms for 30 seconds, then executes three five-minute journeys. Each
 journey traverses orbit, atmosphere, low flight, and surface motion. The gate
 uses the median of the three frame-time medians and the worst journey p95 for
 frame, renderer-submission, terrain, and GPU times. GPU results come from
 `EXT_disjoint_timer_query_webgl2`, are read only after availability, and are
-discarded when disjoint. Medium certification requires valid GPU samples;
-software-renderer and other-device timings never substitute for either named
-machine.
+discarded when disjoint. Both tier certifications require valid GPU samples;
+software-renderer and other-device timings never substitute for the approved
+Mac.
+
+The feasibility fixture deliberately keeps both transition meshes active for
+the combined run (`transitionMode: forced-combined-fixture`) so the overlap
+cost is present in every percentile rather than disappearing below p95. The
+record exports current and maximum draw calls/triangles plus accumulated
+overlap time. This forced duration is a profiling mode, not the production
+fade contract; the renderer platform must still enforce the specified
+0.35-second normal and 1.5-second maximum transition windows.
 
 Example certifying commands (supply values from the machine being tested):
 
 ```bash
-npm run profile:feasibility -- --mode=reference --tier=medium --reference=iris-xe --model="..." --firmware="..." --driver="..." --os="..." --power="AC performance" --sustained-power="..."
-npm run profile:feasibility -- --mode=reference --tier=low --reference=uhd-620 --model="..." --firmware="..." --driver="..." --os="..." --power="AC performance" --sustained-power="..."
+npm run profile:feasibility -- --mode=reference --tier=medium --reference=m3-max-30c --model="MacBook Pro (Mac15,10)" --firmware="<observed firmware>" --driver="<WebGL vendor> / <WebGL renderer>" --os="macOS <version> (<build>)" --power="<Battery Power or AC Power>; powermode 0" --sustained-power="powermode 0; automatic thermal management"
+npm run profile:feasibility -- --mode=reference --tier=low --reference=m3-max-30c --model="MacBook Pro (Mac15,10)" --firmware="<observed firmware>" --driver="<WebGL vendor> / <WebGL renderer>" --os="macOS <version> (<build>)" --power="<Battery Power or AC Power>; powermode 0" --sustained-power="powermode 0; automatic thermal management"
 ```
+
+The supplied CLI strings must exactly match the sanitized host observation
+and the WebGL vendor/renderer captured by the headed browser; a label alone
+cannot substitute for observed evidence.
 
 The script writes a JSON record under `artifacts/performance/`, exits nonzero
 for a failing eligible reference run, and labels any other hardware
@@ -127,9 +142,12 @@ reduction ladder is allowed:
 4. Reduce visual scatter from 50,000 to 25,000.
 5. Simplify ocean glitter.
 
-The ladder is selected with `--stage=0` through `--stage=5`. Physical terrain
-and the 128 proxies are invariant. A run with disabled feature groups is a
-diagnostic delta and is never eligible for certification.
+The ladder is selected with `--stage=0` through `--stage=5`. Low requested
+stage 0 resolves to effective stage 4 (sparse visual scatter); every artifact
+exports both requested and effective stage so Low is never mislabeled as a
+stage-0-only configuration. Physical terrain and the 128 proxies are invariant.
+A run with disabled feature groups is a diagnostic delta and is never eligible
+for certification.
 
 ### 2026-07-10 — local combined-fixture smoke run (non-certifying)
 
@@ -153,6 +171,7 @@ reference result.
 | Console or shader errors | 0 | 0 | clean |
 
 This proves that the harness, counters, delayed queries, scene population,
-and local rendering path work. It does **not** prove Iris Xe or UHD 620
-performance. Phase 2 remains open until both full reference records pass, or
-the approved design spec is revised; Phase 3 must not start before that gate.
+and local rendering path work. It does not constitute a full-duration record.
+Following the user's hardware-target revision, Phase 2 remains open until full
+Medium and Low M3 Max reference records pass; no Intel performance claim is
+made.

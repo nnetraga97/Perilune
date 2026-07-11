@@ -1,6 +1,7 @@
 export type FeasibilityTier = 'low' | 'medium';
 
 export interface FeasibilityFeatureConfig {
+  readonly effectiveStage: number;
   readonly cloudShadows: boolean;
   readonly atmosphereSamples: number;
   readonly secondCloudScale: boolean;
@@ -63,6 +64,7 @@ export function reductionStage(stage: number, tier: FeasibilityTier): Readonly<F
   // feature ladder if further investigation requests stage 5.
   const effectiveStage = tier === 'low' ? Math.max(4, stage) : stage;
   return Object.freeze({
+    effectiveStage,
     cloudShadows: effectiveStage < 1,
     atmosphereSamples: effectiveStage < 2 ? 12 : 8,
     secondCloudScale: effectiveStage < 3,

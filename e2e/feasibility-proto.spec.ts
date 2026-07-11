@@ -1,6 +1,17 @@
 import { expect, test } from '@playwright/test';
 
 interface FeasibilityState {
+  mode: string;
+  tier: string;
+  reductionStage: number;
+  requestedReductionStage: number;
+  effectiveReductionStage: number;
+  protocol: {
+    warmupSeconds: number;
+    journeySeconds: number;
+    journeyCount: number;
+    drainSeconds: number;
+  };
   phase: string;
   caps: {
     backend: string;
@@ -48,6 +59,15 @@ interface FeasibilityState {
     invalidSamples: number;
     saturatedBegins: number;
   };
+  telemetry: {
+    drawCalls: number;
+    triangles: number;
+    maxDrawCalls: number;
+    maxTriangles: number;
+    transitionOverlapMs: number;
+    transitionMode: string;
+    compressedDownloadBytes: number;
+  };
 }
 
 declare global {
@@ -70,6 +90,14 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   await page.waitForFunction(() => window.__FEASIBILITY__?.scene.visualScatterCount === 50_000);
 
   const initial = await page.evaluate(() => window.__FEASIBILITY__!);
+  expect(initial).toMatchObject({
+    mode: 'smoke',
+    tier: 'medium',
+    reductionStage: 0,
+    requestedReductionStage: 0,
+    effectiveReductionStage: 0,
+    protocol: { warmupSeconds: 1.5, journeySeconds: 3, journeyCount: 3, drainSeconds: 0.75 },
+  });
   expect(initial.caps).toMatchObject({
     backend: 'webgl2',
     drawingBufferWidth: 1920,
@@ -135,4 +163,16 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   expect(result.gpuTimer.pending).toBe(0);
   expect(result.gpuTimer.saturatedBegins).toBe(0);
   expect(result.scene.terrainCoverageGaps).toBe(0);
+  expect(result.telemetry.drawCalls).toBeGreaterThan(0);
+  expect(result.telemetry.triangles).toBeGreaterThan(0);
+  expect(result.telemetry.maxDrawCalls).toBeGreaterThanOrEqual(result.telemetry.drawCalls);
+  expect(result.telemetry.maxTriangles).toBeGreaterThanOrEqual(result.telemetry.triangles);
+  expect(result.telemetry.transitionOverlapMs).toBeGreaterThan(5_000);
+  expect(result.telemetry.transitionMode).toBe('forced-combined-fixture');
+  expect(result.telemetry.compressedDownloadBytes).toBe(0);
+  const overlay = await page.evaluate(() => (
+    window as unknown as { __PERF__: { transitionMs: number; drawingBufferWidth: number; drawingBufferHeight: number } }
+  ).__PERF__);
+  expect(overlay.transitionMs).toBeGreaterThan(5_000);
+  expect(overlay).toMatchObject({ drawingBufferWidth: 1920, drawingBufferHeight: 1080 });
 });
