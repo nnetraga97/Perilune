@@ -61,8 +61,12 @@ describe('coverage-safe compact-to-terrain transition', () => {
       material.onBeforeCompile(shader as never, {} as THREE.WebGLRenderer);
       return shader;
     };
-    expect(compile(compact).fragmentShader).toContain('coverageNoise < uCoverageProgress');
-    expect(compile(terrain).fragmentShader).toContain('coverageNoise >= uCoverageProgress');
+    const compactShader = compile(compact).fragmentShader;
+    const terrainShader = compile(terrain).fragmentShader;
+    expect(compactShader).toContain('uniform float uCoverageProgress;');
+    expect(terrainShader).toContain('uniform float uCoverageProgress;');
+    expect(compactShader).toContain('coverageNoise < uCoverageProgress');
+    expect(terrainShader).toContain('coverageNoise >= uCoverageProgress');
   });
 
   it('does not declare terrain ready while any visible coverage gap remains', () => {

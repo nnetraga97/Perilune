@@ -18,6 +18,7 @@ export function installCoverageDither(
   material.onBeforeCompile = (shader, renderer) => {
     previousCompile(shader, renderer);
     shader.uniforms.uCoverageProgress = progress;
+    shader.fragmentShader = `uniform float uCoverageProgress;\n${shader.fragmentShader}`;
     const predicate = role === 'compact'
       ? 'if (coverageNoise < uCoverageProgress) discard;'
       : 'if (coverageNoise >= uCoverageProgress) discard;';
