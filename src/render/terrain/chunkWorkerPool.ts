@@ -30,7 +30,7 @@ interface Job {
 
 interface Slot {
   readonly worker: WorkerLike;
-  jobKey: string | null;
+  job: Job | null;
 }
 
 export function terrainWorkerPoolSize(hardwareConcurrency: number): number {
@@ -55,7 +55,7 @@ export class TerrainChunkWorkerPool {
     const size = options.size ?? terrainWorkerPoolSize(hardwareConcurrency);
     if (!Number.isInteger(size) || size < 1) throw new RangeError(`Invalid worker pool size ${size}`);
     const factory = options.workerFactory ?? productionWorker;
-    this.slots = Array.from({ length: size }, () => ({ worker: factory(), jobKey: null }));
+    this.slots = Array.from({ length: size }, () => ({ worker: factory(), job: null }));
     for (const slot of this.slots) {
       slot.worker.onmessage = (event) => this.complete(slot, event.data);
       slot.worker.onerror = (event) => this.fail(slot, new Error(event.message || 'Terrain worker failed'));
@@ -97,7 +97,7 @@ export class TerrainChunkWorkerPool {
     return Object.freeze({
       workers: this.slots.length,
       pending: this.queue.length,
-      active: this.slots.filter((slot) => slot.jobKey !== null).length,
+      active: this.slots.filter((slot) => slot.job !== null).length,
       buildP99Ms: ordered[p99Index] ?? 0,
     });
   }
@@ -113,22 +113,22 @@ export class TerrainChunkWorkerPool {
       slot.worker.onmessage = null;
       slot.worker.onerror = null;
       slot.worker.terminate();
-      slot.jobKey = null;
+      slot.job = null;
     }
   }
 
   private dispatch(): void {
     if (this.disposed) return;
     for (const slot of this.slots) {
-      if (slot.jobKey !== null) continue;
-      while (slot.jobKey === null) {
+      if (slot.job !== null) continue;
+      while (slot.job === null) {
         const job = this.queue.shift();
         if (!job) return;
-        slot.jobKey = job.request.jobKey;
+        slot.job = job;
         try {
           slot.worker.postMessage(job.request);
         } catch (cause) {
-          slot.jobKey = null;
+          slot.job = null;
           if (this.jobs.get(job.request.jobKey) === job) {
             this.jobs.delete(job.request.jobKey);
             job.reject(cause instanceof Error ? cause : new Error(String(cause)));
@@ -139,11 +139,14 @@ export class TerrainChunkWorkerPool {
   }
 
   private complete(slot: Slot, result: TerrainChunkGeometryResult): void {
-    const dispatchedKey = slot.jobKey;
-    slot.jobKey = null;
-    if (dispatchedKey === result.jobKey) {
+    const dispatched = slot.job;
+    slot.job = null;
+    if (
+      dispatched?.request.jobKey === result.jobKey &&
+      dispatched.request.generation === result.generation
+    ) {
       const job = this.jobs.get(result.jobKey);
-      if (job && job.request.generation === result.generation) {
+      if (job === dispatched) {
         this.jobs.delete(result.jobKey);
         this.completed.push(result);
         this.buildTimings.push(result.buildMs);
@@ -155,14 +158,11 @@ export class TerrainChunkWorkerPool {
   }
 
   private fail(slot: Slot, error: Error): void {
-    const key = slot.jobKey;
-    slot.jobKey = null;
-    if (key) {
-      const job = this.jobs.get(key);
-      if (job) {
-        this.jobs.delete(key);
-        job.reject(error);
-      }
+    const dispatched = slot.job;
+    slot.job = null;
+    if (dispatched && this.jobs.get(dispatched.request.jobKey) === dispatched) {
+      this.jobs.delete(dispatched.request.jobKey);
+      dispatched.reject(error);
     }
     this.dispatch();
   }

@@ -142,6 +142,10 @@ class ControlledWorker implements WorkerLike {
     this.onmessage?.({ data: result } as MessageEvent<TerrainChunkGeometryResult>);
   }
 
+  fail(message = 'worker failed'): void {
+    this.onerror?.({ message } as ErrorEvent);
+  }
+
   terminate(): void { this.terminated = true; }
 }
 
@@ -205,6 +209,26 @@ describe('TerrainChunkWorkerPool', () => {
     expect(worker.posted.map((posted) => posted.jobKey)).toEqual(['recovered']);
     worker.complete();
     await expect(recovered).resolves.toMatchObject({ jobKey: 'recovered' });
+    expect(pool.timings()).toMatchObject({ pending: 0, active: 0 });
+    pool.dispose();
+  });
+
+  it('does not let a stale active error reject a same-key replacement generation', async () => {
+    const worker = new ControlledWorker();
+    const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
+    const stale = pool.submit(request({ jobKey: 'same-key', generation: 1 }));
+    pool.cancelGeneration(1);
+    await expect(stale).rejects.toThrow(/cancel/i);
+    const replacement = pool.submit(request({ jobKey: 'same-key', generation: 2 }));
+
+    worker.fail('stale generation failed');
+    expect(worker.posted.map(({ generation }) => generation)).toEqual([1, 2]);
+    worker.complete();
+
+    await expect(replacement).resolves.toMatchObject({ jobKey: 'same-key', generation: 2 });
+    expect(pool.drainCompleted()).toEqual([
+      expect.objectContaining({ jobKey: 'same-key', generation: 2 }),
+    ]);
     expect(pool.timings()).toMatchObject({ pending: 0, active: 0 });
     pool.dispose();
   });
