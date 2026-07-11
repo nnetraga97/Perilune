@@ -45,6 +45,20 @@ export function sunLightPosition(
   return out.set(sunDirection.x * distance, sunDirection.y * distance, sunDirection.z * distance);
 }
 
+export interface WorldRendererStats {
+  readonly chunks: number;
+  readonly visibleChunks: number;
+  readonly rendererManagers: number;
+  readonly residentFlightPacks: number;
+  /** Checked flight-pack allocation only; procedural renderer resources are not mislabeled as zero. */
+  readonly residentPackGpuBytes: number;
+  readonly rendererFailures: number;
+  /** Transaction candidates are hidden and swapped atomically; no fade clock exists yet. */
+  readonly transitionActive: boolean;
+  readonly transitionMs: number;
+  readonly contextFallback: boolean;
+}
+
 function rendererGeometryBytes(renderer: BodyRenderer): number {
   const geometries = new Set<THREE.BufferGeometry>();
   renderer.root.traverse((object) => {
@@ -172,6 +186,30 @@ export class WorldScene {
       visible += stats.visible;
     }
     return { chunks, visible };
+  }
+
+  renderStats(): Readonly<WorldRendererStats> {
+    const body = this.planetStats();
+    let rendererFailures = 0;
+    let transitionActive = false;
+    let transitionMs = 0;
+    for (const manager of this.bodyRendererManagers.values()) {
+      const stats = manager.platformStats();
+      rendererFailures += stats.failures;
+      transitionActive ||= stats.transactionActive;
+      transitionMs = Math.max(transitionMs, stats.transitionMs);
+    }
+    return Object.freeze({
+      chunks: body.chunks,
+      visibleChunks: body.visible,
+      rendererManagers: this.bodyRendererManagers.size,
+      residentFlightPacks: this.rendererLedger.residentFlightBodyIds().length,
+      residentPackGpuBytes: this.rendererLedger.snapshot()?.gpuBytes ?? 0,
+      rendererFailures,
+      transitionActive,
+      transitionMs,
+      contextFallback: this.context.lifecycle.state === 'fallback',
+    });
   }
 
   private rendererFor(body: Body): BodyRenderer | null {

@@ -57,8 +57,10 @@ the main thread if real-device profiling shows the 8 ms build spikes.
   on target hardware demands it.
 - Save serialization: craft/vessel state is plain JSON data by construction;
   round-trip is covered by the save-system unit tests in M1.
-- WebGPU: detection wired (`render/context.ts`); WebGL2 baseline renders in
-  CI including software GL; WebGL1 fallback path exists.
+- Renderer capability: WebGL2 is required and receives an explicit capability
+  screen when unavailable. WebGPU is not detected or used, and there is no
+  WebGL1 fallback. Software WebGL2 remains useful for correctness smoke tests,
+  not hardware certification.
 
 ## Device tiers (to be filled from real browser profiling)
 
@@ -73,6 +75,29 @@ CI environment note: headless Chromium in this container uses SwiftShader
 (software GL), so absolute FPS numbers in CI are far below any real GPU;
 CI perf tests therefore track *relative* regressions and CPU-side frame
 cost, while tier validation numbers come from real-hardware runs.
+
+## Production renderer telemetry
+
+The F3 overlay and `window.__PERF__` expose typed production fields for frame,
+simulation, renderer submission, draws, triangles, visible chunks, renderer
+manager count, checked flight-pack residency/bytes, current or last renderer
+transaction duration, renderer failures, and context fallback. Pack bytes are
+deliberately labeled `residentPackGpuBytes`; an empty checked manifest does not
+pretend that procedural geometry and textures consume zero GPU memory.
+
+Only actual flight and map `renderer.render` submissions are enclosed by the
+12-slot `GpuTimerRing`. Query results are polled after the driver reports them
+available and are attributed as valid, disjoint, invalid, pending,
+unavailable-poll, or saturated-begin counts. Unsupported or broken profiling
+is disabled without skipping or changing a render. Lost/restoring contexts
+issue neither draw nor query calls, and restoration replaces the ring before
+rendering resumes so old query objects are never reused. Editor rendering is
+not included in these flight/map GPU fields.
+
+The production manager swap is currently atomic rather than a visual crossfade;
+its transaction metric measures candidate load/prepare/compile/coverage/budget
+time. A later art transition must still meet the 0.35-second normal and
+1.5-second maximum contract before it can be called shipped.
 
 ## Planet-rendering feasibility protocol
 
@@ -184,3 +209,11 @@ and local rendering path work. It does not constitute a full-duration record.
 Following the user's hardware-target revision, Phase 2 remains open until full
 Medium and Low M3 Max reference records pass; no Intel performance claim is
 made.
+
+### Deferred final validation
+
+Per the user's request to prioritize implementation, the broad unit/e2e pass,
+full-duration M3 Max Medium and Low records, and automated feature-group delta
+profiles are deferred to the final verification pass. The focused Phase 3
+checks and typecheck do not certify those hardware gates or the complete
+specification.

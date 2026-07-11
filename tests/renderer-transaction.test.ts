@@ -84,6 +84,28 @@ function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRend
 }
 
 describe('transactional body renderer replacement', () => {
+  test('reports truthful committed, transaction, failure, and resident resource state', async () => {
+    const load = deferred<LoadedRendererAssets>();
+    let now = 100;
+    const { manager, ledger } = managerHarness({ now: () => now });
+    const initialAssets = assets({ gpuBytes: 42, transientBytes: 7 });
+    manager.adoptInitial(body('veyra'), candidate('veyra').renderer, initialAssets);
+    expect(manager.platformStats()).toMatchObject({ committed: true, transactionActive: false, failures: 0 });
+    expect(ledger.snapshot()).toEqual({ bodyId: 'veyra', tier: 'medium', gpuBytes: 42, transientBytes: 7 });
+
+    manager.setBoundaries({ loadAssets: () => load.promise });
+    const replacing = manager.replaceQuality('high');
+    await vi.waitFor(() => expect(manager.platformStats().transactionActive).toBe(true));
+    now = 125;
+    expect(manager.platformStats().transitionMs).toBe(25);
+    now = 145;
+    load.resolve(assets({ gpuBytes: 55, transientBytes: 8 }));
+    await replacing;
+
+    expect(manager.platformStats()).toMatchObject({ committed: true, transactionActive: false, transitionMs: 45, failures: 0 });
+    expect(ledger.snapshot()).toEqual({ bodyId: 'veyra', tier: 'high', gpuBytes: 55, transientBytes: 8 });
+  });
+
   test('adopts a truthful initial renderer synchronously without a blank first frame', () => {
     const { manager, scene } = managerHarness();
     const initial = candidate('veyra');

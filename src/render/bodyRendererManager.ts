@@ -22,6 +22,21 @@ interface ResidentPack {
   readonly assets: LoadedRendererAssets;
 }
 
+export interface RendererResourceSnapshot {
+  readonly bodyId: string;
+  readonly tier: QualityTier;
+  readonly gpuBytes: number;
+  readonly transientBytes: number;
+}
+
+export interface BodyRendererManagerStats {
+  readonly committed: boolean;
+  readonly transactionActive: boolean;
+  readonly quality: QualityTier;
+  readonly failures: number;
+  readonly transitionMs: number;
+}
+
 export class RendererResourceLedger {
   private resident: ResidentPack | null = null;
 
@@ -53,6 +68,16 @@ export class RendererResourceLedger {
   residentFlightBodyIds(): string[] {
     return this.resident ? [this.resident.bodyId] : [];
   }
+
+  snapshot(): Readonly<RendererResourceSnapshot> | null {
+    if (!this.resident) return null;
+    return Object.freeze({
+      bodyId: this.resident.bodyId,
+      tier: this.resident.tier,
+      gpuBytes: this.resident.assets.gpuBytes,
+      transientBytes: this.resident.assets.transientBytes,
+    });
+  }
 }
 
 interface TransactionBoundaries {
@@ -68,6 +93,7 @@ export interface BodyRendererManagerOptions extends TransactionBoundaries {
   readonly createCandidate: (body: Body, tier: QualityTier) => BodyRenderer;
   readonly ledger: RendererResourceLedger;
   readonly failures?: RenderFailureTracker;
+  readonly now?: () => number;
 }
 
 interface CommittedRenderer {
@@ -86,11 +112,15 @@ export class BodyRendererManager {
   private generation = 0;
   private disposed = false;
   private readonly ledgerOwner = Symbol('BodyRendererManager');
+  private readonly now: () => number;
+  private transactionStartedAt: number | null = null;
+  private lastTransitionMs = 0;
 
   constructor(private readonly options: BodyRendererManagerOptions) {
     this.quality = options.quality;
     this.boundaries = options;
     this.failures = options.failures ?? new RenderFailureTracker();
+    this.now = options.now ?? (() => performance.now());
   }
 
   setBoundaries(boundaries: Partial<TransactionBoundaries>): void {
@@ -99,6 +129,17 @@ export class BodyRendererManager {
 
   current(): BodyRenderer | null { return this.committed?.renderer ?? null; }
   failureStats(): Readonly<RenderFailureStats> { return this.failures.stats(); }
+  platformStats(): Readonly<BodyRendererManagerStats> {
+    return Object.freeze({
+      committed: this.committed !== null,
+      transactionActive: this.candidate !== null,
+      quality: this.quality,
+      failures: this.failures.stats().total,
+      transitionMs: this.transactionStartedAt === null
+        ? this.lastTransitionMs
+        : Math.max(0, this.now() - this.transactionStartedAt),
+    });
+  }
 
   adoptInitial(body: Body, renderer: BodyRenderer, assets: LoadedRendererAssets): void {
     if (this.disposed) throw new Error('Body renderer manager is disposed');
@@ -144,6 +185,7 @@ export class BodyRendererManager {
     if (this.disposed) return;
     this.disposed = true;
     this.generation++;
+    this.finishTransition();
     if (this.candidate) this.candidate.dispose();
     this.candidate = null;
     if (!this.committed) return;
@@ -169,6 +211,7 @@ export class BodyRendererManager {
     const renderer = this.options.createCandidate(body, tier);
     renderer.root.visible = false;
     this.candidate = renderer;
+    this.transactionStartedAt = this.now();
     let loaded: LoadedRendererAssets | null = null;
     let phase: RenderFailurePhase = 'load';
     try {
@@ -211,6 +254,14 @@ export class BodyRendererManager {
       loaded?.dispose();
       if (this.candidate === renderer) this.candidate = null;
       throw error;
+    } finally {
+      this.finishTransition();
     }
+  }
+
+  private finishTransition(): void {
+    if (this.transactionStartedAt === null) return;
+    this.lastTransitionMs = Math.max(0, this.now() - this.transactionStartedAt);
+    this.transactionStartedAt = null;
   }
 }
