@@ -121,10 +121,20 @@ export class TerrainChunkWorkerPool {
     if (this.disposed) return;
     for (const slot of this.slots) {
       if (slot.jobKey !== null) continue;
-      const job = this.queue.shift();
-      if (!job) return;
-      slot.jobKey = job.request.jobKey;
-      slot.worker.postMessage(job.request);
+      while (slot.jobKey === null) {
+        const job = this.queue.shift();
+        if (!job) return;
+        slot.jobKey = job.request.jobKey;
+        try {
+          slot.worker.postMessage(job.request);
+        } catch (cause) {
+          slot.jobKey = null;
+          if (this.jobs.get(job.request.jobKey) === job) {
+            this.jobs.delete(job.request.jobKey);
+            job.reject(cause instanceof Error ? cause : new Error(String(cause)));
+          }
+        }
+      }
     }
   }
 

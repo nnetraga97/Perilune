@@ -17,7 +17,7 @@ import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual 
 import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
-import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
+import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack, VectorCoordinates } from './bodyRenderer';
 import type { BodyRendererKind } from '../content/bodyVisuals';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
 import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
@@ -62,6 +62,29 @@ export interface WorldRendererStats {
   readonly transitionActive: boolean;
   readonly transitionMs: number;
   readonly contextFallback: boolean;
+}
+
+export function bodyFixedCameraVelocity(
+  current: VectorCoordinates,
+  previous: Readonly<BodyRenderFrame> | undefined,
+  deltaSeconds: number,
+): VectorCoordinates {
+  if (!previous || !(deltaSeconds > 0)) return { x: 0, y: 0, z: 0 };
+  const inverseDelta = 1 / deltaSeconds;
+  return {
+    x: (current.x - previous.cameraBodyFixed.x) * inverseDelta,
+    y: (current.y - previous.cameraBodyFixed.y) * inverseDelta,
+    z: (current.z - previous.cameraBodyFixed.z) * inverseDelta,
+  };
+}
+
+export function pruneBodyFrameSamples(
+  samples: Map<string, BodyRenderFrame>,
+  sampledBodyIds: ReadonlySet<string>,
+): void {
+  for (const bodyId of samples.keys()) {
+    if (!sampledBodyIds.has(bodyId)) samples.delete(bodyId);
+  }
 }
 
 function rendererGeometryBytes(renderer: BodyRenderer): number {
@@ -409,6 +432,7 @@ export class WorldScene {
     const active = game.active;
     if (!active) {
       this.setFlightTerrainOwner(null);
+      this.lastBodyFrames?.clear();
       return;
     }
     const v = active.runtime;
@@ -460,6 +484,7 @@ export class WorldScene {
       consider(sibling);
     }
 
+    const sampledBodyIds = new Set<string>();
     for (const b of considerBodies) {
       game.universe.absolutePosition(b, t, _bodyAbs);
       Vec3.sub(_bodyAbs, _camAbs, _rel); // body center in camera-relative world
@@ -474,12 +499,7 @@ export class WorldScene {
       if (!renderer) continue;
       renderer.root.visible = true;
       const previousFrame = this.lastBodyFrames.get(b.id);
-      const inverseDelta = dt > 0 ? 1 / dt : 0;
-      const cameraBodyFixedVelocity = previousFrame ? {
-        x: (_camBF.x - previousFrame.cameraBodyFixed.x) * inverseDelta,
-        y: (_camBF.y - previousFrame.cameraBodyFixed.y) * inverseDelta,
-        z: (_camBF.z - previousFrame.cameraBodyFixed.z) * inverseDelta,
-      } : { x: 0, y: 0, z: 0 };
+      const cameraBodyFixedVelocity = bodyFixedCameraVelocity(_camBF, previousFrame, dt);
       const frame: BodyRenderFrame = {
         cameraRelativeOrigin: _rel,
         cameraBodyFixed: _camBF,
@@ -503,12 +523,14 @@ export class WorldScene {
         bodySunDirection: { ...frame.bodySunDirection },
       };
       this.lastBodyFrames.set(b.id, stableFrame);
+      sampledBodyIds.add(b.id);
       renderer.update(stableFrame);
     }
     // Hide renderers of bodies no longer relevant.
     for (const [id, renderer] of this.bodyRenderers) {
       if (!renderSet.has(id)) renderer.root.visible = false;
     }
+    pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
 
     // Cape Skyward is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.

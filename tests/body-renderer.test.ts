@@ -10,7 +10,7 @@ import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
-import { WorldScene } from '../src/render/worldScene';
+import { bodyFixedCameraVelocity, pruneBodyFrameSamples, WorldScene } from '../src/render/worldScene';
 import type { BodyRenderer } from '../src/render/bodyRenderer';
 
 const caps: RenderCaps = {
@@ -253,5 +253,18 @@ describe('body renderer adapters', () => {
 
     expect(stale.replaceQuality).toHaveBeenCalledTimes(2);
     expect(current.replaceQuality).not.toHaveBeenCalled();
+  });
+
+  test('a body returning after absence starts with zero body-fixed camera velocity', () => {
+    const samples = new Map<string, BodyRenderFrame>([['veyra', frame({
+      cameraBodyFixed: { x: 100, y: 200, z: 300 },
+    })]]);
+    pruneBodyFrameSamples(samples, new Set());
+    expect(samples.has('veyra')).toBe(false);
+    expect(bodyFixedCameraVelocity(
+      { x: 1_000_000, y: -2_000_000, z: 3_000_000 },
+      samples.get('veyra'),
+      1 / 60,
+    )).toEqual({ x: 0, y: 0, z: 0 });
   });
 });

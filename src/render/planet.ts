@@ -148,10 +148,11 @@ function countLodOverlaps(keys: ReadonlySet<string>): number {
 export class PlanetRenderer {
   readonly body: Body;
   readonly group = new THREE.Group();
-  private readonly chunks = new Map<string, Chunk>();
+  private chunks = new Map<string, Chunk>();
+  private replacementChunks: Map<string, Chunk> | null = null;
   private readonly material: THREE.Material;
   private readonly workerPool: TerrainChunkWorkerPool | null;
-  private readonly pendingChunks = new Set<string>();
+  private readonly pendingChunks = new Map<string, number>();
   private generation = 1;
   private readonly oceanMaterial: THREE.MeshPhongMaterial | null = null;
   private readonly maxDepth: number;
@@ -215,8 +216,10 @@ export class PlanetRenderer {
   setQuality(q: PlanetQuality): void {
     if (q === this.quality) return;
     this.workerPool?.cancelGeneration(this.generation);
+    if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
     this.generation++;
     this.pendingChunks.clear();
+    this.replacementChunks = new Map();
     this.quality = q;
   }
 
@@ -247,13 +250,17 @@ export class PlanetRenderer {
   }
 
   resourceGeometryBytes(): Readonly<{ terrainGeometryBytes: number; oceanGeometryBytes: number; geometryCount: number }> {
-    const terrainGeometryBytes = [...this.chunks.values()]
+    const terrainChunks = [
+      ...this.chunks.values(),
+      ...(this.replacementChunks?.values() ?? []),
+    ];
+    const terrainGeometryBytes = terrainChunks
       .reduce((sum, chunk) => sum + geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry), 0);
     const oceanGeometryBytes = this.ocean ? geometryByteLength(this.ocean.geometry) : 0;
     return Object.freeze({
       terrainGeometryBytes,
       oceanGeometryBytes,
-      geometryCount: this.chunks.size + (this.ocean ? 1 : 0),
+      geometryCount: terrainChunks.length + (this.ocean ? 1 : 0),
     });
   }
 
@@ -283,11 +290,15 @@ export class PlanetRenderer {
     if (this.workerPool) {
       const installStart = performance.now();
       for (const result of this.workerPool.drainCompleted()) {
-        this.pendingChunks.delete(result.jobKey);
-        if (result.generation === this.generation && !this.chunks.has(result.jobKey)) {
-          this.installChunk(result);
+        if (this.pendingChunks.get(result.jobKey) === result.generation) {
+          this.pendingChunks.delete(result.jobKey);
+        }
+        if (result.generation === this.generation) {
+          const target = this.replacementChunks ?? this.chunks;
+          if (!target.has(result.jobKey)) this.installChunk(result, target);
         }
       }
+      this.commitReplacementIfReady();
       this.stats.installMs = performance.now() - installStart;
     }
 
@@ -303,10 +314,11 @@ export class PlanetRenderer {
     const wanted = new Set<string>();
     const scheduleStart = performance.now();
     const orderedFaces = planetFaceOrder(camDir);
+    const buildTarget = this.replacementChunks ?? this.chunks;
     // Establish the six root fallbacks before spending budget on refinement.
     for (const f of orderedFaces) {
       const key = `${f}:0:-1.000000:-1.000000`;
-      if (this.chunks.has(key) || this.pendingChunks.has(key)) continue;
+      if (buildTarget.has(key) || this.pendingChunks.get(key) === this.generation) continue;
       if (this.workerPool && this.buildsThisUpdate >= this.quality.buildBudget) break;
       if (this.workerPool) this.buildsThisUpdate++;
       this.stats.built++;
@@ -320,6 +332,10 @@ export class PlanetRenderer {
         worldSize: this.body.radius * 1.57,
       });
     }
+    this.commitReplacementIfReady();
+    // While replacement roots stage, committed terrain remains the only
+    // selectable coverage and refinement waits for the atomic swap.
+    if (this.replacementChunks) this.buildsThisUpdate = this.quality.buildBudget;
     for (const f of orderedFaces) {
       if (!this.selectNode(
         { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(FACES[f], 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
@@ -353,7 +369,7 @@ export class PlanetRenderer {
         if (this.buildsThisUpdate >= this.quality.buildBudget) break;
       }
     }
-    this.stats.scheduleMs = Math.max(0, performance.now() - scheduleStart - this.stats.installMs);
+    this.stats.scheduleMs = Math.max(0, performance.now() - scheduleStart);
     this.stats.overlapChunks = countLodOverlaps(wanted);
 
     // Hide unneeded chunks, show wanted ones, place camera-relative.
@@ -410,7 +426,7 @@ export class PlanetRenderer {
     }
 
     const key = `${node.face}:${node.depth}:${node.u0.toFixed(6)}:${node.v0.toFixed(6)}`;
-    if (!this.chunks.has(key) && !this.pendingChunks.has(key) && this.buildsThisUpdate < this.quality.buildBudget) {
+    if (!this.chunks.has(key) && this.pendingChunks.get(key) !== this.generation && this.buildsThisUpdate < this.quality.buildBudget) {
       this.buildsThisUpdate++;
       this.stats.built++;
       this.requestChunk(key, node);
@@ -441,7 +457,7 @@ export class PlanetRenderer {
       // only part of its child set.
       for (const child of children) {
         const childKey = `${child.face}:${child.depth}:${child.u0.toFixed(6)}:${child.v0.toFixed(6)}`;
-        if (!this.chunks.has(childKey) && !this.pendingChunks.has(childKey) && this.buildsThisUpdate < this.quality.buildBudget) {
+        if (!this.chunks.has(childKey) && this.pendingChunks.get(childKey) !== this.generation && this.buildsThisUpdate < this.quality.buildBudget) {
           this.buildsThisUpdate++;
           this.stats.built++;
           this.requestChunk(childKey, child);
@@ -479,13 +495,14 @@ export class PlanetRenderer {
     const request = this.chunkRequest(key, node);
     if (!this.workerPool) {
       const installStart = performance.now();
-      this.installChunk(buildTerrainChunkGeometry(request));
+      this.installChunk(buildTerrainChunkGeometry(request), this.replacementChunks ?? this.chunks);
       this.stats.installMs += performance.now() - installStart;
       return;
     }
-    this.pendingChunks.add(key);
+    const requestGeneration = request.generation;
+    this.pendingChunks.set(key, requestGeneration);
     void this.workerPool.submit(request).catch(() => {
-      this.pendingChunks.delete(key);
+      if (this.pendingChunks.get(key) === requestGeneration) this.pendingChunks.delete(key);
     });
   }
 
@@ -520,7 +537,7 @@ export class PlanetRenderer {
     };
   }
 
-  private installChunk(result: TerrainChunkGeometryResult): void {
+  private installChunk(result: TerrainChunkGeometryResult, target = this.chunks): void {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(result.position, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(result.normal, 3));
@@ -537,10 +554,31 @@ export class PlanetRenderer {
     mesh.frustumCulled = true;
     mesh.matrixAutoUpdate = true;
     mesh.receiveShadow = this.shadowReceiver;
+    mesh.visible = false;
     this.group.add(mesh);
     const origin = new Vec3(...result.origin);
-    this.chunks.set(result.jobKey, { key: result.jobKey, mesh, origin, lastUsed: this.frame });
+    target.set(result.jobKey, { key: result.jobKey, mesh, origin, lastUsed: this.frame });
     this.geometryBytes += geometryByteLength(geo);
+  }
+
+  private commitReplacementIfReady(): void {
+    const replacement = this.replacementChunks;
+    if (!replacement) return;
+    for (let face = 0; face < FACES.length; face++) {
+      if (!replacement.has(`${face}:0:-1.000000:-1.000000`)) return;
+    }
+    this.disposeChunks(this.chunks);
+    this.chunks = replacement;
+    this.replacementChunks = null;
+  }
+
+  private disposeChunks(chunks: Map<string, Chunk>): void {
+    for (const chunk of chunks.values()) {
+      this.group.remove(chunk.mesh);
+      this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
+      chunk.mesh.geometry.dispose();
+    }
+    chunks.clear();
   }
 
   private evictStale(): void {
@@ -561,11 +599,9 @@ export class PlanetRenderer {
     this.workerPool?.cancelGeneration(this.generation);
     this.workerPool?.dispose();
     this.pendingChunks.clear();
-    for (const chunk of this.chunks.values()) {
-      this.group.remove(chunk.mesh);
-      chunk.mesh.geometry.dispose();
-    }
-    this.chunks.clear();
+    this.disposeChunks(this.chunks);
+    if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
+    this.replacementChunks = null;
     this.geometryBytes = 0;
     this.material.dispose();
     this.oceanMaterial?.dispose();
