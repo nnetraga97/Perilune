@@ -23,6 +23,7 @@ export interface VeyraCanonicalMaps {
   readonly normal: Uint8Array;
   readonly material: Uint8Array;
   readonly clouds: Uint8Array;
+  readonly heightS16le: Uint8Array;
   readonly rawHashes: Readonly<Record<'albedo' | 'normal' | 'material' | 'clouds', string>>;
   readonly texelHeightRange: number;
 }
@@ -106,11 +107,50 @@ export function decodeOctNormal(encodedX: number, encodedY: number): Vec3 {
   return new Vec3(x, y, z).normalize();
 }
 
-function sourcePixel(source: RawRaster, u: number, v: number): number {
-  const x = Math.min(source.width - 1, Math.floor((u - Math.floor(u)) * source.width));
-  const y = Math.min(source.height - 1, Math.max(0, Math.floor(v * source.height)));
+function sourceLuminanceAt(source: RawRaster, x: number, y: number): number {
   const offset = (y * source.width + x) * source.channels;
-  return (source.data[offset] << 16) | (source.data[offset + 1] << 8) | source.data[offset + 2];
+  return source.data[offset] * 0.21 + source.data[offset + 1] * 0.72 + source.data[offset + 2] * 0.07;
+}
+
+function sourceLuminance(source: RawRaster, u: number, v: number): number {
+  const wrappedU = u - Math.floor(u);
+  const scaledX = wrappedU * source.width - 0.5;
+  const scaledY = Math.max(0, Math.min(source.height - 1, v * source.height - 0.5));
+  const x0Unwrapped = Math.floor(scaledX);
+  const x0 = (x0Unwrapped + source.width) % source.width;
+  const x1 = (x0 + 1) % source.width;
+  const y0 = Math.floor(scaledY);
+  const y1 = Math.min(source.height - 1, y0 + 1);
+  const tx = scaledX - x0Unwrapped;
+  const ty = scaledY - y0;
+  const north = mixNumber(sourceLuminanceAt(source, x0, y0), sourceLuminanceAt(source, x1, y0), tx);
+  const south = mixNumber(sourceLuminanceAt(source, x0, y1), sourceLuminanceAt(source, x1, y1), tx);
+  return mixNumber(north, south, ty);
+}
+
+function directionLuminance(source: RawRaster, x: number, y: number, z: number): number {
+  const length = Math.hypot(x, y, z) || 1;
+  const nx = x / length;
+  const ny = y / length;
+  const nz = Math.max(-1, Math.min(1, z / length));
+  const u = Math.atan2(ny, nx) / TAU + 0.5;
+  const v = 0.5 - Math.asin(nz) / Math.PI;
+  const directional = sourceLuminance(source, u, v);
+  const poleAverage = sourceLuminance(source, 0.5, v);
+  return mixNumber(directional, poleAverage, smoothstep(0.96, 0.9995, Math.abs(nz)));
+}
+
+/** Pole- and seam-safe Natural Earth detail sampled only from body direction. */
+export function sampleVeyraSourceDetail(source: RawRaster, direction: Readonly<Vec3>): number {
+  const sampleA = directionLuminance(source, direction.y, direction.z, direction.x);
+  const sampleB = directionLuminance(source, -direction.z, direction.x, -direction.y);
+  const sampleC = directionLuminance(
+    source,
+    direction.x * 0.36 + direction.z * 0.93,
+    direction.y,
+    -direction.x * 0.93 + direction.z * 0.36,
+  );
+  return (sampleA + sampleB + sampleC) / 3;
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -131,6 +171,8 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
   }
 
   const heights = new Float32Array(width * height);
+  const heightS16le = new Uint8Array(width * height * 2);
+  const heightView = new DataView(heightS16le.buffer);
   const longitudeCos = new Float64Array(width);
   const longitudeSin = new Float64Array(width);
   const latitudeCos = new Float64Array(height);
@@ -156,6 +198,11 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
         evaluationDirection,
       );
       heights[index] = heightAt(evaluationDirection);
+      const quantizedHeight = Math.round(heights[index] / 0.5);
+      if (quantizedHeight < -32768 || quantizedHeight > 32767) {
+        throw new Error(`Veyra canonical height exceeds signed-16 range at ${x},${y}`);
+      }
+      heightView.setInt16(index * 2, quantizedHeight, true);
     }
   }
   for (let y = 0; y < height; y++) {
@@ -219,27 +266,14 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
       if (surfaceNormal.dot(direction) < 0) surfaceNormal.negate();
       writeOctNormal(surfaceNormal, normal, index * 2);
 
-      const u = (x + 0.5) / width;
-      const v = (y + 0.5) / height;
-      // Natural Earth is deliberately reduced to multi-sampled color texture.
-      // Tiling, mirroring, rotation and nonlinear offsets remove Earth-scale
-      // coast/continent identity; Veyra's solidHeight remains the only
-      // geography authority.
-      const warp = Math.sin(direction.y * 17 + seed * 0.013) * 0.08 +
-        Math.sin(direction.z * 29 - seed * 0.009) * 0.04;
-      const sampleA = sourcePixel(source, u * 3.17 + warp + 0.23, ((v * 2.13 + 0.17) % 1 + 1) % 1);
-      const sampleB = sourcePixel(source, -u * 4.73 + warp * 0.7 + 0.61, ((1 - v) * 3.07 + 0.41) % 1);
-      const sampleC = sourcePixel(source, u * 7.11 - warp * 0.5 + 0.37, ((v * 4.31 + 0.73) % 1 + 1) % 1);
-      const sourceR = ((sampleA >>> 16) + (sampleB >>> 16) + (sampleC >>> 16)) / 3;
-      const sourceG = (((sampleA >>> 8) & 0xff) + ((sampleB >>> 8) & 0xff) + ((sampleC >>> 8) & 0xff)) / 3;
-      const sourceB = ((sampleA & 0xff) + (sampleB & 0xff) + (sampleC & 0xff)) / 3;
+      const sourceDetail = sampleVeyraSourceDetail(source, direction);
       const ocean = terrainHeight < 0;
       const elevation = Math.max(-1, Math.min(1, terrainHeight / 8_000));
       if (ocean) {
         const depth = Math.min(1, -terrainHeight / 6_000);
-        albedo[index * 3] = clampByte(12 + sourceB * 0.04);
-        albedo[index * 3 + 1] = clampByte(45 + sourceG * 0.12 - depth * 15);
-        albedo[index * 3 + 2] = clampByte(78 + sourceB * 0.28 - depth * 20);
+        albedo[index * 3] = clampByte(12 + sourceDetail * 0.04);
+        albedo[index * 3 + 1] = clampByte(45 + sourceDetail * 0.12 - depth * 15);
+        albedo[index * 3 + 2] = clampByte(78 + sourceDetail * 0.28 - depth * 20);
       } else {
         const latitude = Math.abs(direction.z);
         const moistureNoise = fbm3(direction.x * 3.4, direction.y * 3.4, direction.z * 3.4, seed + 91, 5);
@@ -267,8 +301,7 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
         baseR = mixNumber(baseR, 198, snowWeight);
         baseG = mixNumber(baseG, 207, snowWeight);
         baseB = mixNumber(baseB, 205, snowWeight);
-        const sourceLuminance = sourceR * 0.21 + sourceG * 0.72 + sourceB * 0.07;
-        const detail = (sourceLuminance - 128) * 0.16;
+        const detail = (sourceDetail - 128) * 0.16;
         albedo[index * 3] = clampByte(baseR + detail + elevation * 24);
         albedo[index * 3 + 1] = clampByte(baseG + detail + elevation * 19);
         albedo[index * 3 + 2] = clampByte(baseB + detail + elevation * 16);
@@ -279,7 +312,16 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
       material[index * 4] = clampByte((ocean ? 0.24 : 0.76 - slope * 1.8) * 255); // roughness
       material[index * 4 + 1] = clampByte((0.82 - slope * 0.55) * 255); // ambient occlusion
       material[index * 4 + 2] = ocean ? 0 : terrainHeight > 2_500 ? 220 : terrainHeight > 300 ? 150 : 80;
-      material[index * 4 + 3] = ocean ? 255 : 0;
+      const localShoreWidth = Math.max(
+        0.5,
+        Math.abs(terrainHeight - heights[eastIndex]),
+        Math.abs(terrainHeight - heights[westIndex]),
+        Math.abs(terrainHeight - heights[northIndex]),
+        Math.abs(terrainHeight - heights[southIndex]),
+      );
+      material[index * 4 + 3] = clampByte(
+        smoothstep(localShoreWidth, -localShoreWidth, terrainHeight) * 255,
+      );
 
       const warpNoise = fbm3(direction.x * 2.6, direction.y * 2.6, direction.z * 2.6, seed + 211, 3);
       const warpedX = direction.x * 3.4 + warpNoise * 0.72;
@@ -305,6 +347,7 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
     normal,
     material,
     clouds,
+    heightS16le,
     rawHashes: {
       albedo: sha256(albedo),
       normal: sha256(normal),

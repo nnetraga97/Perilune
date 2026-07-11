@@ -488,6 +488,13 @@ describe('planet asset loading boundary', () => {
         packagePath: 'veyra/albedo.ktx2',
         fallbackPath: 'veyra/albedo.webp',
         gpuBytes: 20,
+        fallbackGpuBytes: 80,
+      }, {
+        name: 'normal',
+        packagePath: 'veyra/normal.ktx2',
+        fallbackPath: 'veyra/normal.png',
+        gpuBytes: 10,
+        fallbackGpuBytes: 40,
       }],
     }],
   };
@@ -524,11 +531,18 @@ describe('planet asset loading boundary', () => {
       loadConventional,
     });
 
-    await loader.load('veyra', 'medium');
+    const loaded = await loader.load('veyra', 'medium');
 
     expect(ktx2.setTranscoderPath).toHaveBeenCalledWith('/perilune/basis/');
-    expect(order).toEqual(['detect', 'fallback:./planets/veyra/albedo.webp']);
+    expect(order).toEqual([
+      'detect',
+      'fallback:./planets/veyra/albedo.webp',
+      'fallback:./planets/veyra/normal.png',
+    ]);
     expect(ktx2.loadAsync).not.toHaveBeenCalled();
+    expect(loaded.gpuBytes).toBe(120);
+    expect(loaded.textures.get('albedo')?.colorSpace).toBe(THREE.SRGBColorSpace);
+    expect(loaded.textures.get('normal')?.colorSpace).toBe(THREE.NoColorSpace);
     loader.dispose();
     loader.dispose();
     expect(ktx2.dispose).toHaveBeenCalledOnce();
@@ -550,8 +564,9 @@ describe('planet asset loading boundary', () => {
     expect(empty.hasPack('veyra', 'medium')).toBe(false);
     expect(checkedManifest.hasPack('veyra', 'medium')).toBe(true);
     expect(checkedManifest.packs[0]).toMatchObject({ width: 2048, height: 1024 });
+    expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
-    expect(checkPlanetManifest(checkedPlanetArtifact).packs).toHaveLength(0);
+    expect(checkPlanetManifest(checkedPlanetArtifact).packs).toHaveLength(3);
   });
 
   test('accepts validator-authorized zero resource values', () => {
@@ -563,7 +578,7 @@ describe('planet asset loading boundary', () => {
       },
       packs: [{
         bodyId: 'veyra', tier: 'medium', width: 1024, height: 512, transientBytes: 0,
-        channels: [{ name: 'albedo', packagePath: 'a.ktx2', fallbackPath: 'a.webp', gpuBytes: 0 }],
+        channels: [{ name: 'albedo', packagePath: 'a.ktx2', fallbackPath: 'a.webp', gpuBytes: 0, fallbackGpuBytes: 0 }],
       }],
     };
     expect(checkPlanetManifest(artifactFor(zeroManifest)).hasPack('veyra', 'medium')).toBe(true);

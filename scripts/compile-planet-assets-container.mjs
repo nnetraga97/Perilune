@@ -28,6 +28,7 @@ run([
   '--mount', `type=bind,source=${assetsPath},target=/workspace/assets/planets`,
   '--mount', `type=bind,source=${generatedMetadataPath},target=/workspace/src/generated`,
   image,
-  'sh', '-lc',
+  // A login shell resets the image's pinned /opt/ktx PATH on Debian.
+  'sh', '-c',
   'npm run compile:planet-assets -- --write && npm run validate:content',
 ], 'Planet asset generation');

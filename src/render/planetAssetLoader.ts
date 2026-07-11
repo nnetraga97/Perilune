@@ -8,6 +8,8 @@ export interface PlanetAssetChannel {
   readonly packagePath: string;
   readonly fallbackPath: string;
   readonly gpuBytes: number;
+  /** Conservative browser upload size for conventional PNG/WebP fallback. */
+  readonly fallbackGpuBytes: number;
 }
 
 export interface PlanetAssetPack {
@@ -17,6 +19,16 @@ export interface PlanetAssetPack {
   readonly height: number;
   readonly transientBytes: number;
   readonly channels: readonly PlanetAssetChannel[];
+}
+
+function fullMipRgbaBytes(width: number, height: number): number {
+  let total = 0;
+  for (;;) {
+    total += width * height * 4;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
 }
 
 export interface CheckedManifestArtifact {
@@ -85,7 +97,11 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
       throw new Error(`Checked planet manifest contains an invalid pack for ${pack.bodyId}/${pack.tier}`);
     }
     const channels = pack.channels.map((channel) => {
-      if (typeof channel.name !== 'string' || !Number.isInteger(channel.gpuBytes) || channel.gpuBytes < 0) {
+      if (
+        typeof channel.name !== 'string' || !Number.isInteger(channel.gpuBytes) || channel.gpuBytes < 0 ||
+        (channel.fallbackGpuBytes !== undefined &&
+          (!Number.isInteger(channel.fallbackGpuBytes) || channel.fallbackGpuBytes < 0))
+      ) {
         throw new Error(`Checked planet manifest contains an invalid channel for ${pack.bodyId}/${pack.tier}`);
       }
       requireLocal(channel.packagePath);
@@ -95,6 +111,7 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
         packagePath: channel.packagePath,
         fallbackPath: channel.fallbackPath,
         gpuBytes: channel.gpuBytes,
+        fallbackGpuBytes: channel.fallbackGpuBytes ?? fullMipRgbaBytes(pack.width!, pack.height!),
       });
     });
     return Object.freeze({
@@ -169,13 +186,16 @@ export class PlanetAssetLoader {
       compressed = false;
     }
     const textures = new Map<string, THREE.Texture>();
+    let selectedGpuBytes = 0;
     try {
       for (const channel of pack.channels) {
         try {
           const texture = compressed
             ? await this.options.ktx2.loadAsync(this.options.resolveAssetUrl(channel.packagePath))
             : await this.options.loadConventional(this.options.resolveAssetUrl(channel.fallbackPath));
+          texture.colorSpace = channel.name === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
           textures.set(channel.name, texture);
+          selectedGpuBytes += compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
         } catch (error) {
           throw new RenderBoundaryError(
             { body: bodyId, tier, channel: channel.name, phase: 'load' },
@@ -190,7 +210,7 @@ export class PlanetAssetLoader {
     }
     return {
       pack,
-      gpuBytes: pack.channels.reduce((total, channel) => total + channel.gpuBytes, 0),
+      gpuBytes: selectedGpuBytes,
       textures,
       dispose: () => { for (const texture of textures.values()) texture.dispose(); },
     };

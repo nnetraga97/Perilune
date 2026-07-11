@@ -17,11 +17,14 @@ const manifestPath = resolve(assetsRoot, 'manifest.json');
 const outputPath = resolve(assetsRoot, 'compiler-output.json');
 const sourcePath = resolve(assetsRoot, 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.tif');
 const generatedRoot = resolve(assetsRoot, 'generated/veyra');
+const canonicalHeightPath = resolve(generatedRoot, 'canonical/height.s16le');
 const canonicalWidth = 8192;
 const canonicalHeight = 4096;
 const fingerprintWidth = 64;
 const fingerprintHeight = 32;
 const quantizationMeters = 0.5;
+const compilerVersion = '2.1.0';
+const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
 const writeGlobal = write && !process.argv.includes('--fingerprints-only');
 
@@ -36,6 +39,9 @@ interface ChannelOutput {
   fallbackChecksumSha256: string;
   gpuFormat: 'etc2-rgb' | 'bc5-rg' | 'bc3-rgba';
   gpuBytes: number;
+  fallbackGpuBytes: number;
+  fallbackLayout: 'rgb' | 'rgb-rg' | 'rgba';
+  transcodeTargets: readonly string[];
   mipmapped: true;
 }
 
@@ -73,6 +79,16 @@ function fullMipBytes(width: number, height: number, blockBytes: number): number
   }
 }
 
+function fullMipRgbaBytes(width: number, height: number): number {
+  let total = 0;
+  for (;;) {
+    total += width * height * 4;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
+}
+
 function relativeAssetPath(path: string): string {
   return relative(assetsRoot, path).split('\\').join('/');
 }
@@ -90,7 +106,9 @@ function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['n
     ...encoding, inputPath, outputPath,
   ], { encoding: 'utf8', env: process.env });
   if (result.status !== 0) {
-    throw new Error(`KTX encoding failed for ${channel}: ${result.stderr || result.stdout}`);
+    const detail = result.error?.message || result.stderr || result.stdout ||
+      `exit=${String(result.status)} signal=${String(result.signal)}`;
+    throw new Error(`KTX encoding failed for ${channel}: ${detail}`);
   }
 }
 
@@ -110,18 +128,33 @@ async function writeTier(
   ];
   const channels: ChannelOutput[] = [];
   for (const definition of definitions) {
-    const image = sharp(Buffer.from(definition.data), {
+    const resized = await sharp(Buffer.from(definition.data), {
       raw: { width: canonicalWidth, height: canonicalHeight, channels: definition.channels },
       sequentialRead: true,
-    }).resize(width, height, { kernel: sharp.kernel.lanczos3 });
+    }).resize(width, height, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
+    const image = sharp(resized, { raw: { width, height, channels: definition.channels } });
     const fallbackPath = resolve(tierDir, `${definition.name}.${definition.fallback}`);
-    if (definition.fallback === 'webp') await image.clone().webp({ quality: 92, effort: 6, smartSubsample: true }).toFile(fallbackPath);
-    else await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
-    const encoderInput = definition.fallback === 'png' ? fallbackPath : resolve(tierDir, `${definition.name}.encoder.png`);
-    if (definition.fallback !== 'png') await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+    const encoderInput = resolve(tierDir, `${definition.name}.encoder.png`);
+    if (definition.fallback === 'webp') {
+      await image.clone().webp({ quality: 92, effort: 6, smartSubsample: true }).toFile(fallbackPath);
+      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+    } else if (definition.channels === 2) {
+      const rgb = Buffer.allocUnsafe(width * height * 3);
+      for (let pixel = 0; pixel < width * height; pixel++) {
+        rgb[pixel * 3] = resized[pixel * 2];
+        rgb[pixel * 3 + 1] = resized[pixel * 2 + 1];
+        rgb[pixel * 3 + 2] = 0;
+      }
+      await sharp(rgb, { raw: { width, height, channels: 3 } })
+        .png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
+      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+    } else {
+      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
+      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+    }
     const packagePath = resolve(tierDir, `${definition.name}.ktx2`);
     runKtx(encoderInput, packagePath, definition.name);
-    if (encoderInput !== fallbackPath) rmSync(encoderInput, { force: true });
+    rmSync(encoderInput, { force: true });
     const blockBytes = definition.name === 'albedo' ? 8 : 16;
     channels.push({
       name: definition.name,
@@ -133,6 +166,13 @@ async function writeTier(
       fallbackChecksumSha256: sha256(readFileSync(fallbackPath)),
       gpuFormat: definition.name === 'albedo' ? 'etc2-rgb' : definition.name === 'normal' || definition.name === 'clouds' ? 'bc5-rg' : 'bc3-rgba',
       gpuBytes: fullMipBytes(width, height, blockBytes),
+      fallbackGpuBytes: fullMipRgbaBytes(width, height),
+      fallbackLayout: definition.name === 'albedo' ? 'rgb' : definition.name === 'material' ? 'rgba' : 'rgb-rg',
+      transcodeTargets: definition.name === 'albedo'
+        ? ['etc2-rgb', 'bc1-rgb']
+        : definition.name === 'material'
+          ? ['etc2-rgba', 'bc3-rgba', 'astc-rgba']
+          : ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
       mipmapped: true,
     });
   }
@@ -148,7 +188,11 @@ async function writeTier(
   };
 }
 
-async function compileVeyraGlobal(universe: Universe): Promise<{ rawHashes: VeyraCanonicalMaps['rawHashes']; packs: unknown[] }> {
+async function compileVeyraGlobal(universe: Universe): Promise<{
+  rawHashes: VeyraCanonicalMaps['rawHashes'];
+  heightChecksumSha256: string;
+  packs: unknown[];
+}> {
   const metadata = await sharp(sourcePath).metadata();
   if (metadata.width !== 16200 || metadata.height !== 8100 || metadata.space !== 'srgb') {
     throw new Error(`Natural Earth source must be 16200x8100 sRGB; got ${metadata.width}x${metadata.height} ${metadata.space}`);
@@ -170,11 +214,14 @@ async function compileVeyraGlobal(universe: Universe): Promise<{ rawHashes: Veyr
     },
     seed: veyra.def.terrain.seed,
   });
+  mkdirSync(dirname(canonicalHeightPath), { recursive: true });
+  writeFileSync(canonicalHeightPath, canonical.heightS16le);
+  const heightChecksumSha256 = sha256(canonical.heightS16le);
   const tiers = [];
   tiers.push(await writeTier('low', 1024, 512, canonical));
   tiers.push(await writeTier('medium', 2048, 1024, canonical));
   tiers.push(await writeTier('high', 4096, 2048, canonical));
-  return { rawHashes: canonical.rawHashes, packs: tiers.map((tier) => tier.pack) };
+  return { rawHashes: canonical.rawHashes, heightChecksumSha256, packs: tiers.map((tier) => tier.pack) };
 }
 
 const recipeFile = JSON.parse(readFileSync(recipesPath, 'utf8')) as { schemaVersion: number; recipes: RecipeRecord[] };
@@ -194,7 +241,49 @@ const bodies = [...universe.bodies.values()].map((body) => {
 let veyraCanonical = (JSON.parse(readFileSync(outputPath, 'utf8')) as Record<string, any>).veyraCanonical;
 if (writeGlobal) {
   const global = await compileVeyraGlobal(universe);
-  veyraCanonical = { width: canonicalWidth, height: canonicalHeight, rawHashes: global.rawHashes };
+  const veyraRecipe = recipeForBody(universe.get('veyra'));
+  const identitySha256 = sha256(Buffer.from(JSON.stringify([
+    compilerVersion,
+    manifest.compiler.containerImage,
+    manifest.compiler.ktxSoftwareVersion,
+    manifest.compiler.ktxArchiveSha256,
+    sourceArchiveSha256,
+    veyraRecipe.version,
+    veyraRecipe.hash,
+    canonicalWidth,
+    canonicalHeight,
+    quantizationMeters,
+    global.rawHashes,
+    global.heightChecksumSha256,
+  ])));
+  const heightArtifact = {
+    bodyId: 'veyra',
+    kind: 'height-s16le',
+    path: relativeAssetPath(canonicalHeightPath),
+    width: canonicalWidth,
+    height: canonicalHeight,
+    quantizationMeters,
+    offsetMeters: 0,
+    byteOrder: 'little-endian',
+    checksumSha256: global.heightChecksumSha256,
+    identitySha256,
+    recipeHash: veyraRecipe.hash,
+    sourceChecksumSha256: sourceArchiveSha256,
+    compilerVersion,
+    containerImage: manifest.compiler.containerImage,
+  };
+  veyraCanonical = {
+    width: canonicalWidth,
+    height: canonicalHeight,
+    rawHashes: global.rawHashes,
+    identitySha256,
+    heightArtifact: {
+      path: heightArtifact.path,
+      checksumSha256: heightArtifact.checksumSha256,
+      quantizationMeters,
+      byteOrder: 'little-endian',
+    },
+  };
   manifest.sources = [{
     id: 'natural-earth-ii-3.2.0',
     url: 'https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip',
@@ -202,19 +291,25 @@ if (writeGlobal) {
     license: 'Public-Domain',
     licenseUrl: 'https://www.naturalearthdata.com/about/terms-of-use/',
     attribution: 'Made with Natural Earth; modified by Perilune',
-    checksumSha256: '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919',
+    checksumSha256: sourceArchiveSha256,
     localPath: 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.zip',
     authoringOnly: true,
     sourceDimensions: [16200, 8100],
     transformations: ['body-fixed reprojection', 'deterministic geographic warp and recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'Lanczos3 tier resampling', 'BasisLZ and UASTC KTX2 encoding'],
     bodies: ['veyra'], channels: ['albedo'],
   }];
+  manifest.canonicalArtifacts = [heightArtifact];
+  manifest.budgets.rendererBaseGpuBytes = {
+    low: 64 * 1024 * 1024,
+    medium: 96 * 1024 * 1024,
+    high: 128 * 1024 * 1024,
+  };
   manifest.packs = global.packs;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 const output = `${JSON.stringify({
   schemaVersion: 1,
-  compilerVersion: '2.0.0',
+  compilerVersion,
   fingerprint: { width: fingerprintWidth, height: fingerprintHeight, quantizationMeters, byteOrder: 'little-endian' },
   bodies,
   ...(veyraCanonical ? { veyraCanonical } : {}),
