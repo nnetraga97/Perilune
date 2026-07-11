@@ -71,7 +71,8 @@ export function probeRenderCaps(
       etc1: gl.getExtension('WEBGL_compressed_texture_etc1') !== null,
       s3tc: gl.getExtension('WEBGL_compressed_texture_s3tc') !== null,
       bptc: gl.getExtension('EXT_texture_compression_bptc') !== null,
-      pvrtc: gl.getExtension('WEBGL_compressed_texture_pvrtc') !== null,
+      pvrtc: gl.getExtension('WEBGL_compressed_texture_pvrtc') !== null
+        || gl.getExtension('WEBKIT_WEBGL_compressed_texture_pvrtc') !== null,
     },
     maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     maxAnisotropy: renderer.capabilities.getMaxAnisotropy(),

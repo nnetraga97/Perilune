@@ -104,6 +104,18 @@ describe('renderer capabilities', () => {
     expect(caps.drawingBufferSamples).toBe(2);
   });
 
+  it('detects WebKit-prefixed PVRTC support used by the KTX2 loader', () => {
+    const caps = probeRenderCaps(
+      fakeGl(
+        { precision: 23, rangeMin: 127, rangeMax: 127 },
+        ['WEBKIT_WEBGL_compressed_texture_pvrtc'],
+      ),
+      renderer(),
+    );
+
+    expect(caps.compressedTextures.pvrtc).toBe(true);
+  });
+
   it('provides the exact user-facing WebGL2 requirement message', () => {
     const error = new RenderCapabilityError('Perilune requires WebGL2');
 
