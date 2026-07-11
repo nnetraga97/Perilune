@@ -7,7 +7,7 @@
   "scripts": {
     "predev": "npm run sync:renderer-assets",
     "dev": "vite",
-    "prebuild": "npm run sync:renderer-assets",
+    "prebuild": "npm run validate:content && npm run sync:renderer-assets",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "serve": "vite preview --port 4173",

@@ -340,9 +340,29 @@ describe('planet content validator', () => {
     expect(existsSync(invalid.checkedManifestPath)).toBe(false);
   });
 
-  it('keeps build ordering current and rejects checked-artifact paths outside public planets', () => {
+  it('validates content before syncing renderer assets in the production build entry', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: { prebuild: string } };
-    expect(packageJson.scripts.prebuild).toBe('npm run sync:renderer-assets');
+    expect(packageJson.scripts.prebuild)
+      .toBe('npm run validate:content && npm run sync:renderer-assets');
+
+    const dir = mkdtempSync(join(tmpdir(), 'perilune-invalid-build-'));
+    const manifestPath = join(dir, 'manifest.json');
+    writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 999 }));
+    const result = spawnSync(
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
+      ['run', 'build'],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { ...process.env, PERILUNE_MANIFEST_PATH: manifestPath },
+      },
+    );
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/manifest schemaVersion must be 1/i);
+    expect(result.stdout).not.toMatch(/vite v\d/i);
+  });
+
+  it('rejects checked-artifact paths outside public planets', () => {
 
     const dir = mkdtempSync(join(tmpdir(), 'perilune-sync-'));
     const artifactPath = join(dir, 'checked.json');
