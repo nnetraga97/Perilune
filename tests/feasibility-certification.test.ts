@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessCertificationEligibility,
+  browserExecutableForMode,
   buildCertificationGates,
   expectedReferenceForTier,
 } from '../scripts/lib/feasibility-certification.mjs';
@@ -29,6 +30,8 @@ const host = {
 
 const browser = {
   userAgent: 'Mozilla/5.0 Chrome/138.0.0.0 Safari/537.36',
+  product: 'Chrome/138.0.7204.50',
+  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)',
   webglVendor: 'Apple',
 };
@@ -76,13 +79,17 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
     visitedRegimes: ['orbit', 'atmosphere', 'low-flight', 'surface'],
     journeys: [0, 1, 2].map(() => ({
       sampleCount: 100, validGpuSamples: 96, unavailableGpuSamples: 3, disjointGpuSamples: 1,
+      invalidGpuSamples: 0,
     })),
     summary: {
       fpsMedian: 60, frameP95Ms: 16.6, submissionP95Ms: 4, terrainP95Ms: 2,
       gpuP95Ms: 8, validGpuSamples: 288, unavailableGpuSamples: 9,
-      disjointGpuSamples: 3, journeyCount: 3,
+      disjointGpuSamples: 3, invalidGpuSamples: 0, journeyCount: 3,
     },
-    gpuTimer: { supported: true, pending: 0, saturatedBegins: 0 },
+    gpuTimer: {
+      supported: true, pending: 0, saturatedBegins: 0,
+      validSamples: 288, disjointSamples: 3, invalidSamples: 0,
+    },
     telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 },
   };
 }
@@ -105,6 +112,16 @@ describe('feasibility certification integrity', () => {
     expect(expectedReferenceForTier('low')).toBe('m3-max-30c');
   });
 
+  it('requires the installed stable Google Chrome executable for reference mode', () => {
+    const stable = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    expect(browserExecutableForMode('reference', undefined, (path) => path === stable)).toBe(stable);
+    expect(() => browserExecutableForMode('reference', '/tmp/playwright/chrome', () => false))
+      .toThrow(/stable Google Chrome/);
+    expect(browserExecutableForMode('smoke', '/tmp/playwright/chrome', () => false))
+      .toBe('/tmp/playwright/chrome');
+    expect(browserExecutableForMode('smoke', undefined, () => false)).toBeUndefined();
+  });
+
   it('accepts a complete observed full-duration M3 Max record', () => {
     expect(assessCertificationEligibility(input())).toEqual({ eligible: true, reasons: [] });
   });
@@ -123,6 +140,8 @@ describe('feasibility certification integrity', () => {
     expectReason({ browser: { ...browser, webglRenderer: 'ANGLE (Google, Vulkan SwiftShader)' } }, 'SwiftShader is not certifying');
     expectReason({ browser: { ...browser, webglRenderer: 'ANGLE Metal Renderer: Apple M2 Max' } }, 'WebGL renderer must identify Apple M3 Max');
     expectReason({ browser: { ...browser, webglVendor: '' } }, 'WebGL vendor is required');
+    expectReason({ browser: { ...browser, product: 'Chromium/138.0.0.0' } }, 'stable Google Chrome product is required');
+    expectReason({ browser: { ...browser, executablePath: '/tmp/playwright/chrome' } }, 'stable Google Chrome executable is required');
   });
 
   it('rejects mode, tier, stage, protocol, duration, and drawing-buffer mismatches', () => {
@@ -146,7 +165,12 @@ describe('feasibility certification integrity', () => {
 
   it('rejects weak transition overlap and runtime errors', () => {
     expectReason({ state: { ...state(), telemetry: { transitionMode: 'production-clock', transitionOverlapMs: 900_000 } } }, 'transition mode must be forced-combined-fixture');
-    expectReason({ state: { ...state(), telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 899_999 } } }, 'transition overlap must cover at least 900000 ms');
+    expect(assessCertificationEligibility(input({
+      state: { ...state(), telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 - 1000 / 60 } },
+    }))).toMatchObject({ eligible: true });
+    expectReason({
+      state: { ...state(), telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 - 1000 / 60 - 0.001 } },
+    }, 'transition overlap must cover the 900000 ms journey window');
     expectReason({ runtimeErrors: ['shader failed'] }, 'runtime errors must be zero');
   });
 
@@ -157,6 +181,20 @@ describe('feasibility certification integrity', () => {
     const badJourneys = state().journeys.map((journey) => ({ ...journey, validGpuSamples: 94, unavailableGpuSamples: 5 }));
     expectReason({ state: { ...state(), journeys: badJourneys, summary: { ...state().summary, validGpuSamples: 282, unavailableGpuSamples: 15 } } }, 'valid GPU coverage must be at least 95%');
     expectReason({ state: { ...state(), summary: { ...state().summary, validGpuSamples: 287 } } }, 'summary GPU totals must equal journey totals');
+    const invalidJourneys = state().journeys.map((journey, index) => index === 0
+      ? { ...journey, validGpuSamples: 95, invalidGpuSamples: 1 }
+      : journey);
+    expectReason({
+      state: {
+        ...state(),
+        journeys: invalidJourneys,
+        summary: { ...state().summary, validGpuSamples: 287, invalidGpuSamples: 1 },
+        gpuTimer: { ...state().gpuTimer, validSamples: 287, invalidSamples: 1 },
+      },
+    }, 'GPU timer invalid sample count must be zero');
+    expectReason({
+      state: { ...state(), gpuTimer: { ...state().gpuTimer, validSamples: 287 } },
+    }, 'GPU timer totals must equal journey totals');
   });
 
   it('labels Low requested stage 0 as effective stage 4', () => {

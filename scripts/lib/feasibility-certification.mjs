@@ -4,6 +4,18 @@ export const FEASIBILITY_METADATA_KEYS = Object.freeze([
 
 const GROUPS = Object.freeze(['terrain', 'atmosphere', 'ocean', 'clouds', 'scatter', 'transition']);
 const REGIMES = Object.freeze(['orbit', 'atmosphere', 'low-flight', 'surface']);
+export const STABLE_CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const FRAME_BOUNDARY_TOLERANCE_MS = 1000 / 60;
+
+export function browserExecutableForMode(mode, requestedPath, pathExists) {
+  if (mode === 'reference') {
+    if (!pathExists(STABLE_CHROME_PATH)) {
+      throw new Error(`Reference profiling requires stable Google Chrome at ${STABLE_CHROME_PATH}`);
+    }
+    return STABLE_CHROME_PATH;
+  }
+  return requestedPath;
+}
 
 export function expectedReferenceForTier(tier) {
   if (tier !== 'medium' && tier !== 'low') throw new Error(`Unknown feasibility tier ${tier}`);
@@ -81,6 +93,8 @@ export function assessCertificationEligibility(input) {
   reject(!vendor, 'WebGL vendor is required');
   reject(/SwiftShader/i.test(renderer), 'SwiftShader is not certifying');
   reject(Boolean(renderer) && !/Apple M3 Max/i.test(renderer), 'WebGL renderer must identify Apple M3 Max');
+  reject(!/^Chrome\//.test(browser?.product ?? ''), 'stable Google Chrome product is required');
+  reject(browser?.executablePath !== STABLE_CHROME_PATH, 'stable Google Chrome executable is required');
 
   const canonical = canonicalMetadata(host, browser);
   for (const key of FEASIBILITY_METADATA_KEYS) {
@@ -107,6 +121,7 @@ export function assessCertificationEligibility(input) {
     'GPU timer must be supported');
   reject(state?.gpuTimer?.pending !== 0, 'GPU timer pending count must be zero');
   reject(state?.gpuTimer?.saturatedBegins !== 0, 'GPU timer saturated count must be zero');
+  reject(state?.gpuTimer?.invalidSamples !== 0, 'GPU timer invalid sample count must be zero');
 
   const journeys = state?.journeys ?? [];
   reject(journeys.length !== 3 || journeys.some((journey) => !(journey?.sampleCount > 0)),
@@ -121,22 +136,28 @@ export function assessCertificationEligibility(input) {
   reject(state?.scene?.terrainCoverageGaps !== 0, 'terrain coverage gaps must be zero');
   reject(state?.telemetry?.transitionMode !== 'forced-combined-fixture',
     'transition mode must be forced-combined-fixture');
-  reject(!(state?.telemetry?.transitionOverlapMs >= 900_000),
-    'transition overlap must cover at least 900000 ms');
+  reject(!(state?.telemetry?.transitionOverlapMs >= 900_000 - FRAME_BOUNDARY_TOLERANCE_MS),
+    'transition overlap must cover the 900000 ms journey window within one 60Hz frame');
   reject((runtimeErrors?.length ?? 0) !== 0, 'runtime errors must be zero');
 
   const totals = journeys.reduce((sum, journey) => ({
     valid: sum.valid + (journey.validGpuSamples ?? 0),
     unavailable: sum.unavailable + (journey.unavailableGpuSamples ?? 0),
     disjoint: sum.disjoint + (journey.disjointGpuSamples ?? 0),
+    invalid: sum.invalid + (journey.invalidGpuSamples ?? 0),
     samples: sum.samples + (journey.sampleCount ?? 0),
-  }), { valid: 0, unavailable: 0, disjoint: 0, samples: 0 });
-  reject(totals.valid + totals.unavailable + totals.disjoint !== totals.samples,
+  }), { valid: 0, unavailable: 0, disjoint: 0, invalid: 0, samples: 0 });
+  reject(totals.valid + totals.unavailable + totals.disjoint + totals.invalid !== totals.samples,
     'journey GPU totals must equal journey sample totals');
   reject(state?.summary?.validGpuSamples !== totals.valid ||
     state?.summary?.unavailableGpuSamples !== totals.unavailable ||
-    state?.summary?.disjointGpuSamples !== totals.disjoint,
+    state?.summary?.disjointGpuSamples !== totals.disjoint ||
+    state?.summary?.invalidGpuSamples !== totals.invalid,
   'summary GPU totals must equal journey totals');
+  reject(state?.gpuTimer?.validSamples !== totals.valid ||
+    state?.gpuTimer?.disjointSamples !== totals.disjoint ||
+    state?.gpuTimer?.invalidSamples !== totals.invalid,
+  'GPU timer totals must equal journey totals');
   reject(totals.samples === 0 || totals.valid / totals.samples < 0.95,
     'valid GPU coverage must be at least 95%');
 

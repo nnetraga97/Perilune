@@ -10,6 +10,12 @@ export interface CertificationGate {
 }
 
 export const FEASIBILITY_METADATA_KEYS: readonly string[];
+export const STABLE_CHROME_PATH: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+export function browserExecutableForMode(
+  mode: string,
+  requestedPath: string | undefined,
+  pathExists: (path: string) => boolean,
+): string | undefined;
 export function expectedReferenceForTier(tier: FeasibilityTier): 'm3-max-30c';
 export function effectiveStageFor(tier: FeasibilityTier, requestedStage: number): number;
 export function assessCertificationEligibility(input: {

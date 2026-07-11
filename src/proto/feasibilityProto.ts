@@ -201,6 +201,7 @@ export async function runFeasibilityProto(): Promise<void> {
   const journeySamples: MutableSample[][] = [[], [], []];
   const sampleByGpuLabel = new Map<string, { sample: MutableSample; journeyIndex: number }>();
   const journeyDisjointSamples = [0, 0, 0];
+  const journeyInvalidSamples = [0, 0, 0];
   const visitedRegimes = new Set<CameraRegime>();
   let journeySummaries: JourneySummary[] = [];
   let summary: ReferenceRunSummary | null = null;
@@ -370,7 +371,9 @@ export async function runFeasibilityProto(): Promise<void> {
     triangles = renderer.info.render.triangles;
     maxDrawCalls = Math.max(maxDrawCalls, drawCalls);
     maxTriangles = Math.max(maxTriangles, triangles);
-    if (fixtureStats.profilingGroups.transition) transitionOverlapMs += frameMs;
+    if (phase === 'journey' && fixtureStats.profilingGroups.transition) {
+      transitionOverlapMs += frameMs;
+    }
     if (phase === 'journey') gpuTimer.end();
     perf.endRender(submissionStart);
     perf.setExtra('scatter', fixtureStats.visualScatterCount);
@@ -392,6 +395,9 @@ export async function runFeasibilityProto(): Promise<void> {
       if (issued && timing.status === 'disjoint') {
         journeyDisjointSamples[issued.journeyIndex]++;
       }
+      if (issued && timing.status === 'invalid') {
+        journeyInvalidSamples[issued.journeyIndex]++;
+      }
       sampleByGpuLabel.delete(timing.label);
     }
 
@@ -407,7 +413,10 @@ export async function runFeasibilityProto(): Promise<void> {
       sampleByGpuLabel.clear();
       journeySummaries = journeySamples.map((samples, index) => summarizeJourney(
         samples as FeasibilitySample[],
-        { disjointGpuSamples: journeyDisjointSamples[index] },
+        {
+          disjointGpuSamples: journeyDisjointSamples[index],
+          invalidGpuSamples: journeyInvalidSamples[index],
+        },
       ));
       summary = summarizeReferenceRun(journeySummaries);
       publish(elapsedSeconds);

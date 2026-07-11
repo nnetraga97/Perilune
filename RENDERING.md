@@ -46,7 +46,8 @@ introduce a second height authority.
 The combined profile intentionally forces transition overlap for the entire
 measurement window so its GPU cost participates in p95. Exported telemetry
 labels that mode explicitly and records overlap time, draw calls, and
-triangles; it does not represent the production transition clock.
+triangles; overlap time counts measured journey phases only and does not
+represent the production transition clock.
 
 Terrain, atmosphere, ocean, clouds, visual scatter, and transition overlap
 can each be disabled independently for profiling. Physical proxies remain

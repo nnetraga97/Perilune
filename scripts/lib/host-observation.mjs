@@ -14,6 +14,21 @@ function parseMemoryBytes(value) {
   return Math.round(Number(match[1]) * 1024 ** 3);
 }
 
+function parseActivePowerMode(output, powerSource) {
+  let activeSection = false;
+  for (const line of output.split(/\r?\n/)) {
+    const section = line.match(/^(Battery|AC) Power:\s*$/);
+    if (section) {
+      activeSection = `${section[1]} Power` === powerSource;
+      continue;
+    }
+    if (!activeSection) continue;
+    const mode = line.match(/^\s*powermode\s+(\d+)\s*$/);
+    if (mode) return Number(mode[1]);
+  }
+  return -1;
+}
+
 /**
  * Returns a strict allowlist of host facts. Raw command output is never
  * returned because system_profiler includes serial numbers and stable IDs.
@@ -28,7 +43,6 @@ export function observeSanitizedMacHost(runCommand = run) {
   const battery = runCommand('pmset', ['-g', 'batt']);
   const power = runCommand('pmset', ['-g', 'custom']);
   const sourceMatch = battery.match(/Now drawing from '([^']+)'/);
-  const modeMatch = power.match(/\bpowermode\s+(\d+)\b/);
   const coreValue = display.sppci_cores ?? display.spdisplays_gpu_cores ?? display.gpu_cores;
 
   return Object.freeze({
@@ -41,6 +55,6 @@ export function observeSanitizedMacHost(runCommand = run) {
     osVersion: runCommand('sw_vers', ['-productVersion']).trim(),
     osBuild: runCommand('sw_vers', ['-buildVersion']).trim(),
     powerSource: sourceMatch?.[1] ?? '',
-    powerMode: modeMatch ? Number(modeMatch[1]) : -1,
+    powerMode: parseActivePowerMode(power, sourceMatch?.[1] ?? ''),
   });
 }

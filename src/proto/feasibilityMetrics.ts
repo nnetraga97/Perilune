@@ -29,6 +29,7 @@ export interface JourneySummary {
   readonly validGpuSamples: number;
   readonly unavailableGpuSamples: number;
   readonly disjointGpuSamples: number;
+  readonly invalidGpuSamples: number;
   readonly sampleCount: number;
 }
 
@@ -42,6 +43,7 @@ export interface ReferenceRunSummary {
   readonly validGpuSamples: number;
   readonly unavailableGpuSamples: number;
   readonly disjointGpuSamples: number;
+  readonly invalidGpuSamples: number;
   readonly journeyCount: number;
 }
 
@@ -77,14 +79,19 @@ export function reductionStage(stage: number, tier: FeasibilityTier): Readonly<F
 
 export function summarizeJourney(
   samples: readonly FeasibilitySample[],
-  counts: { readonly disjointGpuSamples?: number } = {},
+  counts: {
+    readonly disjointGpuSamples?: number;
+    readonly invalidGpuSamples?: number;
+  } = {},
 ): Readonly<JourneySummary> {
   if (samples.length === 0) throw new Error('A feasibility journey requires at least one sample');
   const frame = samples.map((entry) => entry.frameMs);
   const gpu = samples.flatMap((entry) => entry.gpuMs === null ? [] : [entry.gpuMs]);
   const disjointGpuSamples = counts.disjointGpuSamples ?? 0;
+  const invalidGpuSamples = counts.invalidGpuSamples ?? 0;
   if (!Number.isInteger(disjointGpuSamples) || disjointGpuSamples < 0
-    || disjointGpuSamples > samples.length - gpu.length) {
+    || !Number.isInteger(invalidGpuSamples) || invalidGpuSamples < 0
+    || disjointGpuSamples + invalidGpuSamples > samples.length - gpu.length) {
     throw new Error(`Invalid disjoint GPU sample count ${disjointGpuSamples}`);
   }
   const frameMedianMs = percentile(frame, 0.5);
@@ -96,8 +103,9 @@ export function summarizeJourney(
     terrainP95Ms: percentile(samples.map((entry) => entry.terrainMs), 0.95),
     gpuP95Ms: gpu.length > 0 ? percentile(gpu, 0.95) : null,
     validGpuSamples: gpu.length,
-    unavailableGpuSamples: samples.length - gpu.length - disjointGpuSamples,
+    unavailableGpuSamples: samples.length - gpu.length - disjointGpuSamples - invalidGpuSamples,
     disjointGpuSamples,
+    invalidGpuSamples,
     sampleCount: samples.length,
   });
 }
@@ -118,6 +126,7 @@ export function summarizeReferenceRun(
     validGpuSamples: journeys.reduce((sum, run) => sum + run.validGpuSamples, 0),
     unavailableGpuSamples: journeys.reduce((sum, run) => sum + run.unavailableGpuSamples, 0),
     disjointGpuSamples: journeys.reduce((sum, run) => sum + run.disjointGpuSamples, 0),
+    invalidGpuSamples: journeys.reduce((sum, run) => sum + run.invalidGpuSamples, 0),
     journeyCount: journeys.length,
   });
 }

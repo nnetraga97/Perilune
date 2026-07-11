@@ -5,6 +5,7 @@ import { chromium } from '@playwright/test';
 import {
   FEASIBILITY_METADATA_KEYS,
   assessCertificationEligibility,
+  browserExecutableForMode,
   buildCertificationGates,
   expectedReferenceForTier,
 } from './lib/feasibility-certification.mjs';
@@ -65,13 +66,11 @@ async function waitForServer() {
   throw new Error('Timed out waiting for the preview server');
 }
 
-const browserPaths = [
+const executablePath = browserExecutableForMode(
+  mode,
   values.get('browser-path'),
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-].filter(Boolean);
-const executablePath = browserPaths.find((path) => existsSync(path));
+  existsSync,
+);
 let browser;
 let exitCode = 0;
 
@@ -99,11 +98,17 @@ try {
   const timeout = mode === 'reference' ? 1_000_000 : 60_000;
   await page.waitForFunction(() => window.__FEASIBILITY_DONE__ === true, undefined, { timeout });
   const state = await page.evaluate(() => window.__FEASIBILITY__);
+  const cdp = await context.newCDPSession(page);
+  const browserVersion = await cdp.send('Browser.getVersion');
   const browserIdentity = await page.evaluate(() => ({
     userAgent: navigator.userAgent,
     webglRenderer: window.__FEASIBILITY__?.caps.renderer ?? '',
     webglVendor: window.__FEASIBILITY__?.caps.vendor ?? '',
   }));
+  Object.assign(browserIdentity, {
+    product: browserVersion.product,
+    executablePath: executablePath ?? 'playwright-bundled-chromium',
+  });
   if (!state?.summary) throw new Error('Feasibility harness completed without a summary');
 
   const gates = buildCertificationGates(state, tier);

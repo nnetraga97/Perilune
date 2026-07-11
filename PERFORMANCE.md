@@ -111,9 +111,9 @@ The feasibility fixture deliberately keeps both transition meshes active for
 the combined run (`transitionMode: forced-combined-fixture`) so the overlap
 cost is present in every percentile rather than disappearing below p95. The
 record exports current and maximum draw calls/triangles plus accumulated
-overlap time. This forced duration is a profiling mode, not the production
-fade contract; the renderer platform must still enforce the specified
-0.35-second normal and 1.5-second maximum transition windows.
+measured-journey overlap time. This forced duration is a profiling mode, not
+the production fade contract; the renderer platform must still enforce the
+specified 0.35-second normal and 1.5-second maximum transition windows.
 
 Example certifying commands (supply values from the machine being tested):
 
@@ -124,7 +124,9 @@ npm run profile:feasibility -- --mode=reference --tier=low --reference=m3-max-30
 
 The supplied CLI strings must exactly match the sanitized host observation
 and the WebGL vendor/renderer captured by the headed browser; a label alone
-cannot substitute for observed evidence.
+cannot substitute for observed evidence. Reference mode requires the installed
+stable Google Chrome executable at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`;
+Playwright's bundled Chromium remains smoke-only.
 
 The script writes a JSON record under `artifacts/performance/`, exits nonzero
 for a failing eligible reference run, and labels any other hardware

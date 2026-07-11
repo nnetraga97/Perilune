@@ -37,6 +37,19 @@ describe('feasibility metrics', () => {
     expect(summary.disjointGpuSamples).toBe(1);
   });
 
+  it('reports invalid GPU timings separately from unavailable timings', () => {
+    const summary = summarizeJourney([
+      sample(16, 7), sample(17, null), sample(18, null), sample(19, null),
+    ], { disjointGpuSamples: 1, invalidGpuSamples: 1 });
+    expect(summary).toMatchObject({
+      validGpuSamples: 1,
+      unavailableGpuSamples: 1,
+      disjointGpuSamples: 1,
+      invalidGpuSamples: 1,
+      sampleCount: 4,
+    });
+  });
+
   it('aggregates the median of run medians and the worst run p95', () => {
     const runs = [
       summarizeJourney([sample(10), sample(12), sample(14)]),

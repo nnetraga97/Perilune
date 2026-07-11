@@ -43,6 +43,7 @@ interface FeasibilityState {
     validGpuSamples: number;
     unavailableGpuSamples: number;
     disjointGpuSamples: number;
+    invalidGpuSamples: number;
   }>;
   summary: null | {
     journeyCount: number;
@@ -51,6 +52,7 @@ interface FeasibilityState {
     validGpuSamples: number;
     unavailableGpuSamples: number;
     disjointGpuSamples: number;
+    invalidGpuSamples: number;
   };
   gpuTimer: {
     pending: number;
@@ -148,7 +150,7 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
     expect(journey.frameP95Ms).toBeGreaterThan(0);
     expect(journey.submissionP95Ms).toBeGreaterThanOrEqual(0);
     expect(journey.terrainP95Ms).toBeGreaterThanOrEqual(0);
-    expect(journey.validGpuSamples + journey.unavailableGpuSamples + journey.disjointGpuSamples)
+    expect(journey.validGpuSamples + journey.unavailableGpuSamples + journey.disjointGpuSamples + journey.invalidGpuSamples)
       .toBe(journey.sampleCount);
   }
   expect(result.summary).toMatchObject({ journeyCount: 3 });
@@ -160,14 +162,18 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
     .toBe(result.journeys.reduce((sum, journey) => sum + journey.unavailableGpuSamples, 0));
   expect(result.summary!.disjointGpuSamples)
     .toBe(result.journeys.reduce((sum, journey) => sum + journey.disjointGpuSamples, 0));
+  expect(result.summary!.invalidGpuSamples)
+    .toBe(result.journeys.reduce((sum, journey) => sum + journey.invalidGpuSamples, 0));
   expect(result.gpuTimer.pending).toBe(0);
   expect(result.gpuTimer.saturatedBegins).toBe(0);
+  expect(result.gpuTimer.invalidSamples).toBe(0);
   expect(result.scene.terrainCoverageGaps).toBe(0);
   expect(result.telemetry.drawCalls).toBeGreaterThan(0);
   expect(result.telemetry.triangles).toBeGreaterThan(0);
   expect(result.telemetry.maxDrawCalls).toBeGreaterThanOrEqual(result.telemetry.drawCalls);
   expect(result.telemetry.maxTriangles).toBeGreaterThanOrEqual(result.telemetry.triangles);
-  expect(result.telemetry.transitionOverlapMs).toBeGreaterThan(5_000);
+  expect(result.telemetry.transitionOverlapMs).toBeGreaterThan(8_900);
+  expect(result.telemetry.transitionOverlapMs).toBeLessThan(9_100);
   expect(result.telemetry.transitionMode).toBe('forced-combined-fixture');
   expect(result.telemetry.compressedDownloadBytes).toBe(0);
   const overlay = await page.evaluate(() => (
