@@ -2,6 +2,7 @@
  * Perilune entry point. Routes to prototype harnesses (`?proto=...`) or the
  * game shell.
  */
+import { RenderCapabilityError } from './render/context';
 
 const params = new URLSearchParams(location.search);
 const proto = params.get('proto');
@@ -32,5 +33,9 @@ async function boot(): Promise<void> {
 
 boot().catch((err) => {
   console.error('Boot failed:', err);
+  if (err instanceof RenderCapabilityError) {
+    setBoot(err.message, 0);
+    return;
+  }
   setBoot(`boot failed: ${err instanceof Error ? err.message : String(err)}`, 0);
 });
