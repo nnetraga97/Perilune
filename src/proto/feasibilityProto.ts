@@ -350,6 +350,9 @@ export async function runFeasibilityProto(): Promise<void> {
 
     if (phase === 'complete' && !complete) {
       complete = true;
+      for (const timing of gpuTimer.abandonPending()) {
+        sampleByGpuLabel.delete(timing.label);
+      }
       sampleByGpuLabel.clear();
       journeySummaries = journeySamples.map((samples, index) => summarizeJourney(
         samples as FeasibilitySample[],

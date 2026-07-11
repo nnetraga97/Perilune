@@ -13,7 +13,7 @@ interface TimerSlot {
 
 export type GpuTimingSample =
   | { readonly label: string; readonly status: 'valid'; readonly milliseconds: number }
-  | { readonly label: string; readonly status: 'disjoint' | 'invalid' };
+  | { readonly label: string; readonly status: 'disjoint' | 'invalid' | 'unavailable' };
 
 export interface GpuTimerSnapshot {
   readonly supported: boolean;
@@ -145,6 +145,21 @@ export class GpuTimerRing {
       slot.label = '';
     }
     return completed;
+  }
+
+  abandonPending(): GpuTimingSample[] {
+    if (this.disposed) throw new Error('GPU timer ring is disposed');
+    const abandoned = this.slots
+      .filter((slot) => slot.pending)
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((slot) => ({ label: slot.label, status: 'unavailable' as const }));
+    for (const slot of this.slots) {
+      if (!slot.pending) continue;
+      slot.pending = false;
+      slot.discardAsDisjoint = false;
+      slot.label = '';
+    }
+    return abandoned;
   }
 
   snapshot(): Readonly<GpuTimerSnapshot> {

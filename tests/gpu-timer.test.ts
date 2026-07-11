@@ -165,6 +165,21 @@ describe('GpuTimerRing', () => {
     expect(gl.disjointReads).toBe(1);
   });
 
+  it('abandons unavailable queries with labels and leaves their slots reusable', () => {
+    const gl = new FakeWebGl2();
+    const ring = timer(gl);
+    ring.begin('unfinished-frame');
+    ring.end();
+    expect(ring.poll()).toEqual([]);
+
+    expect(ring.abandonPending()).toEqual([
+      { label: 'unfinished-frame', status: 'unavailable' },
+    ]);
+    expect(ring.snapshot().pending).toBe(0);
+    expect(ring.begin('replacement-frame')).toBe(true);
+    ring.end();
+  });
+
   it('rejects rings smaller than the production-safe minimum', () => {
     const gl = new FakeWebGl2();
     expect(() => timer(gl, 5)).toThrow(/at least 6/i);
