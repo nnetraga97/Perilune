@@ -67,7 +67,7 @@ describe('save system', () => {
     game.addAlarm(1234, 'Window: Rusk', 'transfer');
 
     const saved = serializeGame(game, 'alarm');
-    expect(saved.saveVersion).toBe(3);
+    expect(saved.saveVersion).toBe(SAVE_VERSION);
     expect(restoreGame(saved).alarms[0]).toMatchObject({
       time: 1234,
       label: 'Window: Rusk',

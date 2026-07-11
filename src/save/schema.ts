@@ -15,13 +15,22 @@ import type { Craft, Stage, PartInstance } from '../sim/vessel';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface SavedAlarm {
   id: string;
   time: number;
   label: string;
   kind: AlarmKind;
+}
+
+export interface SavedSurfacePose {
+  bodyId: string;
+  recipeHash: string;
+  scatterRecipeHash: string;
+  directionBF: Vec3Like;
+  attitudeBF: QuatLike;
+  contactOffset: number;
 }
 
 export interface SavedPart {
@@ -76,6 +85,8 @@ export interface SavedVessel {
   } | null;
   railsLandedPos: Vec3Like | null;
   railsLandedAtt: QuatLike | null;
+  /** Body-fixed landed pose and terrain compatibility contract (v4). */
+  surfacePose: SavedSurfacePose | null;
 }
 
 export interface SaveGame {
@@ -120,6 +131,18 @@ export function validateSave(raw: unknown): raw is SaveGame {
       if (!p.position || !Number.isFinite(p.position.x)) return false;
     }
     if (!v.pos || !Number.isFinite(v.pos.x) || !Number.isFinite(v.vel?.x ?? NaN)) return false;
+    if ((s.saveVersion ?? 0) >= 4) {
+      if (v.surfacePose !== null && typeof v.surfacePose !== 'object') return false;
+      if (v.surfacePose) {
+        const pose = v.surfacePose;
+        if (pose.bodyId !== v.bodyId) return false;
+        if (!/^[a-f0-9]{32}$/.test(pose.recipeHash)) return false;
+        if (!/^[a-f0-9]{32}$/.test(pose.scatterRecipeHash)) return false;
+        if (!pose.directionBF || !Number.isFinite(pose.directionBF.x)) return false;
+        if (!pose.attitudeBF || !Number.isFinite(pose.attitudeBF.w)) return false;
+        if (!Number.isFinite(pose.contactOffset)) return false;
+      }
+    }
   }
   return true;
 }
@@ -138,6 +161,13 @@ export function migrateSave(raw: SaveGame): SaveGame {
   }
   if (save.saveVersion === 2) {
     save = { ...save, saveVersion: 3, alarms: [] };
+  }
+  if (save.saveVersion === 3) {
+    save = {
+      ...save,
+      saveVersion: 4,
+      vessels: save.vessels.map((vessel) => ({ ...vessel, surfacePose: null })),
+    };
   }
   if (save.saveVersion !== SAVE_VERSION) {
     throw new Error(`No migration path from save version ${save.saveVersion}.`);
