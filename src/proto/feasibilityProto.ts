@@ -351,6 +351,10 @@ export async function runFeasibilityProto(): Promise<void> {
     if (phase === 'complete' && !complete) {
       complete = true;
       for (const timing of gpuTimer.abandonPending()) {
+        const issued = sampleByGpuLabel.get(timing.label);
+        if (issued && timing.status === 'disjoint') {
+          journeyDisjointSamples[issued.journeyIndex]++;
+        }
         sampleByGpuLabel.delete(timing.label);
       }
       sampleByGpuLabel.clear();

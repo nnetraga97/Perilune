@@ -180,6 +180,23 @@ describe('GpuTimerRing', () => {
     ring.end();
   });
 
+  it('preserves disjoint status and counting when a marked query is abandoned', () => {
+    const gl = new FakeWebGl2();
+    const ring = timer(gl);
+    ring.begin('unfinished-disjoint-frame');
+    ring.end();
+    gl.disjoint = true;
+
+    expect(ring.poll()).toEqual([]);
+    expect(ring.snapshot()).toMatchObject({ pending: 1, disjointSamples: 0 });
+    expect(ring.abandonPending()).toEqual([
+      { label: 'unfinished-disjoint-frame', status: 'disjoint' },
+    ]);
+    expect(ring.snapshot()).toMatchObject({ pending: 0, disjointSamples: 1 });
+    expect(ring.abandonPending()).toEqual([]);
+    expect(ring.snapshot().disjointSamples).toBe(1);
+  });
+
   it('rejects rings smaller than the production-safe minimum', () => {
     const gl = new FakeWebGl2();
     expect(() => timer(gl, 5)).toThrow(/at least 6/i);

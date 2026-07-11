@@ -149,12 +149,17 @@ export class GpuTimerRing {
 
   abandonPending(): GpuTimingSample[] {
     if (this.disposed) throw new Error('GPU timer ring is disposed');
-    const abandoned = this.slots
+    const pending = this.slots
       .filter((slot) => slot.pending)
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((slot) => ({ label: slot.label, status: 'unavailable' as const }));
-    for (const slot of this.slots) {
-      if (!slot.pending) continue;
+      .sort((a, b) => a.sequence - b.sequence);
+    const abandoned: GpuTimingSample[] = [];
+    for (const slot of pending) {
+      if (slot.discardAsDisjoint) {
+        abandoned.push({ label: slot.label, status: 'disjoint' });
+        this.disjointSamples++;
+      } else {
+        abandoned.push({ label: slot.label, status: 'unavailable' });
+      }
       slot.pending = false;
       slot.discardAsDisjoint = false;
       slot.label = '';
