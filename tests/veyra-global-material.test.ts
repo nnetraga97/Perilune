@@ -64,6 +64,8 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.vertexShader).toContain('attribute vec3 bodyDirection');
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('decodeGlobalOctNormal');
+    expect(shader.fragmentShader).toContain('diffuseColor.rgb *= authoredAlbedo.rgb;');
+    expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);
   });
 
