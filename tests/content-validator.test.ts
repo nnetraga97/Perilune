@@ -327,7 +327,7 @@ describe('planet content validator', () => {
 
   it('keeps build ordering current and rejects checked-artifact paths outside public planets', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: { prebuild: string } };
-    expect(packageJson.scripts.prebuild).toMatch(/^npm run validate:content && npm run sync:renderer-assets/);
+    expect(packageJson.scripts.prebuild).toBe('npm run sync:renderer-assets');
 
     const dir = mkdtempSync(join(tmpdir(), 'perilune-sync-'));
     const artifactPath = join(dir, 'checked.json');

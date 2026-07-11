@@ -14,9 +14,10 @@ describe('body visual assignments', () => {
     expect(BODY_VISUALS.auren).toMatchObject({ renderer: 'star', targetArchetype: 'star' });
 
     for (const [bodyId, visual] of Object.entries(BODY_VISUALS)) {
-      if (bodyId !== 'auren') expect(visual.renderer).toBe('legacy');
+      if (bodyId !== 'auren' && bodyId !== 'veyra') expect(visual.renderer).toBe('legacy');
     }
 
+    expect(BODY_VISUALS.veyra.renderer).toBe('terrestrial');
     expect(BODY_VISUALS.veyra.targetArchetype).toBe('terrestrial');
     expect(BODY_VISUALS.palla.targetArchetype).toBe('airless');
     expect(BODY_VISUALS.tyran.targetArchetype).toBe('gas-giant');
@@ -57,7 +58,7 @@ describe('bodyMaterialDescriptor', () => {
     expect(gas).toMatchObject({ bodyId: 'tyran', renderer: 'legacy', identity: 'gas' });
     expect(solid).toMatchObject({
       bodyId: 'veyra',
-      renderer: 'legacy',
+      renderer: 'terrestrial',
       identity: 'solid',
       albedo: {
         low: '#4a7c46',

@@ -31,7 +31,7 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
   ashen: { renderer: 'legacy', targetArchetype: 'airless', materialId: 'ashen-airless' },
   vess: { renderer: 'legacy', targetArchetype: 'terrestrial', materialId: 'vess-terrestrial' },
   veyra: {
-    renderer: 'legacy',
+    renderer: 'terrestrial',
     targetArchetype: 'terrestrial',
     materialId: 'veyra-terrestrial',
     atmosphereVisual: { wavelengthTint: [0.42, 0.68, 1], strength: 1 },

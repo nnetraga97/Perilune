@@ -6,6 +6,7 @@ import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { StarBodyRenderer } from '../src/render/starBodyRenderer';
+import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
@@ -35,6 +36,8 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
     cameraSunDirection: { x: -1, y: 0, z: 0 },
     bodySunDirection: { x: -1, y: 0, z: 0 },
     time: 0,
+    deltaSeconds: 1 / 60,
+    framePressure: false,
     altitude: 1000,
     allowFlightTerrain: true,
     ...overrides,
@@ -70,6 +73,7 @@ describe('body renderer adapters', () => {
 
     expect(createBodyRendererCandidate({ body: star, caps, quality: 'medium' })).toBeInstanceOf(StarBodyRenderer);
     expect(createBodyRendererCandidate({ body: gas, caps, quality: 'medium' })).toBeInstanceOf(LegacyBodyRenderer);
+    expect(createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' })).toBeInstanceOf(TerrestrialBodyRenderer);
   });
 
   test('legacy solid renderer owns compact, terrain, and cloud visuals without amplitude selection', () => {

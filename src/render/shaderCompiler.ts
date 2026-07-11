@@ -25,6 +25,11 @@ async function compileIsolated(options: CompileRendererCandidateOptions): Promis
   const previousParent = options.root.parent;
   const previousIndex = previousParent?.children.indexOf(options.root) ?? -1;
   const previousVisible = options.root.visible;
+  const descendantVisibility = new Map<THREE.Object3D, boolean>();
+  options.root.traverse((object) => {
+    descendantVisibility.set(object, object.visible);
+    object.visible = true;
+  });
   stagingScene.add(options.root);
   options.root.visible = true;
   const previous = options.renderer.debug.onShaderError;
@@ -49,6 +54,7 @@ async function compileIsolated(options: CompileRendererCandidateOptions): Promis
   } finally {
     options.renderer.debug.onShaderError = previous;
     stagingScene.remove(options.root);
+    for (const [object, visible] of descendantVisibility) object.visible = visible;
     options.root.visible = previousVisible;
     if (previousParent) {
       previousParent.add(options.root);

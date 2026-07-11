@@ -21,12 +21,15 @@ export function installCoverageDither(
     const predicate = role === 'compact'
       ? 'if (coverageNoise < uCoverageProgress) discard;'
       : 'if (coverageNoise >= uCoverageProgress) discard;';
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <clipping_planes_fragment>',
-      `#include <clipping_planes_fragment>
+    const dither = `
 float coverageNoise = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));
-${predicate}`,
-    );
+${predicate}`;
+    shader.fragmentShader = shader.fragmentShader.includes('#include <clipping_planes_fragment>')
+      ? shader.fragmentShader.replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>${dither}`,
+      )
+      : shader.fragmentShader.replace('void main() {', `void main() {${dither}`);
   };
   material.customProgramCacheKey = () => `${previousKey()}:coverage-dither:${role}`;
   material.needsUpdate = true;

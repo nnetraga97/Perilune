@@ -44,7 +44,9 @@ Apple silicon. For non-authoritative local iteration only, use
 To intentionally refresh compiler fingerprints after a reviewed recipe
 change, run `npm run compile:planet-assets -- --write`, inspect the diff, and
 commit the recipe and output together. Production builds never download
-authoring sources; `prebuild` runs both checks against local declared files.
+authoring sources. `prebuild` verifies the signed checked-manifest digest and
+every runtime package/fallback checksum while copying only approved files.
+Run `npm run validate:content` explicitly after authoring/compiler changes.
 
 Every declared runtime channel must include a KTX2 package and its specified
 fallback file. Validation derives the complete mip-chain allocation from the

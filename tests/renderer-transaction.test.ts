@@ -600,6 +600,7 @@ describe('shader compile boundary and failure accounting', () => {
         expect(scene.parent).toBeNull();
         expect(scene.children).toHaveLength(1);
         expect(root.visible).toBe(true);
+        expect(root.children[0].visible).toBe(true);
         let materials = 0;
         root.traverse((object) => { if (object instanceof THREE.Mesh) materials++; });
         expect(materials).toBe(1);
@@ -610,7 +611,9 @@ describe('shader compile boundary and failure accounting', () => {
     const before = new THREE.Group();
     const root = new THREE.Group();
     root.visible = false;
-    root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+    const hiddenChild = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    hiddenChild.visible = false;
+    root.add(hiddenChild);
     originalParent.add(before, root);
 
     await expect(compileRendererCandidate({
@@ -624,6 +627,7 @@ describe('shader compile boundary and failure accounting', () => {
 
     expect(renderer.debug.onShaderError).toBe(previous);
     expect(root.visible).toBe(false);
+    expect(hiddenChild.visible).toBe(false);
     expect(root.parent).toBe(originalParent);
     expect(originalParent.children).toEqual([before, root]);
   });

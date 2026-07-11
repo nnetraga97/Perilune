@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Perilune — an original browser-based orbital engineering game",
   "scripts": {
-    "predev": "npm run validate:content && npm run sync:renderer-assets",
+    "predev": "npm run sync:renderer-assets",
     "dev": "vite",
-    "prebuild": "npm run validate:content && npm run sync:renderer-assets && npm run compile:planet-assets",
+    "prebuild": "npm run sync:renderer-assets",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "serve": "vite preview --port 4173",

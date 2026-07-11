@@ -13,9 +13,9 @@
 import * as THREE from 'three';
 import { geometryByteLength } from './resourceAccounting';
 import { Vec3 } from '../core/vec3';
-import type { Quat } from '../core/quat';
 import type { Body } from '../sim/universe';
 import { terrainHeight } from '../sim/terrain';
+import type { QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 
 interface FaceBasis {
   n: Vec3;
@@ -57,6 +57,21 @@ const _dir = new Vec3();
 const _e = new Vec3();
 const _w = new Vec3();
 const _rotatedOrigin = new Vec3();
+
+function rotateCoordinates(
+  q: QuaternionCoordinates,
+  value: VectorCoordinates,
+  out: Vec3,
+): Vec3 {
+  const tx = 2 * (q.y * value.z - q.z * value.y);
+  const ty = 2 * (q.z * value.x - q.x * value.z);
+  const tz = 2 * (q.x * value.y - q.y * value.x);
+  return out.set(
+    value.x + q.w * tx + (q.y * tz - q.z * ty),
+    value.y + q.w * ty + (q.z * tx - q.x * tz),
+    value.z + q.w * tz + (q.x * ty - q.y * tx),
+  );
+}
 
 /** Map cube-face UV (with tan warp for even angular spacing) to unit sphere dir. */
 function faceToDir(face: FaceBasis, u: number, v: number, out: Vec3): Vec3 {
@@ -254,9 +269,9 @@ export class PlanetRenderer {
    *        coordinates (f64 subtraction happens before this call)
    */
   update(
-    camBodyFixed: Readonly<Vec3>,
-    orientation: Readonly<Quat>,
-    originWorld: Readonly<Vec3>,
+    camBodyFixed: VectorCoordinates,
+    orientation: QuaternionCoordinates,
+    originWorld: VectorCoordinates,
   ): void {
     this.frame++;
     this.buildsThisUpdate = 0;
@@ -268,8 +283,8 @@ export class PlanetRenderer {
     this.stats.scheduleMs = 0;
     this.stats.installMs = 0;
 
-    const camDist = camBodyFixed.length();
-    const camDir = _dir.copy(camBodyFixed).normalize();
+    const camDist = Math.hypot(camBodyFixed.x, camBodyFixed.y, camBodyFixed.z);
+    const camDir = _dir.set(camBodyFixed.x, camBodyFixed.y, camBodyFixed.z).normalize();
     // Conservative horizon cull: chunks whose center is more than
     // horizonAngle + margin away from the camera direction can't be seen.
     const horizonCos =
@@ -297,7 +312,7 @@ export class PlanetRenderer {
       chunk.mesh.visible = inUse && this.terrainVisible;
       if (inUse) {
         chunk.lastUsed = this.frame;
-        orientation.rotate(chunk.origin, _rotatedOrigin);
+        rotateCoordinates(orientation, chunk.origin, _rotatedOrigin);
         chunk.mesh.position.set(
           _rotatedOrigin.x + originWorld.x,
           _rotatedOrigin.y + originWorld.y,
@@ -333,7 +348,7 @@ export class PlanetRenderer {
 
   private selectNode(
     node: QuadNode,
-    cam: Readonly<Vec3>,
+    cam: VectorCoordinates,
     camDir: Readonly<Vec3>,
     horizonCos: number,
     wanted: Set<string>,
@@ -353,7 +368,7 @@ export class PlanetRenderer {
     const hasFallback = this.chunks.has(key);
 
     const center = _p.copy(node.centerDir).scale(this.body.radius);
-    const dist = Math.max(1, center.distanceTo(cam) - node.worldSize * 0.5);
+    const dist = Math.max(1, Math.hypot(center.x - cam.x, center.y - cam.y, center.z - cam.z) - node.worldSize * 0.5);
     if (node.depth < this.maxDepth && dist < node.worldSize * this.quality.splitFactor) {
       const half = node.size / 2;
       const children: QuadNode[] = [];

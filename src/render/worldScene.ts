@@ -480,6 +480,8 @@ export class WorldScene {
         cameraSunDirection: _sunDir,
         bodySunDirection: _bodySunDir,
         time: t,
+        deltaSeconds: dt,
+        framePressure: dt > 1 / 45,
         altitude: dist - b.radius,
         allowFlightTerrain: b.id === body.id && b.def.surfaceKind === 'solid',
       };

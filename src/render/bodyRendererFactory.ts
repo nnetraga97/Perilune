@@ -6,6 +6,7 @@ import type { RenderCaps } from './context';
 import type { BodyRenderer, QualityTier } from './bodyRenderer';
 import { LegacyBodyRenderer, type LegacyBodyRendererDependencies } from './legacyBodyRenderer';
 import { StarBodyRenderer } from './starBodyRenderer';
+import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
 
 export interface BodyRendererCandidateOptions {
   readonly body: Body;
@@ -23,6 +24,8 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
       return new StarBodyRenderer(options.body, descriptor, options.caps, options.quality);
     case 'legacy':
       return new LegacyBodyRenderer(options.body, descriptor, options.caps, options.quality, options.legacyDependencies);
+    case 'terrestrial':
+      return new TerrestrialBodyRenderer(options.body, descriptor, options.caps, options.quality);
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);
   }

@@ -24,6 +24,10 @@ export interface BodyRenderFrame {
   readonly cameraSunDirection: VectorCoordinates;
   readonly bodySunDirection: VectorCoordinates;
   readonly time: number;
+  /** Wall-clock frame delta; never simulation-warp time. */
+  readonly deltaSeconds: number;
+  /** True when recent frame time calls for the shortened visual transition. */
+  readonly framePressure: boolean;
   readonly altitude: number;
   /** WorldScene grants this only to the current sphere-of-influence body. */
   readonly allowFlightTerrain: boolean;
