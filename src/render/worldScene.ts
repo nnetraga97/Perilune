@@ -292,9 +292,13 @@ export class WorldScene {
     });
   }
 
-  private retryFlightPromotion(bodyId: string): void {
+  /** Explicit recovery hook for context restoration or a user-requested visual retry. */
+  retryActiveBodyRenderer(): boolean {
+    const bodyId = this.flightTerrainBodyId;
+    if (!bodyId || !this.flightPromotionFailed.has(bodyId)) return false;
     this.flightPromotionFailed.delete(bodyId);
     this.promoteFlightRenderer(bodyId);
+    return true;
   }
 
   visualFor(gv: GameVessel): VesselVisual {

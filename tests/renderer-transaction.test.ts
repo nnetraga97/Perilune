@@ -296,12 +296,15 @@ describe('transactional body renderer replacement', () => {
     (world as unknown as { setFlightTerrainOwner(bodyId: string): void }).setFlightTerrainOwner('cinder');
     await Promise.resolve();
     expect(promotionAttempts).toBe(1);
-    (world as unknown as { retryFlightPromotion(bodyId: string): void }).retryFlightPromotion('cinder');
+    expect(world.retryActiveBodyRenderer()).toBe(true);
+    expect(world.retryActiveBodyRenderer()).toBe(false);
     await vi.waitFor(() => expect(ledger.residentFlightBodyIds()).toEqual(['cinder']));
     expect(a.manager.current()).toBeNull();
     expect(b.made).toHaveLength(3);
     expect(b.manager.current()).toBe(b.made[2].renderer);
     expect(promotionAttempts).toBe(2);
+    Object.assign(world as unknown as Record<string, unknown>, { flightTerrainBodyId: null });
+    expect(world.retryActiveBodyRenderer()).toBe(false);
   });
 
   test('dispose invalidates an in-flight transaction before it can commit', async () => {
