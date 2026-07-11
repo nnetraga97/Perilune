@@ -6,9 +6,38 @@
  * sides can never disagree.
  */
 import { Vec3 } from '../core/vec3';
-import { fbm3, ridged3, noise3 } from '../core/noise';
 import type { Body } from './universe';
 import { inertialToBodyFixed } from './bodyOrientation';
+import { evaluateRecipeHeight, recipeForBody } from './terrainRecipe';
+
+export type SurfaceHeightResult =
+  | { kind: 'solid' | 'water'; height: number }
+  | { kind: 'none' };
+
+/** Raw land or seafloor height from the versioned recipe. */
+export function solidHeight(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
+  if (body.def.surfaceKind !== 'solid') return { kind: 'none' };
+  return { kind: 'solid', height: evaluateRecipeHeight(recipeForBody(body), dir) };
+}
+
+/** Water datum where the raw solid surface lies below an ocean. */
+export function waterSurfaceHeight(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
+  const solid = solidHeight(body, dir);
+  if (
+    solid.kind === 'solid' &&
+    body.def.terrain.oceanLevel > 0 &&
+    solid.height < 0
+  ) {
+    return { kind: 'water', height: 0 };
+  }
+  return { kind: 'none' };
+}
+
+/** Contact height selected from solid terrain or an existing water surface. */
+export function contactSurface(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
+  const water = waterSurfaceHeight(body, dir);
+  return water.kind === 'water' ? water : solidHeight(body, dir);
+}
 
 /**
  * Terrain height (m) above the body's reference sphere for a unit direction
@@ -16,43 +45,19 @@ import { inertialToBodyFixed } from './bodyOrientation';
  * datum (ocean floor on worlds with oceans).
  */
 export function terrainHeight(body: Body, dir: Readonly<Vec3>): number {
-  const t = body.def.terrain;
-  if (t.amplitude === 0) return 0; // gas giants / star
-  const f = t.frequency;
-  const s = t.seed;
-
-  // Continental base: low-frequency fBm.
-  const continents = fbm3(dir.x * f, dir.y * f, dir.z * f, s, Math.min(4, t.octaves));
-
-  // Mountain detail: ridged noise masked by continent height so ranges
-  // cluster on "land" rather than everywhere.
-  const detailF = f * 5;
-  const ridges = ridged3(dir.x * detailF, dir.y * detailF, dir.z * detailF, s + 7, Math.max(2, t.octaves - 3));
-  const mask = Math.max(0, continents + 0.35);
-
-  // Fine roughness so close-up ground isn't glassy.
-  const roughF = f * 40;
-  const rough = noise3(dir.x * roughF, dir.y * roughF, dir.z * roughF, s + 31) * 0.02;
-
-  let h = continents * 0.55 + ridges * mask * 0.6 + rough;
-
-  if (t.oceanLevel > 0) {
-    // Shift so `oceanLevel` fraction of the surface sits below 0.
-    h -= (t.oceanLevel - 0.5) * 1.1;
-  }
-  return h * t.amplitude;
+  const result = solidHeight(body, dir);
+  return result.kind === 'solid' ? result.height : 0;
 }
 
 /** Height clamped to sea level where the body has oceans (for landing/splash logic). */
 export function surfaceHeight(body: Body, dir: Readonly<Vec3>): number {
-  const h = terrainHeight(body, dir);
-  if (body.def.terrain.oceanLevel > 0 && h < 0) return 0;
-  return h;
+  const result = contactSurface(body, dir);
+  return result.kind === 'none' ? 0 : result.height;
 }
 
 /** True if the point is over ocean. */
 export function isOcean(body: Body, dir: Readonly<Vec3>): boolean {
-  return body.def.terrain.oceanLevel > 0 && terrainHeight(body, dir) < 0;
+  return waterSurfaceHeight(body, dir).kind === 'water';
 }
 
 const _dir = new Vec3();
@@ -63,5 +68,19 @@ const _dir = new Vec3();
  */
 export function groundRadiusInertial(body: Body, dirInertial: Readonly<Vec3>, t: number): number {
   inertialToBodyFixed(body, t, dirInertial, _dir).normalize();
-  return body.radius + surfaceHeight(body, _dir);
+  const surface = contactSurface(body, _dir);
+  if (surface.kind === 'none') throw new Error(`${body.name} has no contact surface`);
+  return body.radius + surface.height;
+}
+
+/** Raw solid radius without water clamping. */
+export function solidRadiusInertial(
+  body: Body,
+  dirInertial: Readonly<Vec3>,
+  t: number,
+): number {
+  inertialToBodyFixed(body, t, dirInertial, _dir).normalize();
+  const surface = solidHeight(body, _dir);
+  if (surface.kind !== 'solid') throw new Error(`${body.name} has no solid surface`);
+  return body.radius + surface.height;
 }

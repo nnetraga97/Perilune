@@ -44,6 +44,8 @@ export interface TerrainDef {
   colorOcean?: string;
 }
 
+export type SurfaceKind = 'solid' | 'gas' | 'star';
+
 export interface BodyDef {
   id: string;
   name: string;
@@ -56,6 +58,10 @@ export interface BodyDef {
   rotationPeriod: number;
   /** Axial tilt (rad). */
   axialTilt: number;
+  /** Physical surface model; never inferred from terrain amplitude. */
+  surfaceKind: SurfaceKind;
+  /** Immutable terrain-recipe schema version assigned by content. */
+  terrainRecipeVersion: number;
   atmosphere?: AtmosphereDef;
   terrain: TerrainDef;
   /** Orbit around parent (absent for the root star). */

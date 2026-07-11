@@ -110,7 +110,8 @@ export function terrainSkirtDepth(worldSize: number, gridRes: number): number {
 }
 
 export function renderedTerrainHeight(height: number, hasOcean: boolean): number {
-  return hasOcean ? Math.max(0, height) : height;
+  void hasOcean;
+  return height;
 }
 
 function countLodOverlaps(keys: ReadonlySet<string>): number {
@@ -172,7 +173,7 @@ export class PlanetRenderer {
       // the group each frame.
       const geo = new THREE.SphereGeometry(1, 96, 64);
       this.ocean = new THREE.Mesh(geo, this.oceanMaterial);
-      this.ocean.scale.setScalar(body.radius - 2);
+      this.ocean.scale.setScalar(body.radius);
       this.group.add(this.ocean);
     }
   }

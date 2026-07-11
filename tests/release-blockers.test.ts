@@ -151,7 +151,7 @@ describe('M2 release blockers', () => {
       .renderedTerrainHeight;
     expect(surfaceHeight).toBeTypeOf('function');
     if (!surfaceHeight) return;
-    expect(surfaceHeight(-500, true)).toBe(0);
+    expect(surfaceHeight(-500, true)).toBe(-500);
     expect(surfaceHeight(250, true)).toBe(250);
     expect(surfaceHeight(-500, false)).toBe(-500);
   });

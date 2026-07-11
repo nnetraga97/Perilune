@@ -18,7 +18,7 @@ import { inertialToBodyFixed } from './bodyOrientation';
  */
 export function oreConcentration(body: Body, dir: Readonly<Vec3>): number {
   const t = body.def.terrain;
-  if (t.amplitude === 0) return 0; // star / gas giants
+  if (body.def.surfaceKind !== 'solid') return 0;
   const f = 2.6;
   const s = t.seed + 101;
   const n = fbm3(dir.x * f, dir.y * f, dir.z * f, s, 4);
