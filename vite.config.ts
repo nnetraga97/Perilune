@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite';
+import { sites } from './build/sites-vite-plugin';
 
 export default defineConfig({
   base: './',
+  plugins: [sites()],
   build: {
     target: 'es2022',
     sourcemap: true,
