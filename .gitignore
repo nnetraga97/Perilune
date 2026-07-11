@@ -1,5 +1,6 @@
 node_modules/
 dist/
+public/basis/
 .vite/
 playwright-report/
 test-results/

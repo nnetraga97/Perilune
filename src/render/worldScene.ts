@@ -17,8 +17,10 @@ import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual 
 import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
-import type { BodyRenderer, QualityTier } from './bodyRenderer';
+import type { BodyRenderer, BodyRenderFrame, QualityTier } from './bodyRenderer';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
+import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
+import { compileRendererCandidate } from './shaderCompiler';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -45,6 +47,12 @@ export class WorldScene {
   private readonly ambient: THREE.AmbientLight;
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
+  private bodyRendererManagers = new Map<string, BodyRendererManager>();
+  private lastBodyFrames = new Map<string, BodyRenderFrame>();
+  private readonly rendererLedger = new RendererResourceLedger({
+    activeBodyGpuBytes: { low: 67_108_864, medium: 134_217_728, high: 268_435_456 },
+    transientPeakBytes: { low: 100_663_296, medium: 201_326_592, high: 402_653_184 },
+  });
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly launchSite: THREE.Group;
   private quality: QualityTier = 'medium';
@@ -110,11 +118,12 @@ export class WorldScene {
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
     if (tier === this.quality) return;
     this.quality = tier;
-    for (const renderer of this.bodyRenderers.values()) {
-      this.scene.remove(renderer.root);
-      renderer.dispose();
+    for (const [bodyId, manager] of this.bodyRendererManagers) {
+      void manager.replaceQuality(tier).then(() => {
+        const renderer = manager.current();
+        if (renderer) this.bodyRenderers.set(bodyId, renderer);
+      }).catch(() => undefined);
     }
-    this.bodyRenderers.clear();
   }
 
   planetStats(): { chunks: number; visible: number } {
@@ -128,25 +137,54 @@ export class WorldScene {
     return { chunks, visible };
   }
 
-  private rendererFor(body: Body): BodyRenderer {
-    let renderer = this.bodyRenderers.get(body.id);
-    if (!renderer) {
-      renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
-      this.bodyRenderers.set(body.id, renderer);
-      this.scene.add(renderer.root);
-    }
+  private rendererFor(body: Body): BodyRenderer | null {
+    const current = this.bodyRenderers.get(body.id);
+    if (current) return current;
+    if (this.bodyRendererManagers.has(body.id)) return null;
+    const manager = new BodyRendererManager({
+      scene: this.scene,
+      quality: this.quality,
+      createCandidate: (candidate, tier) => createBodyRendererCandidate({
+        body: candidate, caps: this.context.caps, quality: tier,
+      }),
+      loadAssets: async () => ({ gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined }),
+      compileCandidate: async (candidate) => compileRendererCandidate({
+        renderer: this.context.renderer,
+        camera: this.camera,
+        root: candidate.root,
+        body: candidate.bodyId,
+        channel: 'renderer',
+      }),
+      awaitCoverage: async (candidate) => {
+        const frame = this.lastBodyFrames.get(candidate.bodyId);
+        if (frame) candidate.update(frame);
+        if (!candidate.ready) throw new Error(`${candidate.bodyId} renderer coverage is not ready`);
+      },
+      ledger: this.rendererLedger,
+    });
+    this.bodyRendererManagers.set(body.id, manager);
+    const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
+    manager.adoptInitial(body, renderer, {
+      gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined,
+    });
+    this.bodyRenderers.set(body.id, renderer);
     return renderer;
   }
 
   private setFlightTerrainOwner(bodyId: string | null): void {
     const previousId = this.flightTerrainBodyId;
     if (previousId && previousId !== bodyId) {
+      const manager = this.bodyRendererManagers?.get(previousId);
+      if (manager) {
+        manager.dispose();
+        this.bodyRendererManagers.delete(previousId);
+      }
       const previous = this.bodyRenderers.get(previousId);
-      if (previous) {
+      if (previous && !manager) {
         this.scene.remove(previous.root);
         previous.dispose();
-        this.bodyRenderers.delete(previousId);
       }
+      this.bodyRenderers.delete(previousId);
     }
     this.flightTerrainBodyId = bodyId;
   }
@@ -253,8 +291,9 @@ export class WorldScene {
       _bodySunDir.copy(_starAbs).sub(_bodyAbs);
       if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
       const renderer = this.rendererFor(b);
+      if (!renderer) continue;
       renderer.root.visible = true;
-      renderer.update({
+      const frame: BodyRenderFrame = {
         cameraRelativeOrigin: _rel,
         cameraBodyFixed: _camBF,
         orientation: _bodyQ,
@@ -263,7 +302,17 @@ export class WorldScene {
         time: t,
         altitude: dist - b.radius,
         allowFlightTerrain: b.id === body.id && b.def.surfaceKind === 'solid',
-      });
+      };
+      const stableFrame: BodyRenderFrame = {
+        ...frame,
+        cameraRelativeOrigin: { ...frame.cameraRelativeOrigin },
+        cameraBodyFixed: { ...frame.cameraBodyFixed },
+        orientation: { ...frame.orientation },
+        cameraSunDirection: { ...frame.cameraSunDirection },
+        bodySunDirection: { ...frame.bodySunDirection },
+      };
+      this.lastBodyFrames.set(b.id, stableFrame);
+      renderer.update(stableFrame);
     }
     // Hide renderers of bodies no longer relevant.
     for (const [id, renderer] of this.bodyRenderers) {
@@ -358,11 +407,13 @@ export class WorldScene {
     if (this.disposed) return;
     this.disposed = true;
     window.removeEventListener('resize', this.resizeHandler);
+    for (const manager of this.bodyRendererManagers.values()) manager.dispose();
+    this.bodyRendererManagers.clear();
     for (const renderer of this.bodyRenderers.values()) {
-      this.scene.remove(renderer.root);
-      renderer.dispose();
+      if (renderer.root.parent === this.scene) this.scene.remove(renderer.root);
     }
     this.bodyRenderers.clear();
+    this.lastBodyFrames.clear();
     this.flightTerrainBodyId = null;
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);
