@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -56,19 +56,22 @@ function runValidator(
   const dir = mkdtempSync(join(tmpdir(), 'perilune-content-'));
   const manifestPath = join(dir, 'manifest.json');
   const recipesPath = join(dir, 'recipes.json');
+  const checkedManifestPath = join(dir, 'checked-planet-manifest.json');
   writeFileSync(manifestPath, JSON.stringify(manifest));
   writeFileSync(recipesPath, JSON.stringify(recipes()));
   if (asset) writeFileSync(join(dir, 'source.bin'), asset);
   for (const [path, bytes] of Object.entries(extraFiles)) writeFileSync(join(dir, path), bytes);
-  return spawnSync(process.execPath, ['scripts/validate-content.mjs'], {
+  const result = spawnSync(process.execPath, ['scripts/validate-content.mjs'], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: {
       ...process.env,
       PERILUNE_MANIFEST_PATH: manifestPath,
       PERILUNE_RECIPES_PATH: recipesPath,
+      PERILUNE_CHECKED_MANIFEST_PATH: checkedManifestPath,
     },
   });
+  return Object.assign(result, { checkedManifestPath });
 }
 
 describe('planet content validator', () => {
@@ -78,6 +81,42 @@ describe('planet content validator', () => {
       encoding: 'utf8',
     });
     expect(result.status, result.stderr || result.stdout).toBe(0);
+  });
+
+  it('emits a deterministic checked artifact only after successful validation', () => {
+    const valid = runValidator(baseManifest());
+    expect(valid.status, valid.stderr || valid.stdout).toBe(0);
+    const artifact = JSON.parse(readFileSync(valid.checkedManifestPath, 'utf8')) as {
+      schemaVersion: number; manifestSha256: string; manifest: { schemaVersion: number };
+    };
+    expect(artifact).toMatchObject({ schemaVersion: 1, manifest: { schemaVersion: 1 } });
+    expect(artifact.manifestSha256).toMatch(/^[a-f0-9]{64}$/);
+
+    const invalidManifest = baseManifest();
+    invalidManifest.schemaVersion = 2;
+    const invalid = runValidator(invalidManifest);
+    expect(invalid.status).not.toBe(0);
+    expect(existsSync(invalid.checkedManifestPath)).toBe(false);
+  });
+
+  it('keeps build ordering current and rejects checked-artifact paths outside public planets', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: { prebuild: string } };
+    expect(packageJson.scripts.prebuild).toMatch(/^npm run validate:content && npm run sync:renderer-assets/);
+
+    const dir = mkdtempSync(join(tmpdir(), 'perilune-sync-'));
+    const artifactPath = join(dir, 'checked.json');
+    writeFileSync(artifactPath, JSON.stringify({
+      schemaVersion: 1,
+      manifestSha256: 'a'.repeat(64),
+      manifest: { packs: [{ channels: [{ packagePath: '../escape.ktx2', fallbackPath: 'safe.webp' }] }] },
+    }));
+    const result = spawnSync(process.execPath, ['scripts/sync-renderer-assets.mjs'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, PERILUNE_CHECKED_MANIFEST_PATH: artifactPath },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/unsafe validated planet asset path/i);
   });
 
   it('matches checked recipe hashes and raw height fingerprints', () => {

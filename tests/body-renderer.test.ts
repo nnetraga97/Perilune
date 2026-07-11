@@ -210,4 +210,25 @@ describe('body renderer adapters', () => {
     expect(dispose).toHaveBeenCalledOnce();
     expect(scene.children).not.toContain(root);
   });
+
+  test('setQuality retries only managers whose committed tier is still stale', async () => {
+    const stale = { current: vi.fn(() => ({ quality: 'medium' })), replaceQuality: vi.fn()
+      .mockRejectedValueOnce(new Error('compile failed')).mockResolvedValueOnce(undefined) };
+    const current = { current: vi.fn(() => ({ quality: 'high' })), replaceQuality: vi.fn() };
+    const world = Object.create(WorldScene.prototype) as WorldScene;
+    Object.assign(world as unknown as Record<string, unknown>, {
+      quality: 'medium',
+      bodyRendererManagers: new Map([['veyra', stale], ['auren', current]]),
+      bodyRenderers: new Map(),
+    });
+
+    world.setQuality('high');
+    await Promise.resolve();
+    await Promise.resolve();
+    world.setQuality('high');
+    await Promise.resolve();
+
+    expect(stale.replaceQuality).toHaveBeenCalledTimes(2);
+    expect(current.replaceQuality).not.toHaveBeenCalled();
+  });
 });

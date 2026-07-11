@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256File } from './lib/canonical-json.mjs';
+import { canonicalJson, sha256Bytes, sha256File } from './lib/canonical-json.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = resolve(
@@ -9,6 +9,9 @@ const manifestPath = resolve(
 );
 const recipesPath = resolve(
   process.env.PERILUNE_RECIPES_PATH ?? resolve(root, 'assets/planets/recipes.json'),
+);
+const checkedManifestPath = resolve(
+  process.env.PERILUNE_CHECKED_MANIFEST_PATH ?? resolve(root, 'src/generated/checked-planet-manifest.json'),
 );
 const compilerLockPath = resolve(root, 'tools/planet-assets/compiler-lock.json');
 const packagePath = resolve(root, 'package.json');
@@ -345,6 +348,13 @@ if (errors.length) {
   for (const error of errors) console.error(`content validation: ${error}`);
   process.exitCode = 1;
 } else {
+  const artifact = {
+    schemaVersion: 1,
+    manifestSha256: sha256Bytes(canonicalJson(manifest)),
+    manifest,
+  };
+  mkdirSync(dirname(checkedManifestPath), { recursive: true });
+  writeFileSync(checkedManifestPath, `${JSON.stringify(artifact, null, 2)}\n`);
   console.log(
     `content validation passed: ${recipeFile.recipes.length} recipes, ` +
       `${manifest.sources.length} sources, ${manifest.packs.length} packs`,

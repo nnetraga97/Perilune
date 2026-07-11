@@ -21,6 +21,10 @@ import type { BodyRenderer, BodyRenderFrame, QualityTier } from './bodyRenderer'
 import { createBodyRendererCandidate } from './bodyRendererFactory';
 import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
 import { compileRendererCandidate } from './shaderCompiler';
+import checkedPlanetArtifact from '../generated/checked-planet-manifest.json';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { checkPlanetManifest, PlanetAssetLoader, type CheckedPlanetManifest } from './planetAssetLoader';
+import { geometryByteLength } from './resourceAccounting';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -41,6 +45,16 @@ export function sunLightPosition(
   return out.set(sunDirection.x * distance, sunDirection.y * distance, sunDirection.z * distance);
 }
 
+function rendererGeometryBytes(renderer: BodyRenderer): number {
+  const geometries = new Set<THREE.BufferGeometry>();
+  renderer.root.traverse((object) => {
+    if (object instanceof THREE.Mesh) geometries.add(object.geometry);
+  });
+  let bytes = 0;
+  for (const geometry of geometries) bytes += geometryByteLength(geometry);
+  return bytes;
+}
+
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
@@ -49,10 +63,9 @@ export class WorldScene {
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
   private lastBodyFrames = new Map<string, BodyRenderFrame>();
-  private readonly rendererLedger = new RendererResourceLedger({
-    activeBodyGpuBytes: { low: 67_108_864, medium: 134_217_728, high: 268_435_456 },
-    transientPeakBytes: { low: 100_663_296, medium: 201_326_592, high: 402_653_184 },
-  });
+  private readonly rendererLedger: RendererResourceLedger;
+  private readonly checkedPlanetManifest: CheckedPlanetManifest;
+  private readonly planetAssetLoader: PlanetAssetLoader;
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly launchSite: THREE.Group;
   private quality: QualityTier = 'medium';
@@ -66,6 +79,17 @@ export class WorldScene {
   camDist = 18;
 
   constructor(private readonly context: RenderContext) {
+    this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
+    this.rendererLedger = new RendererResourceLedger(this.checkedPlanetManifest.budgets);
+    const textureLoader = new THREE.TextureLoader();
+    this.planetAssetLoader = new PlanetAssetLoader({
+      renderer: context.renderer,
+      manifest: this.checkedPlanetManifest,
+      ktx2: new KTX2Loader(),
+      compressedSupported: Object.values(context.caps.compressedTextures).some(Boolean),
+      resolveAssetUrl: (path) => `${import.meta.env.BASE_URL}planets/${path}`,
+      loadConventional: (path) => textureLoader.loadAsync(path),
+    });
     this.camera = new THREE.PerspectiveCamera(
       62,
       window.innerWidth / window.innerHeight,
@@ -116,9 +140,9 @@ export class WorldScene {
     const tier = typeof q === 'string'
       ? q
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
-    if (tier === this.quality) return;
     this.quality = tier;
     for (const [bodyId, manager] of this.bodyRendererManagers) {
+      if (manager.current()?.quality === tier) continue;
       void manager.replaceQuality(tier).then(() => {
         const renderer = manager.current();
         if (renderer) this.bodyRenderers.set(bodyId, renderer);
@@ -141,33 +165,77 @@ export class WorldScene {
     const current = this.bodyRenderers.get(body.id);
     if (current) return current;
     if (this.bodyRendererManagers.has(body.id)) return null;
+    let transactionChannels: readonly string[] = [];
     const manager = new BodyRendererManager({
       scene: this.scene,
       quality: this.quality,
       createCandidate: (candidate, tier) => createBodyRendererCandidate({
         body: candidate, caps: this.context.caps, quality: tier,
       }),
-      loadAssets: async () => ({ gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined }),
-      compileCandidate: async (candidate) => compileRendererCandidate({
-        renderer: this.context.renderer,
-        camera: this.camera,
-        root: candidate.root,
-        body: candidate.bodyId,
-        channel: 'renderer',
-      }),
-      awaitCoverage: async (candidate) => {
+      loadAssets: async (candidateBody, tier, candidate) => {
+        if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
+          transactionChannels = ['legacy'];
+          return { gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined };
+        }
+        const loaded = await this.planetAssetLoader.load(candidateBody.id, tier);
+        transactionChannels = loaded.pack.channels.map((channel) => channel.name);
+        const packState = Object.freeze({
+          manifestDigest: this.checkedPlanetManifest.digest,
+          channels: transactionChannels,
+          textures: loaded.textures,
+        });
+        candidate.root.userData.planetAssetPack = packState;
+        return {
+          gpuBytes: loaded.gpuBytes,
+          transientBytes: loaded.pack.transientBytes,
+          flightScale: candidateBody.id === this.flightTerrainBodyId,
+          dispose: () => {
+            if (candidate.root.userData.planetAssetPack === packState) delete candidate.root.userData.planetAssetPack;
+            loaded.dispose();
+          },
+        };
+      },
+      prepareCandidate: async (candidate) => {
         const frame = this.lastBodyFrames.get(candidate.bodyId);
         if (frame) candidate.update(frame);
+      },
+      compileCandidate: async (candidate, _candidateBody, tier) => {
+        for (const channel of transactionChannels.length > 0 ? transactionChannels : [candidate.kind]) {
+          await compileRendererCandidate({
+            renderer: this.context.renderer,
+            camera: this.camera,
+            root: candidate.root,
+            body: candidate.bodyId,
+            tier,
+            channel,
+          });
+        }
+      },
+      awaitCoverage: async (candidate) => {
         if (!candidate.ready) throw new Error(`${candidate.bodyId} renderer coverage is not ready`);
       },
       ledger: this.rendererLedger,
     });
     this.bodyRendererManagers.set(body.id, manager);
     const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
+    const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
-      gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined,
+      gpuBytes: hasAuthoredPack ? rendererGeometryBytes(renderer) : 0,
+      transientBytes: 0,
+      flightScale: false,
+      dispose: () => undefined,
     });
     this.bodyRenderers.set(body.id, renderer);
+    if (hasAuthoredPack) {
+      void manager.rebuildCommitted().then(() => {
+        const replacement = manager.current();
+        if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
+          if (replacement) this.bodyRenderers.set(body.id, replacement);
+        } else {
+          manager.dispose();
+        }
+      }).catch(() => undefined);
+    }
     return renderer;
   }
 
@@ -414,6 +482,7 @@ export class WorldScene {
     }
     this.bodyRenderers.clear();
     this.lastBodyFrames.clear();
+    this.planetAssetLoader.dispose();
     this.flightTerrainBodyId = null;
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);

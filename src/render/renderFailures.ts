@@ -9,6 +9,21 @@ export interface RenderFailureKey {
   readonly phase: RenderFailurePhase;
 }
 
+export class RenderBoundaryError extends Error {
+  constructor(
+    readonly key: Readonly<RenderFailureKey>,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'RenderBoundaryError';
+  }
+}
+
+export function renderFailureKey(error: unknown): Readonly<RenderFailureKey> | null {
+  return error instanceof RenderBoundaryError ? error.key : null;
+}
+
 export interface RenderFailureStats {
   readonly total: number;
   readonly load: number;

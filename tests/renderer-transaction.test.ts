@@ -7,11 +7,11 @@ import {
   type LoadedRendererAssets,
 } from '../src/render/bodyRendererManager';
 import {
+  checkPlanetManifest,
   PlanetAssetLoader,
-  type CheckedPlanetManifest,
 } from '../src/render/planetAssetLoader';
 import { compileRendererCandidate } from '../src/render/shaderCompiler';
-import { RenderFailureTracker } from '../src/render/renderFailures';
+import { RenderBoundaryError, RenderFailureTracker } from '../src/render/renderFailures';
 
 function candidate(bodyId: string, quality: QualityTier = 'medium') {
   const root = new THREE.Group();
@@ -37,6 +37,10 @@ function deferred<T>() {
 }
 
 const body = (id: string) => ({ id }) as never;
+const manifestBudgets = {
+  activeBodyGpuBytes: { low: 100, medium: 200, high: 300 },
+  transientPeakBytes: { low: 150, medium: 250, high: 350 },
+};
 const assets = (overrides: Partial<LoadedRendererAssets> = {}): LoadedRendererAssets => ({
   gpuBytes: 20,
   transientBytes: 10,
@@ -61,6 +65,7 @@ function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRend
       return next.renderer;
     },
     loadAssets: async () => assets(),
+    prepareCandidate: async () => undefined,
     compileCandidate: async () => undefined,
     awaitCoverage: async () => undefined,
     ledger,
@@ -112,6 +117,28 @@ describe('transactional body renderer replacement', () => {
     expect(previous.dispose).toHaveBeenCalledOnce();
   });
 
+  test('materializes the cached active-SOI visual before compile while keeping the candidate hidden', async () => {
+    const order: string[] = [];
+    const { manager, scene, made } = managerHarness({
+      prepareCandidate: async (renderer) => {
+        order.push('prepare');
+        renderer.root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+        expect(renderer.root.visible).toBe(false);
+      },
+      compileCandidate: async (renderer) => {
+        order.push('compile');
+        expect(renderer.root.children.some((child) => child instanceof THREE.Mesh)).toBe(true);
+        expect(scene.children).toHaveLength(0);
+      },
+      awaitCoverage: async () => { order.push('coverage'); },
+    });
+
+    await manager.ensure(body('veyra'));
+
+    expect(order).toEqual(['prepare', 'compile', 'coverage']);
+    expect(made[0].root.visible).toBe(true);
+  });
+
   test.each([
     ['load', { loadAssets: async () => { throw new Error('load failed'); } }],
     ['compile', { compileCandidate: async () => { throw new Error('compile failed'); } }],
@@ -139,6 +166,21 @@ describe('transactional body renderer replacement', () => {
 
     expect(made).toHaveLength(3);
     expect(manager.current()?.quality).toBe('high');
+  });
+
+  test('uses a boundary error channel in the log-once failure key', async () => {
+    const log = vi.fn();
+    const failures = new RenderFailureTracker(log);
+    const { manager } = managerHarness({
+      failures,
+      loadAssets: async (_body, tier) => {
+        throw new RenderBoundaryError({ body: 'veyra', tier, channel: 'albedo', phase: 'load' }, 'asset failed');
+      },
+    });
+
+    await expect(manager.ensure(body('veyra'))).rejects.toThrow('asset failed');
+
+    expect(log).toHaveBeenCalledWith('[renderer:veyra/medium/albedo/load]', expect.any(RenderBoundaryError));
   });
 
   test('rejects a candidate whose transient allocation exceeds the tier budget', async () => {
@@ -251,8 +293,9 @@ describe('transactional body renderer replacement', () => {
 });
 
 describe('planet asset loading boundary', () => {
-  const checkedManifest: CheckedPlanetManifest = {
-    approvedByValidator: true,
+  const manifest = {
+    schemaVersion: 1,
+    budgets: manifestBudgets,
     packs: [{
       bodyId: 'veyra', tier: 'medium', transientBytes: 10,
       channels: [{
@@ -263,6 +306,11 @@ describe('planet asset loading boundary', () => {
       }],
     }],
   };
+  const checkedManifest = checkPlanetManifest({
+    schemaVersion: 1,
+    manifestSha256: 'a'.repeat(64),
+    manifest,
+  });
 
   test('detects KTX support before loading and uses the declared conventional fallback when unavailable', async () => {
     const order: string[] = [];
@@ -270,6 +318,7 @@ describe('planet asset loading boundary', () => {
       setTranscoderPath: vi.fn().mockReturnThis(),
       detectSupport: vi.fn(() => { order.push('detect'); return ktx2; }),
       loadAsync: vi.fn(async () => { order.push('ktx'); return new THREE.Texture(); }),
+      dispose: vi.fn(),
     };
     const loadConventional = vi.fn(async (path: string) => {
       order.push(`fallback:${path}`);
@@ -279,6 +328,7 @@ describe('planet asset loading boundary', () => {
       renderer: {} as never,
       manifest: checkedManifest,
       compressedSupported: false,
+      resolveAssetUrl: (path) => `./planets/${path}`,
       ktx2,
       loadConventional,
     });
@@ -286,24 +336,36 @@ describe('planet asset loading boundary', () => {
     await loader.load('veyra', 'medium');
 
     expect(ktx2.setTranscoderPath).toHaveBeenCalledWith('./basis/');
-    expect(order).toEqual(['detect', 'fallback:veyra/albedo.webp']);
+    expect(order).toEqual(['detect', 'fallback:./planets/veyra/albedo.webp']);
     expect(ktx2.loadAsync).not.toHaveBeenCalled();
+    loader.dispose();
+    loader.dispose();
+    expect(ktx2.dispose).toHaveBeenCalledOnce();
   });
 
-  test('rejects manifests not approved by validation and non-local entries', async () => {
+  test('requires the opaque checked-artifact boundary and rejects invalid artifact paths', () => {
     const base = { renderer: {} as never, ktx2: {
-      setTranscoderPath: vi.fn().mockReturnThis(), detectSupport: vi.fn(), loadAsync: vi.fn(),
-    }, compressedSupported: false, loadConventional: vi.fn() };
-    expect(() => new PlanetAssetLoader({ ...base, manifest: { ...checkedManifest, approvedByValidator: false } })).toThrow(/validator-approved/i);
-    const remote = structuredClone(checkedManifest) as {
-      approvedByValidator: boolean;
-      packs: Array<{ bodyId: string; tier: QualityTier; transientBytes: number; channels: Array<{
-        name: string; packagePath: string; fallbackPath: string; gpuBytes: number;
-      }> }>;
-    };
+      setTranscoderPath: vi.fn().mockReturnThis(), detectSupport: vi.fn(), loadAsync: vi.fn(), dispose: vi.fn(),
+    }, compressedSupported: false, resolveAssetUrl: (path: string) => `./planets/${path}`, loadConventional: vi.fn() };
+    expect(() => new PlanetAssetLoader({ ...base, manifest: manifest as never })).toThrow(/checked manifest boundary/i);
+    const remote = structuredClone(manifest);
     remote.packs[0].channels[0].fallbackPath = 'https://example.test/albedo.webp';
-    const loader = new PlanetAssetLoader({ ...base, manifest: remote });
-    await expect(loader.load('veyra', 'medium')).rejects.toThrow(/local manifest entry/i);
+    expect(() => checkPlanetManifest({
+      schemaVersion: 1,
+      manifestSha256: 'b'.repeat(64),
+      manifest: remote,
+    })).toThrow(/local manifest entry/i);
+  });
+
+  test('checked artifacts expose authored pack lookup and preserve the real empty baseline', () => {
+    const empty = checkPlanetManifest({
+      schemaVersion: 1,
+      manifestSha256: 'c'.repeat(64),
+      manifest: { schemaVersion: 1, budgets: manifestBudgets, packs: [] },
+    });
+    expect(empty.hasPack('veyra', 'medium')).toBe(false);
+    expect(checkedManifest.hasPack('veyra', 'medium')).toBe(true);
+    expect(empty.budgets).toEqual(manifestBudgets);
   });
 });
 
@@ -315,21 +377,58 @@ describe('shader compile boundary and failure accounting', () => {
       compileAsync: vi.fn(async (scene: THREE.Scene) => {
         expect(scene.parent).toBeNull();
         expect(scene.children).toHaveLength(1);
+        expect(root.visible).toBe(true);
+        let materials = 0;
+        root.traverse((object) => { if (object instanceof THREE.Mesh) materials++; });
+        expect(materials).toBe(1);
         renderer.debug.onShaderError?.('gl', 'program', 'vert', 'frag');
       }),
     };
+    const originalParent = new THREE.Group();
+    const before = new THREE.Group();
     const root = new THREE.Group();
+    root.visible = false;
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+    originalParent.add(before, root);
 
     await expect(compileRendererCandidate({
       renderer: renderer as never,
       camera: new THREE.PerspectiveCamera(),
       root,
       body: 'veyra',
+      tier: 'medium',
       channel: 'surface',
     })).rejects.toThrow(/veyra.*surface.*shader/i);
 
     expect(renderer.debug.onShaderError).toBe(previous);
-    expect(root.parent).toBeNull();
+    expect(root.visible).toBe(false);
+    expect(root.parent).toBe(originalParent);
+    expect(originalParent.children).toEqual([before, root]);
+  });
+
+  test('serializes callback ownership for overlapping compiles on one renderer', async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const callbacks: Array<(...args: never[]) => void> = [];
+    const previous = vi.fn();
+    const renderer = {
+      debug: { onShaderError: previous as ((...args: never[]) => void) | null },
+      compileAsync: vi.fn(async () => {
+        callbacks.push(renderer.debug.onShaderError!);
+        await (callbacks.length === 1 ? first.promise : second.promise);
+      }),
+    };
+    const a = compileRendererCandidate({ renderer: renderer as never, camera: new THREE.Camera(), root: new THREE.Group(), body: 'veyra', tier: 'medium', channel: 'albedo' });
+    const b = compileRendererCandidate({ renderer: renderer as never, camera: new THREE.Camera(), root: new THREE.Group(), body: 'auren', tier: 'high', channel: 'clouds' });
+    await vi.waitFor(() => expect(renderer.compileAsync).toHaveBeenCalledTimes(1));
+    callbacks[0]();
+    first.resolve();
+    await expect(a).rejects.toThrow(/veyra.*albedo.*shader/i);
+    await vi.waitFor(() => expect(renderer.compileAsync).toHaveBeenCalledTimes(2));
+    expect(callbacks[1]).not.toBe(callbacks[0]);
+    second.resolve();
+    await expect(b).resolves.toBeUndefined();
+    expect(renderer.debug.onShaderError).toBe(previous);
   });
 
   test('scopes compileAsync rejection and restores the debug callback in finally', async () => {
@@ -343,6 +442,7 @@ describe('shader compile boundary and failure accounting', () => {
       camera: new THREE.PerspectiveCamera(),
       root: new THREE.Group(),
       body: 'cinder',
+      tier: 'medium',
       channel: 'clouds',
     })).rejects.toThrow(/cinder.*clouds.*compile/i);
     expect(renderer.debug.onShaderError).toBe(previous);

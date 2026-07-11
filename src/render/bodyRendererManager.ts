@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { Body } from '../sim/universe';
 import type { BodyRenderer, QualityTier } from './bodyRenderer';
-import { RenderFailureTracker, type RenderFailurePhase, type RenderFailureStats } from './renderFailures';
+import { renderFailureKey, RenderFailureTracker, type RenderFailurePhase, type RenderFailureStats } from './renderFailures';
 
 export interface LoadedRendererAssets {
   readonly gpuBytes: number;
@@ -56,7 +56,8 @@ export class RendererResourceLedger {
 }
 
 interface TransactionBoundaries {
-  readonly loadAssets: (body: Body, tier: QualityTier) => Promise<LoadedRendererAssets>;
+  readonly loadAssets: (body: Body, tier: QualityTier, candidate: BodyRenderer) => Promise<LoadedRendererAssets>;
+  readonly prepareCandidate: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
   readonly compileCandidate: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
   readonly awaitCoverage: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
 }
@@ -171,7 +172,10 @@ export class BodyRendererManager {
     let loaded: LoadedRendererAssets | null = null;
     let phase: RenderFailurePhase = 'load';
     try {
-      loaded = await this.boundaries.loadAssets(body, tier);
+      loaded = await this.boundaries.loadAssets(body, tier, renderer);
+      assertCurrent();
+      phase = 'coverage';
+      await this.boundaries.prepareCandidate(renderer, body, tier);
       assertCurrent();
       phase = 'compile';
       await this.boundaries.compileCandidate(renderer, body, tier);
@@ -202,7 +206,7 @@ export class BodyRendererManager {
       if (replacedAssets) replacedAssets.dispose();
       return renderer;
     } catch (error) {
-      this.failures.record({ body: body.id, tier, channel: 'renderer', phase }, error);
+      this.failures.record(renderFailureKey(error) ?? { body: body.id, tier, channel: 'renderer', phase }, error);
       if (this.candidate === renderer) renderer.dispose();
       loaded?.dispose();
       if (this.candidate === renderer) this.candidate = null;
