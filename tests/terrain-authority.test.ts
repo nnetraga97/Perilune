@@ -8,6 +8,11 @@ import {
 } from '../src/sim/terrain';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import { renderedTerrainHeight } from '../src/render/planet';
+import {
+  decodeOctNormal,
+  directionFromEquirectUv,
+  generateVeyraCanonicalMaps,
+} from '../scripts/lib/veyra-global-maps';
 
 function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
   for (let lat = -80; lat <= 80; lat += 5) {
@@ -26,6 +31,51 @@ function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
 }
 
 describe('planet surface authority', () => {
+  it('derives deterministic Veyra masks and normals from the shared height evaluator', () => {
+    const veyra = new GameState().universe.get('veyra');
+    const source = new Uint8Array(32 * 16 * 3);
+    for (let index = 0; index < source.length; index++) source[index] = (index * 17) & 0xff;
+    const generate = () => generateVeyraCanonicalMaps({
+      width: 32,
+      height: 16,
+      source: { data: source, width: 32, height: 16, channels: 3 },
+      radius: veyra.radius,
+      heightAt: (direction) => {
+        const result = solidHeight(veyra, direction);
+        if (result.kind !== 'solid') throw new Error('expected solid Veyra terrain');
+        return result.height;
+      },
+      seed: veyra.def.terrain.seed,
+    });
+
+    const first = generate();
+    const second = generate();
+    expect(first.rawHashes).toEqual(second.rawHashes);
+    expect(first.material).toEqual(second.material);
+    expect(first.normal).toEqual(second.normal);
+
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 32; x++) {
+        const pixel = y * 32 + x;
+        const direction = directionFromEquirectUv((x + 0.5) / 32, (y + 0.5) / 16);
+        const result = solidHeight(veyra, direction);
+        if (result.kind !== 'solid') throw new Error('expected solid Veyra terrain');
+        if (Math.abs(result.height) > first.texelHeightRange) {
+          expect(first.material[pixel * 4 + 3] === 255).toBe(result.height < 0);
+        }
+        const normal = decodeOctNormal(first.normal[pixel * 2], first.normal[pixel * 2 + 1]);
+        expect(normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
+          .toBeGreaterThan(0.9);
+      }
+    }
+  });
+
+  it('keeps body-fixed longitude seams and exact poles continuous', () => {
+    expect(directionFromEquirectUv(0, 0.5)).toEqual(directionFromEquirectUv(1, 0.5));
+    expect(directionFromEquirectUv(0.1, 0)).toEqual(directionFromEquirectUv(0.9, 0));
+    expect(directionFromEquirectUv(0.1, 1)).toEqual(directionFromEquirectUv(0.9, 1));
+  });
+
   it('returns raw seafloor separately from water contact', () => {
     const veyra = new GameState().universe.get('veyra');
     const ocean = findDirection((direction) => {

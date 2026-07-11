@@ -9,6 +9,8 @@
   "albedoWorkingSpace": "srgb",
   "dataWorkingSpace": "b-w",
   "ktxSoftwareVersion": "4.4.2",
+  "ktxArchiveUrl": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2",
+  "ktxArchiveSha256": "a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245",
   "compressionThreads": 1,
   "rawByteOrder": "little-endian"
 }

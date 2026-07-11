@@ -20,7 +20,8 @@
     "validate:content": "node scripts/validate-content.mjs",
     "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
     "sync:renderer-assets": "node scripts/sync-renderer-assets.mjs",
-    "profile:feasibility": "node scripts/profile-feasibility.mjs"
+    "profile:feasibility": "node scripts/profile-feasibility.mjs",
+    "fetch:planet-source": "node scripts/fetch-planet-source.mjs"
   },
   "dependencies": {
     "three": "^0.170.0"

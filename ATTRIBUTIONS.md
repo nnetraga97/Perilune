@@ -27,6 +27,12 @@ implementations here are original code.
 
 ## Planet source assets
 
-No third-party planet source assets are currently shipped. This section is
-generated from `assets/planets/manifest.json` when the first accepted source is
-added; missing attribution or modification notices fail content validation.
+- **Natural Earth II 3.2.0** — original public-domain 1:10m land-cover raster
+  by Natural Earth. Source: https://www.naturalearthdata.com/downloads/10m-raster-data/10m-natural-earth-2/
+  Terms: https://www.naturalearthdata.com/about/terms-of-use/
+
+  Used as an authoring input for Veyra's albedo geography. Perilune modifies it
+  through body-fixed reprojection, deterministic geographic warping and
+  recoloring, terrain-derived shoreline/material masks and oct normals,
+  deterministic cloud synthesis, Lanczos3 resampling, and KTX2/WebP/PNG
+  encoding. The original archive and extracted TIFF are not shipped.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "compilerVersion": "1.0.0",
+  "compilerVersion": "2.0.0",
   "fingerprint": {
     "width": 64,
     "height": 32,
@@ -92,5 +92,15 @@
       "recipeHash": "33726d86d0980ab861201105b5f309d9",
       "rawHeightSha256": "c38ce48c862fb99bee9cc9a584defc68795133a852bf31142ea733d115c4956d"
     }
-  ]
+  ],
+  "veyraCanonical": {
+    "width": 8192,
+    "height": 4096,
+    "rawHashes": {
+      "albedo": "a516067cb35072cceee2444ad1aed7f78c95c4232bf3eb6ca935d444d442112b",
+      "normal": "cf5eb48f452b2535f79400fddbd1b72cb4e7469509693927d153a9492c6e7745",
+      "material": "7fb7283522584a9c3192059bfbc442c6b1483c93a29f8f469def39213c8629eb",
+      "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
+    }
+  }
 }

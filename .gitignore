@@ -8,4 +8,7 @@ test-results/
 artifacts/performance/
 .superpowers/
 *.local
+assets/planets/sources/**/*.zip
+assets/planets/sources/**/*.tif
+assets/planets/sources/**/*.partial
 .DS_Store

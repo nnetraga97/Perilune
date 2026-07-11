@@ -16,6 +16,7 @@ const checkedManifestPath = resolve(
 const compilerLockPath = resolve(root, 'tools/planet-assets/compiler-lock.json');
 const packagePath = resolve(root, 'package.json');
 const errors = [];
+const ktx2Identifier = Buffer.from([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function loadJson(path, label) {
   try {
@@ -121,6 +122,10 @@ if (manifest) {
   }
   requireString(manifest.compiler?.nodeVersion, 'Compiler nodeVersion');
   requireString(manifest.compiler?.ktxSoftwareVersion, 'Compiler ktxSoftwareVersion');
+  requireString(manifest.compiler?.ktxArchiveUrl, 'Compiler ktxArchiveUrl');
+  if (!/^[a-f0-9]{64}$/.test(manifest.compiler?.ktxArchiveSha256 ?? '')) {
+    errors.push('Compiler ktxArchiveSha256 must be SHA-256');
+  }
   if (manifest.compiler?.imageLibraryVersion !== 'sharp@0.35.3') {
     errors.push('Compiler imageLibraryVersion must be sharp@0.35.3');
   }
@@ -139,6 +144,8 @@ if (manifest) {
       'containerImage',
       'nodeVersion',
       'ktxSoftwareVersion',
+      'ktxArchiveUrl',
+      'ktxArchiveSha256',
       'compressionThreads',
       'imageLibraryVersion',
       'resamplingKernel',
@@ -209,12 +216,18 @@ if (manifest) {
       const localPath = isAbsolute(source.localPath)
         ? source.localPath
         : resolve(manifestDir, source.localPath);
-      if (!existsSync(localPath)) {
+      if (!existsSync(localPath) && source.authoringOnly !== true) {
         errors.push(`Source ${source.id} local file is missing: ${localPath}`);
-      } else if (/^[a-f0-9]{64}$/.test(source.checksumSha256 ?? '')) {
+      } else if (existsSync(localPath) && /^[a-f0-9]{64}$/.test(source.checksumSha256 ?? '')) {
         const actual = sha256File(localPath);
         if (actual !== source.checksumSha256) {
           errors.push(`Source ${source.id} checksum mismatch: expected ${source.checksumSha256}, got ${actual}`);
+        }
+      }
+      if (source.authoringOnly === true) {
+        if (!Array.isArray(source.sourceDimensions) || source.sourceDimensions.length !== 2 ||
+          source.sourceDimensions.some((dimension) => !Number.isInteger(dimension) || dimension <= 0)) {
+          errors.push(`Source ${source.id} authoring-only dimensions are required`);
         }
       }
     }
@@ -302,6 +315,28 @@ if (manifest) {
             errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} ${kind} is missing: ${assetPath}`);
           } else {
             if (kind === 'package') packageBytes += statSync(assetPath).size;
+            if (kind === 'package') {
+              const packageFile = readFileSync(assetPath);
+              const identifier = packageFile.subarray(0, ktx2Identifier.length);
+              if (!identifier.equals(ktx2Identifier)) {
+                errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} package has no KTX2 identifier`);
+              } else if (packageFile.byteLength < 48) {
+                errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} package has a truncated KTX2 header`);
+              } else {
+                const pixelWidth = packageFile.readUInt32LE(20);
+                const pixelHeight = packageFile.readUInt32LE(24);
+                const levelCount = packageFile.readUInt32LE(40);
+                if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
+                  errors.push(
+                    `Pack ${pack.bodyId}/${pack.tier} ${channel.name} KTX2 dimensions ` +
+                    `${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`,
+                  );
+                }
+                if (levelCount <= 1) {
+                  errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} KTX2 requires mip levels`);
+                }
+              }
+            }
             if (/^[a-f0-9]{64}$/.test(checksum ?? '')) {
               const actualChecksum = sha256File(assetPath);
               if (actualChecksum !== checksum) {

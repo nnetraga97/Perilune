@@ -25,12 +25,15 @@ this repository is original work created for this project.)
 | @types/three | MIT | Type definitions |
 | tsx | MIT | Execute the TypeScript planet compiler |
 | sharp | Apache-2.0 | Pinned build-time image decode, color conversion, and resampling |
+| KTX-Software 4.4.2 | Apache-2.0 | Pinned build-time KTX2/Basis Universal encoding |
 
 Sharp distributes libvips components under LGPL-2.1-or-later; it is a
 development-only compiler dependency and is not shipped in the browser bundle.
 
-No third-party models, textures, audio, or fonts are currently included. Any
-future planet source must pass the per-file provenance and license policy in
-`CONTENT_PIPELINE.md` and must add its generated attribution in the same
-change. A repository software license is not accepted as evidence that bundled
-third-party textures are reusable.
+Veyra's generated textures use Natural Earth II 3.2.0 as a public-domain
+authoring source. Natural Earth's public-domain terms and the exact local
+source boundary are recorded in
+`assets/planets/sources/natural-earth-ii-3.2.0/TERMS.md`. Any future planet
+source must pass the per-file provenance and license policy in
+`CONTENT_PIPELINE.md`; a repository software license is not accepted as
+evidence that bundled third-party textures are reusable.

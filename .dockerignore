@@ -1,0 +1,6 @@
+node_modules
+dist
+.git
+assets/planets/sources/**/*.zip
+assets/planets/sources/**/*.tif
+assets/planets/generated

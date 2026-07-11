@@ -17,6 +17,19 @@ npm run validate:content
 npm run compile:planet-assets
 ```
 
+Veyra's authoring source is fetched explicitly, never by `prebuild`:
+
+```bash
+npm run fetch:planet-source
+KTX_CLI=/path/to/ktx npm run compile:planet-assets -- --write
+```
+
+The fetch command downloads the original Natural Earth II 3.2.0 archive to an
+ignored authoring directory, verifies SHA-256 before extraction, and refuses a
+mismatched archive. Neither the 69 MiB archive nor the extracted 16200x8100
+TIFF is committed. A clean checkout validates the pinned provenance record and
+committed runtime packs without downloading authoring inputs.
+
 To intentionally refresh compiler fingerprints after a reviewed recipe
 change, run `npm run compile:planet-assets -- --write`, inspect the diff, and
 commit the recipe and output together. Production builds never download
@@ -28,6 +41,16 @@ declared dimensions and GPU block format, compares it with the manifest, sums
 the actual package file sizes, and enforces per-tier active-body, transient,
 and total-renderer ceilings. Budget declarations therefore cannot hide a
 larger artifact or omit the files the runtime needs.
+
+Veyra is evaluated once at 8192x4096 in body-fixed coordinates (+Z north,
+longitude `atan2(y,x)`). One `solidHeight` grid owns the ocean sign, packed
+material mask, and finite-difference oct normals. Canonical raw channel hashes
+are recorded before encoding. Low, Medium, and High are derived from those
+canonical buffers with Lanczos3 at 1024x512, 2048x1024, and 4096x2048.
+Albedo uses BasisLZ/ETC1S KTX2 plus WebP; linear normal, material, and cloud
+data use UASTC KTX2 plus PNG. Encoding is single-threaded and the production
+Linux x86_64 KTX-Software 4.4.2 archive is checksum-pinned in both the compiler
+lock and container.
 
 Third-party planet sources are admitted only through manifest records with an
 exact source URL, author, license URL, attribution, SHA-256 checksum,

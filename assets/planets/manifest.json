@@ -5,6 +5,8 @@
     "containerImage": "node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf",
     "nodeVersion": "22.23.1",
     "ktxSoftwareVersion": "4.4.2",
+    "ktxArchiveUrl": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2",
+    "ktxArchiveSha256": "a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245",
     "compressionThreads": 1,
     "imageLibraryVersion": "sharp@0.35.3",
     "resamplingKernel": "lanczos3",
@@ -35,6 +37,214 @@
       "high": 0
     }
   },
-  "sources": [],
-  "packs": []
+  "sources": [
+    {
+      "id": "natural-earth-ii-3.2.0",
+      "url": "https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip",
+      "author": "Natural Earth",
+      "license": "Public-Domain",
+      "licenseUrl": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "attribution": "Made with Natural Earth; modified by Perilune",
+      "checksumSha256": "3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919",
+      "localPath": "sources/natural-earth-ii-3.2.0/NE2_LR_LC.zip",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        16200,
+        8100
+      ],
+      "transformations": [
+        "body-fixed reprojection",
+        "deterministic geographic warp and recolor",
+        "solidHeight-derived ocean/material masks and oct normals",
+        "deterministic cloud synthesis",
+        "Lanczos3 tier resampling",
+        "BasisLZ and UASTC KTX2 encoding"
+      ],
+      "bodies": [
+        "veyra"
+      ],
+      "channels": [
+        "albedo"
+      ]
+    }
+  ],
+  "packs": [
+    {
+      "bodyId": "veyra",
+      "tier": "low",
+      "width": 1024,
+      "height": 512,
+      "compressedBytes": 875242,
+      "transientBytes": 11534336,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/veyra/low/albedo.ktx2",
+          "fallbackPath": "generated/veyra/low/albedo.webp",
+          "packageChecksumSha256": "c5902e4d83e3bbf31e083f46442d6e2ea5b64aa38cc12df1ba4d045ce3d9e132",
+          "fallbackChecksumSha256": "bc9cd3b49e4e7e05b9d93cceda4afe7cd02e9d6bbfee56739c1cd771fbc35fd8",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 349544,
+          "mipmapped": true
+        },
+        {
+          "name": "normal",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/low/normal.ktx2",
+          "fallbackPath": "generated/veyra/low/normal.png",
+          "packageChecksumSha256": "0e28215a17ee1988072f2c36fba762f2f9893e91cefc9714ba3bd788aa1baa3f",
+          "fallbackChecksumSha256": "aef5942990a7066308abe14e31063182dc227441acd59d12609e692884af44dd",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 699088,
+          "mipmapped": true
+        },
+        {
+          "name": "material",
+          "colorSpace": "linear",
+          "logicalFormat": "RGBA8",
+          "packagePath": "generated/veyra/low/material.ktx2",
+          "fallbackPath": "generated/veyra/low/material.png",
+          "packageChecksumSha256": "993ad3bb0797ccb116ca9a5cf6cd4477a8c7cf459530066331c1b69a9bffb73c",
+          "fallbackChecksumSha256": "6e62ae99ea57d14692942d0ea2e241a87444cbe4437f09373adc2690b4ec362a",
+          "gpuFormat": "bc3-rgba",
+          "gpuBytes": 699088,
+          "mipmapped": true
+        },
+        {
+          "name": "clouds",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/low/clouds.ktx2",
+          "fallbackPath": "generated/veyra/low/clouds.png",
+          "packageChecksumSha256": "184282c14f123d2c17571580abe5b6d0b586ecdcc86f16ee40a3e6c73c2ac2b2",
+          "fallbackChecksumSha256": "82f62359117ca3dd10c49405c912f7b148816d4c6ea8e5ef805e3f9199dc24bd",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 699088,
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "veyra",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 2813178,
+      "transientBytes": 46137344,
+      "bootCritical": true,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/veyra/medium/albedo.ktx2",
+          "fallbackPath": "generated/veyra/medium/albedo.webp",
+          "packageChecksumSha256": "058931dbc36768be1a960121fe6b16652082222df3692819fbc3cfa686369b9b",
+          "fallbackChecksumSha256": "4b56e2ae0435b3145bb30255a5c104a48150eb53fc8fdc71d687707a49d3e583",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "mipmapped": true
+        },
+        {
+          "name": "normal",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/medium/normal.ktx2",
+          "fallbackPath": "generated/veyra/medium/normal.png",
+          "packageChecksumSha256": "62416b0ab8fc148566149f6e9b314b9a8c1aae857fc6e0952178915c91ab32ce",
+          "fallbackChecksumSha256": "0c75d5de86aa6a838074f53283cd82bb329773c1204ec6c0306d2016a34143a6",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 2796240,
+          "mipmapped": true
+        },
+        {
+          "name": "material",
+          "colorSpace": "linear",
+          "logicalFormat": "RGBA8",
+          "packagePath": "generated/veyra/medium/material.ktx2",
+          "fallbackPath": "generated/veyra/medium/material.png",
+          "packageChecksumSha256": "3aed08d61d5b92e870dd85eebe4577717ef46525ea301d66cbd84182c3f0a277",
+          "fallbackChecksumSha256": "55e064f55e9ef8c816530e0938232ed238d141caf94792962f94b755c8ab7e3f",
+          "gpuFormat": "bc3-rgba",
+          "gpuBytes": 2796240,
+          "mipmapped": true
+        },
+        {
+          "name": "clouds",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/medium/clouds.ktx2",
+          "fallbackPath": "generated/veyra/medium/clouds.png",
+          "packageChecksumSha256": "e1305b68fb212d53b436306d763405675c6a5da49876cba4c6bfbfb615b58f83",
+          "fallbackChecksumSha256": "3ce8c2ce3f3eef4503bfc799bf7879606a63f102caaec2f60547966ae7f4bc44",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 2796240,
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "veyra",
+      "tier": "high",
+      "width": 4096,
+      "height": 2048,
+      "compressedBytes": 9171708,
+      "transientBytes": 184549376,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/veyra/high/albedo.ktx2",
+          "fallbackPath": "generated/veyra/high/albedo.webp",
+          "packageChecksumSha256": "b01902a52d291b4ad5b7c039e057b81645b20f76e8021b4204fe66d0feb2f73d",
+          "fallbackChecksumSha256": "889488d9e8ba4e92df0581b2b8a56c408b591ee2831d0984b5b5098490e9e745",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 5592424,
+          "mipmapped": true
+        },
+        {
+          "name": "normal",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/high/normal.ktx2",
+          "fallbackPath": "generated/veyra/high/normal.png",
+          "packageChecksumSha256": "af5ab13b56e9ebe87472a3e77f106a969f39990658c17bd6aa8dce0f1b42bf21",
+          "fallbackChecksumSha256": "1a5b2f23e7ba322aa21f0843c614b2bc982bcb146c2c25a8bbc12ab8fd482ace",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 11184848,
+          "mipmapped": true
+        },
+        {
+          "name": "material",
+          "colorSpace": "linear",
+          "logicalFormat": "RGBA8",
+          "packagePath": "generated/veyra/high/material.ktx2",
+          "fallbackPath": "generated/veyra/high/material.png",
+          "packageChecksumSha256": "49744eacba62b2ca58f85f5105602d11fdfb37acc86f095fac64bef3e24d6d0b",
+          "fallbackChecksumSha256": "f417bcbb23d3229797e928648422baea96491f46ffd7baa42580e3c8c36f41de",
+          "gpuFormat": "bc3-rgba",
+          "gpuBytes": 11184848,
+          "mipmapped": true
+        },
+        {
+          "name": "clouds",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/veyra/high/clouds.ktx2",
+          "fallbackPath": "generated/veyra/high/clouds.png",
+          "packageChecksumSha256": "b390530aaf81cd5996117693aa2a43beaebbdd3ce3eb7dcdc0405c5958bb5e6b",
+          "fallbackChecksumSha256": "136ec8a6b9001617d8e13276586b6147d8dc4fd4beb14cc6abe81eda126911b0",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 11184848,
+          "mipmapped": true
+        }
+      ]
+    }
+  ]
 }
