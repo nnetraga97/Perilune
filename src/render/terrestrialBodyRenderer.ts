@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Vec3 } from '../core/vec3';
 import { BODY_VISUALS } from '../content/bodyVisuals';
 import type { BodyId } from '../content/bodyVisuals';
 import type { Body } from '../sim/universe';
@@ -21,9 +22,51 @@ import { TerrestrialOcean } from './terrestrial/ocean';
 import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
 import { installCoverageDither, type CoverageDitherBinding } from './terrestrial/coverageDither';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import { TerrestrialScatter, type SurfaceSampler } from './terrestrial/scatter';
+import { TerrestrialSurfaceEffects } from './terrestrial/surfaceEffects';
+import { evaluateRecipeHeight, recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
+const SCATTER_ALTITUDE_MULTIPLIER = 0.02;
+
+/**
+ * Body-fixed terrain sampler for surface scatter and effects: the raw evaluator
+ * height and a finite-difference surface normal. It reads the same authority as
+ * physics and never modifies it.
+ */
+function createSurfaceSampler(recipe: BodyFeatureRecipe): SurfaceSampler {
+  const probe = new Vec3();
+  return (x, y, z) => {
+    const len = Math.hypot(x, y, z) || 1;
+    const dx = x / len;
+    const dy = y / len;
+    const dz = z / len;
+    const height = evaluateRecipeHeight(recipe, probe.set(dx, dy, dz));
+    // Tangent basis for a finite-difference normal.
+    let ex = -dy;
+    let ey = dx;
+    let ez = 0;
+    if (ex * ex + ey * ey + ez * ez < 1e-9) { ex = 1; ey = 0; ez = 0; }
+    const el = Math.hypot(ex, ey, ez);
+    ex /= el; ey /= el; ez /= el;
+    const fx = dy * ez - dz * ey;
+    const fy = dz * ex - dx * ez;
+    const fz = dx * ey - dy * ex;
+    const eps = 1e-4;
+    const he = evaluateRecipeHeight(recipe, probe.set(dx + ex * eps, dy + ey * eps, dz + ez * eps));
+    const hf = evaluateRecipeHeight(recipe, probe.set(dx + fx * eps, dy + fy * eps, dz + fz * eps));
+    // Slope gradients: dHeight per unit tangent direction.
+    const gu = (he - height) / eps;
+    const gv = (hf - height) / eps;
+    let nx = dx - (ex * gu + fx * gv);
+    let ny = dy - (ey * gu + fy * gv);
+    let nz = dz - (ez * gu + fz * gv);
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    return { height, normalX: nx, normalY: ny, normalZ: nz };
+  };
+}
 
 export class TerrestrialBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
@@ -35,6 +78,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private atmosphere!: TerrestrialAtmosphere;
   private ocean!: TerrestrialOcean;
   private clouds!: TerrestrialCloudDeck;
+  private scatter!: TerrestrialScatter;
+  private effects!: TerrestrialSurfaceEffects;
+  private readonly surfaceSampler: SurfaceSampler;
   private compactDither!: CoverageDitherBinding;
   private terrainDither!: CoverageDitherBinding;
   private oceanDither!: CoverageDitherBinding;
@@ -56,6 +102,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       throw new Error(`${body.id} terrestrial renderer requires physical and visual atmosphere data`);
     }
     this.root.name = `terrestrial-renderer:${body.id}`;
+    this.surfaceSampler = createSurfaceSampler(recipeForBody(body));
     this.buildStack(null);
   }
 
@@ -111,12 +158,18 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     }
     this.clouds = new TerrestrialCloudDeck(this.body, this.quality, cloudMap);
 
+    const seed = this.body.def.terrain.seed;
+    this.scatter = new TerrestrialScatter(this.body.radius, seed, this.surfaceSampler, this.quality);
+    this.effects = new TerrestrialSurfaceEffects(this.body.radius, seed, this.surfaceSampler, this.quality);
+
     this.root.add(
       this.compact,
       this.terrain.group,
       this.ocean.mesh,
       this.atmosphere.mesh,
       this.clouds.group,
+      this.scatter.group,
+      this.effects.group,
     );
     this.transition.requestCompact();
     this.applyCoverage(0, false);
@@ -155,6 +208,28 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       frame.framePressure,
     );
     this.applyCoverage(snapshot.progress, prewarm);
+    this.updateSurfaceDetail(frame, prewarm && snapshot.progress > 0);
+  }
+
+  private updateSurfaceDetail(frame: Readonly<BodyRenderFrame>, terrainVisible: boolean): void {
+    const nearSurface = terrainVisible && frame.altitude < this.body.radius * SCATTER_ALTITUDE_MULTIPLIER;
+    this.scatter.group.visible = nearSurface;
+    this.effects.group.visible = nearSurface;
+    if (!nearSurface) return;
+    this.scatter.update({
+      cameraBodyFixed: frame.cameraBodyFixed,
+      orientation: frame.orientation,
+      cameraRelativeOrigin: frame.cameraRelativeOrigin,
+    });
+    this.effects.update({
+      cameraBodyFixed: frame.cameraBodyFixed,
+      cameraBodyFixedVelocity: frame.cameraBodyFixedVelocity,
+      orientation: frame.orientation,
+      cameraRelativeOrigin: frame.cameraRelativeOrigin,
+      altitude: frame.altitude,
+      deltaSeconds: frame.deltaSeconds,
+      time: frame.time,
+    });
   }
 
   private applyCoverage(progress: number, prewarm: boolean): void {
@@ -169,12 +244,24 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   stats(): Readonly<BodyRendererStats> {
     if (!this.ready) return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 });
+    const scatter = this.scatter.stats();
+    const effects = this.effects.stats();
+    const active = this.scatter.group.visible;
     return Object.freeze({
       chunks: this.terrain.stats.chunks,
       visible: this.terrainActive ? this.terrain.stats.visible : 0,
       terrainActive: this.terrainActive,
       exposure: 0,
       coverageProgress: this.coverageProgress,
+      visualScatter: active ? scatter.grass + scatter.shrub + scatter.rock : 0,
+      decals: active ? effects.decals : 0,
+      dust: active ? effects.dust : 0,
+      physicalProxies: 0,
+      collisions: 0,
+      terrainScheduleMs: this.terrain.stats.scheduleMs,
+      terrainInstallMs: this.terrain.stats.installMs,
+      scatterBytes: scatter.bufferBytes,
+      effectBytes: effects.bufferBytes,
     });
   }
 
@@ -187,6 +274,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.atmosphere.dispose();
     this.ocean.dispose();
     this.clouds.dispose();
+    this.scatter.dispose();
+    this.effects.dispose();
     this.fallbackCloudTexture?.dispose();
     this.fallbackCloudTexture = null;
     this.initialized = false;

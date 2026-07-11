@@ -5,6 +5,7 @@ import {
   drawingBufferResourceBytes,
   fullMipChainBytes,
   geometryByteLength,
+  instancedResourceBytes,
 } from '../src/render/resourceAccounting';
 
 describe('resource accounting', () => {
@@ -16,6 +17,15 @@ describe('resource accounting', () => {
     geometry.setIndex(new THREE.BufferAttribute(new Uint32Array([0, 1, 2, 2, 3, 0]), 1));
 
     expect(geometryByteLength(geometry)).toBe(48 + 24 + 16 + 24);
+  });
+
+  it('counts instanced geometry plus per-instance matrix and color buffers', () => {
+    const geometry = new THREE.PlaneGeometry(1, 1); // pos(12)+normal(12)+uv(8) f32 + index
+    const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), 10);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(10 * 3), 3);
+    const expected = geometryByteLength(geometry) + 10 * 16 * 4 + 10 * 3 * 4;
+    expect(instancedResourceBytes(mesh)).toBe(expected);
+    mesh.dispose();
   });
 
   it('counts full mip chains, faces, layers, and samples', () => {

@@ -76,6 +76,8 @@ describe('TerrestrialBodyRenderer integration', () => {
       'terrestrial-ocean:veyra',
       'terrestrial-atmosphere:veyra',
       'terrestrial-cloud-deck:veyra',
+      'terrestrial-scatter',
+      'terrestrial-surface-effects',
     ]);
     expect(renderer.root.getObjectByName('terrestrial-cloud:veyra:weather')).toBeDefined();
     expect(renderer.root.getObjectByName('terrestrial-cloud:veyra:wisps')).toBeDefined();
@@ -98,6 +100,26 @@ describe('TerrestrialBodyRenderer integration', () => {
     renderer.update(frame(veyra.radius, { allowFlightTerrain: false }));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
     expect(compact.visible).toBe(true);
+    renderer.dispose();
+  });
+
+  it('streams visual scatter and surface effects only near the surface', () => {
+    const veyra = body('veyra');
+    const renderer = createBodyRendererCandidate({ body: veyra, caps, quality: 'medium' }) as TerrestrialBodyRenderer;
+    renderer.stageAssets(pack('medium'));
+    const near = { cameraBodyFixed: { x: veyra.radius + 80, y: 0, z: 0 }, altitude: 80 };
+    for (let i = 0; i < 4; i++) renderer.update(frame(veyra.radius, { ...near, deltaSeconds: 0.35 }));
+    const surfaceStats = renderer.stats();
+    expect(surfaceStats.terrainActive).toBe(true);
+    expect(surfaceStats.scatterBytes).toBeGreaterThan(0);
+    expect(surfaceStats.effectBytes).toBeGreaterThan(0);
+    expect(surfaceStats.visualScatter).toBeGreaterThanOrEqual(0);
+    const scatterGroup = renderer.root.getObjectByName('terrestrial-scatter')!;
+    expect(scatterGroup.visible).toBe(true);
+    // High above the surface the decorative layers switch off entirely.
+    renderer.update(frame(veyra.radius, { cameraBodyFixed: { x: veyra.radius * 3, y: 0, z: 0 }, altitude: veyra.radius, allowFlightTerrain: false }));
+    expect(renderer.stats().visualScatter).toBe(0);
+    expect(scatterGroup.visible).toBe(false);
     renderer.dispose();
   });
 

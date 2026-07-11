@@ -40,6 +40,20 @@ export interface BodyRendererStats {
   readonly visible: number;
   readonly terrainActive: boolean;
   readonly exposure: number;
+  readonly coverageProgress?: number;
+  /** Visual-only instanced scatter, decal, and dust counts (never simulation objects). */
+  readonly visualScatter?: number;
+  readonly decals?: number;
+  readonly dust?: number;
+  /** Active canonical physical obstacle proxies and resolved collisions (Phases 6-7). */
+  readonly physicalProxies?: number;
+  readonly collisions?: number;
+  /** Terrain worker scheduling and chunk-install cost (ms) for the perf overlay. */
+  readonly terrainScheduleMs?: number;
+  readonly terrainInstallMs?: number;
+  /** Renderer-owned surface resource bytes by category. */
+  readonly scatterBytes?: number;
+  readonly effectBytes?: number;
 }
 
 export interface BodyRenderer {

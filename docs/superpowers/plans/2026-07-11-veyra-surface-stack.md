@@ -214,25 +214,25 @@ Commit: `feat: compile canonical Veyra scatter cells`
 - Produces: `TerrestrialScatter`, `TerrestrialSurfaceEffects`, deterministic per-cell retry, instance counts, buffer bytes, and idempotent disposal.
 - Consumes: canonical scatter cells, camera body-fixed position/velocity, terrain height and normal, quality tier, time, sun direction, and physical suppression IDs.
 
-- [ ] **Step 1: Write failing stream/effect tests**
+- [x] **Step 1: Write failing stream/effect tests**
 
 Cover deterministic grass/shrub/rock transforms, quality density ordering, unchanged physical records, camera-centered cell activation, 20% visual hysteresis, failed-cell discard and deterministic retry, no underwater instances, terrain-conforming decals, body-fixed dust motion, zero simulation objects, bounded pools, resource accounting, quality replacement, context rebuild, and one-time disposal.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `npx vitest run tests/veyra-surface-effects.test.ts tests/terrestrial-body-renderer.test.ts tests/resource-accounting.test.ts`
 
 Expected: no production scatter/effects owners or renderer statistics exist.
 
-- [ ] **Step 3: Build production instancing**
+- [x] **Step 3: Build production instancing**
 
 Use shared low-poly geometries and `InstancedMesh` pools for grass, shrubs, and rocks. Stream visible cells around the body-fixed camera; derive each transform from canonical records and terrain normals. Quality changes alter only visual selection and mesh complexity. A failed cell is removed completely and retried from its stable seed on a later update.
 
-- [ ] **Step 4: Add decals and dust**
+- [x] **Step 4: Add decals and dust**
 
 Create pooled terrain-hugging decal instances for bare soil, rock breakup, wet shore, and landing scuffs. Create a bounded `Points` dust system driven by body-fixed velocity, altitude, biome dryness, and deterministic time; it must not move with floating-origin shifts or add collision state.
 
-- [ ] **Step 5: Integrate stats, verify, and commit**
+- [x] **Step 5: Integrate stats, verify, and commit**
 
 Extend `BodyRendererStats` with visual scatter, decal, dust, physical proxy, collision, worker timing, and resource-byte fields. Include them in renderer disposal and transaction rebuilds.
 

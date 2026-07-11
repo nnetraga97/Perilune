@@ -17,6 +17,17 @@ export function geometryByteLength(geometry: THREE.BufferGeometry): number {
   return bytes;
 }
 
+/**
+ * Bytes an InstancedMesh keeps resident: shared geometry plus the per-instance
+ * matrix and optional color buffers. Used for surface-scatter and decal pools.
+ */
+export function instancedResourceBytes(mesh: THREE.InstancedMesh): number {
+  let bytes = geometryByteLength(mesh.geometry as THREE.BufferGeometry);
+  bytes += mesh.instanceMatrix.array.byteLength;
+  if (mesh.instanceColor) bytes += mesh.instanceColor.array.byteLength;
+  return bytes;
+}
+
 export function fullMipChainBytes(spec: MipResourceSpec): number {
   const faces = spec.faces ?? 1;
   const layers = spec.layers ?? 1;
