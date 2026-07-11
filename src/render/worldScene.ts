@@ -138,7 +138,7 @@ export class WorldScene {
     return renderer;
   }
 
-  private setFlightTerrainOwner(bodyId: string): void {
+  private setFlightTerrainOwner(bodyId: string | null): void {
     const previousId = this.flightTerrainBodyId;
     if (previousId && previousId !== bodyId) {
       const previous = this.bodyRenderers.get(previousId);
@@ -189,7 +189,10 @@ export class WorldScene {
    */
   update(game: GameState, dt: number): void {
     const active = game.active;
-    if (!active) return;
+    if (!active) {
+      this.setFlightTerrainOwner(null);
+      return;
+    }
     const v = active.runtime;
     const body = game.bodyOf(active);
     this.setFlightTerrainOwner(body.id);

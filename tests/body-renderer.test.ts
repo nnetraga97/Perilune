@@ -9,6 +9,8 @@ import { StarBodyRenderer } from '../src/render/starBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import type { BodyRenderFrame } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
+import { WorldScene } from '../src/render/worldScene';
+import type { BodyRenderer } from '../src/render/bodyRenderer';
 
 const caps: RenderCaps = {
   backend: 'webgl2',
@@ -188,5 +190,24 @@ describe('body renderer adapters', () => {
     expect(ownedDispose).toHaveBeenCalledOnce();
     expect(sharedDispose).not.toHaveBeenCalled();
     expect(materialDispose).not.toHaveBeenCalled();
+  });
+
+  test('losing the active vessel releases the previous flight renderer before returning', () => {
+    const root = new THREE.Group();
+    const dispose = vi.fn();
+    const previous = { root, dispose } as unknown as BodyRenderer;
+    const scene = new THREE.Scene();
+    scene.add(root);
+    const world = Object.create(WorldScene.prototype) as WorldScene;
+    Object.assign(world as unknown as Record<string, unknown>, {
+      scene,
+      bodyRenderers: new Map([['veyra', previous]]),
+      flightTerrainBodyId: 'veyra',
+    });
+
+    world.update({ active: null } as never, 0);
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(scene.children).not.toContain(root);
   });
 });
