@@ -121,7 +121,7 @@ For each canonical pixel, compute body-fixed direction with +Z north; sample `so
 
 - [ ] **Step 5: Package and validate**
 
-Install pinned KTX-Software in the compiler container with a verified archive checksum. Encode ETC1S albedo and UASTC data channels with one thread, produce WebP/PNG fallbacks, update checked manifest data, and generate attribution/modification notices.
+Install `KTX-Software-4.4.2-Linux-x86_64.tar.bz2` from the official Khronos release with SHA-256 `a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245`. Encode ETC1S albedo and UASTC data channels with one thread, produce WebP/PNG fallbacks, update checked manifest data, and generate attribution/modification notices.
 
 - [ ] **Step 6: Run focused checks and commit**
 
