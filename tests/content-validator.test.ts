@@ -51,6 +51,21 @@ function fullMipRgbaBytes(width: number, height: number): number {
   }
 }
 
+function canonicalJson(value: unknown): string {
+  const normalize = (entry: unknown): unknown => {
+    if (Array.isArray(entry)) return entry.map(normalize);
+    if (entry && typeof entry === 'object') {
+      return Object.fromEntries(
+        Object.keys(entry)
+          .sort()
+          .map((key) => [key, normalize((entry as Record<string, unknown>)[key])]),
+      );
+    }
+    return entry;
+  };
+  return JSON.stringify(normalize(value));
+}
+
 function ktx2Fixture(
   width: number,
   height: number,
@@ -331,10 +346,11 @@ describe('planet content validator', () => {
 
     const dir = mkdtempSync(join(tmpdir(), 'perilune-sync-'));
     const artifactPath = join(dir, 'checked.json');
+    const manifest = { packs: [{ channels: [{ packagePath: '../escape.ktx2', fallbackPath: 'safe.webp' }] }] };
     writeFileSync(artifactPath, JSON.stringify({
       schemaVersion: 1,
-      manifestSha256: 'a'.repeat(64),
-      manifest: { packs: [{ channels: [{ packagePath: '../escape.ktx2', fallbackPath: 'safe.webp' }] }] },
+      manifestSha256: createHash('sha256').update(canonicalJson(manifest)).digest('hex'),
+      manifest,
     }));
     const result = spawnSync(process.execPath, ['scripts/sync-renderer-assets.mjs'], {
       cwd: process.cwd(),
