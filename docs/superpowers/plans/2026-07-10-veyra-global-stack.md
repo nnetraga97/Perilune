@@ -105,7 +105,7 @@ git commit -m "feat: type renderer asset handoff"
 
 - [ ] **Step 1: Pin and fetch the original source**
 
-Use `https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip`. The fetch script verifies a committed SHA-256 before extraction, never downloads during `prebuild`, and records the Natural Earth terms URL and transformation list in the manifest.
+Use `https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip` (Natural Earth II 3.2.0, 16200x8100). The fetch script requires SHA-256 `3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919` before extraction, never downloads during `prebuild`, and records the Natural Earth terms URL and transformation list in the manifest.
 
 - [ ] **Step 2: Write failing compiler and validator tests**
 
