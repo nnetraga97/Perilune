@@ -159,7 +159,11 @@ describe('entry prediction', () => {
 
     const model = buildAeroModel(v.craft);
     const mass = computeMassProperties(v.craft).mass;
+    const positionBefore = v.pos.clone();
+    const velocityBefore = v.vel.clone();
     const pred = predictEntry(veyra, model, mass, v.pos, v.vel, game.time);
+    expect(v.pos).toEqual(positionBefore);
+    expect(v.vel).toEqual(velocityBefore);
     expect(pred.willEnter).toBe(true);
     expect(pred.lands).toBe(true);
     expect(pred.landingDirBF).not.toBeNull();
@@ -182,5 +186,46 @@ describe('entry prediction', () => {
     const pred = predictEntry(veyra, model, mass, v.pos, v.vel, game.time);
     expect(pred.willEnter).toBe(false);
     expect(pred.lands).toBe(false);
+  });
+
+  it('predicts direct terrain impact on an airless body without heating', () => {
+    const game = new GameState();
+    const palla = game.universe.get('palla');
+    const craft = buildProbe();
+    const model = buildAeroModel(craft);
+    const mass = computeMassProperties(craft).mass;
+    const pred = predictEntry(
+      palla,
+      model,
+      mass,
+      new Vec3(palla.radius + 10_000, 0, 0),
+      new Vec3(-100, 0, 0),
+      game.time,
+    );
+
+    expect(pred.willEnter).toBe(true);
+    expect(pred.lands).toBe(true);
+    expect(pred.peakHeatFlux).toBe(0);
+    expect(pred.landingDirBF).not.toBeNull();
+  });
+
+  it('reports no entry for a stable airless orbit', () => {
+    const game = new GameState();
+    const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'palla', 100_000);
+    const palla = game.bodyOf(gv);
+    const model = buildAeroModel(gv.runtime.craft);
+    const mass = computeMassProperties(gv.runtime.craft).mass;
+    const pred = predictEntry(
+      palla,
+      model,
+      mass,
+      gv.runtime.pos,
+      gv.runtime.vel,
+      game.time,
+    );
+
+    expect(pred.willEnter).toBe(false);
+    expect(pred.lands).toBe(false);
+    expect(pred.samples.every((sample) => sample.isFinite())).toBe(true);
   });
 });
