@@ -13,7 +13,6 @@ const ACTIVE_RESOURCE_CATEGORIES = Object.freeze([
   'transitionGeometryBytes', 'shadowBytes',
 ]);
 const RENDERER_RESOURCE_CATEGORIES = Object.freeze([
-  'inactiveCloudGeometryBytes', 'inactiveCloudTextureBytes',
   'starfieldGeometryBytes', 'drawingBufferColorBytes', 'drawingBufferDepthBytes',
 ]);
 

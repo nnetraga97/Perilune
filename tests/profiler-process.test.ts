@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateLoopbackPort,
   stopProcessTree,
+  terminateWindowsProcessTree,
   waitForServerOrExit,
+  type ProcessCommand,
 } from '../scripts/lib/profiler-process.mjs';
 
 function canConnect(port: number): Promise<boolean> {
@@ -20,6 +22,23 @@ function canConnect(port: number): Promise<boolean> {
 }
 
 describe('profiler process ownership', () => {
+  it('uses taskkill tree and force flags for Windows cleanup', async () => {
+    let observed: ProcessCommand | undefined;
+    await terminateWindowsProcessTree(731, async (command) => {
+      observed = command;
+      return { code: 0, signal: null };
+    });
+    expect(observed).toEqual({
+      file: 'taskkill',
+      args: ['/PID', '731', '/T', '/F'],
+    });
+  });
+
+  it('reports taskkill failures', async () => {
+    await expect(terminateWindowsProcessTree(731, async () => ({ code: 128, signal: null })))
+      .rejects.toThrow(/taskkill.*128/i);
+  });
+
   it('allocates an available ephemeral loopback port', async () => {
     const first = await allocateLoopbackPort();
     expect(first).toBeGreaterThan(0);

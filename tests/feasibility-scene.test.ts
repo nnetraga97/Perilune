@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reductionStage } from '../src/proto/feasibilityMetrics';
+import { categorizeResources } from '../src/render/resourceAccounting';
 import {
   DisposableBag,
   classifyCloudResources,
@@ -55,25 +56,36 @@ describe('feasibility scene fixture', () => {
     ], reductionStage(0, 'medium').secondCloudScale)).toEqual({
       activeGeometryBytes: 110,
       activeTextureBytes: 220,
-      inactiveGeometryBytes: 0,
-      inactiveTextureBytes: 0,
       activeGeometryCount: 2,
       activeTextureCount: 2,
     });
   });
 
   it('moves the allocated second cloud out of active-body bytes at stage 4', () => {
-    expect(classifyCloudResources([
+    const clouds = classifyCloudResources([
       { geometryBytes: 100, textureBytes: 200 },
       { geometryBytes: 10, textureBytes: 20 },
-    ], reductionStage(4, 'medium').secondCloudScale)).toEqual({
+    ], reductionStage(4, 'medium').secondCloudScale);
+    expect(clouds).toEqual({
       activeGeometryBytes: 100,
       activeTextureBytes: 200,
-      inactiveGeometryBytes: 10,
-      inactiveTextureBytes: 20,
       activeGeometryCount: 1,
       activeTextureCount: 1,
     });
+    const resources = categorizeResources({
+      activeBody: {
+        cloudGeometryBytes: clouds.activeGeometryBytes,
+        cloudTextureBytes: clouds.activeTextureBytes,
+      },
+      rendererOnly: {
+        starfieldGeometryBytes: 10,
+        drawingBufferColorBytes: 20,
+        drawingBufferDepthBytes: 30,
+      },
+      transientBytes: 0,
+    });
+    expect(resources.activeBodyBytes).toBe(300);
+    expect(resources.totalRendererBytes).toBe(360);
   });
 
   it('disposes every owned resource exactly once', () => {

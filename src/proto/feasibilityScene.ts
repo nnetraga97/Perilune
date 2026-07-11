@@ -134,7 +134,6 @@ export interface FeasibilitySceneStats extends FeasibilityFixtureSpec {
 
 export interface FeasibilityBodyResources {
   readonly categories: Readonly<Record<string, number>>;
-  readonly rendererOnlyCategories: Readonly<Record<string, number>>;
   readonly geometryCount: number;
   readonly textureCount: number;
 }
@@ -149,14 +148,11 @@ export function classifyCloudResources(
   secondCloudScale: boolean,
 ) {
   const active = secondCloudScale ? clouds : [clouds[0]];
-  const inactive = secondCloudScale ? [] : [clouds[1]];
   const sum = (items: readonly CloudResourceStats[], field: keyof CloudResourceStats) =>
     items.reduce((total, item) => total + item[field], 0);
   return Object.freeze({
     activeGeometryBytes: sum(active, 'geometryBytes'),
     activeTextureBytes: sum(active, 'textureBytes'),
-    inactiveGeometryBytes: sum(inactive, 'geometryBytes'),
-    inactiveTextureBytes: sum(inactive, 'textureBytes'),
     activeGeometryCount: active.length,
     activeTextureCount: active.length,
   });
@@ -282,10 +278,6 @@ export class FeasibilityScene {
         physicalProxyInstanceBytes: this.proxies.instanceMatrix.array.byteLength,
         transitionGeometryBytes: geometryByteLength(this.transitionMeshes[0].geometry),
         shadowBytes,
-      }),
-      rendererOnlyCategories: Object.freeze({
-        inactiveCloudGeometryBytes: cloudResources.inactiveGeometryBytes,
-        inactiveCloudTextureBytes: cloudResources.inactiveTextureBytes,
       }),
       geometryCount: planet.geometryCount + 1 + cloudResources.activeGeometryCount + 1 + 1 + 1,
       // Cloud maps plus the authoritative 2048 directional shadow resource.

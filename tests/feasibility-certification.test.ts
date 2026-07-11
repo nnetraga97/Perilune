@@ -83,7 +83,6 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
         scatterInstanceBytes: 10, physicalProxyGeometryBytes: 10,
         physicalProxyInstanceBytes: 10, transitionGeometryBytes: 10, shadowBytes: 10,
         starfieldGeometryBytes: 10, drawingBufferColorBytes: 10, drawingBufferDepthBytes: 10,
-        inactiveCloudGeometryBytes: 0, inactiveCloudTextureBytes: 0,
       },
       activeBodyBytes: 110,
       totalRendererBytes: 140,
