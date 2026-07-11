@@ -139,15 +139,27 @@ export class PlanetRenderer {
   readonly group = new THREE.Group();
   private readonly chunks = new Map<string, Chunk>();
   private readonly material: THREE.Material;
-  private readonly oceanMaterial: THREE.Material | null = null;
+  private readonly oceanMaterial: THREE.MeshPhongMaterial | null = null;
   private readonly maxDepth: number;
   private quality: PlanetQuality;
   private frame = 0;
   private buildsThisUpdate = 0;
   private readonly palette: { low: THREE.Color; mid: THREE.Color; high: THREE.Color; ocean: THREE.Color };
   private ocean: THREE.Mesh | null = null;
+  private shadowReceiver = false;
+  private geometryBytes = 0;
   /** Stats for the perf overlay. */
-  stats = { chunks: 0, visible: 0, built: 0, triangles: 0, coverageGaps: 0, overlapChunks: 0 };
+  stats = {
+    chunks: 0,
+    visible: 0,
+    built: 0,
+    triangles: 0,
+    coverageGaps: 0,
+    overlapChunks: 0,
+    scheduleMs: 0,
+    installMs: 0,
+    geometryBytes: 0,
+  };
 
   constructor(body: Body, quality: PlanetQuality = PLANET_QUALITY.medium) {
     this.body = body;
@@ -182,6 +194,18 @@ export class PlanetRenderer {
     this.quality = q;
   }
 
+  setShadowReceiver(enabled: boolean): void {
+    this.shadowReceiver = enabled;
+    for (const chunk of this.chunks.values()) chunk.mesh.receiveShadow = enabled;
+  }
+
+  setOceanGlitter(enabled: boolean): void {
+    if (!this.oceanMaterial) return;
+    this.oceanMaterial.shininess = enabled ? 90 : 12;
+    this.oceanMaterial.specular.set(enabled ? '#8fb8cc' : '#101820');
+    this.oceanMaterial.needsUpdate = true;
+  }
+
   /**
    * Update LOD selection and chunk placement.
    * @param camBodyFixed camera position in body-fixed f64 coordinates
@@ -201,6 +225,8 @@ export class PlanetRenderer {
     this.stats.triangles = 0;
     this.stats.coverageGaps = 0;
     this.stats.overlapChunks = 0;
+    this.stats.scheduleMs = 0;
+    this.stats.installMs = 0;
 
     const camDist = camBodyFixed.length();
     const camDir = _dir.copy(camBodyFixed).normalize();
@@ -212,6 +238,7 @@ export class PlanetRenderer {
         : -0.2; // near/below surface: keep a generous hemisphere
 
     const wanted = new Set<string>();
+    const scheduleStart = performance.now();
     for (const f of planetFaceOrder(camDir)) {
       if (!this.selectNode(
         { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(FACES[f], 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
@@ -221,6 +248,7 @@ export class PlanetRenderer {
         wanted,
       )) this.stats.coverageGaps++;
     }
+    this.stats.scheduleMs = Math.max(0, performance.now() - scheduleStart - this.stats.installMs);
     this.stats.overlapChunks = countLodOverlaps(wanted);
 
     // Hide unneeded chunks, show wanted ones, place camera-relative.
@@ -259,6 +287,7 @@ export class PlanetRenderer {
 
     this.evictStale();
     this.stats.chunks = this.chunks.size;
+    this.stats.geometryBytes = this.geometryBytes;
   }
 
   private selectNode(
@@ -341,6 +370,7 @@ export class PlanetRenderer {
   }
 
   private buildChunk(key: string, node: QuadNode): void {
+    const installStart = performance.now();
     const res = this.quality.gridRes;
     const face = FACES[node.face];
     const vertCount = res * res + res * 4; // grid + skirt ring
@@ -449,8 +479,11 @@ export class PlanetRenderer {
     const mesh = new THREE.Mesh(geo, this.material);
     mesh.frustumCulled = true;
     mesh.matrixAutoUpdate = true;
+    mesh.receiveShadow = this.shadowReceiver;
     this.group.add(mesh);
     this.chunks.set(key, { key, mesh, origin, lastUsed: this.frame });
+    this.geometryBytes += geometryByteLength(geo);
+    this.stats.installMs += performance.now() - installStart;
   }
 
   private evictStale(): void {
@@ -461,6 +494,7 @@ export class PlanetRenderer {
       const chunk = entries[i];
       if (chunk.lastUsed === this.frame) break; // never evict in-use chunks
       this.group.remove(chunk.mesh);
+      this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
       chunk.mesh.geometry.dispose();
       this.chunks.delete(chunk.key);
     }
@@ -472,8 +506,19 @@ export class PlanetRenderer {
       chunk.mesh.geometry.dispose();
     }
     this.chunks.clear();
+    this.geometryBytes = 0;
     this.material.dispose();
     this.oceanMaterial?.dispose();
     if (this.ocean) this.ocean.geometry.dispose();
   }
+}
+
+function geometryByteLength(geometry: THREE.BufferGeometry): number {
+  let bytes = 0;
+  for (const attribute of Object.values(geometry.attributes)) {
+    bytes += attribute.array.byteLength;
+  }
+  const index = geometry.getIndex();
+  if (index) bytes += index.array.byteLength;
+  return bytes;
 }
