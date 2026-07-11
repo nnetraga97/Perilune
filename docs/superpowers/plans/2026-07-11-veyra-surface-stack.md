@@ -123,25 +123,25 @@ Commit: `build: validate planet content before production`
 - Produces: `createTerrestrialSurfaceMaterial(pack, descriptor, tier)` and `classifyTerrestrialSurface(sample)`.
 - Consumes: global albedo/normal/material maps, body direction, body-fixed detail anchor, terrain normal, altitude, slope, latitude, ocean proximity, and deterministic moisture noise.
 
-- [ ] **Step 1: Write failing material tests**
+- [x] **Step 1: Write failing material tests**
 
 Cover soil, rock, sand, and vegetation dominance; snow/highland fallback; slope-driven rock exposure; shore sand/wetness; latitude and deterministic moisture influence; Low/Medium/High frequency differences without identity changes; tri-planar weights summing to one; 8192-meter periodicity; and identical samples across floating-origin shifts and worker rebuilds.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `npx vitest run tests/veyra-surface-material.test.ts tests/veyra-global-material.test.ts`
 
 Expected: the surface-material API and `detailAnchor` shader attribute are missing.
 
-- [ ] **Step 3: Implement deterministic regional classification**
+- [x] **Step 3: Implement deterministic regional classification**
 
 Decode biome class from material B and shore/ocean from A. Blend it with evaluator altitude, geometric slope, absolute latitude, and a body-fixed periodic moisture function. Return normalized weights for soil, rock, sand, and vegetation so CPU tests and shader constants share the same thresholds.
 
-- [ ] **Step 4: Implement analytic triplanar detail**
+- [x] **Step 4: Implement analytic triplanar detail**
 
 Inject a periodic multi-octave procedural detail function into `MeshStandardMaterial` rather than adding unlicensed texture assets. Blend along geometric-normal axes, perturb only shading normals/albedo/roughness, and leave vertex positions unchanged. Set declared repeat and material scales per tier while preserving the same regional classification.
 
-- [ ] **Step 5: Integrate, verify, and commit**
+- [x] **Step 5: Integrate, verify, and commit**
 
 Run: `npx vitest run tests/veyra-surface-material.test.ts tests/veyra-global-material.test.ts tests/terrain-worker.test.ts tests/ground.test.ts && npm run typecheck && npm run build`
 

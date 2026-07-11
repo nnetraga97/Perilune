@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { Vec3 } from '../src/core/vec3';
+import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import type { RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { PLANET_QUALITY, PlanetRenderer } from '../src/render/planet';
@@ -98,5 +99,28 @@ describe('Veyra global coordinates and material', () => {
       .toBe(meshes[0].geometry.getAttribute('position').count);
     renderer.dispose();
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('installs a per-vertex surface altitude attribute matching the evaluator', () => {
+    const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, { oceanEnabled: false });
+    const requestChunk = (renderer as unknown as { requestChunk(key: string, node: unknown): void }).requestChunk.bind(renderer);
+    // A deep, small chunk keeps chunk-local f32 positions precise, so the
+    // reconstructed altitude can be checked tightly against the evaluator.
+    requestChunk('alt', {
+      face: 2, depth: 6, u0: 0, v0: 0, size: 2 / 64,
+      centerDir: new Vec3(0, 1, 0), worldSize: veyra.radius / 64,
+    });
+    const mesh = renderer.group.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh)!;
+    const altitude = mesh.geometry.getAttribute('surfaceAltitude');
+    const direction = mesh.geometry.getAttribute('bodyDirection');
+    expect(altitude.count).toBe(direction.count);
+    const recipe = recipeForBody(veyra);
+    // Sample only the main grid; skirt vertices are intentionally sunk.
+    const mainCount = PLANET_QUALITY.low.gridRes * PLANET_QUALITY.low.gridRes;
+    for (let i = 0; i < mainCount; i += 7) {
+      const expected = evaluateRecipeHeight(recipe, new Vec3(direction.getX(i), direction.getY(i), direction.getZ(i)));
+      expect(Math.abs(altitude.getX(i) - expected)).toBeLessThan(0.5);
+    }
+    renderer.dispose();
   });
 });

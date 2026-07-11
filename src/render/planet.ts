@@ -125,6 +125,28 @@ export interface PlanetRendererOptions {
   readonly workerPool?: TerrainChunkWorkerPool;
 }
 
+/**
+ * Per-vertex evaluator altitude above sea level, reconstructed from the chunk's
+ * body-fixed geometry so the surface material can classify without a second
+ * terrain sample. Derived at install time; the worker geometry buffers (and
+ * their determinism tests) are unchanged.
+ */
+function surfaceAltitudes(result: TerrainChunkGeometryResult, radius: number): Float32Array {
+  const count = result.bodyDirection.length / 3;
+  const altitude = new Float32Array(count);
+  const [ox, oy, oz] = result.origin;
+  for (let i = 0; i < count; i++) {
+    const px = result.position[i * 3] + ox;
+    const py = result.position[i * 3 + 1] + oy;
+    const pz = result.position[i * 3 + 2] + oz;
+    const dx = result.bodyDirection[i * 3];
+    const dy = result.bodyDirection[i * 3 + 1];
+    const dz = result.bodyDirection[i * 3 + 2];
+    altitude[i] = px * dx + py * dy + pz * dz - radius;
+  }
+  return altitude;
+}
+
 function countLodOverlaps(keys: ReadonlySet<string>): number {
   let overlaps = 0;
   for (const key of keys) {
@@ -544,6 +566,7 @@ export class PlanetRenderer {
     geo.setAttribute('color', new THREE.BufferAttribute(result.color, 3));
     geo.setAttribute('bodyDirection', new THREE.BufferAttribute(result.bodyDirection, 3));
     geo.setAttribute('bodyFixedDetailAnchor', new THREE.BufferAttribute(result.bodyFixedDetailAnchor, 3));
+    geo.setAttribute('surfaceAltitude', new THREE.BufferAttribute(surfaceAltitudes(result, this.body.radius), 1));
     geo.setIndex(new THREE.BufferAttribute(result.index, 1));
     geo.boundingSphere = new THREE.Sphere(
       new THREE.Vector3(...result.bounds.center),

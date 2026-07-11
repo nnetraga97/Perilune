@@ -15,6 +15,7 @@ import { CoverageTransition } from './coverageTransition';
 import { PLANET_QUALITY, PlanetRenderer } from './planet';
 import { installBodyFixedDirectionAttribute } from './terrestrial/globalCoordinates';
 import { createTerrestrialGlobalMaterial } from './terrestrial/globalMaterial';
+import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial';
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
 import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
@@ -83,7 +84,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.compact.name = `terrestrial-compact:${this.bodyId}`;
     this.compact.scale.setScalar(this.body.radius);
 
-    const terrainMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor);
+    const terrainMaterial = createTerrestrialSurfaceMaterial(pack, this.descriptor, this.quality);
     this.terrainDither = installCoverageDither(terrainMaterial, 'terrain');
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
