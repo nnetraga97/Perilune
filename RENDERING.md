@@ -22,10 +22,10 @@ frame, so precision holds from interplanetary distance to 1 m altitude
 
 `src/content/bodyVisuals.ts` is the sole visual-assignment registry. Selection
 is explicit and never inferred from terrain amplitude or atmosphere data.
-Auren is assigned `star`; Ashen, Vess, Veyra, Palla, Wisp, Rusk, Tyran, Brimm,
-Glacia, Mote, and Farfall are assigned `legacy` in Phase 3. Each non-star also
-records its future terrestrial, airless, or gas-giant target archetype without
-activating that later art.
+Auren is assigned `star` and Veyra is assigned `terrestrial`. Ashen, Vess,
+Palla, Wisp, Rusk, Tyran, Brimm, Glacia, Mote, and Farfall retain `legacy`
+coverage while recording their future terrestrial, airless, or gas-giant
+target archetypes.
 
 `BodyRendererManager` keeps one committed renderer visible while a candidate
 loads assets, prepares coverage, compiles shaders, and passes resource budgets.
@@ -38,10 +38,11 @@ procedural renderer resources.
 Planet-pack metadata comes from the build-generated, digest-checked manifest.
 Runtime paths and byte counts therefore cannot bypass content validation.
 KTX2/Basis transcoders are synced from the pinned Three.js dependency during
-development/build preparation. The checked manifest is currently empty, so
-the shipped Phase 3 bodies use their procedural legacy/star renderers; authored
-body packs and later archetype art are planned for Phase 4 and beyond, not
-claimed as shipped.
+development/build preparation. The checked manifest contains Veyra Low,
+Medium, and High packs, each with KTX2 and conventional fallback albedo,
+normal, material, and cloud channels. Other bodies continue through the
+procedural legacy or star paths until their archetype renderers and validated
+content ship.
 
 `BodyMaterialDescriptor` is shared by compact flight and MapView presentation.
 It carries solid/gas/star identity, the body palette, and the stable body-fixed
@@ -52,6 +53,29 @@ evaluator.
 `StarBodyRenderer` exclusively owns Auren's disk/corona, directional light,
 light color/intensity, and exposure contribution. No scene creates a second
 flight-scale star presentation.
+
+## Veyra terrestrial global stack
+
+`TerrestrialBodyRenderer` stages one validated Veyra pack transactionally and
+keeps the committed procedural terrestrial coverage if loading, shader
+compilation, coverage preparation, or resource admission fails. Its compact
+sphere and terrain chunks sample the same body-fixed global material identity.
+The production stack owns:
+
+- Authored global albedo plus generated oct-normal and packed
+  roughness/AO/biome/ocean data.
+- An altitude-aware atmosphere shell selected from analytic, lookup, or
+  limb-haze paths by measured renderer capabilities.
+- A separate water-datum sphere with Fresnel response, depth tint, sun
+  glitter, and shoreline treatment; terrain remains raw seafloor beneath it.
+- Two deterministic cloud shells with independent drift and conditional
+  Medium/High shadow ownership.
+- A coverage-ready compact-to-terrain dither transition that retains fallback
+  coverage until terrain is prepared.
+
+Regional triplanar materials, decals, dust, production scatter, worker-built
+chunks, and physical obstacles belong to the deferred Veyra surface phase and
+are not claimed by this global stack.
 
 ## Legacy planet detail (`src/render/planet.ts`)
 
@@ -67,11 +91,12 @@ flight-scale star presentation.
 - Clouds: procedural fBm canvas texture on a translucent shell, drifting
   relative to the ground, fading out when the camera nears the layer.
 
-## Atmosphere
+## Legacy atmosphere
 
 Sky color and ambient light blend with altitude and sun elevation; the
-background returns to starfield black above the atmosphere. (Full
-scattering shader is scheduled for the visual-quality milestone.)
+background returns to starfield black above the atmosphere. Veyra suppresses
+this tint path and uses the terrestrial atmosphere pass described above;
+legacy atmospheric bodies retain it until their renderer migrations.
 
 ## Phase 2 feasibility fixture
 
@@ -107,9 +132,9 @@ drop out of the visual on sync.
 
 ## Scenes
 
-- `WorldScene`: flight — lazy legacy terrain only for the active solid SOI,
-  descriptor compact relatives, vessels, starfield, and Auren presentation
-  owned by `StarBodyRenderer`.
+- `WorldScene`: flight — one explicit active-body renderer (terrestrial Veyra
+  or legacy fallback), descriptor compact relatives, vessels, starfield, and
+  Auren presentation owned by `StarBodyRenderer`.
 - `MapView`: 1:100,000 orbital display — conic lines (elliptic + hyperbolic
   sampling), SOI shells, encounter markers, node widgets.
 - `Editor`: workshop scene with grid, pad, key/rim lighting, ghost-part

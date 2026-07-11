@@ -216,6 +216,9 @@ made.
 
 Per the user's request to prioritize implementation, the broad unit/e2e pass,
 full-duration M3 Max Medium and Low records, and automated feature-group delta
-profiles are deferred to the final verification pass. The focused Phase 3
-checks and typecheck do not certify those hardware gates or the complete
-specification.
+profiles are deferred to the final verification pass. Focused renderer checks,
+typecheck, and the shortened local smoke do not certify those hardware gates
+or the complete specification. Veyra's production Low, Medium, and High packs
+are admitted against the checked manifest's transfer, active-body, total, and
+transient ceilings, but final orbit-to-contact journeys and manual art review
+remain required.

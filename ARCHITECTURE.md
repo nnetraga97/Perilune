@@ -75,14 +75,19 @@ low multipliers (atmospheric "physics warp" is capped separately).
 ## ADR-006: Body visuals — explicit, shared, and transactional
 
 - Renderer assignment lives in `src/content/bodyVisuals.ts`, outside the
-  simulation `BodyDef`. Auren is `star`; all eleven non-star bodies remain
-  `legacy` in Phase 3 while recording an explicit later target archetype.
+  simulation `BodyDef`. Auren is `star`, Veyra is `terrestrial`, and the ten
+  remaining bodies retain `legacy` coverage while recording an explicit later
+  terrestrial, airless, or gas-giant target archetype.
 - `BodyMaterialDescriptor` is the common identity/palette/orientation input
   for compact flight and MapView bodies. +Z is north and longitude is
   `atan2(y, x)`. Simulation terrain remains the only collision-height source.
 - `BodyRendererManager` stages candidate assets, coverage, shaders, and
   budgets while retaining the committed root. Success swaps atomically;
   failure disposes the candidate and retains the committed renderer.
+- Veyra's terrestrial renderer consumes digest-checked Low, Medium, or High
+  albedo, normal, material, and cloud channels. Its compact identity, terrain,
+  atmosphere, independent ocean, cloud deck, and coverage transition share
+  body-fixed coordinates while `solidHeight` remains collision authority.
 - `RendererResourceLedger` admits at most one flight-scale pack. Its reported
   bytes are pack-only and are not presented as total procedural GPU memory.
 - `StarBodyRenderer` owns the flight-scale Auren disk/corona, directional
@@ -118,7 +123,9 @@ e2e/           Playwright end-to-end + visual + perf harness
 - **Star system:** Auren (star); Ashen, Vess, **Veyra** (home), Rusk,
   Tyran (+ Brimm, Glacia, Mote), Farfall; Veyra's moons **Palla** and Wisp
 - **Species:** the Vellans; **Agency:** the Skyward Cooperative
-- All names, bodies, parts, current procedural presentation, and text are
-  original. Authored body packs and Phase 4+ archetype art are planned rather
-  than shipped. Third-party code and any future sourced assets must remain
-  recorded in ATTRIBUTIONS.md / LICENSES.md.
+- All names, bodies, parts, simulation code, procedural systems, and text are
+  original. Veyra's authored albedo pack uses the public-domain Natural Earth
+  II source through deterministic reprojection, warping, recoloring, and
+  packaging. That source and any future sourced assets remain recorded in
+  `ATTRIBUTIONS.md` and `LICENSES.md`; other bodies still use their legacy
+  procedural presentation until their archetype phases ship.

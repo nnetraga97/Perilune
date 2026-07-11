@@ -6,8 +6,11 @@ land on moons, and bring your crew home.
 
 **Status: Milestone 1 vertical slice — playable.** Build a rocket in the
 Workshop, launch from Veyra, reach orbit, plan a transfer to the moon Palla
-with maneuver nodes, land, return, and recover. Original star system, parts,
-art (all procedural), and writing.
+with maneuver nodes, land, return, and recover. The star system, parts,
+simulation, and writing are original. Veyra's authored global albedo uses a
+public-domain Natural Earth II source through Perilune's deterministic asset
+compiler; its provenance and modifications are recorded in
+`ATTRIBUTIONS.md` and `LICENSES.md`.
 
 ## Play (development)
 
@@ -27,6 +30,8 @@ npm run dev        # http://localhost:5173
 | `npm run test:e2e` | Browser end-to-end tests (Playwright) |
 | `npm run bench` | Performance benchmarks with CI budgets |
 | `npm run typecheck` | Strict TypeScript check |
+| `npm run validate:content` | Validate planet assets, provenance, checksums, and budgets |
+| `npm run compile:planet-assets:container` | Regenerate authoritative planet packs in the pinned container |
 
 The production build deploys to any HTTPS static host.
 
