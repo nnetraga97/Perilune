@@ -50,6 +50,7 @@ export class WorldScene {
   private quality: QualityTier = 'medium';
   private readonly resizeHandler: () => void;
   private disposed = false;
+  private flightTerrainBodyId: string | null = null;
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -137,6 +138,19 @@ export class WorldScene {
     return renderer;
   }
 
+  private setFlightTerrainOwner(bodyId: string): void {
+    const previousId = this.flightTerrainBodyId;
+    if (previousId && previousId !== bodyId) {
+      const previous = this.bodyRenderers.get(previousId);
+      if (previous) {
+        this.scene.remove(previous.root);
+        previous.dispose();
+        this.bodyRenderers.delete(previousId);
+      }
+    }
+    this.flightTerrainBodyId = bodyId;
+  }
+
   visualFor(gv: GameVessel): VesselVisual {
     let vis = this.vesselVisuals.get(gv.runtime.id);
     if (!vis) {
@@ -178,6 +192,7 @@ export class WorldScene {
     if (!active) return;
     const v = active.runtime;
     const body = game.bodyOf(active);
+    this.setFlightTerrainOwner(body.id);
     const t = game.time;
 
     // ---- camera position: orbit rig around the vessel, in vessel-local
@@ -345,6 +360,7 @@ export class WorldScene {
       renderer.dispose();
     }
     this.bodyRenderers.clear();
+    this.flightTerrainBodyId = null;
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);
       disposeVesselVisual(visual);

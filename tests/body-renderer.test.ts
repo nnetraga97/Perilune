@@ -100,6 +100,26 @@ describe('body renderer adapters', () => {
     expect(renderer.stats().terrainActive).toBe(false);
   });
 
+  test('revoking active-SOI permission releases terrain and clouds exactly once', () => {
+    const solid = body('veyra');
+    const terrain = { group: new THREE.Group(), stats: { chunks: 2, visible: 1 }, update: vi.fn(), dispose: vi.fn() };
+    const cloud = { mesh: new THREE.Mesh(), update: vi.fn(), dispose: vi.fn() };
+    const renderer = new LegacyBodyRenderer(solid, bodyMaterialDescriptor(solid), caps, 'medium', {
+      createTerrain: () => terrain,
+      createCloud: () => cloud,
+    });
+    renderer.update(frame({ cameraBodyFixed: { x: solid.radius * 2, y: 0, z: 0 } }));
+
+    renderer.update(frame({ allowFlightTerrain: false }));
+    renderer.update(frame({ allowFlightTerrain: false }));
+
+    expect(terrain.dispose).toHaveBeenCalledOnce();
+    expect(cloud.dispose).toHaveBeenCalledOnce();
+    expect(renderer.root.children).not.toContain(terrain.group);
+    expect(renderer.root.children).not.toContain(cloud.mesh);
+    expect(renderer.stats()).toMatchObject({ chunks: 0, visible: 0, terrainActive: false });
+  });
+
   test('star owns exactly one visible source, one directional light, and its target', () => {
     const star = body('auren');
     const renderer = new StarBodyRenderer(star, bodyMaterialDescriptor(star), caps, 'medium');
@@ -110,10 +130,18 @@ describe('body renderer adapters', () => {
     expect(lights).toHaveLength(1);
     expect(renderer.root.children).toContain((lights[0] as THREE.DirectionalLight).target);
 
+    const corona = visibleSources[0].children.find((child): child is THREE.Sprite => child instanceof THREE.Sprite)!;
+    const alpha = (corona.material.map!.image as { data: Uint8Array }).data;
+    expect(alpha[3]).toBe(0);
+    expect(alpha[(8 * 16 + 8) * 4 + 3]).toBeGreaterThan(0);
+
     renderer.update(frame({ cameraRelativeOrigin: { x: 1e9, y: 0, z: 0 }, cameraSunDirection: { x: 1, y: 0, z: 0 } }));
     const presentation = visibleSources[0];
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(presentation.quaternion);
     expect(Math.abs(normal.dot(new THREE.Vector3(-1, 0, 0)))).toBeCloseTo(1, 5);
+    expect(renderer.stats().visible).toBe(0);
+    renderer.root.visible = false;
+    expect(renderer.stats().visible).toBe(0);
   });
 
   test('adapter disposal is idempotent and releases only owned resources', () => {

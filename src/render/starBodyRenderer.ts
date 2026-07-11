@@ -29,7 +29,21 @@ export class StarBodyRenderer implements BodyRenderer {
     this.diskGeometry = new THREE.CircleGeometry(1, 64);
     this.diskMaterial = new THREE.MeshBasicMaterial({ color: descriptor.albedo.mid, side: THREE.DoubleSide });
     this.presentation.add(new THREE.Mesh(this.diskGeometry, this.diskMaterial));
-    this.coronaTexture = new THREE.DataTexture(new Uint8Array([255, 247, 221, 255]), 1, 1);
+    const coronaSize = 16;
+    const coronaData = new Uint8Array(coronaSize * coronaSize * 4);
+    const center = (coronaSize - 1) / 2;
+    for (let y = 0; y < coronaSize; y++) {
+      for (let x = 0; x < coronaSize; x++) {
+        const offset = (y * coronaSize + x) * 4;
+        const radius = Math.hypot(x - center, y - center) / center;
+        const alpha = Math.max(0, 1 - radius);
+        coronaData[offset] = 255;
+        coronaData[offset + 1] = 247;
+        coronaData[offset + 2] = 221;
+        coronaData[offset + 3] = Math.round(alpha * alpha * 255);
+      }
+    }
+    this.coronaTexture = new THREE.DataTexture(coronaData, coronaSize, coronaSize);
     this.coronaTexture.needsUpdate = true;
     this.sourceMaterial = new THREE.SpriteMaterial({
       color: descriptor.albedo.mid,
@@ -73,7 +87,7 @@ export class StarBodyRenderer implements BodyRenderer {
   }
 
   stats(): Readonly<BodyRendererStats> {
-    return Object.freeze({ chunks: 0, visible: this.disposed ? 0 : 1, terrainActive: false, exposure: this.disposed ? 0 : this.exposure });
+    return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: this.disposed ? 0 : this.exposure });
   }
 
   dispose(): void {

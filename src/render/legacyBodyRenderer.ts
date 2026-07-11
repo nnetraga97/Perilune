@@ -67,12 +67,27 @@ export class LegacyBodyRenderer implements BodyRenderer {
     if (this.cloud) this.root.add(this.cloud.mesh);
   }
 
+  private releaseFlightVisuals(): void {
+    if (this.terrain) {
+      this.root.remove(this.terrain.group);
+      this.terrain.dispose();
+      this.terrain = null;
+    }
+    if (this.cloud) {
+      this.root.remove(this.cloud.mesh);
+      this.cloud.dispose();
+      this.cloud = null;
+    }
+    this.terrainActive = false;
+  }
+
   update(frame: Readonly<BodyRenderFrame>): void {
     if (this.disposed) return;
     this.compact.position.set(frame.cameraRelativeOrigin.x, frame.cameraRelativeOrigin.y, frame.cameraRelativeOrigin.z);
     this.compact.quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
 
     const near = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z) < this.body.radius * 60;
+    if (!frame.allowFlightTerrain) this.releaseFlightVisuals();
     if (frame.allowFlightTerrain && near) this.ensureFlightVisuals();
     this.terrainActive = this.terrain !== null && frame.allowFlightTerrain && near;
     this.compact.visible = !this.terrainActive;
@@ -103,8 +118,7 @@ export class LegacyBodyRenderer implements BodyRenderer {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.terrain?.dispose();
-    this.cloud?.dispose();
+    this.releaseFlightVisuals();
     this.compactGeometry.dispose();
     this.compactMaterial.dispose();
     this.root.clear();
