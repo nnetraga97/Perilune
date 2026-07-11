@@ -134,8 +134,32 @@ export interface FeasibilitySceneStats extends FeasibilityFixtureSpec {
 
 export interface FeasibilityBodyResources {
   readonly categories: Readonly<Record<string, number>>;
+  readonly rendererOnlyCategories: Readonly<Record<string, number>>;
   readonly geometryCount: number;
   readonly textureCount: number;
+}
+
+interface CloudResourceStats {
+  readonly geometryBytes: number;
+  readonly textureBytes: number;
+}
+
+export function classifyCloudResources(
+  clouds: readonly [CloudResourceStats, CloudResourceStats],
+  secondCloudScale: boolean,
+) {
+  const active = secondCloudScale ? clouds : [clouds[0]];
+  const inactive = secondCloudScale ? [] : [clouds[1]];
+  const sum = (items: readonly CloudResourceStats[], field: keyof CloudResourceStats) =>
+    items.reduce((total, item) => total + item[field], 0);
+  return Object.freeze({
+    activeGeometryBytes: sum(active, 'geometryBytes'),
+    activeTextureBytes: sum(active, 'textureBytes'),
+    inactiveGeometryBytes: sum(inactive, 'geometryBytes'),
+    inactiveTextureBytes: sum(inactive, 'textureBytes'),
+    activeGeometryCount: active.length,
+    activeTextureCount: active.length,
+  });
 }
 
 /** Combined performance fixture. It is deliberately not the Phase 3 renderer API. */
@@ -243,14 +267,15 @@ export class FeasibilityScene {
 
   resourceStats(shadowBytes: number): Readonly<FeasibilityBodyResources> {
     const planet = this.planet.resourceGeometryBytes();
-    const clouds = this.clouds.map((cloud) => cloud.resourceStats());
+    const clouds = this.clouds.map((cloud) => cloud.resourceStats()) as [CloudResourceStats, CloudResourceStats];
+    const cloudResources = classifyCloudResources(clouds, this.features.secondCloudScale);
     return Object.freeze({
       categories: Object.freeze({
         terrainGeometryBytes: planet.terrainGeometryBytes,
         oceanGeometryBytes: planet.oceanGeometryBytes,
         atmosphereGeometryBytes: geometryByteLength(this.atmosphere.geometry),
-        cloudGeometryBytes: clouds.reduce((sum, cloud) => sum + cloud.geometryBytes, 0),
-        cloudTextureBytes: clouds.reduce((sum, cloud) => sum + cloud.textureBytes, 0),
+        cloudGeometryBytes: cloudResources.activeGeometryBytes,
+        cloudTextureBytes: cloudResources.activeTextureBytes,
         scatterGeometryBytes: geometryByteLength(this.scatter.geometry),
         scatterInstanceBytes: this.scatter.instanceMatrix.array.byteLength,
         physicalProxyGeometryBytes: geometryByteLength(this.proxies.geometry),
@@ -258,9 +283,13 @@ export class FeasibilityScene {
         transitionGeometryBytes: geometryByteLength(this.transitionMeshes[0].geometry),
         shadowBytes,
       }),
-      geometryCount: planet.geometryCount + 1 + (this.features.secondCloudScale ? 2 : 1) + 1 + 1 + 1,
+      rendererOnlyCategories: Object.freeze({
+        inactiveCloudGeometryBytes: cloudResources.inactiveGeometryBytes,
+        inactiveCloudTextureBytes: cloudResources.inactiveTextureBytes,
+      }),
+      geometryCount: planet.geometryCount + 1 + cloudResources.activeGeometryCount + 1 + 1 + 1,
       // Cloud maps plus the authoritative 2048 directional shadow resource.
-      textureCount: (this.features.secondCloudScale ? 2 : 1) + 1,
+      textureCount: cloudResources.activeTextureCount + 1,
     });
   }
 

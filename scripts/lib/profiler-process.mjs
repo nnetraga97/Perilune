@@ -48,29 +48,46 @@ export async function waitForServerOrExit(child, url, options = {}) {
   return Promise.race([readiness, childExit]);
 }
 
-function signalTree(child, signal) {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+function signalProcessGroup(pid, signal) {
   try {
-    if (process.platform === 'win32') child.kill(signal);
-    else process.kill(-child.pid, signal);
+    process.kill(-pid, signal);
   } catch (error) {
     if (error?.code !== 'ESRCH') throw error;
   }
 }
 
-async function waitBounded(child, timeoutMs) {
-  return Promise.race([
-    exited(child).then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-  ]);
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    if (error?.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+async function waitForProcessGroupExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return true;
 }
 
 export async function stopProcessTree(child, options = {}) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  signalTree(child, 'SIGTERM');
-  if (await waitBounded(child, options.graceMs ?? 3_000)) return;
-  signalTree(child, 'SIGKILL');
-  if (!await waitBounded(child, options.killMs ?? 2_000)) {
-    throw new Error(`Preview process tree ${child.pid} did not exit after SIGKILL`);
+  if (!child?.pid) return;
+  if (process.platform === 'win32') {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await exited(child);
+    return;
+  }
+  const processGroupId = child.pid;
+  signalProcessGroup(processGroupId, 'SIGTERM');
+  if (await waitForProcessGroupExit(processGroupId, options.graceMs ?? 3_000)) return;
+  signalProcessGroup(processGroupId, 'SIGKILL');
+  if (!await waitForProcessGroupExit(processGroupId, options.killMs ?? 2_000)) {
+    throw new Error(`Preview process group ${processGroupId} did not exit after SIGKILL`);
   }
 }

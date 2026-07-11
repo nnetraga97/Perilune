@@ -83,6 +83,7 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
         scatterInstanceBytes: 10, physicalProxyGeometryBytes: 10,
         physicalProxyInstanceBytes: 10, transitionGeometryBytes: 10, shadowBytes: 10,
         starfieldGeometryBytes: 10, drawingBufferColorBytes: 10, drawingBufferDepthBytes: 10,
+        inactiveCloudGeometryBytes: 0, inactiveCloudTextureBytes: 0,
       },
       activeBodyBytes: 110,
       totalRendererBytes: 140,
@@ -187,6 +188,15 @@ describe('feasibility certification integrity', () => {
     expectReason({
       state: { ...state(), transfer: { ...state().transfer, bodyPackCompressedBytes: -1 } },
     }, 'transfer derivation fields are required');
+    expectReason({
+      state: { ...state(), resources: { ...state().resources, transientBytes: 1, uncompressedWorstCaseBytes: 141 } },
+    }, 'resource transient bytes must match transfer transient bytes');
+    expectReason({
+      state: { ...state(), transfer: { ...state().transfer, manifestPackCount: 0, selectedPackCount: 1 } },
+    }, 'selected pack count cannot exceed manifest pack count');
+    expectReason({
+      state: { ...state(), transfer: { ...state().transfer, selectedPackCount: 0, transientBytes: 1 } },
+    }, 'no selected pack requires zero body-pack and transient bytes');
   });
 
   it('enforces resource and Medium transfer ceilings without estimated GPU fields', () => {
@@ -200,6 +210,16 @@ describe('feasibility certification integrity', () => {
     expect(buildCertificationGates({
       ...state(), transfer: { ...state().transfer, bodyPackCompressedBytes: 32 * 1024 * 1024 + 1 },
     }, 'medium').find((gate) => gate.name === 'bodyPackCompressedBytes')?.pass).toBe(false);
+    const overTransient = 192 * 1024 * 1024 + 1;
+    expect(buildCertificationGates({
+      ...state(),
+      resources: {
+        ...state().resources,
+        transientBytes: overTransient,
+        uncompressedWorstCaseBytes: state().resources.totalRendererBytes + overTransient,
+      },
+      transfer: { ...state().transfer, transientBytes: overTransient, selectedPackCount: 1, manifestPackCount: 1 },
+    }, 'medium').find((gate) => gate.name === 'transientBytes')?.pass).toBe(false);
   });
 
   it('rejects missing journeys, regimes, groups, expected features, and scene counts', () => {

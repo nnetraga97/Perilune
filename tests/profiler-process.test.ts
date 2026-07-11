@@ -54,4 +54,32 @@ describe('profiler process ownership', () => {
     }
     await expect.poll(() => canConnect(port), { timeout: 3_000 }).toBe(false);
   });
+
+  it.skipIf(process.platform === 'win32')('kills a stubborn descendant after the npm-like parent exits', async () => {
+    const port = await allocateLoopbackPort();
+    const descendant = `
+      process.on('SIGTERM', () => {});
+      require('node:http').createServer((_, res) => res.end('ok')).listen(${port}, '127.0.0.1');
+      setInterval(() => {}, 1000);
+    `;
+    const parent = `
+      const { spawn } = require('node:child_process');
+      spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'ignore' });
+      process.on('SIGTERM', () => process.exit(0));
+      setInterval(() => {}, 1000);
+    `;
+    const preview = spawn(process.execPath, ['-e', parent], { detached: true, stdio: 'ignore' });
+    try {
+      await waitForServerOrExit(preview, `http://127.0.0.1:${port}/`, { timeoutMs: 5_000 });
+      const parentExited = new Promise<void>((resolve) => preview.once('exit', () => resolve()));
+      preview.kill('SIGTERM');
+      await parentExited;
+      expect(await canConnect(port)).toBe(true);
+      await stopProcessTree(preview, { graceMs: 250, killMs: 1_000 });
+      await expect.poll(() => canConnect(port), { timeout: 2_000 }).toBe(false);
+      expect(() => process.kill(-preview.pid!, 0)).toThrow(/ESRCH/);
+    } finally {
+      try { process.kill(-preview.pid!, 'SIGKILL'); } catch { /* Test cleanup. */ }
+    }
+  });
 });

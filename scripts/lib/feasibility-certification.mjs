@@ -13,6 +13,7 @@ const ACTIVE_RESOURCE_CATEGORIES = Object.freeze([
   'transitionGeometryBytes', 'shadowBytes',
 ]);
 const RENDERER_RESOURCE_CATEGORIES = Object.freeze([
+  'inactiveCloudGeometryBytes', 'inactiveCloudTextureBytes',
   'starfieldGeometryBytes', 'drawingBufferColorBytes', 'drawingBufferDepthBytes',
 ]);
 
@@ -27,11 +28,14 @@ function validTransfer(transfer) {
   ].every((field) => Number.isInteger(transfer?.[field]) && transfer[field] >= 0);
 }
 
-function consistentTransfer(transfer) {
+function consistentTransfer(transfer, resourceTransientBytes) {
   if (!validTransfer(transfer)) return false;
+  if (transfer.transientBytes !== resourceTransientBytes) return false;
+  if (transfer.selectedPackCount > transfer.manifestPackCount) return false;
+  if (transfer.selectedPackCount === 0 &&
+      (transfer.bodyPackCompressedBytes !== 0 || transfer.transientBytes !== 0)) return false;
   if (transfer.manifestPackCount === 0 &&
       (transfer.bodyPackCompressedBytes !== 0 || transfer.bootCriticalBytes !== 0)) return false;
-  if (transfer.selectedPackCount === 0 && transfer.bodyPackCompressedBytes !== 0) return false;
   return transfer.applicationTransferBytes > 0 || transfer.applicationEncodedBytes > 0;
 }
 
@@ -188,6 +192,13 @@ export function assessCertificationEligibility(input) {
     state.telemetry.rendererTextureCount > state?.telemetry?.accountedTextureCount,
   'renderer texture count must be nonzero and not exceed accounted texture count');
   reject(!validTransfer(state?.transfer), 'transfer derivation fields are required');
+  reject(state?.resources?.transientBytes !== state?.transfer?.transientBytes,
+    'resource transient bytes must match transfer transient bytes');
+  reject(state?.transfer?.selectedPackCount > state?.transfer?.manifestPackCount,
+    'selected pack count cannot exceed manifest pack count');
+  reject(state?.transfer?.selectedPackCount === 0 &&
+    (state?.transfer?.bodyPackCompressedBytes !== 0 || state?.transfer?.transientBytes !== 0),
+  'no selected pack requires zero body-pack and transient bytes');
   reject(state?.transfer?.manifestPackCount === 0 &&
     (state?.transfer?.bodyPackCompressedBytes !== 0 || state?.transfer?.bootCriticalBytes !== 0),
   'empty manifest transfer derivation must be zero');
@@ -225,7 +236,7 @@ export function buildCertificationGates(state, tier) {
   const categories = state.resources?.categories;
   const activeCategoryBytes = categorySum(categories, ACTIVE_RESOURCE_CATEGORIES);
   const rendererOnlyBytes = categorySum(categories, RENDERER_RESOURCE_CATEGORIES);
-  const transferValid = consistentTransfer(state.transfer);
+  const transferValid = consistentTransfer(state.transfer, state.resources?.transientBytes);
   const drawingBufferValid = state.caps?.drawingBufferWidth === 1920 &&
     state.caps?.drawingBufferHeight === 1080 &&
     Number.isInteger(state.caps?.drawingBufferSamples) && state.caps.drawingBufferSamples >= 0;

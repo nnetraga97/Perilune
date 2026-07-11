@@ -266,6 +266,7 @@ export async function runFeasibilityProto(): Promise<void> {
     const resources = categorizeResources({
       activeBody: bodyResources.categories,
       rendererOnly: {
+        ...bodyResources.rendererOnlyCategories,
         starfieldGeometryBytes: geometryByteLength(starfield.geometry),
         drawingBufferColorBytes: drawingBuffer.colorBytes,
         drawingBufferDepthBytes: drawingBuffer.depthBytes,

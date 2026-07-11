@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { reductionStage } from '../src/proto/feasibilityMetrics';
 import {
   DisposableBag,
+  classifyCloudResources,
   feasibilityFixtureSpec,
   generateScatterRecords,
   physicalProxyIds,
@@ -45,6 +46,34 @@ describe('feasibility scene fixture', () => {
     expect(feasibilityFixtureSpec(reductionStage(3, 'medium'), 4217).cloudLayerCount).toBe(1);
     expect(feasibilityFixtureSpec(reductionStage(4, 'medium'), 4217).visualScatterCount).toBe(25_000);
     expect(feasibilityFixtureSpec(reductionStage(5, 'medium'), 4217).oceanGlitter).toBe(false);
+  });
+
+  it('keeps both cloud allocations active at stage 0', () => {
+    expect(classifyCloudResources([
+      { geometryBytes: 100, textureBytes: 200 },
+      { geometryBytes: 10, textureBytes: 20 },
+    ], reductionStage(0, 'medium').secondCloudScale)).toEqual({
+      activeGeometryBytes: 110,
+      activeTextureBytes: 220,
+      inactiveGeometryBytes: 0,
+      inactiveTextureBytes: 0,
+      activeGeometryCount: 2,
+      activeTextureCount: 2,
+    });
+  });
+
+  it('moves the allocated second cloud out of active-body bytes at stage 4', () => {
+    expect(classifyCloudResources([
+      { geometryBytes: 100, textureBytes: 200 },
+      { geometryBytes: 10, textureBytes: 20 },
+    ], reductionStage(4, 'medium').secondCloudScale)).toEqual({
+      activeGeometryBytes: 100,
+      activeTextureBytes: 200,
+      inactiveGeometryBytes: 10,
+      inactiveTextureBytes: 20,
+      activeGeometryCount: 1,
+      activeTextureCount: 1,
+    });
   });
 
   it('disposes every owned resource exactly once', () => {
