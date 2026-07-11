@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 
-**Status:** Approved design, revised after quantitative review
+**Status:** Revision 3 ready for user review
 
 **Scope:** Restore the interrupted M2 baseline, then build a scalable hybrid planet-rendering pipeline centered on orbit-to-ground flight and detailed surface operations.
 
@@ -26,7 +26,7 @@ The visual target is **grounded cinematic realism**. Planets should remain physi
 
 ## Non-Goals
 
-- Replacing the existing orbital, vessel, or terrain physics.
+- Replacing orbital mechanics, vessel construction, or the existing radial terrain-contact model wholesale. Targeted extensions required by this design—versioned terrain recipes, water-contact separation, gas-giant terminal behavior, and sparse obstacle contacts—are in scope.
 - Copying NASA Eyes or reproducing the real Solar System.
 - Making all decorative scatter participate in physics.
 - Requiring WebGPU. WebGL2 remains the baseline.
@@ -46,23 +46,51 @@ This creates several visible problems:
 - Similar-looking planets because seed, amplitude, frequency, and three palette colors carry most differentiation.
 - No body-specific rendering model for gas giants, ice worlds, lava worlds, or cratered moons.
 
-The repository is also not green at the approved design baseline. Commit `b5f5c76` added transfer-planning tests that depend on an absent atmospheric-entry predictor and unimplemented alarm state and persistence. Existing unrelated tests pass, but production type-checking and the full test command fail.
+The repository is also not green at the approved design baseline. Commit `b5f5c76` added transfer-planning tests that depend on an absent atmospheric-entry predictor and unimplemented alarm state and persistence. Existing unrelated tests pass, but production type-checking and the full test command fail. Independently, `npm run validate:content` references a missing `scripts/validate-content.mjs`, and the production build does not currently invoke content validation.
 
 ## Architecture
 
 ### 1. Simulation Authority
 
-`terrainHeight(body, direction)` remains the single source of truth for solid ground. Large terrain features that affect landing or traversal—such as Palla's major craters and Veyra's large-scale relief—must be part of this authoritative function or a deterministic body-height provider called by it.
+One pure, shared module exports `solidHeight(bodyId, recipeVersion, bodyFixedDirection)`. Browser physics, browser rendering, Node asset compilation, tests, and resource/scatter generation import this same evaluator; the compiler may not reimplement crater or relief profiles. Large terrain features that affect landing or traversal—such as Palla's major craters and Veyra's large-scale relief—must be part of this evaluator. Calling it for `surfaceKind: 'gas'` returns a typed no-solid-surface result rather than radius-zero terrain.
 
 Visual-only normal maps, micro-displacement, decals, grass, pebbles, and dust must not change collision height. This boundary prevents a vessel from appearing to rest above or sink into terrain.
 
+Oceanic bodies expose three different queries:
+
+- `solidHeight`: raw land or seafloor height.
+- `waterSurfaceHeight`: datum where an ocean exists.
+- `contactSurface`: solid ground or water surface according to contact type.
+
+Rendering uses raw seafloor geometry below an independent water surface. Vessel ground contact uses `contactSurface`; shoreline, foam, wetness, and ocean masks derive from the sign and slope of `solidHeight`. Terrain geometry may never be clamped to datum before the ocean pass.
+
 ### 2. Shared Body-Feature Recipes
 
-Features that must agree between collision and imagery are defined once in a versioned `BodyFeatureRecipe`. A recipe contains deterministic feature records such as crater center direction, radius, depth, rim profile, ejecta seed, landmark bounds, and biome influence. Both the runtime height provider and the asset compiler consume this recipe.
+Features that must agree between collision and imagery are defined once in a versioned, content-addressed `BodyFeatureRecipe`. A recipe contains deterministic feature records such as crater center direction, radius, depth, rim profile, ejecta seed, landmark bounds, and biome influence. Recipe versions are immutable after release. Both the runtime height provider and the asset compiler consume this recipe.
 
-The compiler may derive albedo, normals, biome masks, and scatter masks from a feature record, but it may not independently invent collision-scale features. Runtime terrain evaluates the same record to modify height. Tests assert that a compiled feature-mask centroid is within half a texel of the highest-resolution canonical map, runtime height at the recipe center matches crater depth within 1%, and the sampled rim radius matches the recipe within `max(25 meters, 0.5% of crater radius)`.
+The compiler derives canonical height, ocean, normal, biome, and scatter masks by sampling the shared evaluator. It may not independently invent collision-scale features. Tests sample at least 10,000 seeded directions per representative body, including cube seams and poles, and assert:
 
-### 3. Planet Asset Compiler
+- Canonical height reconstructed from the highest-resolution map agrees with the shared evaluator within map quantization error.
+- Ocean/land sign agrees for every non-boundary sample; boundary samples use a one-texel shoreline tolerance.
+- Height-derived normals agree within two degrees outside deliberately visual-only microdetail.
+- Runtime height at each crater center matches recipe depth within 1%.
+- Sampled rim radius agrees within `max(25 meters, 0.5% of crater radius)`.
+
+Canonical-map resolution is always 8192×4096 for Veyra and Palla regardless of runtime tier, so these tolerances do not depend on optional Ultra assets. Lower runtime tiers are downsampled from that canonical source.
+
+Recipe evaluation must remain bounded as feature counts grow. Craters and other bounded features are indexed into deterministic cube-face cells at compile time. A height query evaluates only the global base field plus records intersecting the queried cell and its seam neighbors; it may not scan every crater. Terrain chunk vertices are generated in a worker pool, with transferables used for completed buffers. The main thread only schedules work and installs completed chunks.
+
+### 3. Body Orientation and Save Compatibility
+
+A single `BodyOrientation` module owns body-fixed↔inertial transforms as quaternions composed from axial tilt and spin. Terrain, rendering, resources, communications, scatter, launch sites, and landed-vessel transforms use this module instead of hand-written Z-axis rotations. Visual tilt may not differ from physics tilt.
+
+The first terrain-recipe release bumps the save schema. Each landed vessel stores body ID, recipe hash, body-fixed surface direction, body-fixed attitude, and contact offset/AGL. Loading a save with an older recipe samples old and new surfaces, preserves direction and clearance, and reprojects the vessel before physics resumes. Active and rails landed states follow the same migration rule. Saves also store the physical-scatter recipe hash.
+
+The one-time migration from today's unversioned saves uses the saved simulation time and the legacy Z-spin transform to convert each saved body-relative inertial position and attitude into the old body-fixed frame. It computes clearance with the legacy terrain evaluator, then applies the new recipe and full tilted `BodyOrientation` transform. This preserves the location on the rotating body instead of treating the old inertial vector as a new geographic coordinate.
+
+Recipe migration is explicit rather than best-effort. Released recipes remain available as migration evaluators for at least one save-schema generation. If a required old recipe is unavailable, loading stops before mutating the save and explains which recipe is missing. A migrated save is written only after validation succeeds, retaining the existing backup rotation.
+
+### 4. Planet Asset Compiler
 
 A build-time compiler converts curated sources and body recipes into runtime-ready asset packs. It performs:
 
@@ -71,12 +99,16 @@ A build-time compiler converts curated sources and body recipes into runtime-rea
 - Generation of albedo, normal, roughness, biome, cloud, and scatter maps.
 - Packing compatible grayscale channels to reduce texture bindings and memory.
 - Resolution-tier generation.
-- GPU texture compression with conventional WebP, PNG, or JPEG fallbacks.
+- GPU texture compression with conventional WebP or PNG fallbacks.
 - Validation of source licenses, checksums, map dimensions, seams, and output budgets.
 
-Canonical uncompressed maps must be deterministic from input checksums, recipe version, body seed, and pinned tool versions. Their hashes are the reproducibility contract. GPU compression is a packaging step: encoder version, container image, thread count, and settings are pinned for release builds, but cross-platform bit equality of KTX2 or Basis output is not required. The release records both canonical-map hashes and packaged-artifact hashes. Source downloads are not performed implicitly during a production build.
+Canonical generation runs in a pinned Linux/amd64 container identified by immutable image digest. The container pins Node, the image decoder/resampler, color-management library, and all compiler packages. Sources are converted to declared sRGB or linear working space, uncontrolled profiles are stripped after conversion, and a fixed resampling kernel is used. Raw quantized pixel buffers—not PNG or JPEG files—are hashed from input checksums, recipe version, body seed, compiler version, and container digest.
 
-### 4. Asset Provenance
+GPU compression is a packaging step. KTX-Software version, container image, settings, and transcoder bundle are pinned; encoders that vary under parallel execution run with one thread. Cross-platform bit equality of independently compressed KTX2 files is not promised. Release artifacts record canonical raw-buffer hashes and packaged-file hashes. Source downloads are never performed implicitly during a production build.
+
+Physical scatter is compiled from integer recipe data and canonical quantized CPU masks using a specified integer PRNG. It never samples lossy, transcoded, filtered, or GPU-resident visual textures. Visual scatter may be culled by quality but starts from the same canonical cells.
+
+### 5. Asset Provenance
 
 Every third-party input has a manifest record containing:
 
@@ -92,13 +124,13 @@ An asset being publicly accessible does not make it reusable. Missing, ambiguous
 
 The default license policy is:
 
-- **Allowed:** CC0-1.0, confirmed public-domain works, CC-BY-4.0, and NASA or JPL media whose specific source page permits the intended use under applicable media guidelines.
-- **Conditional legal/product review:** CC-BY-SA assets. Any approved adaptation must preserve the required share-alike terms and distribution notices.
-- **Rejected:** CC-NC, CC-ND, unknown licenses, source-only evaluation licenses, and assets whose author or provenance cannot be confirmed.
+- **Allowed:** CC0-1.0, confirmed public-domain works, and CC-BY-4.0 with generated attribution and modification notices.
+- **Case-by-case source review:** NASA and JPL media. The manifest records the exact source page, owner, third-party-content status, commercial-use conditions, modification permission, required credit, and a local snapshot of the applicable terms.
+- **Rejected for this milestone:** CC-BY-SA, CC-NC, CC-ND, unknown licenses, source-only evaluation licenses, and assets whose author or provenance cannot be confirmed. CC-BY-SA may be reconsidered only after Perilune's distribution license is selected.
 
 A repository-level software license does not automatically cover bundled textures. Each asset from the reference Three.js repository or another public repository must trace back to its own source and license.
 
-### 5. Body Renderer Contract
+### 6. Body Renderer Contract
 
 `WorldScene` should depend on a body-renderer interface rather than constructing every body through `PlanetRenderer`. Each implementation owns its meshes, materials, texture state, and effects while exposing a shared lifecycle:
 
@@ -108,9 +140,17 @@ A repository-level software license does not automatically cover bundled texture
 - Change quality without recreating simulation state.
 - Dispose of geometry, materials, textures, workers, and pooled objects.
 
+Body renderer loading is transactional. A candidate renderer loads textures, calls `KTX2Loader.detectSupport`, compiles materials with `compileAsync`, and captures shader errors before it can replace the visible renderer. Failure disposes partial resources and retains the legacy renderer. A renderer also handles WebGL context loss and rebuilds from its manifest after context restoration.
+
 The renderer factory selects an archetype from explicit body visual data. It must not infer major behavior from terrain amplitude or atmosphere presence alone.
 
 The existing `PlanetRenderer` remains available through a `LegacyBodyRenderer` adapter during migration. Each body explicitly selects `legacy`, `terrestrial`, `airless`, `gas-giant`, or `star` in content data. Auren's `star` adapter owns its emissive surface and light-source presentation without pretending it is rocky terrain. New renderers can therefore ship body by body, and a capability or asset failure can select the legacy adapter without changing save data. The legacy path is removed only after all twelve current bodies have an assigned new renderer and fallback coverage.
+
+Quality changes are transactional and keyed by tier. Replacement root meshes and asset packs become visible only after coverage is ready; then the previous tier's geometry, textures, and buffers are disposed. Physical terrain, crater records, obstacle cells, and collision behavior are identical across all quality tiers.
+
+Compact-system rendering and flight rendering share a lightweight `BodyMaterialDescriptor` derived from the same asset manifest. `MapView` uses that descriptor for phase-correct albedo, orientation, and gas/star identity instead of constructing solid-color Lambert spheres. It does not load flight-scale terrain or scatter.
+
+The `star` adapter owns Auren's visible disk, corona/sprite, directional-light color and intensity, and exposure contribution. `WorldScene` supplies camera and star direction but does not create a second sun sprite or light. This prevents duplicate star ownership during migration.
 
 ## Body Archetypes
 
@@ -126,6 +166,8 @@ Veyra establishes the complete orbit-to-ground stack:
 - Atmospheric limb, aerial perspective, and altitude-dependent haze.
 - Two cloud scales with independent motion and optional Medium-or-higher cloud shadows.
 - Deterministic biome scatter for grass, shrubs, rocks, and dust.
+
+Veyra is the reference implementation for the separate solid, water, and contact surfaces. Its atmosphere renderer consumes the same pressure, density, scale-height, and atmosphere-top parameters as flight physics, plus explicitly visual coefficients such as wavelength tint and art-direction strength. Visual haze may be stylized, but atmosphere thickness and boundary altitude may not contradict the physical model.
 
 ### Palla: Airless Renderer
 
@@ -149,16 +191,24 @@ Tyran does not use rocky terrain LOD:
 - Limited parallax may suggest cloud depth without implying landable terrain.
 - The shared body contract leaves room for a later ring component.
 
+Tyran's content declares `surfaceKind: 'gas'`; zero terrain amplitude is never used to infer this behavior. A gas body has no `solidHeight`, ground contact, wheel contact, splashed state, prelaunch state, or landed rails state. Atmospheric pressure and density use the existing exponential model above the reference radius and continue it below the radius as `P0 × exp(-altitude / scaleHeight)` and `ρ0 × exp(-altitude / scaleHeight)`. Tyran sets `terminalPressurePa: 5_000_000` and `terminalDepthMeters: 60_000`; crossing either boundary destroys the vessel through the normal damage/event path and prevents it from being put on rails. Tests cover descent at the atmosphere top, reference radius, 5 MPa pressure crossing, and 60 km depth. A save that incorrectly contains a landed vessel on a gas body fails validation with a recoverable load error.
+
+### Remaining Body Variants
+
+The eight non-archetype planets and moons are assignments of established systems, not eight new renderer architectures. Their recipes cover five bounded variants: dense-cloud terrestrial, arid/desert terrestrial, ice/regolith airless, lava/emissive airless, and irregular low-gravity moon. Each variant may add data, material parameters, and visual-only masks; a requirement for new simulation authority or a new renderer lifecycle becomes a separate design change. Auren uses the dedicated star adapter, bringing the current total to twelve explicitly assigned bodies.
+
 ## Orbit-to-Ground Continuity
 
 The same compiled global maps feed both compact distant rendering and near terrain chunks. The renderer changes geometry and detail frequency with altitude, not planet identity.
+
+Global material coordinates are defined from the normalized body-fixed direction using one documented longitude origin and pole convention. Compact spheres, cube-sphere chunks, clouds, ocean masks, decals, and `MapView` all use this transform. Local triplanar detail is anchored in body-fixed meters and wraps over a declared period, so floating-origin shifts and chunk rebuilds cannot make the material swim. Seam tests cover the equirectangular wrap, all cube edges, and both poles.
 
 1. **System view:** compact body geometry, correct phase and limb, low-resolution global maps.
 2. **Orbital view:** global albedo, biome, ocean, clouds, and atmosphere; terrain LOD begins before the compact body disappears.
 3. **Atmospheric flight:** regional material detail, aerial perspective, and cloud shadows blend in.
 4. **Surface operations:** local triplanar detail, decals, dust, and instanced scatter dominate.
 
-Near/far changes use screen-space error plus a bounded dithered cross-fade. Terrain prewarms before entering the visible transition band. Dual rendering is capped at 90 frames or 1.5 seconds at 60 FPS; if replacement chunks are not ready, the compact or parent fallback remains fully visible rather than extending expensive overlap. Under sustained frame pressure, the quality controller shortens the fade or performs a coverage-safe cut. A renderer may not hide a valid parent or compact fallback until its replacement is ready, preserving the coverage rule established by the M2 terrain-hole fix.
+Near/far changes use screen-space error plus a bounded dithered cross-fade. Terrain prewarms before entering the visible transition band, using camera velocity to request the next cells. The fade clock starts only when replacement coverage is ready; loading time is not counted as overlap. Complementary stochastic masks give parent and child a combined opacity of one without transparent coplanar blending. The normal fade is 0.35 seconds and the maximum is 1.5 wall-clock seconds, independent of frame rate. Under sustained frame pressure it may shorten to 0.2 seconds, but it may not hide valid fallback coverage. The compact or parent renderer remains fully visible until the replacement is ready, preserving the coverage rule established by the M2 terrain-hole fix.
 
 ## Surface Scatter and Collision
 
@@ -167,15 +217,25 @@ Scatter cells are deterministic from body seed, cell coordinates, biome, slope, 
 Two layers are deliberately separate:
 
 - **Visual layer:** dense grass, pebbles, small rocks, dust, and distant vegetation. These instances never create simulation objects.
-- **Physical layer:** sparse large boulders, trees, cliffs, and landmarks. Pooled collision proxies exist only inside the active vessel's local physics radius.
+- **Physical layer:** sparse large boulders, trees, cliffs, and landmarks. It uses a quality-independent canonical obstacle set; quality may simplify visual meshes but may not add, remove, or move gameplay collisions.
 
-Collision proxies have hard count and distance caps. Medium quality activates proxies inside 300 meters and deactivates them outside 360 meters. A newly activated proxy may not overlap the vessel's current or one-second swept bounding volume plus an exclusion margin of `max(25 meters, 2 × vessel bounding radius)`. Cells inside that exclusion remain deferred until the vessel leaves; they are not relocated. These distance and hysteresis rules are testable invariants and prevent obstacles from appearing inside a stationary or slowly moving vessel. Saves store vessel state, not transient scatter instances; deterministic regeneration recreates the same environment.
+Physical obstacles are a targeted extension to the current radial contact model. Deterministic cube-face cells provide the broadphase. Each obstacle has a sphere, capsule, or small compound-sphere proxy and a stable ID. The active-regime physics step queries candidate cells for every active vessel and resolves hull, landing-leg, and wheel contacts through the existing impulse/damage path. Rails propagation does not simulate obstacle contacts, so a vessel inside the predictive activation zone may not transition to rails.
+
+The activation radius is `max(300 meters, vesselSpeed × (generationP99Seconds + 2 seconds) + vesselBoundingRadius)`, evaluated per vessel and measured from reference-hardware worker timings. Deactivation uses 20% distance hysteresis. Cells are requested before they enter this radius, and normal flight may never defer an obstacle because it intersects the vessel's swept path. Spawn, save-restore, and recipe-migration are the only exclusion cases: if a vessel initially overlaps an obstacle, that obstacle's visual and physical instance is suppressed for that vessel until the vessel clears `max(25 meters, 2 × vesselBoundingRadius)`, after which the canonical obstacle returns. Hard pool caps are permitted only if the activation radius remains fully covered. If coverage cannot be maintained, the game reduces visual density first, blocks rails transition, and pauses local simulation before the vessel enters uncovered space while showing a recoverable loading fault; it never silently drops physical obstacles.
+
+Saves store the physical-scatter recipe hash rather than transient proxies. Deterministic regeneration recreates stable obstacle IDs. Tests cover high-speed approach, two simultaneous active vessels, cell seams, pool pressure, restore overlap, quality switching, and the invariant that no unsuppressed obstacle first appears inside a vessel's current or two-second swept bounding volume.
 
 ## Quality Tiers and Budgets
 
-WebGL2 remains the supported baseline. The Medium reference machine is an Intel Core i5-1135G7 laptop with Iris Xe 80-EU graphics, 16 GB dual-channel memory, a 1080p display, and the current stable Chrome release. Medium acceptance requires a 60 FPS median, a frame-time p95 below 16.7 ms, renderer CPU submission at or below 4 ms p95, and GPU timer-query work at or below 8 ms p95 during the defined camera journeys. If reliable timer queries are unavailable, total frame timing is authoritative and the run is marked as lacking per-feature GPU certification. An Intel UHD 620-class machine is a Low-tier floor targeting 30 FPS, not a Medium pass target.
+WebGL2 is required. WebGL1 is unsupported and receives a clear capability screen instead of silently selecting a degraded renderer. At release, supported browsers are the latest two stable desktop versions of Chrome, Edge, and Firefox plus the current and previous desktop Safari. CI records exact pinned versions; the release checklist repeats smoke tests on the then-current versions rather than assuming a timeless matrix.
 
-The Medium 8 ms rendering allocation is a budget to prove, not an assumed measurement:
+The Medium reference machine is an Intel Core i5-1135G7 laptop with Iris Xe 80-EU graphics and 16 GiB dual-channel memory. The run records laptop model, firmware, graphics driver, browser build, operating system, power mode, and sustained package-power configuration. It uses AC power, the operating system's performance mode, a fixed 1920×1080 physical drawing buffer, no browser zoom, and no supersampling. An Intel Core i5-8250U laptop with UHD 620 graphics and 16 GiB dual-channel memory is the Low reference, using the same drawing-buffer size and targeting 30 FPS.
+
+Performance assertions are provisional until a feasibility prototype runs on both machines. Before full Veyra implementation, a representative scene must combine one terrain patch, atmosphere, ocean, two cloud layers, one shadow receiver, transition overlap, 50,000 visible instanced scatter items, and 128 active physical proxies. It runs a 30-second warm-up followed by three five-minute camera journeys. Acceptance uses the median of the three run medians and the worst run's p95. Medium requires at least 60 FPS median, frame time below 16.7 ms p95, renderer main-thread submission at or below 4 ms p95, terrain scheduling and chunk installation at or below 2 ms p95, and measured GPU work at or below 8 ms p95. Low requires at least 30 FPS median and frame time below 33.3 ms p95.
+
+GPU timings use a delayed query ring through `EXT_disjoint_timer_query_webgl2`; samples are read only after availability and discarded whenever the disjoint flag is set. If valid timer queries are unavailable, total frame timing still gates the tier, but no per-feature GPU claim may be certified. Playwright or software-renderer timings detect relative regressions only and never substitute for reference hardware.
+
+The Medium 8 ms rendering allocation is an initial feasibility allocation, not evidence that the design fits:
 
 | Feature group | Medium p95 budget |
 |---|---:|
@@ -188,12 +248,27 @@ The Medium 8 ms rendering allocation is a budget to prove, not an assumed measur
 | Renderer headroom | 0.6 ms |
 | **Total** | **8.0 ms** |
 
-Each feature group is independently switchable in the profiling harness. A feature that exceeds its allocation must be simplified, moved to a higher tier, or offset by measured savings elsewhere before Medium is accepted.
+Each feature group is independently switchable in the profiling harness. If the combined prototype misses a gate, the design is reduced in this order: remove Medium cloud shadows, reduce atmospheric samples, reduce the second cloud scale, reduce visual scatter, then simplify ocean glitter. Physical terrain and obstacle collisions are never reduced. Full Veyra work does not begin until the reduced Medium prototype passes or this spec is revised with a different target.
 
-- **Low:** 1K global maps, simplified atmosphere, sparse scatter, no cloud shadows.
-- **Medium:** 2K global maps, full atmosphere and oceans, moderate scatter, selective cloud shadows; target 1080p/60 FPS on baseline hardware.
-- **High:** 4K global maps, denser scatter, improved shadows, and higher atmosphere sampling.
-- **Ultra:** optional 8K hero-body maps and maximum surface density for modern GPUs.
+Runtime global maps use exact 2:1 dimensions:
+
+| Tier | Global dimensions | Drawing-buffer target | Visual differences |
+|---|---:|---:|---|
+| Low | 1024×512 | 1920×1080 | Simplified atmosphere, sparse visual scatter, no cloud shadows |
+| Medium | 2048×1024 | 1920×1080 | Full atmosphere and ocean, moderate visual scatter, conditional cloud shadows |
+| High | 4096×2048 | User display up to 1440p | Denser visual scatter, improved shadows, more atmosphere samples |
+| Ultra | 8192×4096 | User display | Optional hero-body maps and maximum visual density |
+
+The canonical compiler output is 8192×4096. Runtime channels are fixed:
+
+| Channel | Color space / logical format | GPU package | Conventional fallback |
+|---|---|---|---|
+| Albedo | sRGB RGB8 | KTX2 ETC1S with mipmaps | WebP |
+| Normal | Linear octahedral XY in RG8 | KTX2 UASTC with mipmaps | PNG |
+| Material | Linear RGBA8: roughness, AO, biome class, ocean/shore mask | KTX2 UASTC with mipmaps | PNG |
+| Clouds | Linear RG8: coverage, optical depth | KTX2 UASTC with mipmaps | PNG |
+
+JPEG is never used for height, normal, mask, or material data. Canonical validation height is signed 16-bit with per-body meter scale and offset selected so the quantization step is at most 0.5 meters; it is a compiler/test artifact, not physics authority. The runtime queries the shared evaluator for collision and terrain vertices. A platform without a supported compressed transcode format selects Low before loading fallback PNG/WebP assets.
 
 GPU-resource ceilings distinguish active-body assets from the whole renderer:
 
@@ -204,7 +279,11 @@ GPU-resource ceilings distinguish active-body assets from the whole renderer:
 | High | 256 MiB | 768 MiB | 384 MiB |
 | Ultra | Report only | Report only | Report only |
 
-The performance overlay gains texture-memory estimates, scatter instances, active collision-proxy counts, active transition duration, and feature-group timings alongside existing frame, draw, triangle, and chunk statistics. Because WebGL cannot expose exact allocation on every driver, estimates are computed from dimensions, formats, mip levels, and instance buffers and are verified against browser or OS telemetry during reference-machine runs.
+`Active-body GPU assets` includes that body's global and local textures, geometry, instance buffers, atmosphere lookup tables, and shadow resources. `Total renderer GPU resources` adds compact-body assets, vessel and scene resources, active transition overlap, and renderer-owned offscreen targets. Browser-owned swapchain/compositor memory is recorded separately because the application cannot account for it exactly. Estimates use actual selected GPU internal formats, dimensions, faces/layers, mip levels, sample count, and buffer byte lengths; uncompressed worst-case estimates are also reported for fallback paths.
+
+Only one flight-scale body pack may be GPU-resident. All bodies retain compact assets, but the next sphere-of-influence candidate remains as compressed CPU/network bytes until transition is imminent. Quality replacement and context restoration stage one candidate pack at a time; old and new GPU residency may overlap only within the transient peak. Medium boot-critical transfer is capped at 12 MiB compressed, and one Medium body pack is capped at 32 MiB compressed. The manifest validator rejects a tier that exceeds its transfer, active-body, total-renderer, or transient ceiling.
+
+The performance overlay gains actual drawing-buffer dimensions, estimated GPU bytes by category, compressed download bytes, scatter instances, active collision-proxy counts, active transition duration, disjoint-query count, and feature-group timings alongside existing frame, draw, triangle, and chunk statistics. Reference runs compare estimates with browser and OS telemetry and document the expected difference.
 
 ## Failure Handling
 
@@ -214,8 +293,11 @@ The performance overlay gains texture-memory estimates, scatter instances, activ
 - Startup probes fragment `highp` precision and range. Full analytic atmosphere materials require the validated precision floor; otherwise the body uses a precomputed lookup or simplified limb-haze material.
 - An invalid provenance manifest, missing required map, or over-budget generated pack fails the build.
 - A failed scatter cell is discarded and deterministically regenerated on a later update.
-- Collision-proxy pools refuse excess objects and retain the closest high-priority obstacles.
+- A physical-obstacle pool that cannot cover the predictive activation radius reduces visual density, prevents rails transition, and pauses local simulation before uncovered space; it does not silently remove canonical collisions.
 - Asset and shader failures log once with body and channel context to avoid per-frame console flooding.
+- `webglcontextlost` pauses rendering and prevents default context disposal. Restoration rebuilds the last committed renderer from its manifest; the legacy renderer remains visible if rebuilding the candidate fails.
+
+`scripts/validate-content.mjs` is created before any asset lands. `npm run validate:content` validates schemas, provenance, checksums, canonical/raw hashes, dimensions, channel semantics, compressed and fallback pairs, transfer sizes, and memory estimates. It is chained through `prebuild` and run as an explicit CI job, so `npm run build` cannot bypass asset validation. Production builds consume checked-in or release-downloaded artifacts only and never fetch authoring sources.
 
 ## Testing Strategy
 
@@ -223,12 +305,18 @@ The performance overlay gains texture-memory estimates, scatter instances, activ
 
 - Asset-manifest license and checksum validation.
 - Deterministic compiler output for fixed recipes.
+- Canonical raw-buffer hash equality inside the pinned compiler container and packaged-file hash recording.
 - Texture seam and expected-channel validation.
+- Shared evaluator versus canonical maps, crater centers/rims, shorelines, normals, and body-orientation transforms.
 - Cube-face geometry and material continuity.
 - LOD fallback coverage and transition readiness.
 - Deterministic scatter placement and cell regeneration.
-- Collision pool caps, prioritization, and cleanup.
-- Quality-tier selection and procedural fallback behavior.
+- Predictive obstacle activation, high-speed swept contact, two-vessel coverage, restore suppression, pool faults, and quality-invariant physical IDs.
+- Save migration across recipe versions and rejection of unavailable recipes or landed gas-body states.
+- Gas-body pressure continuation, terminal destruction, and absence of ground/rails contact.
+- Quality-tier cache invalidation, transactional replacement, procedural fallback, context loss, and context restoration.
+- `MapView`, flight view, and physics agreement on body orientation and material identity.
+- Asset-validator invocation through production build and CI entry points.
 - Alarm, entry prediction, and save restoration tests needed to restore the M2 baseline.
 
 ### Browser and Visual Tests
@@ -241,34 +329,47 @@ Playwright captures stable reference views for Veyra, Palla, and Tyran at:
 - Surface or closest valid approach.
 - Daylight and night-side lighting.
 
-CI visual baselines use a pinned Chromium and SwiftShader image with temporal animation frozen at fixed simulation times. A snapshot passes when structural similarity is at least 0.985 and no more than 0.5% of pixels differ by more than 3/255 per color channel. Masked regions are limited to explicitly documented nondeterministic browser overlays; planet pixels are never masked.
+CI visual baselines use a pinned Chromium and SwiftShader image with temporal animation frozen at fixed simulation times. Thresholds are calibrated rather than guessed: each reference scene is captured 30 times on the pinned image to establish per-pixel and structural noise, then seeded defects—missing crater, shifted shoreline, broken cube seam, lost cloud layer, wrong body orientation, and black material—must fail. Each scene records a whole-frame threshold plus tighter regions of interest for the limb, shoreline, landmark, and transition boundary. A threshold is accepted only if all clean calibration runs pass and every seeded defect fails. Masked regions are limited to explicitly documented nondeterministic browser overlays; planet pixels are never masked.
 
-Automated camera journeys check for coverage gaps, black frames, shader errors, unbounded memory, and relative frame spikes. CI performance results guard regressions on the pinned software renderer but do not certify target hardware. Medium and Low tier releases require the named reference-machine journeys, with browser version, power mode, resolution, quality settings, median, p95, and feature timings recorded in `PERFORMANCE.md`. Manual art review remains the authority for whether a planet looks convincing.
+Automated camera journeys check for coverage gaps, black frames, shader errors, unbounded memory, transition duration, and relative frame spikes. Shader conformance scenes exercise the full and precision-fallback atmosphere paths. CI performance results guard regressions on the pinned software renderer but do not certify target hardware. Medium and Low tier releases require the named reference-machine protocol, with hardware, driver, browser, power, drawing buffer, quality, run medians, worst-run p95, memory, query validity, and feature timings recorded in `PERFORMANCE.md`. Manual art review remains the authority for whether a planet looks convincing.
 
 ### Completion Gates
 
 - Production build and full unit suite pass.
 - Existing playable-loop and terrain-descent tests pass.
-- No missing-asset or shader errors in supported browsers.
-- Medium quality stays within the per-feature frame allocations and 128/384 MiB active/total GPU-resource ceilings on the named Iris Xe reference machine.
+- No missing-asset or shader errors in the supported browser matrix; capability fallback and context restoration pass.
+- The feasibility prototype and final Medium journeys stay within the frame, main-thread, GPU, transfer, and 128/384 MiB active/total resource ceilings on the named Iris Xe reference machine.
+- Low journeys pass on the named UHD 620 machine without changing physical terrain or obstacles.
+- Build and CI invoke content validation, and every shipped third-party asset has accepted per-file provenance and generated attribution.
 - Veyra retains one recognizable identity from orbit to contact.
 - Palla reads as a cratered moon rather than palette-swapped generic terrain.
-- Tyran visibly behaves as a gas giant rather than a solid rocky sphere.
+- Tyran visibly and physically behaves as a non-landable gas giant rather than a solid rocky sphere.
 
 ## Delivery Sequence
 
-1. Restore the interrupted M2 baseline in a separate mergeable change by completing alarm state and persistence plus atmospheric-entry prediction. Keep and validate the transfer planner. No renderer work belongs in this change.
-2. Add asset provenance, compiler validation, body visual definitions, body-renderer interface, quality control, and fallback loading.
-3. Implement Veyra's global material, atmosphere, ocean, clouds, lighting, and near/far continuity.
-4. Add Veyra's regional and local surface materials, decals, scatter, dust, cloud shadows, and selective collision.
-5. Implement Palla's authoritative major craters, regolith materials, ejecta, boulders, and airless lighting.
-6. Implement Tyran's dedicated band, storm, and limb-haze renderer.
-7. Apply the established archetypes to the eight remaining planets or moons, add Auren's dedicated star adapter, and tune each body's assets and performance. Each body receives an explicit recipe, provenance record, renderer assignment, orbit/surface review where applicable, and quality-budget check.
+This epic is implemented as separately reviewable phase plans and mergeable changes. A phase may not begin until its predecessor's gates pass.
+
+0. **Restore M2:** complete alarm state and persistence plus atmospheric-entry prediction, keep and validate the transfer planner, and restore build/test health. No graphics code belongs in this change.
+1. **Authority and tooling foundation:** add recipe/version schemas, `BodyOrientation`, save migration, separate solid/water/contact queries, `surfaceKind`, gas-body terminal behavior, the provenance manifest, the pinned asset compiler, `validate-content.mjs`, `prebuild`/CI wiring, and raw/package hashing. This phase contains no new art direction.
+2. **Feasibility prototype:** implement only enough disposable-or-promotable rendering to run the combined Medium/Low reference-machine scene. Record the protocol and results in `PERFORMANCE.md`. Reduce features in the specified order if necessary. Stop and revise this spec if the hardware gates cannot be met.
+3. **Renderer platform:** add the renderer interface, legacy adapter, transactional asset/shader loading, capability detection, context restoration, quality replacement, shared compact material descriptor, performance accounting, and star ownership. Keep all bodies on legacy visuals except prototype fixtures.
+4. **Veyra global stack:** ship its compiled geography, global material, atmosphere, ocean, clouds, lighting, and orbit-to-ground transition behind the terrestrial assignment.
+5. **Veyra surface stack:** ship regional/local materials, decals, worker-generated chunks, visual scatter, dust, and the quality-invariant physical-obstacle subsystem.
+6. **Palla:** ship spatially indexed authoritative craters, regolith/ejecta materials, boulders, landmarks, and airless lighting.
+7. **Tyran:** ship band, storm, depth, and limb-haze rendering against the already-tested non-landable gas simulation contract.
+8. **System completion:** assign the five bounded variants to the eight remaining planets or moons, ship Auren's star adapter, and tune each body. Every body receives an explicit recipe, provenance record, renderer assignment, compact-map identity, supported-view snapshots, and quality-budget check.
 
 Each step must leave the build and relevant tests green. Asset licensing and attribution changes ship with the assets they govern.
+
+`RENDERING.md`, `ARCHITECTURE.md`, `PERFORMANCE.md`, `README.md`, and `LICENSES.md` are updated in the phase that invalidates their current claims. In particular, the existing statements that all art is original and procedurally generated must be replaced when the first licensed source asset lands; generated attribution is committed with that asset.
 
 ## References
 
 - NASA Eyes on the Solar System: https://eyes.nasa.gov/apps/solar-system/#/home
+- NASA Images and Media Usage Guidelines: https://www.nasa.gov/nasa-brand-center/images-and-media/
 - SoumyaEXE 3D Solar System ThreeJS: https://github.com/SoumyaEXE/3d-Solar-System-ThreeJS
+- Creative Commons BY-SA 4.0 terms: https://creativecommons.org/licenses/by-sa/4.0/
+- Khronos WebGL2 disjoint timer-query specification: https://registry.khronos.org/webgl/extensions/EXT_disjoint_timer_query_webgl2/
+- Khronos KTX-Software releases and determinism notes: https://github.com/KhronosGroup/KTX-Software/releases
+- Three.js `WebGLRenderer` compilation and shader-error API: https://threejs.org/docs/pages/WebGLRenderer.html
 - Existing rendering architecture: `ARCHITECTURE.md`, `RENDERING.md`, and `PERFORMANCE.md`
