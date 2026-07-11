@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 describe('Sites worker', () => {
+  it('packages static game assets in the Sites client directory', async () => {
+    const fsModulePath: string = 'node:fs/promises';
+    const { access } = await import(fsModulePath);
+    const indexUrl = new URL('../dist/client/index.html', import.meta.url);
+
+    await expect(access(indexUrl)).resolves.toBeUndefined();
+  });
+
   it('serves index.html for the site root', async () => {
     const workerModulePath: string = '../dist/server/index.js';
     const { default: worker } = await import(workerModulePath);

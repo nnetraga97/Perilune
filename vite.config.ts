@@ -5,6 +5,7 @@ export default defineConfig({
   base: './',
   plugins: [sites()],
   build: {
+    outDir: 'dist/client',
     target: 'es2022',
     sourcemap: true,
     chunkSizeWarningLimit: 1200,

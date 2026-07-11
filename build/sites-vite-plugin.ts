@@ -22,6 +22,9 @@ export function sites(): Plugin {
     configResolved(config) {
       root = config.root;
     },
+    async buildStart() {
+      await rm(resolve(root, 'dist'), { recursive: true, force: true });
+    },
     async closeBundle() {
       const dist = resolve(root, 'dist');
       const hostingConfig = resolve(root, '.openai', 'hosting.json');
