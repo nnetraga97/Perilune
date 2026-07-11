@@ -104,6 +104,8 @@ if (useAuthoredGlobalMaps > 0.5) {
   vec4 authoredAlbedo = texture2D(globalAlbedoMap, globalUv);
   diffuseColor.rgb *= sRGBTransferEOTF(vec4(authoredAlbedo.rgb, 1.0)).rgb;
   diffuseColor.rgb *= mix(0.55, 1.0, authoredMaterial.g);
+  float wetShore = 1.0 - abs(authoredMaterial.a * 2.0 - 1.0);
+  diffuseColor.rgb *= mix(1.0, 0.72, wetShore);
 }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 if (useAuthoredGlobalMaps > 0.5) roughnessFactor *= mix(0.2, 1.0, authoredMaterial.r);`)
