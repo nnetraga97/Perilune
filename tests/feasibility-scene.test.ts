@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reductionStage } from '../src/proto/feasibilityMetrics';
+import { cameraRegimesCrossed } from '../src/proto/feasibilityProto';
 import { categorizeResources } from '../src/render/resourceAccounting';
 import {
   DisposableBag,
@@ -10,6 +11,21 @@ import {
 } from '../src/proto/feasibilityScene';
 
 describe('feasibility scene fixture', () => {
+  it('accounts for every camera regime crossed during a long frame', () => {
+    expect(cameraRegimesCrossed(0, 3, 3)).toEqual([
+      'orbit',
+      'atmosphere',
+      'low-flight',
+      'surface',
+    ]);
+    expect(cameraRegimesCrossed(2.2, 4.4, 3)).toEqual([
+      'low-flight',
+      'surface',
+      'orbit',
+      'atmosphere',
+    ]);
+  });
+
   it('generates deterministic visual scatter records', () => {
     const first = generateScatterRecords(4217, 16);
     const second = generateScatterRecords(4217, 16);

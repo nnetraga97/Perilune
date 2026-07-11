@@ -222,12 +222,12 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   expect(result.telemetry.rendererTextureCount).toBeLessThanOrEqual(result.telemetry.accountedTextureCount);
   expect(result.transfer.applicationTransferBytes > 0 || result.transfer.applicationEncodedBytes > 0).toBe(true);
   expect(result.transfer).toMatchObject({
-    bodyPackCompressedBytes: 0,
-    bootCriticalBytes: 0,
-    transientBytes: 0,
-    manifestPackCount: 0,
-    selectedPackCount: 0,
+    manifestPackCount: 3,
+    selectedPackCount: 1,
   });
+  expect(result.transfer.bodyPackCompressedBytes).toBeGreaterThan(0);
+  expect(result.transfer.bootCriticalBytes).toBe(result.transfer.bodyPackCompressedBytes);
+  expect(result.transfer.transientBytes).toBeGreaterThan(0);
   const overlay = await page.evaluate(() => (
     window as unknown as { __PERF__: { transitionMs: number; drawingBufferWidth: number; drawingBufferHeight: number } }
   ).__PERF__);

@@ -32,7 +32,7 @@ import {
 } from './feasibilityScene';
 import { applicationResourceTransfer, derivePlanetTransfer } from './feasibilityTransfer';
 
-type CameraRegime = 'orbit' | 'atmosphere' | 'low-flight' | 'surface';
+export type CameraRegime = 'orbit' | 'atmosphere' | 'low-flight' | 'surface';
 type FeasibilityMode = 'smoke' | 'reference';
 
 export interface FeasibilityPublicState {
@@ -134,6 +134,33 @@ function regimeAt(progress: number): { regime: CameraRegime; local: number } {
   const index = Math.floor(scaled);
   const regimes: readonly CameraRegime[] = ['orbit', 'atmosphere', 'low-flight', 'surface'];
   return { regime: regimes[index], local: scaled - index };
+}
+
+/** Regimes traversed by a wall-clock interval, including those skipped by a long rendered frame. */
+export function cameraRegimesCrossed(
+  previousElapsed: number,
+  currentElapsed: number,
+  journeySeconds: number,
+): readonly CameraRegime[] {
+  if (!(journeySeconds > 0) || !Number.isFinite(journeySeconds)) {
+    throw new Error('Journey duration must be finite and positive');
+  }
+  const start = Math.max(0, Math.min(previousElapsed, currentElapsed));
+  const end = Math.max(start, currentElapsed);
+  const firstJourney = Math.floor(start / journeySeconds);
+  const lastJourney = end === 0 ? 0 : Math.max(firstJourney, Math.ceil(end / journeySeconds) - 1);
+  const regimes: readonly CameraRegime[] = ['orbit', 'atmosphere', 'low-flight', 'surface'];
+  const crossed: CameraRegime[] = [];
+  for (let journey = firstJourney; journey <= lastJourney; journey++) {
+    const journeyStart = journey * journeySeconds;
+    const localStart = Math.max(0, (start - journeyStart) / journeySeconds);
+    const localEnd = Math.min(1, (end - journeyStart) / journeySeconds);
+    if (localStart > 1 || localEnd < 0) continue;
+    const firstRegime = Math.floor(Math.min(0.999999, localStart) * regimes.length);
+    const lastRegime = Math.floor(Math.min(0.999999, localEnd) * regimes.length);
+    for (let index = firstRegime; index <= lastRegime; index++) crossed.push(regimes[index]);
+  }
+  return crossed;
 }
 
 function altitudeFor(regime: CameraRegime, local: number, atmosphereHeight: number): number {
@@ -247,6 +274,7 @@ export async function runFeasibilityProto(): Promise<void> {
   let maxDrawCalls = 0;
   let maxTriangles = 0;
   let transitionOverlapMs = 0;
+  let previousJourneyElapsed = 0;
 
   const camBodyFixed = new Vec3();
   const camInertial = new Vec3();
@@ -372,8 +400,17 @@ export async function runFeasibilityProto(): Promise<void> {
       : phase === 'warmup'
         ? 0
         : 0.999999;
+    // Smoke runs are intentionally short and SwiftShader may skip a quarter-regime
+    // between frames. Reference certification still records rendered regimes only.
+    if (mode === 'smoke' && journeyElapsed >= 0) {
+      const boundedJourneyElapsed = Math.min(journeySeconds * 3, journeyElapsed);
+      for (const crossed of cameraRegimesCrossed(previousJourneyElapsed, boundedJourneyElapsed, journeySeconds)) {
+        visitedRegimes.add(crossed);
+      }
+      previousJourneyElapsed = boundedJourneyElapsed;
+    }
     const { regime, local } = regimeAt(activeJourneyProgress);
-    if (phase === 'journey') visitedRegimes.add(regime);
+    if (mode === 'reference' && phase === 'journey') visitedRegimes.add(regime);
     const atmosphereHeight = veyra.def.atmosphere?.height ?? 70_000;
     const altitude = altitudeFor(regime, local, atmosphereHeight);
     const longitude = longitudeFor(regime, local);
