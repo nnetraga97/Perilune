@@ -8,7 +8,8 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
-import { GameState, GameVessel } from '../sim/state';
+import { GameState, GameVessel, LAUNCH_PAD_DECK_HEIGHT, launchSiteDirection } from '../sim/state';
+import { groundRadiusInertial } from '../sim/terrain';
 import type { Body } from '../sim/universe';
 import { PlanetRenderer, PLANET_QUALITY, PlanetQuality } from './planet';
 import { CloudLayer } from './clouds';
@@ -23,6 +24,14 @@ const _camBF = new Vec3();
 const _sunDir = new Vec3();
 const _tmp = new Vec3();
 
+export function sunLightPosition(
+  sunDirection: Readonly<Vec3>,
+  distance: number,
+  out: THREE.Vector3,
+): THREE.Vector3 {
+  return out.set(sunDirection.x * distance, sunDirection.y * distance, sunDirection.z * distance);
+}
+
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
@@ -33,6 +42,7 @@ export class WorldScene {
   private cloudLayers = new Map<string, CloudLayer>();
   private distantBodies = new Map<string, THREE.Mesh>();
   private vesselVisuals = new Map<string, VesselVisual>();
+  private readonly launchSite: THREE.Group;
   private quality: PlanetQuality = PLANET_QUALITY.medium;
 
   /** Camera rig: orbit around the active vessel. */
@@ -53,6 +63,8 @@ export class WorldScene {
     });
     this.scene.background = new THREE.Color('#04070a');
     this.scene.add(makeStarfield(4200));
+    this.launchSite = this.buildLaunchSite();
+    this.scene.add(this.launchSite);
     this.sun = new THREE.DirectionalLight('#fff4e0', 2.6);
     this.scene.add(this.sun);
     this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
@@ -68,6 +80,32 @@ export class WorldScene {
     this.sunSprite = new THREE.Sprite(spriteMat);
     this.sunSprite.scale.setScalar(4e6);
     this.scene.add(this.sunSprite);
+  }
+
+  private buildLaunchSite(): THREE.Group {
+    const group = new THREE.Group();
+    const concrete = new THREE.MeshStandardMaterial({ color: '#68717a', roughness: 0.92, metalness: 0.05 });
+    const structure = new THREE.MeshStandardMaterial({ color: '#c7d0d5', roughness: 0.65, metalness: 0.35 });
+    const accent = new THREE.MeshStandardMaterial({ color: '#c96a3b', roughness: 0.7, metalness: 0.2 });
+    const pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(9, 9.8, LAUNCH_PAD_DECK_HEIGHT, 32),
+      concrete,
+    );
+    pad.position.y = LAUNCH_PAD_DECK_HEIGHT / 2;
+    group.add(pad);
+    const deck = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.12, 32), structure);
+    deck.position.y = LAUNCH_PAD_DECK_HEIGHT + 0.06;
+    group.add(deck);
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(1.1, 13, 1.1), structure);
+    tower.position.set(6.2, LAUNCH_PAD_DECK_HEIGHT + 6.5, 0);
+    group.add(tower);
+    for (let y = 2; y <= 11; y += 3) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.3, 0.35), accent);
+      arm.position.set(3.8, LAUNCH_PAD_DECK_HEIGHT + y, 0);
+      group.add(arm);
+    }
+    group.visible = false;
+    return group;
   }
 
   setQuality(q: PlanetQuality): void {
@@ -177,7 +215,7 @@ export class WorldScene {
 
     // ---- sun light: from camera toward the star (star at origin).
     _sunDir.copy(_camAbs).scale(-1).normalize();
-    this.sun.position.set(_sunDir.x * -1e4, _sunDir.y * -1e4, _sunDir.z * -1e4);
+    sunLightPosition(_sunDir, 1e4, this.sun.position);
     this.sun.target.position.set(0, 0, 0);
     this.sun.target.updateMatrixWorld();
     // Sun sprite at great distance toward the star.
@@ -239,6 +277,25 @@ export class WorldScene {
     }
     for (const [id, mesh] of this.distantBodies) {
       if (!renderSet.has(id)) mesh.visible = false;
+    }
+
+    // Cape Skyward is a single persistent world object, positioned from the
+    // same transform used by spawnOnPad. It never accumulates across launches.
+    if (body.id === 'veyra') {
+      const siteDir = launchSiteDirection(body, t, _tmp);
+      const siteRadius = groundRadiusInertial(body, siteDir, t);
+      game.universe.absolutePosition(body, t, _bodyAbs);
+      _rel.copy(_bodyAbs).addScaled(siteDir, siteRadius).sub(_camAbs);
+      this.launchSite.visible = _rel.length() < 250_000;
+      if (this.launchSite.visible) {
+        this.launchSite.position.set(_rel.x, _rel.y, _rel.z);
+        this.launchSite.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          new THREE.Vector3(siteDir.x, siteDir.y, siteDir.z),
+        );
+      }
+    } else {
+      this.launchSite.visible = false;
     }
 
     // ---- vessels

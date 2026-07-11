@@ -51,6 +51,23 @@ const _br = new Vec3();
 const _bv = new Vec3();
 const _sun = new Vec3();
 
+// Broad highland selected from the deterministic terrain field so the pad is
+// never clipped by the ocean or a steep procedural coastline.
+export const LAUNCH_SITE_LAT = 0.3;
+export const LAUNCH_SITE_LON = 2.4584073464102096;
+export const LAUNCH_PAD_DECK_HEIGHT = 2;
+
+/** Cape Skyward surface normal in the inertial frame at a given time. */
+export function launchSiteDirection(body: Body, time: number, out: Vec3): Vec3 {
+  const spin = body.rotationAngle(time);
+  const x = Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON);
+  const y = Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON);
+  const z = Math.sin(LAUNCH_SITE_LAT);
+  const cs = Math.cos(spin);
+  const ss = Math.sin(spin);
+  return out.set(x * cs - y * ss, x * ss + y * cs, z).normalize();
+}
+
 export class GameState {
   readonly universe = new Universe(AUREN_SYSTEM);
   time = 0;
@@ -88,6 +105,14 @@ export class GameState {
     return `vessel-${this.nextVesselSerial++}`;
   }
 
+  /** Remove all craft from the previous flight while preserving campaign state. */
+  clearFlightVessels(): void {
+    this.vessels = [];
+    this.activeVesselId = null;
+    this.lastDestruction = null;
+    this.setWarp(0, false);
+  }
+
   get warpRate(): number {
     return this.railsWarp ? RAILS_WARP_RATES[this.warpIndex] : PHYSICS_WARP_RATES[this.warpIndex];
   }
@@ -98,17 +123,7 @@ export class GameState {
     const runtime = createVesselRuntime(this.newVesselId(), name, craft, 'veyra');
 
     // Pad site: fixed longitude/latitude on the surface at current spin.
-    const lat = 0.12;
-    const lon = -0.5;
-    const spin = veyra.rotationAngle(this.time);
-    const dirBF = new Vec3(
-      Math.cos(lat) * Math.cos(lon),
-      Math.cos(lat) * Math.sin(lon),
-      Math.sin(lat),
-    );
-    const cs = Math.cos(spin);
-    const ss = Math.sin(spin);
-    const dirI = new Vec3(dirBF.x * cs - dirBF.y * ss, dirBF.x * ss + dirBF.y * cs, dirBF.z);
+    const dirI = launchSiteDirection(veyra, this.time, new Vec3());
     const groundR = groundRadiusInertial(veyra, dirI, this.time);
 
     // Height so the craft's lowest part rests on ground.
@@ -120,7 +135,7 @@ export class GameState {
       minY = Math.min(minY, bottom);
     }
     const comY = runtime.massProps.com.y;
-    const standHeight = comY - minY + 0.4;
+    const standHeight = comY - minY + LAUNCH_PAD_DECK_HEIGHT + 0.4;
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
     // Surface rotation velocity.
@@ -204,6 +219,10 @@ export class GameState {
   /** Split parts at a decoupler/failed joint into a debris vessel. */
   detachSubtree(gv: GameVessel, atPart: PartInstance, ejectionImpulse: number): void {
     const v = gv.runtime;
+    const wasActive = this.activeVesselId === v.id;
+    const oldCom = v.massProps.com.clone();
+    const oldPos = v.pos.clone();
+    const crewBefore = [...v.crew];
     const keys = splitAtJoint(v.craft, atPart.key);
     if (keys.length === v.craft.parts.length) return; // would detach everything
     const detachedParts = v.craft.parts.filter((p) => keys.includes(p.key));
@@ -224,8 +243,20 @@ export class GameState {
     rootPart.parentKey = null;
 
     const debris = createVesselRuntime(this.newVesselId(), debrisCraft.name, debrisCraft, v.bodyId);
-    debris.isDebris = true;
-    debris.pos.copy(v.pos);
+    const retainedHasControl = hasControlSource(v.craft);
+    const detachedHasControl = hasControlSource(debrisCraft);
+    v.isDebris = !retainedHasControl;
+    debris.isDebris = !detachedHasControl;
+    refreshDerived(v);
+
+    // Runtime positions track each craft's CoM. Recenter both pieces so every
+    // part remains at the same world-space position across separation.
+    const retainedShift = v.massProps.com.clone().sub(oldCom);
+    v.att.rotate(retainedShift, retainedShift);
+    v.pos.copy(oldPos).add(retainedShift);
+    const detachedShift = debris.massProps.com.clone().sub(oldCom);
+    v.att.rotate(detachedShift, detachedShift);
+    debris.pos.copy(oldPos).add(detachedShift);
     debris.vel.copy(v.vel);
     debris.att.copy(v.att);
     debris.angVel.copy(v.angVel).scale(1.2);
@@ -234,9 +265,9 @@ export class GameState {
     // Ejection: push debris along its offset direction (usually down/side).
     const dv = ejectionImpulse / Math.max(1, debris.massProps.mass);
     const offset = new Vec3(
-      rootPart.position.x - v.massProps.com.x,
-      rootPart.position.y - v.massProps.com.y,
-      rootPart.position.z - v.massProps.com.z,
+      rootPart.position.x - oldCom.x,
+      rootPart.position.y - oldCom.y,
+      rootPart.position.z - oldCom.z,
     );
     if (offset.lengthSq() < 1e-6) offset.set(0, -1, 0);
     offset.normalize();
@@ -245,12 +276,20 @@ export class GameState {
     v.vel.addScaled(offset, -ejectionImpulse / Math.max(1, v.massProps.mass) * 0.3);
 
     logEvent(v, this.time, `Stage separation`);
-    this.vessels.push({
+    const detachedGv: GameVessel = {
       runtime: debris,
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
-    });
-    refreshDerived(v);
+    };
+    this.vessels.push(detachedGv);
+
+    const retainedSeats = v.craft.parts.reduce((sum, p) => sum + (defOf(p).pod?.crew ?? 0), 0);
+    v.crew = crewBefore.slice(0, retainedSeats);
+    debris.crew = crewBefore.slice(retainedSeats);
+    if (wasActive && !retainedHasControl && detachedHasControl) {
+      this.activeVesselId = debris.id;
+      logEvent(debris, this.time, 'Control transferred after separation.');
+    }
   }
 
   // ------------------------------------------------------- regime switching

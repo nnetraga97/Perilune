@@ -114,6 +114,49 @@ export function childrenOf(craft: Craft, key: number): PartInstance[] {
   return craft.parts.filter((p) => p.parentKey === key);
 }
 
+/** Build stages by attachment-tree separation level, not screen position. */
+export function buildAutoStages(craft: Craft): Stage[] {
+  const byKey = new Map(craft.parts.map((p) => [p.key, p]));
+  const decouplersAbove = (part: PartInstance): number => {
+    let count = 0;
+    let parentKey = part.parentKey;
+    const visited = new Set<number>();
+    while (parentKey !== null && !visited.has(parentKey)) {
+      visited.add(parentKey);
+      const parent = byKey.get(parentKey);
+      if (!parent) break;
+      if (defOf(parent).decoupler) count++;
+      parentKey = parent.parentKey;
+    }
+    return count;
+  };
+  const groups = new Map<number, { decouplers: number[]; engines: number[] }>();
+  const groupAt = (level: number) => {
+    let group = groups.get(level);
+    if (!group) {
+      group = { decouplers: [], engines: [] };
+      groups.set(level, group);
+    }
+    return group;
+  };
+  for (const part of craft.parts) {
+    const def = defOf(part);
+    const level = decouplersAbove(part);
+    if (def.engine) groupAt(level).engines.push(part.key);
+    if (def.decoupler) groupAt(level).decouplers.push(part.key);
+  }
+  const stages = [...groups.keys()]
+    .sort((a, b) => b - a)
+    .map((level) => {
+      const group = groups.get(level)!;
+      return { partKeys: [...group.decouplers, ...group.engines] };
+    })
+    .filter((stage) => stage.partKeys.length > 0);
+  const recovery = craft.parts.filter((p) => defOf(p).parachute).map((p) => p.key);
+  if (recovery.length) stages.push({ partKeys: recovery });
+  return stages;
+}
+
 export function partWetMass(part: PartInstance): number {
   const def = defOf(part);
   let m = def.massDry;

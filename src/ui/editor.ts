@@ -17,6 +17,7 @@ import {
   defOf,
   PartInstance,
   removeSubtree,
+  buildAutoStages,
 } from '../sim/vessel';
 import { PARTS, PartDef, partById } from '../content/parts';
 import { buildAeroModel } from '../sim/aero';
@@ -298,9 +299,15 @@ export class Editor {
     this.partListEl.innerHTML = '';
     for (const def of PARTS.filter((p) => p.category === this.activeCategory)) {
       const card = el('div', 'ed-part', this.partListEl);
+      card.draggable = true;
       el('div', 'ed-part-name', card, def.name);
       el('div', 'ed-part-info', card, `${def.massDry} kg · ${def.blurb}`);
       card.onclick = () => this.pickUp(def);
+      card.ondragstart = (event) => {
+        this.pickUp(def);
+        event.dataTransfer?.setData('text/plain', def.id);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+      };
     }
   }
 
@@ -380,7 +387,9 @@ export class Editor {
       return;
     }
 
-    // Stack node snapping: project spots to screen, take nearest to ray.
+    // Stack node snapping in screen pixels so targets remain usable at every
+    // camera zoom. A fixed world-space radius made distant nodes nearly
+    // impossible to acquire.
     const spots = this.freeStackSpots();
     let best: { spot: StackNodeSpot; d: number } | null = null;
     const sp = new THREE.Vector3();
@@ -388,9 +397,12 @@ export class Editor {
       // Held part must have the opposite node.
       if (spot.kind === 'stack-top' && !def.stackBottom) continue;
       if (spot.kind === 'stack-bottom' && !def.stackTop) continue;
-      sp.set(spot.pos.x, spot.pos.y, spot.pos.z);
-      const d = this.raycaster.ray.distanceToPoint(sp);
-      if (d < 1.1 && (!best || d < best.d)) best = { spot, d };
+      sp.set(spot.pos.x, spot.pos.y, spot.pos.z).project(this.camera);
+      if (sp.z < -1 || sp.z > 1) continue;
+      const dx = (sp.x - this.pointer.x) * window.innerWidth * 0.5;
+      const dy = (sp.y - this.pointer.y) * window.innerHeight * 0.5;
+      const d = Math.hypot(dx, dy);
+      if (d < 36 && (!best || d < best.d)) best = { spot, d };
     }
     if (best) {
       const { spot } = best;
@@ -533,43 +545,7 @@ export class Editor {
 
   /** Generate a sensible staging sequence from the craft layout. */
   autoStage(): void {
-    // Order: bottom-most engines first with the decouplers above them, etc.
-    // Heuristic: group by "decoupler depth" from root.
-    const stages: Array<{ y: number; keys: number[] }> = [];
-    const engines = this.craft.parts.filter((p) => defOf(p).engine);
-    const decouplers = this.craft.parts.filter((p) => defOf(p).decoupler);
-    const chutes = this.craft.parts.filter((p) => defOf(p).parachute);
-
-    // Stage 0: lowest engines (same lowest cluster ±1.5m).
-    const sorted = [...engines].sort((a, b) => a.position.y - b.position.y);
-    const used = new Set<number>();
-    while (sorted.some((e) => !used.has(e.key))) {
-      const seed = sorted.find((e) => !used.has(e.key))!;
-      const cluster = sorted.filter((e) => !used.has(e.key) && Math.abs(e.position.y - seed.position.y) < 2.2);
-      for (const e of cluster) used.add(e.key);
-      stages.push({ y: seed.position.y, keys: cluster.map((e) => e.key) });
-      // The decouplers just above this cluster fire with the NEXT stage.
-    }
-    const craftStages: Array<{ partKeys: number[] }> = [];
-    stages.forEach((s, i) => {
-      const keys = [...s.keys];
-      if (i > 0) {
-        // Decouplers between previous cluster and this one.
-        const prevY = stages[i - 1].y;
-        for (const d of decouplers) {
-          if (d.position.y > prevY - 0.5 && d.position.y < s.y + 2.5 && !craftStages.some((cs) => cs.partKeys.includes(d.key))) {
-            keys.unshift(d.key);
-          }
-        }
-      }
-      craftStages.push({ partKeys: keys });
-    });
-    // Remaining decouplers (e.g. pod separation) as their own stage.
-    const usedKeys = new Set(craftStages.flatMap((s) => s.partKeys));
-    const restDec = decouplers.filter((d) => !usedKeys.has(d.key));
-    if (restDec.length) craftStages.push({ partKeys: restDec.map((d) => d.key) });
-    if (chutes.length) craftStages.push({ partKeys: chutes.map((c) => c.key) });
-    this.craft.stages = craftStages;
+    this.craft.stages = buildAutoStages(this.craft);
   }
 
   // ------------------------------------------------------------- rendering

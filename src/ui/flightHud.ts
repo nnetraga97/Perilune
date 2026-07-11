@@ -12,6 +12,7 @@ import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
 import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
+import { navHeading, projectNavDirection } from './navball';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -435,15 +436,10 @@ export class FlightHud {
     // Craft axes in world.
     const nose = v.att.rotate(new Vec3(0, 1, 0), new Vec3());
     const right = v.att.rotate(new Vec3(1, 0, 0), new Vec3());
+    const screenUp = v.att.rotate(new Vec3(0, 0, 1), new Vec3());
 
     const pitch = Math.asin(Math.max(-1, Math.min(1, nose.dot(up))));
-    const noseFlat = new Vec3().copy(nose).addScaled(up, -nose.dot(up));
-    let heading = 0;
-    if (noseFlat.lengthSq() > 1e-10) {
-      noseFlat.normalize();
-      heading = Math.atan2(noseFlat.dot(east), noseFlat.dot(north));
-      if (heading < 0) heading += Math.PI * 2;
-    }
+    const heading = navHeading(nose, screenUp, up, east, north);
     // Roll: angle of craft right vs horizon plane.
     const horizonRight = new Vec3();
     Vec3.cross(nose, up, horizonRight);
@@ -493,16 +489,10 @@ export class FlightHud {
 
     // Markers: prograde/retrograde/node projected into view space.
     const drawMarker = (dir: Vec3, color: string, glyph: string) => {
-      const f = dir.dot(nose);
-      const x = dir.dot(right);
-      const yUp = dir.dot(v.att.rotate(new Vec3(0, 0, 1), new Vec3()));
-      // Project: angular offset from nose (clamped to ball edge).
-      const ang = Math.acos(Math.max(-1, Math.min(1, f)));
-      const edge = Math.min(1, ang / (Math.PI / 2));
-      const norm = Math.hypot(x, yUp) || 1;
-      const px = cx + (x / norm) * edge * R * 0.92;
-      const py = cy + (yUp / norm) * edge * R * 0.92;
-      ctx.globalAlpha = f > 0 ? 1 : 0.35;
+      const marker = projectNavDirection(dir, nose, right, screenUp);
+      const px = cx + marker.x * R * 0.92;
+      const py = cy + marker.y * R * 0.92;
+      ctx.globalAlpha = marker.behind ? 0.35 : 1;
       ctx.fillStyle = color;
       ctx.font = 'bold 16px monospace';
       ctx.textAlign = 'center';

@@ -1,4 +1,13 @@
 import { defineConfig } from '@playwright/test';
+import { existsSync } from 'node:fs';
+
+const linuxChromium = '/opt/pw-browsers/chromium';
+const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const executablePath = existsSync(linuxChromium)
+  ? linuxChromium
+  : existsSync(macChrome)
+    ? macChrome
+    : undefined;
 
 export default defineConfig({
   testDir: './e2e',
@@ -10,7 +19,7 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     viewport: { width: 1280, height: 720 },
     launchOptions: {
-      executablePath: '/opt/pw-browsers/chromium',
+      executablePath,
       args: [
         '--enable-unsafe-swiftshader',
         '--disable-dev-shm-usage',

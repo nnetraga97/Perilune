@@ -217,6 +217,7 @@ class PeriluneGame {
 
   private launch(craft: Craft): void {
     this.launchedCraft = structuredClone(craft);
+    this.game.clearFlightVessels();
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
     logEvent(this.game.active!.runtime, this.game.time, `${craft.name} on the pad. Throttle up (Shift) and stage (Space) when ready.`);
@@ -259,11 +260,7 @@ class PeriluneGame {
 
   private revert(): void {
     if (!this.launchedCraft) return;
-    const gv = this.game.active;
-    if (gv) {
-      this.game.vessels = this.game.vessels.filter((x) => x !== gv);
-      this.world.invalidateVessel(gv.runtime.id);
-    }
+    this.game.clearFlightVessels();
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.game.setWarp(0, false);
     this.toFlight();
@@ -376,6 +373,22 @@ class PeriluneGame {
       this.dragMoved = 0;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
+    });
+    canvas.addEventListener('dragover', (e) => {
+      if (this.screen !== 'editor') return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = -(e.clientY / window.innerHeight) * 2 + 1;
+      this.editor.updatePointer(nx, ny);
+    });
+    canvas.addEventListener('drop', (e) => {
+      if (this.screen !== 'editor') return;
+      e.preventDefault();
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = -(e.clientY / window.innerHeight) * 2 + 1;
+      this.editor.updatePointer(nx, ny);
+      this.editor.click();
     });
     window.addEventListener('pointermove', (e) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1;

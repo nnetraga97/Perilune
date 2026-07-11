@@ -92,7 +92,10 @@ function buildPartMesh(part: PartInstance): THREE.Object3D {
   body.castShadow = false;
   holder.add(body);
   // Accent band for visual identity (cheap, no textures).
-  if (def.accent && (def.shape.kind === 'cylinder' || def.shape.kind === 'cone')) {
+  const isStraightStack =
+    def.shape.kind === 'cylinder' ||
+    (def.shape.kind === 'cone' && Math.abs((def.shape.radiusTop ?? 0) - (def.shape.radiusBottom ?? 0)) < 1e-6);
+  if (def.accent && isStraightStack && !def.pod && !def.probe) {
     const r = Math.max(def.shape.radiusTop ?? 0.1, def.shape.radiusBottom ?? 0.1);
     const band = new THREE.Mesh(
       new THREE.CylinderGeometry(r * 1.012, r * 1.012, def.shape.height * 0.12, 20),
