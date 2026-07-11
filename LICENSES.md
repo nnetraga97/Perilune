@@ -37,3 +37,8 @@ source boundary are recorded in
 source must pass the per-file provenance and license policy in
 `CONTENT_PIPELINE.md`; a repository software license is not accepted as
 evidence that bundled third-party textures are reusable.
+
+The authoritative planet-asset write command is
+`npm run compile:planet-assets:container`. Its linux/amd64 Docker image pins
+both the Node base-image digest and KTX-Software archive checksum; bind mounts
+return only the generated planet assets and checked metadata to the host.

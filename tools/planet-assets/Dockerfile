@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 ENV PATH=/opt/ktx/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/ktx/lib
 
+RUN test "$(uname -m)" = "x86_64" && ktx --version
+
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 

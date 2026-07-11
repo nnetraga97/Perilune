@@ -21,14 +21,25 @@ Veyra's authoring source is fetched explicitly, never by `prebuild`:
 
 ```bash
 npm run fetch:planet-source
-KTX_CLI=/path/to/ktx npm run compile:planet-assets -- --write
+npm run compile:planet-assets:container
 ```
 
 The fetch command downloads the original Natural Earth II 3.2.0 archive to an
-ignored authoring directory, verifies SHA-256 before extraction, and refuses a
-mismatched archive. Neither the 69 MiB archive nor the extracted 16200x8100
-TIFF is committed. A clean checkout validates the pinned provenance record and
-committed runtime packs without downloading authoring inputs.
+ignored authoring directory and verifies its SHA-256 before every extraction.
+It always extracts the TIFF to a sibling partial file and atomically replaces
+the prior TIFF only after `unzip` succeeds, so a stale or edited extracted file
+cannot bypass the archive checksum. Neither the 69 MiB archive nor the
+extracted 16200x8100 TIFF is committed. A clean checkout validates the pinned
+provenance record and committed runtime packs without downloading inputs.
+
+`compile:planet-assets:container` is the authoritative write path. It builds
+`tools/planet-assets/Dockerfile` for `linux/amd64`, whose Node base image and
+KTX-Software 4.4.2 archive are digest/checksum pinned, then bind-mounts
+`assets/planets` and `src/generated` so generated files and the checked
+manifest return to the host. It runs compilation with `--write` and content
+validation inside that same image. Docker Desktop may use amd64 emulation on
+Apple silicon. For non-authoritative local iteration only, use
+`KTX_CLI=/path/to/ktx npm run compile:planet-assets -- --write`.
 
 To intentionally refresh compiler fingerprints after a reviewed recipe
 change, run `npm run compile:planet-assets -- --write`, inspect the diff, and
@@ -37,10 +48,30 @@ authoring sources; `prebuild` runs both checks against local declared files.
 
 Every declared runtime channel must include a KTX2 package and its specified
 fallback file. Validation derives the complete mip-chain allocation from the
-declared dimensions and GPU block format, compares it with the manifest, sums
-the actual package file sizes, and enforces per-tier active-body, transient,
-and total-renderer ceilings. Budget declarations therefore cannot hide a
-larger artifact or omit the files the runtime needs.
+declared dimensions and GPU block format, plus a conservative RGBA8 mip-chain
+allocation for conventional PNG/WebP uploads. Each channel declares its exact
+fallback layout and supported transcode targets. Validation sums the actual
+package sizes and budgets the larger of the compressed and conventional upload
+paths, including renderer base allocation, before enforcing active-body,
+transient, and total-renderer ceilings. Budget declarations therefore cannot
+hide a larger artifact or omit the files the runtime needs.
+
+Veyra must declare exactly one Low, Medium, and High pack, each with exactly
+albedo, normal, material, and clouds. KTX2 validation reads the complete header,
+level index, DFD, KVD, and supercompression-global-data bounds; requires the
+exact full mip count and in-bounds, non-overlapping level payloads; and checks
+the encoded DFD contract. Albedo is ETC1S with BasisLZ scheme 1. Normal,
+material, and clouds are UASTC with Zstandard scheme 2, including the exact
+uncompressed UASTC block size for every mip. Identifier-only, truncated, or
+wrongly encoded files are rejected even if their checksums match the manifest.
+
+The Veyra canonical signed-16 height artifact is derived from `solidHeight` at
+0.5-meter quantization; it does not replace or independently redefine that
+collision-height authority. Validation checks its declared byte length and
+checksum, then recomputes an identity over the recipe, source archive,
+compiler/container pins, canonical raw hashes, dimensions, quantization, and
+height checksum. The manifest and `compiler-output.json` must agree on that
+identity and height metadata before a checked runtime manifest is emitted.
 
 Veyra is evaluated once at 8192x4096 in body-fixed coordinates (+Z north,
 longitude `atan2(y,x)`). One `solidHeight` grid owns the ocean sign, packed

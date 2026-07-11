@@ -13,6 +13,9 @@ const recipesPath = resolve(
 const checkedManifestPath = resolve(
   process.env.PERILUNE_CHECKED_MANIFEST_PATH ?? resolve(root, 'src/generated/checked-planet-manifest.json'),
 );
+const compilerOutputPath = resolve(
+  process.env.PERILUNE_COMPILER_OUTPUT_PATH ?? resolve(root, 'assets/planets/compiler-output.json'),
+);
 const compilerLockPath = resolve(root, 'tools/planet-assets/compiler-lock.json');
 const packagePath = resolve(root, 'package.json');
 const errors = [];
@@ -39,6 +42,7 @@ const manifest = loadJson(manifestPath, 'Planet manifest');
 const recipeFile = loadJson(recipesPath, 'Terrain recipes');
 const compilerLock = loadJson(compilerLockPath, 'Planet compiler lock');
 const packageJson = loadJson(packagePath, 'package.json');
+const compilerOutput = loadJson(compilerOutputPath, 'Planet compiler output');
 
 const expectedBodies = new Set([
   'auren', 'ashen', 'vess', 'veyra', 'palla', 'wisp',
@@ -72,10 +76,22 @@ if (recipeFile) {
 const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL']);
 const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds']);
 const channelContracts = {
-  albedo: { colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp' },
-  normal: { colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png' },
-  material: { colorSpace: 'linear', logicalFormat: 'RGBA8', fallback: '.png' },
-  clouds: { colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png' },
+  albedo: {
+    colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
+    transcodeTargets: ['etc2-rgb', 'bc1-rgb'],
+  },
+  normal: {
+    colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png', fallbackLayout: 'rgb-rg',
+    transcodeTargets: ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
+  },
+  material: {
+    colorSpace: 'linear', logicalFormat: 'RGBA8', fallback: '.png', fallbackLayout: 'rgba',
+    transcodeTargets: ['etc2-rgba', 'bc3-rgba', 'astc-rgba'],
+  },
+  clouds: {
+    colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png', fallbackLayout: 'rgb-rg',
+    transcodeTargets: ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
+  },
 };
 const tierDimensions = {
   low: [1024, 512],
@@ -104,6 +120,181 @@ function fullMipChainBytes(width, height, format) {
     if (mipWidth === 1 && mipHeight === 1) return total;
     mipWidth = Math.max(1, Math.floor(mipWidth / 2));
     mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+  }
+}
+
+function fullMipRgbaBytes(width, height) {
+  let total = 0;
+  for (;;) {
+    total += width * height * 4;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, Math.floor(width / 2));
+    height = Math.max(1, Math.floor(height / 2));
+  }
+}
+
+function arraysEqual(left, right) {
+  return Array.isArray(left) && left.length === right.length &&
+    left.every((value, index) => value === right[index]);
+}
+
+function safeManifestAssetPath(manifestDir, relativePath, label) {
+  if (typeof relativePath !== 'string' || !relativePath || isAbsolute(relativePath) ||
+    relativePath.split(/[\\/]/).includes('..') || /^[a-z][a-z\d+.-]*:/i.test(relativePath)) {
+    errors.push(`${label} path must be a safe manifest-relative path`);
+    return null;
+  }
+  return resolve(manifestDir, relativePath);
+}
+
+function fullMipLevelCount(width, height) {
+  return Math.floor(Math.log2(Math.max(width, height))) + 1;
+}
+
+function readUint64(file, offset) {
+  if (offset < 0 || offset + 8 > file.byteLength) return null;
+  const value = file.readBigUInt64LE(offset);
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null;
+}
+
+function rangeWithinFile(offset, length, fileLength) {
+  return Number.isSafeInteger(offset) && Number.isSafeInteger(length) &&
+    offset >= 0 && length >= 0 && offset <= fileLength && length <= fileLength - offset;
+}
+
+function rangesOverlap(leftOffset, leftLength, rightOffset, rightLength) {
+  return leftOffset < rightOffset + rightLength && rightOffset < leftOffset + leftLength;
+}
+
+function validateKtx2(packageFile, pack, channel) {
+  const label = `Pack ${pack.bodyId}/${pack.tier} ${channel.name} KTX2`;
+  if (packageFile.byteLength < 80) {
+    errors.push(`${label} has a truncated header`);
+    return;
+  }
+
+  const vkFormat = packageFile.readUInt32LE(12);
+  const typeSize = packageFile.readUInt32LE(16);
+  const pixelWidth = packageFile.readUInt32LE(20);
+  const pixelHeight = packageFile.readUInt32LE(24);
+  const pixelDepth = packageFile.readUInt32LE(28);
+  const layerCount = packageFile.readUInt32LE(32);
+  const faceCount = packageFile.readUInt32LE(36);
+  const levelCount = packageFile.readUInt32LE(40);
+  const supercompressionScheme = packageFile.readUInt32LE(44);
+  const expectedLevels = fullMipLevelCount(pack.width, pack.height);
+
+  if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
+    errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`);
+  }
+  if (vkFormat !== 0 || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
+    errors.push(`${label} must be a 2D transcodable texture with vkFormat 0, typeSize 1, and one face`);
+  }
+  if (levelCount !== expectedLevels) {
+    errors.push(`${label} must contain exactly ${expectedLevels} mip levels, got ${levelCount}`);
+  }
+
+  const indexedLevels = Math.max(1, levelCount);
+  const levelIndexEnd = 80 + indexedLevels * 24;
+  if (!Number.isSafeInteger(levelIndexEnd) || packageFile.byteLength < levelIndexEnd) {
+    errors.push(`${label} has a truncated level index`);
+    return;
+  }
+
+  const dfdOffset = packageFile.readUInt32LE(48);
+  const dfdLength = packageFile.readUInt32LE(52);
+  const kvdOffset = packageFile.readUInt32LE(56);
+  const kvdLength = packageFile.readUInt32LE(60);
+  const sgdOffset = readUint64(packageFile, 64);
+  const sgdLength = readUint64(packageFile, 72);
+  const metadataRanges = [];
+
+  if (dfdLength < 44 || dfdOffset < levelIndexEnd || !rangeWithinFile(dfdOffset, dfdLength, packageFile.byteLength)) {
+    errors.push(`${label} DFD is outside package bounds or too short`);
+  } else {
+    metadataRanges.push([dfdOffset, dfdLength]);
+    const dfdTotalSize = packageFile.readUInt32LE(dfdOffset);
+    const descriptorVersion = packageFile.readUInt16LE(dfdOffset + 8);
+    const descriptorBlockSize = packageFile.readUInt16LE(dfdOffset + 10);
+    const colorModel = packageFile[dfdOffset + 12];
+    const transferFunction = packageFile[dfdOffset + 14];
+    const blockWidth = packageFile[dfdOffset + 16];
+    const blockHeight = packageFile[dfdOffset + 17];
+    const bytesPlane0 = packageFile[dfdOffset + 20];
+    if (dfdTotalSize !== dfdLength || descriptorVersion !== 2 ||
+      descriptorBlockSize < 40 || descriptorBlockSize > dfdLength - 4) {
+      errors.push(`${label} DFD descriptor is malformed`);
+    }
+    const expectedEncoding = channel.name === 'albedo'
+      ? { scheme: 1, model: 163, transfer: 2, bytesPlane: 8, name: 'BasisLZ with ETC1S' }
+      : { scheme: 2, model: 166, transfer: 1, bytesPlane: 16, name: 'UASTC with Zstd' };
+    if (supercompressionScheme !== expectedEncoding.scheme || colorModel !== expectedEncoding.model ||
+      transferFunction !== expectedEncoding.transfer || blockWidth !== 3 || blockHeight !== 3 ||
+      bytesPlane0 !== expectedEncoding.bytesPlane) {
+      errors.push(`${label} ${channel.name} must use ${expectedEncoding.name} and its matching DFD`);
+    }
+  }
+
+  if (kvdLength === 0) {
+    if (kvdOffset !== 0) errors.push(`${label} KVD offset must be zero when its length is zero`);
+  } else if (kvdOffset < levelIndexEnd || !rangeWithinFile(kvdOffset, kvdLength, packageFile.byteLength)) {
+    errors.push(`${label} KVD is outside package bounds`);
+  } else {
+    metadataRanges.push([kvdOffset, kvdLength]);
+  }
+
+  if (sgdOffset === null || sgdLength === null) {
+    errors.push(`${label} SGD uses an unsupported 64-bit range`);
+  } else if (supercompressionScheme === 1) {
+    if (sgdLength === 0 || sgdOffset < levelIndexEnd ||
+      !rangeWithinFile(sgdOffset, sgdLength, packageFile.byteLength)) {
+      errors.push(`${label} BasisLZ package requires in-bounds supercompression global data`);
+    } else {
+      metadataRanges.push([sgdOffset, sgdLength]);
+    }
+  } else if (sgdOffset !== 0 || sgdLength !== 0) {
+    errors.push(`${label} Zstd package must not declare supercompression global data`);
+  }
+
+  for (let left = 0; left < metadataRanges.length; left++) {
+    for (let right = left + 1; right < metadataRanges.length; right++) {
+      if (rangesOverlap(...metadataRanges[left], ...metadataRanges[right])) {
+        errors.push(`${label} metadata sections overlap`);
+      }
+    }
+  }
+
+  const levelRanges = [];
+  for (let level = 0; level < indexedLevels; level++) {
+    const indexOffset = 80 + level * 24;
+    const byteOffset = readUint64(packageFile, indexOffset);
+    const byteLength = readUint64(packageFile, indexOffset + 8);
+    const uncompressedByteLength = readUint64(packageFile, indexOffset + 16);
+    if (byteOffset === null || byteLength === null || uncompressedByteLength === null ||
+      byteLength === 0 || byteOffset < levelIndexEnd ||
+      !rangeWithinFile(byteOffset, byteLength, packageFile.byteLength)) {
+      errors.push(`${label} mip ${level} payload is outside package bounds or empty`);
+      continue;
+    }
+    if (metadataRanges.some(([offset, length]) => rangesOverlap(byteOffset, byteLength, offset, length)) ||
+      levelRanges.some(([offset, length]) => rangesOverlap(byteOffset, byteLength, offset, length))) {
+      errors.push(`${label} mip ${level} payload overlaps another KTX2 section`);
+    }
+    if (supercompressionScheme === 1 && uncompressedByteLength !== 0) {
+      errors.push(`${label} BasisLZ mip ${level} must use zero uncompressedByteLength`);
+    }
+    if (supercompressionScheme === 2) {
+      const mipWidth = Math.max(1, pack.width >> level);
+      const mipHeight = Math.max(1, pack.height >> level);
+      const expectedUastcBytes = Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
+      if (uncompressedByteLength !== expectedUastcBytes) {
+        errors.push(
+          `${label} UASTC mip ${level} uncompressed size ${uncompressedByteLength} ` +
+          `does not match ${expectedUastcBytes}`,
+        );
+      }
+    }
+    levelRanges.push([byteOffset, byteLength]);
   }
 }
 
@@ -233,6 +424,104 @@ if (manifest) {
     }
   }
 
+  const canonicalHeights = Array.isArray(manifest.canonicalArtifacts)
+    ? manifest.canonicalArtifacts.filter(
+      (artifact) => artifact?.bodyId === 'veyra' && artifact?.kind === 'height-s16le',
+    )
+    : [];
+  if (canonicalHeights.length !== 1) {
+    errors.push(`Manifest must contain exactly one Veyra canonical height artifact, got ${canonicalHeights.length}`);
+  } else {
+    const artifact = canonicalHeights[0];
+    const veyraRecipe = recipeFile?.recipes?.find((recipe) => recipe.bodyId === 'veyra');
+    const source = Array.isArray(manifest.sources)
+      ? manifest.sources.find((candidate) => candidate.checksumSha256 === artifact.sourceChecksumSha256)
+      : undefined;
+    const outputCanonical = compilerOutput?.veyraCanonical;
+    const outputHeight = outputCanonical?.heightArtifact;
+    const dimensionsValid = Number.isInteger(artifact.width) && artifact.width > 0 &&
+      Number.isInteger(artifact.height) && artifact.height > 0;
+    if (!dimensionsValid) errors.push('Veyra canonical height dimensions must be positive integers');
+    if (artifact.quantizationMeters !== 0.5 || artifact.offsetMeters !== 0 || artifact.byteOrder !== 'little-endian') {
+      errors.push('Veyra canonical height must use 0.5 meter signed-16 little-endian quantization with zero offset');
+    }
+    if (!/^[a-f0-9]{64}$/.test(artifact.checksumSha256 ?? '')) {
+      errors.push('Veyra canonical height checksum must be SHA-256');
+    }
+    if (!/^[a-f0-9]{64}$/.test(artifact.identitySha256 ?? '')) {
+      errors.push('Veyra canonical identity must be SHA-256');
+    }
+    if (!veyraRecipe || artifact.recipeHash !== veyraRecipe.hash) {
+      errors.push('Veyra canonical height recipe identity does not match recipes.json');
+    }
+    if (!source) errors.push('Veyra canonical height source checksum is not declared in manifest sources');
+    if (artifact.compilerVersion !== compilerOutput?.compilerVersion ||
+      artifact.containerImage !== manifest.compiler?.containerImage) {
+      errors.push('Veyra canonical height compiler identity does not match compiler output and manifest');
+    }
+
+    const artifactPath = safeManifestAssetPath(
+      manifestDir,
+      artifact.path,
+      'Veyra canonical height',
+    );
+    if (artifactPath && !existsSync(artifactPath)) {
+      errors.push(`Veyra canonical height is missing: ${artifactPath}`);
+    } else if (artifactPath) {
+      const expectedLength = dimensionsValid ? artifact.width * artifact.height * 2 : NaN;
+      const actualLength = statSync(artifactPath).size;
+      if (!Number.isSafeInteger(expectedLength) || actualLength !== expectedLength) {
+        errors.push(
+          `Veyra canonical height byte length mismatch: expected ${expectedLength}, got ${actualLength}`,
+        );
+      }
+      if (/^[a-f0-9]{64}$/.test(artifact.checksumSha256 ?? '')) {
+        const actualChecksum = sha256File(artifactPath);
+        if (actualChecksum !== artifact.checksumSha256) {
+          errors.push(
+            `Veyra canonical height checksum mismatch: expected ${artifact.checksumSha256}, got ${actualChecksum}`,
+          );
+        }
+      }
+    }
+
+    const rawHashes = outputCanonical?.rawHashes;
+    const orderedRawHashes = rawHashes && {
+      albedo: rawHashes.albedo,
+      normal: rawHashes.normal,
+      material: rawHashes.material,
+      clouds: rawHashes.clouds,
+    };
+    if (!orderedRawHashes || Object.values(orderedRawHashes).some((hash) => !/^[a-f0-9]{64}$/.test(hash ?? ''))) {
+      errors.push('Planet compiler output must contain four canonical Veyra raw channel hashes');
+    }
+    const expectedIdentity = orderedRawHashes && veyraRecipe
+      ? sha256Bytes(JSON.stringify([
+        compilerOutput.compilerVersion,
+        manifest.compiler?.containerImage,
+        manifest.compiler?.ktxSoftwareVersion,
+        manifest.compiler?.ktxArchiveSha256,
+        artifact.sourceChecksumSha256,
+        veyraRecipe.version,
+        veyraRecipe.hash,
+        artifact.width,
+        artifact.height,
+        artifact.quantizationMeters,
+        orderedRawHashes,
+        artifact.checksumSha256,
+      ]))
+      : null;
+    if (expectedIdentity !== artifact.identitySha256 || outputCanonical?.identitySha256 !== artifact.identitySha256) {
+      errors.push('Veyra canonical identity mismatch between manifest, compiler inputs, and compiler output');
+    }
+    if (outputCanonical?.width !== artifact.width || outputCanonical?.height !== artifact.height ||
+      outputHeight?.path !== artifact.path || outputHeight?.checksumSha256 !== artifact.checksumSha256 ||
+      outputHeight?.quantizationMeters !== artifact.quantizationMeters ||
+      outputHeight?.byteOrder !== artifact.byteOrder) {
+      errors.push('Veyra canonical height metadata does not match compiler output');
+    }
+  }
+
   const budgets = manifest.budgets;
   requirePositiveInteger(budgets?.mediumBootTransferBytes, 'Medium boot transfer budget');
   requirePositiveInteger(budgets?.mediumPackTransferBytes, 'Medium pack transfer budget');
@@ -246,6 +535,10 @@ if (manifest) {
   if (!Array.isArray(manifest.packs)) {
     errors.push('Manifest packs must be an array');
   } else {
+    for (const tier of ['low', 'medium', 'high']) {
+      const count = manifest.packs.filter((pack) => pack.bodyId === 'veyra' && pack.tier === tier).length;
+      if (count !== 1) errors.push(`Manifest must contain exactly one Veyra ${tier} pack, got ${count}`);
+    }
     let mediumBootBytes = 0;
     for (const pack of manifest.packs) {
       if (!expectedBodies.has(pack.bodyId)) errors.push(`Pack has unknown body ${pack.bodyId}`);
@@ -261,11 +554,23 @@ if (manifest) {
         }
         if (pack.bootCritical) mediumBootBytes += pack.compressedBytes;
       }
+      if (pack.bodyId === 'veyra') {
+        const exactChannels = [...allowedChannels];
+        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
+        if (presentChannels.length !== exactChannels.length ||
+          exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
+          errors.push(
+            `Pack ${pack.bodyId}/${pack.tier} must have exact channels ` +
+            'albedo, normal, material, clouds',
+          );
+        }
+      }
       if (!Array.isArray(pack.channels) || pack.channels.length === 0) {
         errors.push(`Pack ${pack.bodyId}/${pack.tier} has no channels`);
         continue;
       }
       let gpuBytes = 0;
+      let fallbackGpuBytes = 0;
       let packageBytes = 0;
       const names = new Set();
       for (const channel of pack.channels) {
@@ -284,6 +589,26 @@ if (manifest) {
         }
         if (!channel.fallbackPath?.endsWith(contract.fallback)) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} fallback has wrong format`);
+        }
+        const derivedFallbackGpuBytes = dimensions
+          ? fullMipRgbaBytes(pack.width, pack.height)
+          : null;
+        if (channel.fallbackGpuBytes !== derivedFallbackGpuBytes) {
+          errors.push(
+            `Pack ${pack.bodyId}/${pack.tier} ${channel.name} fallback memory mismatch: ` +
+            `declared ${channel.fallbackGpuBytes}, derived ${derivedFallbackGpuBytes}`,
+          );
+        } else {
+          fallbackGpuBytes += derivedFallbackGpuBytes;
+        }
+        if (channel.fallbackLayout !== contract.fallbackLayout) {
+          errors.push(
+            `Pack ${pack.bodyId}/${pack.tier} ${channel.name} fallback layout must be ` +
+            contract.fallbackLayout,
+          );
+        }
+        if (!arraysEqual(channel.transcodeTargets, contract.transcodeTargets)) {
+          errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has incorrect transcode targets`);
         }
         if (channel.mipmapped !== true) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} requires mipmaps`);
@@ -320,21 +645,8 @@ if (manifest) {
               const identifier = packageFile.subarray(0, ktx2Identifier.length);
               if (!identifier.equals(ktx2Identifier)) {
                 errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} package has no KTX2 identifier`);
-              } else if (packageFile.byteLength < 48) {
-                errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} package has a truncated KTX2 header`);
               } else {
-                const pixelWidth = packageFile.readUInt32LE(20);
-                const pixelHeight = packageFile.readUInt32LE(24);
-                const levelCount = packageFile.readUInt32LE(40);
-                if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
-                  errors.push(
-                    `Pack ${pack.bodyId}/${pack.tier} ${channel.name} KTX2 dimensions ` +
-                    `${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`,
-                  );
-                }
-                if (levelCount <= 1) {
-                  errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} KTX2 requires mip levels`);
-                }
+                validateKtx2(packageFile, pack, channel);
               }
             }
             if (/^[a-f0-9]{64}$/.test(checksum ?? '')) {
@@ -350,8 +662,9 @@ if (manifest) {
         }
       }
       const gpuBudget = budgets?.activeBodyGpuBytes?.[pack.tier];
-      if (Number.isInteger(gpuBudget) && gpuBytes > gpuBudget) {
-        errors.push(`Pack ${pack.bodyId}/${pack.tier} exceeds active-body GPU budget`);
+      const worstCaseGpuBytes = Math.max(gpuBytes, fallbackGpuBytes);
+      if (Number.isInteger(gpuBudget) && worstCaseGpuBytes > gpuBudget) {
+        errors.push(`Pack ${pack.bodyId}/${pack.tier} fallback/compressed path exceeds active-body GPU budget`);
       }
       const transientBudget = budgets?.transientPeakBytes?.[pack.tier];
       if (Number.isInteger(transientBudget) && pack.transientBytes > transientBudget) {
@@ -362,9 +675,9 @@ if (manifest) {
       if (
         Number.isInteger(totalRendererBudget) &&
         Number.isInteger(rendererBaseBytes) &&
-        rendererBaseBytes + gpuBytes > totalRendererBudget
+        rendererBaseBytes + worstCaseGpuBytes > totalRendererBudget
       ) {
-        errors.push(`Pack ${pack.bodyId}/${pack.tier} exceeds total renderer GPU budget`);
+        errors.push(`Pack ${pack.bodyId}/${pack.tier} fallback/compressed path exceeds total renderer GPU budget`);
       }
       if (packageBytes !== pack.compressedBytes) {
         errors.push(

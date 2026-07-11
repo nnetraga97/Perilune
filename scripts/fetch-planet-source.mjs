@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -27,13 +36,30 @@ if (!existsSync(archivePath)) {
     rmSync(temporaryPath, { force: true });
     throw new Error('Natural Earth archive checksum mismatch; refusing extraction');
   }
-  const { renameSync } = await import('node:fs');
   renameSync(temporaryPath, archivePath);
 }
 const actual = checksum(archivePath);
 if (actual !== SHA256) throw new Error(`Natural Earth archive checksum mismatch: expected ${SHA256}, got ${actual}`);
-if (!existsSync(imagePath)) {
-  const extraction = spawnSync('unzip', ['-j', '-o', archivePath, 'NE2_LR_LC.tif', '-d', sourceDir], { stdio: 'inherit' });
-  if (extraction.status !== 0) throw new Error('Natural Earth extraction failed');
+
+// The TIFF is derived from the checksum-pinned archive on every invocation.
+// Extracting to a sibling and renaming only after success prevents a stale or
+// partially written TIFF from bypassing the archive authority.
+const temporaryImagePath = `${imagePath}.partial`;
+rmSync(temporaryImagePath, { force: true });
+const output = openSync(temporaryImagePath, 'wx');
+let extraction;
+try {
+  extraction = spawnSync('unzip', ['-p', archivePath, 'NE2_LR_LC.tif'], {
+    stdio: ['ignore', output, 'pipe'],
+    encoding: 'utf8',
+  });
+} finally {
+  closeSync(output);
 }
+if (extraction.error || extraction.status !== 0) {
+  rmSync(temporaryImagePath, { force: true });
+  const detail = extraction.error?.message ?? extraction.stderr?.trim() ?? `exit ${extraction.status}`;
+  throw new Error(`Natural Earth extraction failed: ${detail}`);
+}
+renameSync(temporaryImagePath, imagePath);
 console.log(`verified Natural Earth II 3.2.0 source: ${archivePath}`);

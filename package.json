@@ -19,6 +19,7 @@
     "bench": "vitest bench --run",
     "validate:content": "node scripts/validate-content.mjs",
     "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
+    "compile:planet-assets:container": "node scripts/compile-planet-assets-container.mjs",
     "sync:renderer-assets": "node scripts/sync-renderer-assets.mjs",
     "profile:feasibility": "node scripts/profile-feasibility.mjs",
     "fetch:planet-source": "node scripts/fetch-planet-source.mjs"

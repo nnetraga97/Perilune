@@ -35,4 +35,9 @@ implementations here are original code.
   through body-fixed reprojection, deterministic geographic warping and
   recoloring, terrain-derived shoreline/material masks and oct normals,
   deterministic cloud synthesis, Lanczos3 resampling, and KTX2/WebP/PNG
-  encoding. The original archive and extracted TIFF are not shipped.
+  encoding. The original archive and extracted TIFF are not shipped. The
+  archive SHA-256 is pinned in the content manifest; the fetch tool verifies it
+  and atomically re-derives the TIFF on every explicit authoring-source fetch.
+  The shipped canonical height field is derived solely from Perilune's original
+  procedural `solidHeight` terrain; Natural Earth contributes visual albedo
+  detail only and is not collision-height authority.

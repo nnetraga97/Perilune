@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,14 +11,201 @@ const BODY_IDS = [
   'rusk', 'tyran', 'brimm', 'glacia', 'mote', 'farfall',
 ];
 
-function ktx2Fixture(width: number, height: number, levels: number): Uint8Array {
-  const bytes = new Uint8Array(80);
+const CHANNELS = ['albedo', 'normal', 'material', 'clouds'] as const;
+const TIER_DIMENSIONS = {
+  low: [1024, 512],
+  medium: [2048, 1024],
+  high: [4096, 2048],
+} as const;
+const NATURAL_EARTH_SHA256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
+const FIXTURE_HEIGHT = new Uint8Array([0, 0, 2, 0]);
+const FIXTURE_HEIGHT_SHA256 = createHash('sha256').update(FIXTURE_HEIGHT).digest('hex');
+const FIXTURE_RAW_HASHES = {
+  albedo: 'a'.repeat(64),
+  normal: 'b'.repeat(64),
+  material: 'c'.repeat(64),
+  clouds: 'd'.repeat(64),
+};
+
+function fullMipCount(width: number, height: number): number {
+  return Math.floor(Math.log2(Math.max(width, height))) + 1;
+}
+
+function fullMipBytes(width: number, height: number, blockBytes: number): number {
+  let total = 0;
+  for (;;) {
+    total += Math.ceil(width / 4) * Math.ceil(height / 4) * blockBytes;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
+}
+
+function fullMipRgbaBytes(width: number, height: number): number {
+  let total = 0;
+  for (;;) {
+    total += width * height * 4;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
+}
+
+function ktx2Fixture(
+  width: number,
+  height: number,
+  levels = fullMipCount(width, height),
+  encoding: 'basis-lz' | 'uastc-zstd' = 'basis-lz',
+): Uint8Array {
+  const levelIndexEnd = 80 + levels * 24;
+  const dfdOffset = levelIndexEnd;
+  const dfdLength = 44;
+  const sgdLength = encoding === 'basis-lz' ? 1 : 0;
+  const sgdOffset = sgdLength > 0 ? dfdOffset + dfdLength : 0;
+  const levelDataOffset = dfdOffset + dfdLength + sgdLength;
+  const bytes = new Uint8Array(levelDataOffset + levels);
   bytes.set([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]);
   const view = new DataView(bytes.buffer);
+  view.setUint32(16, 1, true);
   view.setUint32(20, width, true);
   view.setUint32(24, height, true);
+  view.setUint32(36, 1, true);
   view.setUint32(40, levels, true);
+  view.setUint32(44, encoding === 'basis-lz' ? 1 : 2, true);
+  view.setUint32(48, dfdOffset, true);
+  view.setUint32(52, dfdLength, true);
+  view.setBigUint64(64, BigInt(sgdOffset), true);
+  view.setBigUint64(72, BigInt(sgdLength), true);
+  for (let level = 0; level < levels; level++) {
+    const indexOffset = 80 + level * 24;
+    view.setBigUint64(indexOffset, BigInt(levelDataOffset + level), true);
+    view.setBigUint64(indexOffset + 8, 1n, true);
+    view.setBigUint64(indexOffset + 16, encoding === 'basis-lz' ? 0n : 16n, true);
+    bytes[levelDataOffset + level] = level + 1;
+  }
+  view.setUint32(dfdOffset, dfdLength, true);
+  view.setUint16(dfdOffset + 8, 2, true);
+  view.setUint16(dfdOffset + 10, dfdLength - 4, true);
+  bytes[dfdOffset + 12] = encoding === 'basis-lz' ? 163 : 166;
+  bytes[dfdOffset + 13] = 1;
+  bytes[dfdOffset + 14] = encoding === 'basis-lz' ? 2 : 1;
+  bytes[dfdOffset + 16] = 3;
+  bytes[dfdOffset + 17] = 3;
+  bytes[dfdOffset + 20] = encoding === 'basis-lz' ? 8 : 16;
+  if (encoding === 'uastc-zstd') {
+    for (let level = 0; level < levels; level++) {
+      const mipWidth = Math.max(1, width >> level);
+      const mipHeight = Math.max(1, height >> level);
+      view.setBigUint64(
+        80 + level * 24 + 16,
+        BigInt(Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16),
+        true,
+      );
+    }
+  }
   return bytes;
+}
+
+function completeVeyraPackFixture() {
+  const files: Record<string, Uint8Array> = {};
+  const packs = Object.entries(TIER_DIMENSIONS).map(([tier, [width, height]]) => {
+    const channels = CHANNELS.map((name) => {
+      const packagePath = `generated/veyra/${tier}/${name}.ktx2`;
+      const fallbackPath = `generated/veyra/${tier}/${name}.${name === 'albedo' ? 'webp' : 'png'}`;
+      const packageBytes = ktx2Fixture(
+        width,
+        height,
+        fullMipCount(width, height),
+        name === 'albedo' ? 'basis-lz' : 'uastc-zstd',
+      );
+      const fallbackBytes = new Uint8Array([1, 2, 3, 4]);
+      files[packagePath] = packageBytes;
+      files[fallbackPath] = fallbackBytes;
+      return {
+        name,
+        colorSpace: name === 'albedo' ? 'sRGB' : 'linear',
+        logicalFormat: name === 'albedo' ? 'RGB8' : name === 'material' ? 'RGBA8' : 'RG8',
+        packagePath,
+        fallbackPath,
+        packageChecksumSha256: createHash('sha256').update(packageBytes).digest('hex'),
+        fallbackChecksumSha256: createHash('sha256').update(fallbackBytes).digest('hex'),
+        gpuFormat: name === 'albedo' ? 'bc1-rgb' : name === 'material' ? 'bc3-rgba' : 'bc5-rg',
+        gpuBytes: fullMipBytes(width, height, name === 'albedo' ? 8 : 16),
+        fallbackGpuBytes: fullMipRgbaBytes(width, height),
+        fallbackLayout: name === 'albedo' ? 'rgb' : name === 'material' ? 'rgba' : 'rgb-rg',
+        transcodeTargets: name === 'albedo'
+          ? ['etc2-rgb', 'bc1-rgb']
+          : name === 'material'
+            ? ['etc2-rgba', 'bc3-rgba', 'astc-rgba']
+            : ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
+        mipmapped: true,
+      };
+    });
+    return {
+      bodyId: 'veyra', tier, width, height,
+      compressedBytes: channels.reduce((sum, channel) => sum + files[channel.packagePath].byteLength, 0),
+      transientBytes: 1024,
+      bootCritical: tier === 'medium',
+      channels,
+    };
+  });
+  return { packs, files };
+}
+
+function canonicalFixture(compiler: ReturnType<typeof baseCompiler>) {
+  const recipeHash = '3'.padStart(32, '0');
+  const identitySha256 = createHash('sha256').update(JSON.stringify([
+    '2.1.0',
+    compiler.containerImage,
+    compiler.ktxSoftwareVersion,
+    compiler.ktxArchiveSha256,
+    NATURAL_EARTH_SHA256,
+    1,
+    recipeHash,
+    2,
+    1,
+    0.5,
+    FIXTURE_RAW_HASHES,
+    FIXTURE_HEIGHT_SHA256,
+  ])).digest('hex');
+  return {
+    artifact: {
+      bodyId: 'veyra', kind: 'height-s16le', path: 'generated/veyra/canonical/height.s16le',
+      width: 2, height: 1, quantizationMeters: 0.5, offsetMeters: 0,
+      byteOrder: 'little-endian', checksumSha256: FIXTURE_HEIGHT_SHA256,
+      identitySha256, recipeHash, sourceChecksumSha256: NATURAL_EARTH_SHA256,
+      compilerVersion: '2.1.0', containerImage: compiler.containerImage,
+    },
+    compilerOutput: {
+      schemaVersion: 1,
+      compilerVersion: '2.1.0',
+      veyraCanonical: {
+        width: 2, height: 1, rawHashes: FIXTURE_RAW_HASHES, identitySha256,
+        heightArtifact: {
+          path: 'generated/veyra/canonical/height.s16le',
+          checksumSha256: FIXTURE_HEIGHT_SHA256,
+          quantizationMeters: 0.5,
+          byteOrder: 'little-endian',
+        },
+      },
+    },
+  };
+}
+
+function baseCompiler() {
+  return {
+    platform: 'linux/amd64',
+    containerImage: 'node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf',
+    nodeVersion: '22.23.1',
+    ktxSoftwareVersion: '4.4.2',
+    ktxArchiveUrl: 'https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2',
+    ktxArchiveSha256: 'a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245',
+    compressionThreads: 1,
+    imageLibraryVersion: 'sharp@0.35.3',
+    resamplingKernel: 'lanczos3',
+    albedoWorkingSpace: 'srgb',
+    dataWorkingSpace: 'b-w',
+  };
 }
 
 function recipes() {
@@ -33,31 +220,33 @@ function recipes() {
 }
 
 function baseManifest() {
+  const { packs } = completeVeyraPackFixture();
+  const compiler = baseCompiler();
+  const canonical = canonicalFixture(compiler);
   return {
     schemaVersion: 1,
-    compiler: {
-      platform: 'linux/amd64',
-      containerImage: 'node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf',
-      nodeVersion: '22.23.1',
-      ktxSoftwareVersion: '4.4.2',
-      ktxArchiveUrl: 'https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2',
-      ktxArchiveSha256: 'a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245',
-      compressionThreads: 1,
-      imageLibraryVersion: 'sharp@0.35.3',
-      resamplingKernel: 'lanczos3',
-      albedoWorkingSpace: 'srgb',
-      dataWorkingSpace: 'b-w',
-    },
+    compiler,
     budgets: {
       mediumBootTransferBytes: 12 * 1024 * 1024,
       mediumPackTransferBytes: 32 * 1024 * 1024,
       activeBodyGpuBytes: { low: 64 * 1024 * 1024, medium: 128 * 1024 * 1024, high: 256 * 1024 * 1024 },
       totalRendererGpuBytes: { low: 256 * 1024 * 1024, medium: 384 * 1024 * 1024, high: 768 * 1024 * 1024 },
       transientPeakBytes: { low: 96 * 1024 * 1024, medium: 192 * 1024 * 1024, high: 384 * 1024 * 1024 },
-      rendererBaseGpuBytes: { low: 0, medium: 0, high: 0 },
+      rendererBaseGpuBytes: { low: 64 * 1024 * 1024, medium: 96 * 1024 * 1024, high: 128 * 1024 * 1024 },
     },
-    sources: [] as unknown[],
-    packs: [] as unknown[],
+    sources: [{
+      id: 'natural-earth-ii-3.2.0',
+      url: 'https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip',
+      author: 'Natural Earth', license: 'Public-Domain',
+      licenseUrl: 'https://www.naturalearthdata.com/about/terms-of-use/',
+      attribution: 'Made with Natural Earth; modified by Perilune',
+      checksumSha256: NATURAL_EARTH_SHA256,
+      localPath: 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.zip',
+      authoringOnly: true, sourceDimensions: [16200, 8100],
+      transformations: ['body-fixed reprojection'], bodies: ['veyra'], channels: ['albedo'],
+    }] as unknown[],
+    canonicalArtifacts: [canonical.artifact] as unknown[],
+    packs: packs as unknown[],
   };
 }
 
@@ -66,14 +255,24 @@ function runValidator(
   asset?: Uint8Array,
   extraFiles: Record<string, Uint8Array> = {},
 ) {
+  const fixtureFiles = completeVeyraPackFixture().files;
   const dir = mkdtempSync(join(tmpdir(), 'perilune-content-'));
   const manifestPath = join(dir, 'manifest.json');
   const recipesPath = join(dir, 'recipes.json');
   const checkedManifestPath = join(dir, 'checked-planet-manifest.json');
+  const compilerOutputPath = join(dir, 'compiler-output.json');
   writeFileSync(manifestPath, JSON.stringify(manifest));
   writeFileSync(recipesPath, JSON.stringify(recipes()));
+  writeFileSync(compilerOutputPath, JSON.stringify(canonicalFixture(baseCompiler()).compilerOutput));
+  mkdirSync(join(dir, 'generated/veyra/canonical'), { recursive: true });
+  writeFileSync(join(dir, 'generated/veyra/canonical/height.s16le'), FIXTURE_HEIGHT);
   if (asset) writeFileSync(join(dir, 'source.bin'), asset);
-  for (const [path, bytes] of Object.entries(extraFiles)) writeFileSync(join(dir, path), bytes);
+  for (const [path, bytes] of Object.entries({ ...fixtureFiles, ...extraFiles })) {
+    const target = join(dir, path);
+    const targetDir = target.slice(0, target.lastIndexOf('/'));
+    if (targetDir !== target) mkdirSync(targetDir, { recursive: true });
+    writeFileSync(target, bytes);
+  }
   const result = spawnSync(process.execPath, ['scripts/validate-content.mjs'], {
     cwd: process.cwd(),
     encoding: 'utf8',
@@ -82,9 +281,23 @@ function runValidator(
       PERILUNE_MANIFEST_PATH: manifestPath,
       PERILUNE_RECIPES_PATH: recipesPath,
       PERILUNE_CHECKED_MANIFEST_PATH: checkedManifestPath,
+      PERILUNE_COMPILER_OUTPUT_PATH: compilerOutputPath,
     },
   });
   return Object.assign(result, { checkedManifestPath });
+}
+
+function replacePackage(
+  manifest: ReturnType<typeof baseManifest>,
+  tier: string,
+  channelName: string,
+  bytes: Uint8Array,
+) {
+  const pack = (manifest.packs as Array<any>).find((candidate) => candidate.tier === tier);
+  const channel = pack.channels.find((candidate: any) => candidate.name === channelName);
+  pack.compressedBytes += bytes.byteLength - completeVeyraPackFixture().files[channel.packagePath].byteLength;
+  channel.packageChecksumSha256 = createHash('sha256').update(bytes).digest('hex');
+  return { [channel.packagePath]: bytes };
 }
 
 describe('planet content validator', () => {
@@ -139,6 +352,27 @@ describe('planet content validator', () => {
     const fetchScript = readFileSync('scripts/fetch-planet-source.mjs', 'utf8');
     expect(fetchScript).toContain('3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919');
     expect(fetchScript).toContain('NE2_LR_LC.zip');
+  });
+
+  it('atomically re-extracts the TIFF from the verified archive on every fetch', () => {
+    const fetchScript = readFileSync('scripts/fetch-planet-source.mjs', 'utf8');
+    expect(fetchScript).toContain('const temporaryImagePath = `${imagePath}.partial`;');
+    expect(fetchScript).toContain("spawnSync('unzip', ['-p', archivePath, 'NE2_LR_LC.tif']");
+    expect(fetchScript).toContain('renameSync(temporaryImagePath, imagePath)');
+    expect(fetchScript).not.toContain('if (!existsSync(imagePath))');
+  });
+
+  it('provides an authoritative volume-backed linux/amd64 compiler command', () => {
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+    expect(packageJson.scripts['compile:planet-assets:container'])
+      .toBe('node scripts/compile-planet-assets-container.mjs');
+    const runner = readFileSync('scripts/compile-planet-assets-container.mjs', 'utf8');
+    expect(runner).toContain("const platform = 'linux/amd64'");
+    expect(runner).toContain("'--platform', platform");
+    expect(runner).toMatch(/type=bind/);
+    expect(runner).toMatch(/assets\/planets/);
+    expect(runner).toContain('compile:planet-assets');
+    expect(runner).toContain('--write');
   });
 
   it('pins the Linux KTX encoder archive at the manifest and container boundary', () => {
@@ -238,7 +472,7 @@ describe('planet content validator', () => {
     const asset = new Uint8Array([1, 2, 3]);
     const checksum = createHash('sha256').update(asset).digest('hex');
     const manifest = baseManifest();
-    manifest.sources = [{
+    const source = {
       id: 'source',
       url: 'https://example.com/source',
       author: 'Example Author',
@@ -250,9 +484,10 @@ describe('planet content validator', () => {
       transformations: ['reprojection'],
       bodies: ['veyra'],
       channels: ['albedo'],
-    }];
+    };
+    (manifest.sources as unknown[]).push(source);
     expect(runValidator(manifest, asset).status).toBe(0);
-    (manifest.sources[0] as { checksumSha256: string }).checksumSha256 = '0'.repeat(64);
+    source.checksumSha256 = '0'.repeat(64);
     const invalid = runValidator(manifest, asset);
     expect(invalid.status).not.toBe(0);
     expect(invalid.stderr).toMatch(/checksum/i);
@@ -290,44 +525,182 @@ describe('planet content validator', () => {
       expectedGpuBytes += Math.ceil(width / 4) * Math.ceil(height / 4) * 8;
       if (width === 1 && height === 1) break;
     }
-    const packageBytes = ktx2Fixture(2048, 1024, 12);
-    const fallbackBytes = new Uint8Array(12);
     const manifest = baseManifest();
-    manifest.packs = [{
-      bodyId: 'veyra',
-      tier: 'medium',
-      width: 2048,
-      height: 1024,
-      compressedBytes: packageBytes.byteLength,
-      transientBytes: 1024,
-      bootCritical: true,
-      channels: [{
-        name: 'albedo',
-        colorSpace: 'sRGB',
-        logicalFormat: 'RGB8',
-        packagePath: 'veyra-albedo.ktx2',
-        fallbackPath: 'veyra-albedo.webp',
-        packageChecksumSha256: createHash('sha256').update(packageBytes).digest('hex'),
-        fallbackChecksumSha256: createHash('sha256').update(fallbackBytes).digest('hex'),
-        gpuFormat: 'bc1-rgb',
-        gpuBytes: expectedGpuBytes,
-        mipmapped: true,
-      }],
-    }];
-    const files = {
-      'veyra-albedo.ktx2': packageBytes,
-      'veyra-albedo.webp': fallbackBytes,
-    };
-    expect(runValidator(manifest, undefined, files).status).toBe(0);
+    const mediumPack = (manifest.packs as Array<any>).find((pack) => pack.tier === 'medium');
+    const albedo = mediumPack.channels.find((channel: any) => channel.name === 'albedo');
+    expect(albedo.gpuBytes).toBe(expectedGpuBytes);
+    expect(runValidator(manifest).status).toBe(0);
 
-    const missing = runValidator(manifest);
+    const missingManifest = structuredClone(manifest);
+    const missingPack = (missingManifest.packs as Array<any>).find((pack) => pack.tier === 'medium');
+    missingPack.channels.find((channel: any) => channel.name === 'albedo').packagePath = 'missing.ktx2';
+    const missing = runValidator(missingManifest);
     expect(missing.status).not.toBe(0);
     expect(missing.stderr).toMatch(/missing/i);
 
-    (manifest.packs[0] as { channels: Array<{ gpuBytes: number }> }).channels[0].gpuBytes++;
-    const wrongMemory = runValidator(manifest, undefined, files);
+    albedo.gpuBytes++;
+    const wrongMemory = runValidator(manifest);
     expect(wrongMemory.status).not.toBe(0);
     expect(wrongMemory.stderr).toMatch(/memory/i);
+  });
+
+  it('derives fallback upload memory and enforces each channel fallback contract', () => {
+    const wrongBytesManifest = baseManifest();
+    const lowPack = (wrongBytesManifest.packs as Array<any>).find((pack) => pack.tier === 'low');
+    lowPack.channels[0].fallbackGpuBytes--;
+    const wrongBytes = runValidator(wrongBytesManifest);
+    expect(wrongBytes.status).not.toBe(0);
+    expect(wrongBytes.stderr).toMatch(/fallback memory mismatch/i);
+
+    const wrongLayoutManifest = baseManifest();
+    const normal = (wrongLayoutManifest.packs as Array<any>)
+      .find((pack) => pack.tier === 'low').channels.find((channel: any) => channel.name === 'normal');
+    normal.fallbackLayout = 'rgba';
+    const wrongLayout = runValidator(wrongLayoutManifest);
+    expect(wrongLayout.status).not.toBe(0);
+    expect(wrongLayout.stderr).toMatch(/fallback layout/i);
+
+    const wrongTargetsManifest = baseManifest();
+    const material = (wrongTargetsManifest.packs as Array<any>)
+      .find((pack) => pack.tier === 'low').channels.find((channel: any) => channel.name === 'material');
+    material.transcodeTargets = ['bc3-rgba'];
+    const wrongTargets = runValidator(wrongTargetsManifest);
+    expect(wrongTargets.status).not.toBe(0);
+    expect(wrongTargets.stderr).toMatch(/transcode targets/i);
+  });
+
+  it('budgets for the larger compressed or conventional-fallback upload path', () => {
+    const activeManifest = baseManifest();
+    activeManifest.budgets.activeBodyGpuBytes.low = 5 * 1024 * 1024;
+    const active = runValidator(activeManifest);
+    expect(active.status).not.toBe(0);
+    expect(active.stderr).toMatch(/fallback.*active-body GPU budget/i);
+
+    const totalManifest = baseManifest();
+    totalManifest.budgets.totalRendererGpuBytes.low = 70 * 1024 * 1024;
+    const total = runValidator(totalManifest);
+    expect(total.status).not.toBe(0);
+    expect(total.stderr).toMatch(/fallback.*total renderer GPU budget/i);
+  });
+
+  it('validates the canonical Veyra height artifact length, checksum, and identity chain', () => {
+    const missingManifest = baseManifest();
+    missingManifest.canonicalArtifacts = [];
+    const missing = runValidator(missingManifest);
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toMatch(/exactly one Veyra canonical height/i);
+
+    const lengthManifest = baseManifest();
+    (lengthManifest.canonicalArtifacts[0] as any).width = 3;
+    const length = runValidator(lengthManifest);
+    expect(length.status).not.toBe(0);
+    expect(length.stderr).toMatch(/byte length/i);
+
+    const checksumManifest = baseManifest();
+    (checksumManifest.canonicalArtifacts[0] as any).checksumSha256 = '0'.repeat(64);
+    const checksum = runValidator(checksumManifest);
+    expect(checksum.status).not.toBe(0);
+    expect(checksum.stderr).toMatch(/canonical height checksum mismatch/i);
+
+    const identityManifest = baseManifest();
+    (identityManifest.canonicalArtifacts[0] as any).identitySha256 = '0'.repeat(64);
+    const identity = runValidator(identityManifest);
+    expect(identity.status).not.toBe(0);
+    expect(identity.stderr).toMatch(/canonical identity mismatch/i);
+  });
+
+  it('rejects an identifier-only KTX2 with no level index or payload', () => {
+    const manifest = baseManifest();
+    const packageBytes = new Uint8Array(80);
+    packageBytes.set([0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const view = new DataView(packageBytes.buffer);
+    view.setUint32(16, 1, true);
+    view.setUint32(20, 1024, true);
+    view.setUint32(24, 512, true);
+    view.setUint32(36, 1, true);
+    view.setUint32(40, 11, true);
+    view.setUint32(44, 1, true);
+    const result = runValidator(manifest, undefined, replacePackage(manifest, 'low', 'albedo', packageBytes));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/level index|truncated/i);
+  });
+
+  it('requires the exact full mip chain for every KTX2 package', () => {
+    const manifest = baseManifest();
+    const packageBytes = ktx2Fixture(1024, 512, 10, 'basis-lz');
+    const result = runValidator(manifest, undefined, replacePackage(manifest, 'low', 'albedo', packageBytes));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/exactly 11 mip levels/i);
+  });
+
+  it('enforces BasisLZ for albedo and UASTC plus Zstd for data channels', () => {
+    const manifest = baseManifest();
+    const wrongAlbedo = ktx2Fixture(1024, 512, 11, 'uastc-zstd');
+    const albedoResult = runValidator(
+      manifest,
+      undefined,
+      replacePackage(manifest, 'low', 'albedo', wrongAlbedo),
+    );
+    expect(albedoResult.status).not.toBe(0);
+    expect(albedoResult.stderr).toMatch(/BasisLZ.*ETC1S/i);
+
+    const dataManifest = baseManifest();
+    const wrongNormal = ktx2Fixture(1024, 512, 11, 'basis-lz');
+    const normalResult = runValidator(
+      dataManifest,
+      undefined,
+      replacePackage(dataManifest, 'low', 'normal', wrongNormal),
+    );
+    expect(normalResult.status).not.toBe(0);
+    expect(normalResult.stderr).toMatch(/UASTC.*Zstd/i);
+  });
+
+  it('rejects KTX2 indexes and DFD sections that point outside the package', () => {
+    const manifest = baseManifest();
+    const packageBytes = ktx2Fixture(1024, 512);
+    new DataView(packageBytes.buffer).setUint32(48, packageBytes.byteLength + 8, true);
+    const result = runValidator(manifest, undefined, replacePackage(manifest, 'low', 'albedo', packageBytes));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/DFD.*bounds/i);
+  });
+
+  it('rejects overlapping KTX2 metadata sections', () => {
+    const manifest = baseManifest();
+    const packageBytes = ktx2Fixture(1024, 512);
+    const view = new DataView(packageBytes.buffer);
+    view.setUint32(56, view.getUint32(48, true), true);
+    view.setUint32(60, 4, true);
+    const result = runValidator(manifest, undefined, replacePackage(manifest, 'low', 'albedo', packageBytes));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/metadata sections overlap/i);
+  });
+
+  it('requires exactly one Veyra pack for each runtime tier', () => {
+    const missingManifest = baseManifest();
+    missingManifest.packs = (missingManifest.packs as Array<any>).filter((pack) => pack.tier !== 'high');
+    const missing = runValidator(missingManifest);
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toMatch(/exactly one Veyra high pack/i);
+
+    const duplicateManifest = baseManifest();
+    const low = (duplicateManifest.packs as Array<any>).find((pack) => pack.tier === 'low');
+    (duplicateManifest.packs as Array<any>).push(structuredClone(low));
+    const duplicate = runValidator(duplicateManifest);
+    expect(duplicate.status).not.toBe(0);
+    expect(duplicate.stderr).toMatch(/exactly one Veyra low pack/i);
+  });
+
+  it('requires the exact four-channel set in every Veyra pack', () => {
+    const manifest = baseManifest();
+    const pack = (manifest.packs as Array<any>).find((candidate) => candidate.tier === 'low');
+    pack.channels = pack.channels.filter((channel: any) => channel.name !== 'clouds');
+    pack.compressedBytes = pack.channels.reduce(
+      (sum: number, channel: any) => sum + completeVeyraPackFixture().files[channel.packagePath].byteLength,
+      0,
+    );
+    const result = runValidator(manifest);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/exact channels.*albedo.*normal.*material.*clouds/i);
   });
 
   it('rejects packaged-file checksum drift', () => {
@@ -413,7 +786,7 @@ describe('planet content validator', () => {
     const asset = new Uint8Array([4, 5, 6]);
     const checksum = createHash('sha256').update(asset).digest('hex');
     const manifest = baseManifest();
-    manifest.sources = [{
+    const source: any = {
       id: 'nasa-source',
       url: 'https://www.nasa.gov/example',
       author: 'NASA',
@@ -425,9 +798,10 @@ describe('planet content validator', () => {
       transformations: ['reprojection'],
       bodies: ['veyra'],
       channels: ['albedo'],
-    }];
+    };
+    (manifest.sources as unknown[]).push(source);
     expect(runValidator(manifest, asset).status).not.toBe(0);
-    (manifest.sources[0] as { review?: unknown }).review = {
+    source.review = {
       thirdPartyContent: false,
       commercialUseReviewed: true,
       modificationReviewed: true,
