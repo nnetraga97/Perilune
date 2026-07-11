@@ -37,12 +37,15 @@ describe('terrain-aware save migration', () => {
     );
 
     const save = serializeGame(game, 'surface');
-    expect(save.saveVersion).toBe(4);
+    expect(save.saveVersion).toBe(5);
     expect(save.vessels[0].surfacePose).toMatchObject({
       bodyId: 'veyra',
       recipeHash: expect.stringMatching(/^[a-f0-9]{32}$/),
       scatterRecipeHash: expect.stringMatching(/^[a-f0-9]{32}$/),
     });
+    // The real scatter hash is distinct from the terrain hash it no longer aliases.
+    expect(save.vessels[0].surfacePose!.scatterRecipeHash)
+      .not.toBe(save.vessels[0].surfacePose!.recipeHash);
 
     const restored = restoreGame(JSON.parse(JSON.stringify(save)));
     const restoredBody = restored.bodyOf(restored.active!);
@@ -109,5 +112,26 @@ describe('terrain-aware save migration', () => {
     save.vessels[0].surfacePose!.scatterRecipeHash = 'f'.repeat(32);
 
     expect(() => restoreGame(save)).toThrow(/scatter recipe/i);
+  });
+
+  it('migrates a version 4 save whose scatter hash aliased the terrain hash', () => {
+    const game = new GameState();
+    game.time = 4_321;
+    const gv = game.spawnOnPad(buildLander(), 'V4 alias lander');
+    const directionBefore = inertialToBodyFixed(game.bodyOf(gv), game.time, gv.runtime.pos, new Vec3()).normalize();
+    const save = serializeGame(game, 'v4 alias') as ReturnType<typeof serializeGame>;
+    // Recreate the version-4 shape: version 4 with scatter hash aliased to terrain.
+    save.saveVersion = 4;
+    save.vessels[0].surfacePose!.scatterRecipeHash = save.vessels[0].surfacePose!.recipeHash;
+
+    const restored = restoreGame(JSON.parse(JSON.stringify(save)));
+    const directionAfter = inertialToBodyFixed(
+      restored.bodyOf(restored.active!),
+      restored.time,
+      restored.active!.runtime.pos,
+      new Vec3(),
+    ).normalize();
+    expect(directionAfter.distanceTo(directionBefore)).toBeLessThan(1e-9);
+    expect(restored.active!.runtime.pos.isFinite()).toBe(true);
   });
 });

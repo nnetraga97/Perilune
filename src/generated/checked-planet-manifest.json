@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestSha256": "cc2f0657e1f943941c69bdb4da10f1a45ea87bb052c777a92cf4e4f1bf2d169d",
+  "manifestSha256": "4e362664f4fa26d9555f321f1d47b9ce9f5958d753e60521b86653cf96833ad0",
   "manifest": {
     "schemaVersion": 1,
     "compiler": {
@@ -347,6 +347,18 @@
         "sourceChecksumSha256": "3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919",
         "compilerVersion": "2.1.0",
         "containerImage": "node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf"
+      },
+      {
+        "bodyId": "veyra",
+        "kind": "physical-scatter",
+        "path": "generated/veyra/canonical/scatter.json",
+        "runtimePath": "src/generated/veyra-scatter.json",
+        "recordCount": 994,
+        "cellCount": 783,
+        "cellResolution": 32,
+        "scatterRecipeHash": "a486833c1abdb3bb5837db1558b8129a",
+        "terrainRecipeHash": "92b8a8cfa5b49226469a8f275292608d",
+        "checksumSha256": "796a1d31bb824c7255ae59c728e60fce06c5a1e71f3fd7e65b455f241352b81e"
       }
     ]
   }

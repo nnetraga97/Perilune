@@ -522,6 +522,135 @@ if (manifest) {
     }
   }
 
+  validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestDir);
+}
+
+/**
+ * Validate the canonical physical-scatter artifact: byte-identical asset/runtime
+ * copies, checksums, recipe linkage, sorted-unique cells and record ids, cell
+ * ownership, and ocean exclusion. Content-hash equality is proven separately by
+ * the scatter-recipe unit test through the shared parser.
+ */
+function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestDir) {
+  const scatters = Array.isArray(manifest.canonicalArtifacts)
+    ? manifest.canonicalArtifacts.filter(
+      (artifact) => artifact?.bodyId === 'veyra' && artifact?.kind === 'physical-scatter',
+    )
+    : [];
+  if (scatters.length !== 1) {
+    errors.push(`Manifest must contain exactly one Veyra physical-scatter artifact, got ${scatters.length}`);
+    return;
+  }
+  const artifact = scatters[0];
+  const veyraRecipe = recipeFile?.recipes?.find((recipe) => recipe.bodyId === 'veyra');
+  const output = compilerOutput?.veyraScatter;
+  if (artifact.cellResolution !== 32) errors.push('Veyra scatter cell resolution must be 32');
+  requirePositiveInteger(artifact.recordCount, 'Veyra scatter record count');
+  requirePositiveInteger(artifact.cellCount, 'Veyra scatter cell count');
+  if (!/^[a-f0-9]{32}$/.test(artifact.scatterRecipeHash ?? '')) {
+    errors.push('Veyra scatter recipe hash must be 32 hex');
+  }
+  if (!veyraRecipe || artifact.terrainRecipeHash !== veyraRecipe.hash) {
+    errors.push('Veyra scatter terrain-recipe linkage does not match recipes.json');
+  }
+  if (artifact.scatterRecipeHash === artifact.terrainRecipeHash) {
+    errors.push('Veyra scatter recipe hash must be distinct from the terrain recipe hash');
+  }
+  if (!/^[a-f0-9]{64}$/.test(artifact.checksumSha256 ?? '')) {
+    errors.push('Veyra scatter checksum must be SHA-256');
+  }
+  if (!output || output.scatterRecipeHash !== artifact.scatterRecipeHash ||
+    output.terrainRecipeHash !== artifact.terrainRecipeHash ||
+    output.recordCount !== artifact.recordCount || output.cellCount !== artifact.cellCount ||
+    output.cellResolution !== artifact.cellResolution || output.checksumSha256 !== artifact.checksumSha256 ||
+    output.path !== artifact.path || output.runtimePath !== artifact.runtimePath) {
+    errors.push('Veyra scatter metadata does not match compiler output');
+  }
+
+  const runtimeRoot = process.env.PERILUNE_ROOT ? resolve(process.env.PERILUNE_ROOT) : root;
+  const assetPath = safeManifestAssetPath(manifestDir, artifact.path, 'Veyra scatter');
+  const runtimePath = typeof artifact.runtimePath === 'string' && !isAbsolute(artifact.runtimePath)
+    ? resolve(runtimeRoot, artifact.runtimePath)
+    : null;
+  if (!runtimePath) errors.push('Veyra scatter runtime path must be a repo-relative path');
+  if (!assetPath || !existsSync(assetPath)) {
+    errors.push('Veyra scatter canonical artifact is missing');
+    return;
+  }
+  if (!runtimePath || !existsSync(runtimePath)) {
+    errors.push('Veyra scatter runtime artifact is missing');
+    return;
+  }
+  const assetBytes = readFileSync(assetPath);
+  const runtimeBytes = readFileSync(runtimePath);
+  if (!assetBytes.equals(runtimeBytes)) {
+    errors.push('Veyra scatter asset and runtime copies are not byte-identical');
+  }
+  if (/^[a-f0-9]{64}$/.test(artifact.checksumSha256 ?? '')) {
+    const actual = sha256File(assetPath);
+    if (actual !== artifact.checksumSha256) {
+      errors.push(`Veyra scatter checksum mismatch: expected ${artifact.checksumSha256}, got ${actual}`);
+    }
+  }
+
+  let recipe;
+  try {
+    recipe = JSON.parse(assetBytes.toString('utf8'));
+  } catch (error) {
+    errors.push(`Veyra scatter JSON could not be parsed: ${error instanceof Error ? error.message : error}`);
+    return;
+  }
+  if (recipe.formatVersion !== 1 || recipe.bodyId !== 'veyra') {
+    errors.push('Veyra scatter artifact header is invalid');
+  }
+  if (recipe.terrainRecipeHash !== artifact.terrainRecipeHash || recipe.hash !== artifact.scatterRecipeHash) {
+    errors.push('Veyra scatter artifact hashes do not match the manifest');
+  }
+  if (!Array.isArray(recipe.cells)) {
+    errors.push('Veyra scatter cells must be an array');
+    return;
+  }
+  const seenIds = new Set();
+  let previousCellKey = -1;
+  let totalRecords = 0;
+  for (const cell of recipe.cells) {
+    if (![cell.face, cell.cx, cell.cy].every((value) => Number.isInteger(value)) ||
+      cell.face < 0 || cell.face > 5 || cell.cx < 0 || cell.cx >= 32 || cell.cy < 0 || cell.cy >= 32) {
+      errors.push('Veyra scatter cell coordinates are out of range');
+      break;
+    }
+    const cellKey = (cell.face * 32 + cell.cx) * 32 + cell.cy;
+    if (cellKey <= previousCellKey) {
+      errors.push('Veyra scatter cells must be sorted and unique');
+      break;
+    }
+    previousCellKey = cellKey;
+    if (!Array.isArray(cell.records) || cell.records.length === 0) {
+      errors.push('Veyra scatter cells must hold at least one record');
+      break;
+    }
+    let previousId = '';
+    for (const record of cell.records) {
+      totalRecords++;
+      if (!/^[a-f0-9]{16}$/.test(record.id ?? '')) { errors.push('Veyra scatter record id must be 16 hex'); break; }
+      if (seenIds.has(record.id)) { errors.push(`Duplicate Veyra scatter record id ${record.id}`); break; }
+      if (record.id <= previousId) { errors.push('Veyra scatter records must be sorted by id'); break; }
+      seenIds.add(record.id);
+      previousId = record.id;
+      if (!Number.isInteger(record.biome) || record.biome < 1) {
+        errors.push('Veyra scatter must never place obstacles in the ocean');
+        break;
+      }
+      if (!['sphere', 'capsule', 'compound-sphere'].includes(record.proxy)) {
+        errors.push('Veyra scatter proxy kind is invalid');
+        break;
+      }
+    }
+  }
+  if (totalRecords !== recipe.recordCount || recipe.recordCount !== artifact.recordCount) {
+    errors.push('Veyra scatter record count does not match the artifact');
+  }
+
   const budgets = manifest.budgets;
   requirePositiveInteger(budgets?.mediumBootTransferBytes, 'Medium boot transfer budget');
   requirePositiveInteger(budgets?.mediumPackTransferBytes, 'Medium pack transfer budget');

@@ -9,6 +9,7 @@ import { recipeForBody } from '../src/sim/terrainRecipe';
 import { solidHeight } from '../src/sim/terrain';
 import { Universe } from '../src/sim/universe';
 import { generateVeyraCanonicalMaps, type VeyraCanonicalMaps } from './lib/veyra-global-maps';
+import { generateVeyraScatter } from './lib/veyra-scatter';
 
 const root = resolve(import.meta.dirname, '..');
 const assetsRoot = resolve(root, 'assets/planets');
@@ -18,6 +19,8 @@ const outputPath = resolve(assetsRoot, 'compiler-output.json');
 const sourcePath = resolve(assetsRoot, 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.tif');
 const generatedRoot = resolve(assetsRoot, 'generated/veyra');
 const canonicalHeightPath = resolve(generatedRoot, 'canonical/height.s16le');
+const canonicalScatterPath = resolve(generatedRoot, 'canonical/scatter.json');
+const runtimeScatterPath = resolve(root, 'src/generated/veyra-scatter.json');
 const canonicalWidth = 8192;
 const canonicalHeight = 4096;
 const fingerprintWidth = 64;
@@ -239,6 +242,40 @@ const bodies = [...universe.bodies.values()].map((body) => {
 }).sort((a, b) => a.bodyId.localeCompare(b.bodyId));
 
 let veyraCanonical = (JSON.parse(readFileSync(outputPath, 'utf8')) as Record<string, any>).veyraCanonical;
+
+// Physical scatter compiles from the canonical quantized height buffer with an
+// integer PRNG; it is platform-deterministic and never touches GPU textures.
+const veyraBody = universe.get('veyra');
+const veyraTerrainHash = recipeForBody(veyraBody).hash;
+const heightBuffer = readFileSync(canonicalHeightPath);
+const heightTexels = new Int16Array(heightBuffer.buffer, heightBuffer.byteOffset, heightBuffer.length / 2);
+const scatterRecipe = generateVeyraScatter({
+  bodyId: 'veyra',
+  terrainRecipeHash: veyraTerrainHash,
+  radius: veyraBody.radius,
+  height: { width: canonicalWidth, height: canonicalHeight, texels: heightTexels },
+});
+const scatterJson = `${JSON.stringify(scatterRecipe, null, 2)}\n`;
+const scatterChecksum = sha256(Buffer.from(scatterJson));
+const scatterArtifact = {
+  bodyId: 'veyra',
+  kind: 'physical-scatter',
+  path: relativeAssetPath(canonicalScatterPath),
+  runtimePath: relative(root, runtimeScatterPath).split('\\').join('/'),
+  recordCount: scatterRecipe.recordCount,
+  cellCount: scatterRecipe.cells.length,
+  cellResolution: scatterRecipe.cellResolution,
+  scatterRecipeHash: scatterRecipe.hash,
+  terrainRecipeHash: veyraTerrainHash,
+  checksumSha256: scatterChecksum,
+};
+if (write) {
+  mkdirSync(dirname(canonicalScatterPath), { recursive: true });
+  writeFileSync(canonicalScatterPath, scatterJson);
+  mkdirSync(dirname(runtimeScatterPath), { recursive: true });
+  writeFileSync(runtimeScatterPath, scatterJson);
+}
+
 if (writeGlobal) {
   const global = await compileVeyraGlobal(universe);
   const veyraRecipe = recipeForBody(universe.get('veyra'));
@@ -298,7 +335,7 @@ if (writeGlobal) {
     transformations: ['body-fixed reprojection', 'deterministic geographic warp and recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'Lanczos3 tier resampling', 'BasisLZ and UASTC KTX2 encoding'],
     bodies: ['veyra'], channels: ['albedo'],
   }];
-  manifest.canonicalArtifacts = [heightArtifact];
+  manifest.canonicalArtifacts = [heightArtifact, scatterArtifact];
   manifest.budgets.rendererBaseGpuBytes = {
     low: 64 * 1024 * 1024,
     medium: 96 * 1024 * 1024,
@@ -313,6 +350,16 @@ const output = `${JSON.stringify({
   fingerprint: { width: fingerprintWidth, height: fingerprintHeight, quantizationMeters, byteOrder: 'little-endian' },
   bodies,
   ...(veyraCanonical ? { veyraCanonical } : {}),
+  veyraScatter: {
+    path: scatterArtifact.path,
+    runtimePath: scatterArtifact.runtimePath,
+    scatterRecipeHash: scatterArtifact.scatterRecipeHash,
+    terrainRecipeHash: scatterArtifact.terrainRecipeHash,
+    recordCount: scatterArtifact.recordCount,
+    cellCount: scatterArtifact.cellCount,
+    cellResolution: scatterArtifact.cellResolution,
+    checksumSha256: scatterArtifact.checksumSha256,
+  },
 }, null, 2)}\n`;
 if (write) {
   mkdirSync(dirname(outputPath), { recursive: true });

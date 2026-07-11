@@ -169,29 +169,29 @@ Commit: `feat: add Veyra regional surface materials`
 - Produces: `PhysicalScatterRecipe`, `scatterRecipeForBody(body)`, cube-face `ScatterCellId`, stable visual/physical records, identical canonical/runtime JSON artifacts, and a distinct 32-hex recipe hash.
 - Consumes: integer recipe data, canonical signed-16 height, canonical material bytes, a specified integer PRNG, and terrain recipe hash.
 
-- [ ] **Step 1: Write failing recipe, seam, and migration tests**
+- [x] **Step 1: Write failing recipe, seam, and migration tests**
 
 Assert stable IDs/records across runs, distinct neighboring cells, agreement across every cube seam, biome/slope/altitude filtering, no ocean obstacles, proxy shape validation, physical equality across all quality tiers, a distinct scatter hash, rejection of unknown hashes before save mutation, and successful migration of version-4 terrain-hash aliases to version 5.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `npx vitest run tests/scatter-recipe.test.ts tests/save-terrain-migration.test.ts tests/content-validator.test.ts`
 
 Expected: the scatter recipe/artifact is absent and saves still alias terrain and scatter hashes.
 
-- [ ] **Step 3: Define the canonical integer format and generator**
+- [x] **Step 3: Define the canonical integer format and generator**
 
 Use canonical JSON containing format version, body ID, terrain recipe hash, scatter recipe hash, cube-cell resolution, record counts, and sorted cells. Records use integer face/cell coordinates, quantized in-cell coordinates, quantized radius/height, proxy kind (`sphere`, `capsule`, or `compound-sphere`), biome class, visual class, and a stable 64-bit ID encoded as lowercase hex. Generate from canonical CPU height/material buffers with an integer PRNG; never sample compressed/fallback/GPU textures. Write byte-identical copies under `assets/` for provenance/validation and `src/generated/` for synchronous simulation/rendering imports.
 
-- [ ] **Step 4: Validate and expose checked metadata**
+- [x] **Step 4: Validate and expose checked metadata**
 
 Validate bounds, sorted unique IDs, cell ownership, checksums, recipe linkage, byte equality of the asset/runtime copies, ocean exclusion, and deterministic recompile fingerprints. Add the artifact to canonical manifest accounting without loading it as a GPU texture channel.
 
-- [ ] **Step 5: Migrate saves explicitly**
+- [x] **Step 5: Migrate saves explicitly**
 
 Bump `SAVE_VERSION` to 5. Version-4 migration rewrites only a surface pose whose scatter hash equals its terrain hash to the current body's declared legacy alias; restoration then validates `scatterRecipeForBody(body).hash`. Serialization always writes the real scatter hash.
 
-- [ ] **Step 6: Generate, verify, and commit**
+- [x] **Step 6: Generate, verify, and commit**
 
 Run: `npm run compile:planet-assets:container && npm run validate:content && npx vitest run tests/scatter-recipe.test.ts tests/save-terrain-migration.test.ts tests/content-validator.test.ts && npm run typecheck && npm run build`
 

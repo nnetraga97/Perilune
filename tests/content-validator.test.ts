@@ -27,6 +27,39 @@ const FIXTURE_RAW_HASHES = {
   clouds: 'd'.repeat(64),
 };
 
+const SCATTER_TERRAIN_HASH = '3'.padStart(32, '0');
+const SCATTER_RECIPE_HASH = 'a'.repeat(32);
+const SCATTER_FIXTURE = {
+  formatVersion: 1,
+  bodyId: 'veyra',
+  terrainRecipeHash: SCATTER_TERRAIN_HASH,
+  hash: SCATTER_RECIPE_HASH,
+  cellResolution: 32,
+  cellQuantum: 65536,
+  sizeQuantumMeters: 0.01,
+  recordCount: 1,
+  cells: [{
+    face: 0, cx: 0, cy: 0, seed: 1,
+    records: [{ id: '0000000000000001', qu: 0, qv: 0, qRadius: 100, qHeight: 100, proxy: 'sphere', biome: 1, visual: 0 }],
+  }],
+};
+const SCATTER_BYTES = Buffer.from(JSON.stringify(SCATTER_FIXTURE));
+const SCATTER_CHECKSUM = createHash('sha256').update(SCATTER_BYTES).digest('hex');
+const SCATTER_ARTIFACT = {
+  bodyId: 'veyra', kind: 'physical-scatter',
+  path: 'generated/veyra/canonical/scatter.json',
+  runtimePath: 'src/generated/veyra-scatter.json',
+  recordCount: 1, cellCount: 1, cellResolution: 32,
+  scatterRecipeHash: SCATTER_RECIPE_HASH, terrainRecipeHash: SCATTER_TERRAIN_HASH,
+  checksumSha256: SCATTER_CHECKSUM,
+};
+const SCATTER_OUTPUT = {
+  path: 'generated/veyra/canonical/scatter.json',
+  runtimePath: 'src/generated/veyra-scatter.json',
+  scatterRecipeHash: SCATTER_RECIPE_HASH, terrainRecipeHash: SCATTER_TERRAIN_HASH,
+  recordCount: 1, cellCount: 1, cellResolution: 32, checksumSha256: SCATTER_CHECKSUM,
+};
+
 function fullMipCount(width: number, height: number): number {
   return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }
@@ -203,6 +236,7 @@ function canonicalFixture(compiler: ReturnType<typeof baseCompiler>) {
           byteOrder: 'little-endian',
         },
       },
+      veyraScatter: SCATTER_OUTPUT,
     },
   };
 }
@@ -260,7 +294,7 @@ function baseManifest() {
       authoringOnly: true, sourceDimensions: [16200, 8100],
       transformations: ['body-fixed reprojection'], bodies: ['veyra'], channels: ['albedo'],
     }] as unknown[],
-    canonicalArtifacts: [canonical.artifact] as unknown[],
+    canonicalArtifacts: [canonical.artifact, structuredClone(SCATTER_ARTIFACT)] as unknown[],
     packs: packs as unknown[],
   };
 }
@@ -281,6 +315,9 @@ function runValidator(
   writeFileSync(compilerOutputPath, JSON.stringify(canonicalFixture(baseCompiler()).compilerOutput));
   mkdirSync(join(dir, 'generated/veyra/canonical'), { recursive: true });
   writeFileSync(join(dir, 'generated/veyra/canonical/height.s16le'), FIXTURE_HEIGHT);
+  writeFileSync(join(dir, 'generated/veyra/canonical/scatter.json'), SCATTER_BYTES);
+  mkdirSync(join(dir, 'src/generated'), { recursive: true });
+  writeFileSync(join(dir, 'src/generated/veyra-scatter.json'), SCATTER_BYTES);
   if (asset) writeFileSync(join(dir, 'source.bin'), asset);
   for (const [path, bytes] of Object.entries({ ...fixtureFiles, ...extraFiles })) {
     const target = join(dir, path);
@@ -297,6 +334,7 @@ function runValidator(
       PERILUNE_RECIPES_PATH: recipesPath,
       PERILUNE_CHECKED_MANIFEST_PATH: checkedManifestPath,
       PERILUNE_COMPILER_OUTPUT_PATH: compilerOutputPath,
+      PERILUNE_ROOT: dir,
     },
   });
   return Object.assign(result, { checkedManifestPath });
@@ -845,5 +883,72 @@ describe('planet content validator', () => {
       termsSnapshot: 'NASA media terms reviewed 2026-07-10',
     };
     expect(runValidator(manifest, asset).status).toBe(0);
+  });
+});
+
+describe('physical scatter artifact validation', () => {
+  it('passes with a well-formed scatter artifact and byte-identical copies', () => {
+    expect(runValidator(baseManifest()).status).toBe(0);
+  });
+
+  it('fails when the scatter artifact is missing', () => {
+    const manifest = baseManifest();
+    manifest.canonicalArtifacts = (manifest.canonicalArtifacts as Array<{ kind: string }>)
+      .filter((artifact) => artifact.kind !== 'physical-scatter');
+    const result = runValidator(manifest);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/physical-scatter/i);
+  });
+
+  it('fails when the scatter hash aliases the terrain hash', () => {
+    const manifest = baseManifest();
+    const scatter = (manifest.canonicalArtifacts as Array<Record<string, unknown>>)
+      .find((artifact) => artifact.kind === 'physical-scatter')!;
+    scatter.scatterRecipeHash = SCATTER_TERRAIN_HASH;
+    const result = runValidator(manifest);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/distinct/i);
+  });
+
+  it('fails when the asset and runtime copies diverge', () => {
+    const manifest = baseManifest();
+    const divergent = Buffer.from(JSON.stringify({ ...SCATTER_FIXTURE, recordCount: 1, cells: SCATTER_FIXTURE.cells }) + ' ');
+    const result = runValidator(manifest, undefined, {
+      'src/generated/veyra-scatter.json': new Uint8Array(divergent),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/byte-identical/i);
+  });
+
+  it('fails when scatter metadata disagrees with the compiler output', () => {
+    const manifest = baseManifest();
+    const scatter = (manifest.canonicalArtifacts as Array<Record<string, unknown>>)
+      .find((artifact) => artifact.kind === 'physical-scatter')!;
+    scatter.recordCount = 2;
+    const result = runValidator(manifest);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/compiler output/i);
+  });
+
+  it('fails when a scatter record is placed in the ocean', () => {
+    const oceanFixture = {
+      ...SCATTER_FIXTURE,
+      cells: [{
+        ...SCATTER_FIXTURE.cells[0],
+        records: [{ ...SCATTER_FIXTURE.cells[0].records[0], biome: 0 }],
+      }],
+    };
+    const oceanBytes = Buffer.from(JSON.stringify(oceanFixture));
+    const oceanChecksum = createHash('sha256').update(oceanBytes).digest('hex');
+    const manifest = baseManifest();
+    const scatter = (manifest.canonicalArtifacts as Array<Record<string, unknown>>)
+      .find((artifact) => artifact.kind === 'physical-scatter')!;
+    scatter.checksumSha256 = oceanChecksum;
+    const result = runValidator(manifest, undefined, {
+      'generated/veyra/canonical/scatter.json': new Uint8Array(oceanBytes),
+      'src/generated/veyra-scatter.json': new Uint8Array(oceanBytes),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/ocean/i);
   });
 });

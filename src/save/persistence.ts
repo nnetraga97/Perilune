@@ -27,6 +27,7 @@ import {
 } from '../sim/bodyOrientation';
 import { contactSurface } from '../sim/terrain';
 import { recipeForBody } from '../sim/terrainRecipe';
+import { scatterRecipeForBody } from '../sim/scatterRecipe';
 
 function isSurfaceSituation(situation: SavedVessel['situation']): boolean {
   return situation === 'prelaunch' || situation === 'landed' || situation === 'splashed';
@@ -50,7 +51,7 @@ function serializeSurfacePose(game: GameState, gv: GameVessel): SavedSurfacePose
   return {
     bodyId: body.id,
     recipeHash: recipe.hash,
-    scatterRecipeHash: recipe.hash,
+    scatterRecipeHash: scatterRecipeForBody(body).hash,
     directionBF: { ...directionBF },
     attitudeBF: { ...attitudeBF },
     contactOffset: positionBF.length() - (body.radius + surface.height),
@@ -141,15 +142,23 @@ export function restoreGame(save: SaveGame): GameState {
       throw new Error(`${body.name} is a gas body with no solid surface for landed saves`);
     }
     if (!vessel.surfacePose) continue;
+    const pose = vessel.surfacePose;
     const currentRecipeHash = recipeForBody(body).hash;
-    if (currentRecipeHash !== vessel.surfacePose.recipeHash) {
+    if (currentRecipeHash !== pose.recipeHash) {
       throw new Error(
-        `Unavailable terrain recipe ${vessel.surfacePose.recipeHash} for ${body.name}`,
+        `Unavailable terrain recipe ${pose.recipeHash} for ${body.name}`,
       );
     }
-    if (currentRecipeHash !== vessel.surfacePose.scatterRecipeHash) {
+    const currentScatterHash = scatterRecipeForBody(body).hash;
+    // Version-4 saves aliased the scatter hash to the terrain hash; adopt the
+    // body's declared scatter recipe for those poses. Genuine version-5 hashes
+    // must match the currently declared recipe or the load stops before mutating.
+    const savedScatterHash = pose.scatterRecipeHash === pose.recipeHash
+      ? currentScatterHash
+      : pose.scatterRecipeHash;
+    if (savedScatterHash !== currentScatterHash) {
       throw new Error(
-        `Unavailable physical-scatter recipe ${vessel.surfacePose.scatterRecipeHash} for ${body.name}`,
+        `Unavailable physical-scatter recipe ${pose.scatterRecipeHash} for ${body.name}`,
       );
     }
   }

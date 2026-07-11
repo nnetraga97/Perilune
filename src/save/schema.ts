@@ -15,7 +15,7 @@ import type { Craft, Stage, PartInstance } from '../sim/vessel';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface SavedAlarm {
   id: string;
@@ -168,6 +168,12 @@ export function migrateSave(raw: SaveGame): SaveGame {
       saveVersion: 4,
       vessels: save.vessels.map((vessel) => ({ ...vessel, surfacePose: null })),
     };
+  }
+  if (save.saveVersion === 4) {
+    // Structural bump to version 5. Version-4 surface poses stored the physical
+    // scatter hash as an alias of the terrain hash; restoreGame rewrites those
+    // aliases to each body's declared scatter recipe once the universe is known.
+    save = { ...save, saveVersion: 5 };
   }
   if (save.saveVersion !== SAVE_VERSION) {
     throw new Error(`No migration path from save version ${save.saveVersion}.`);

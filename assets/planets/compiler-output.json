@@ -109,5 +109,15 @@
       "quantizationMeters": 0.5,
       "byteOrder": "little-endian"
     }
+  },
+  "veyraScatter": {
+    "path": "generated/veyra/canonical/scatter.json",
+    "runtimePath": "src/generated/veyra-scatter.json",
+    "scatterRecipeHash": "a486833c1abdb3bb5837db1558b8129a",
+    "terrainRecipeHash": "92b8a8cfa5b49226469a8f275292608d",
+    "recordCount": 994,
+    "cellCount": 783,
+    "cellResolution": 32,
+    "checksumSha256": "796a1d31bb824c7255ae59c728e60fce06c5a1e71f3fd7e65b455f241352b81e"
   }
 }
