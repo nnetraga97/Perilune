@@ -33,6 +33,24 @@ Sky color and ambient light blend with altitude and sun elevation; the
 background returns to starfield black above the atmosphere. (Full
 scattering shader is scheduled for the visual-quality milestone.)
 
+## Phase 2 feasibility fixture
+
+`?proto=feasibility` is a bounded profiling scene, not the production planet
+renderer. It composes authoritative Veyra terrain with a representative
+analytic atmosphere, ocean highlight path, two cloud scales, one shadow
+receiver, complementary near/far transition meshes, 50,000 instanced visual
+scatter items, and 128 quality-invariant physical-proxy instances. The
+terrain still samples the shared simulation evaluator; the fixture does not
+introduce a second height authority.
+
+Terrain, atmosphere, ocean, clouds, visual scatter, and transition overlap
+can each be disabled independently for profiling. Physical proxies remain
+active under every quality reduction. The renderer records terrain
+scheduling/installation time and estimated active/total GPU allocation. A
+delayed WebGL2 timer-query ring reports GPU work without blocking and discards
+disjoint results. `npm run profile:feasibility` exports the three-journey
+record described in `PERFORMANCE.md`.
+
 ## Vessels (`src/render/vesselMesh.ts`)
 
 Parts render from cached primitive geometries (cylinder/cone/capsule/dome/
