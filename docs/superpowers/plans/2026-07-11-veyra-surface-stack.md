@@ -25,9 +25,9 @@
 - Active-body GPU ceilings remain 64/128/256 MiB and total-renderer ceilings remain 256/384/768 MiB for Low/Medium/High.
 - Each task follows RED-GREEN-REFACTOR, runs its focused tests plus typecheck and production build, receives an independent spec/code-quality review, and leaves the branch green before the next task begins.
 
-## Gate Reconciliation
+## Implementation-First Validation Policy
 
-The approved spec says a phase may not begin until its predecessor passes, but the recorded Phase 2 smoke exceeded the terrain schedule/install target and Phase 2's full Medium/Low M3 runs remain open. Worker terrain is itself a Phase 5 deliverable and the direct fix for that result. Therefore Task 1 is limited to worker terrain, Task 2 immediately runs the full predecessor certification, and no Phase 5 art, scatter, or collision behavior begins until that certification passes. If Task 2 fails, reduce only in the spec's prescribed order or revise the spec; do not continue to Task 3 on an unapproved result.
+Per the user's sequencing decision, Phase 5 focuses first on implementing and reviewing the complete surface feature set. Every task still leaves its focused tests, full unit suite, content validation, typecheck, and production build green, and short profiling runs may diagnose regressions. Full Medium and Low M3 Max hardware certification is not a blocker between implementation tasks; it is the final step after surface materials, canonical scatter, visual effects, physical obstacles, collision integration, production telemetry, browser journeys, visual calibration, documentation, and final code review are complete. No release or Phase 5 completion claim is made until that final certification passes.
 
 ---
 
@@ -78,19 +78,16 @@ Run: `npx vitest run tests/terrain-worker.test.ts tests/veyra-global-material.te
 
 Commit: `feat: generate Veyra terrain in workers`
 
-### Task 2: Close the Predecessor Performance and Build-Validation Gates
+### Task 2: Make Production Content Validation Unskippable
 
 **Files:**
 - Modify: `package.json`
-- Modify as measured: `src/render/planet.ts`
-- Modify as measured: `src/proto/feasibilityScene.ts`
-- Modify: `PERFORMANCE.md`
 - Test: `tests/content-validator.test.ts`
 - Test: `tests/feasibility-certification.test.ts`
 
 **Interfaces:**
-- Produces: an unskippable production-build validation chain and recorded Medium/Low M3 evidence.
-- Consumes: worker timing telemetry, `profile:feasibility`, the approved 1920x1080 protocol, three five-minute journeys per tier, and the exact resource ceilings.
+- Produces: an unskippable production-build validation chain while retaining the already-tested reference-certification contract for the final task.
+- Consumes: `validate:content`, `sync:renderer-assets`, the production build entry, and the existing feasibility-certification validator.
 
 - [ ] **Step 1: Write a failing build-entry test**
 
@@ -106,19 +103,11 @@ Expected: the prebuild assertion fails because the current prebuild only synchro
 
 Set `prebuild` to `npm run validate:content && npm run sync:renderer-assets`. Run `npm run validate:content`, the content-validator test, feasibility-certification test, typecheck, and build.
 
-- [ ] **Step 4: Run the full reference protocol on this M3 Max**
+- [ ] **Step 4: Run complete build-entry verification and commit**
 
-Run the profiler in Medium and Low with a 30-second warm-up and three five-minute journeys per tier at a 1920x1080 physical drawing buffer. Record host, macOS, browser, ANGLE/Metal, power mode, power source, valid/unavailable/disjoint GPU query counts, feature timings, transfer bytes, active/total/transient bytes, run medians, median-of-medians, and worst-run p95. Certification requires >=60 FPS median, <16.7 ms frame p95, <=4 ms submission p95, <=2 ms terrain schedule/install p95, <=8 ms valid GPU p95, >=95% valid GPU query coverage, and the tier resource ceilings.
+Run: `npm run validate:content && npx vitest run tests/content-validator.test.ts tests/feasibility-certification.test.ts && npm run typecheck && npm run build && npm run test -- --run`
 
-- [ ] **Step 5: Apply only prescribed reductions if required**
-
-If Medium misses a gate, disable Medium cloud shadows, reduce atmosphere samples, reduce the second cloud scale, reduce visual scatter, then simplify ocean glitter, one step at a time with a full rerun after each change. Never reduce terrain authority or physical proxies. If the gate still fails, stop and revise the spec rather than continuing.
-
-- [ ] **Step 6: Commit measured evidence**
-
-Run: `npm run test -- --run && npm run build`
-
-Commit: `perf: certify the combined planet renderer`
+Commit: `build: validate planet content before production`
 
 ### Task 3: Regional and Body-Fixed Triplanar Surface Material
 
@@ -373,22 +362,24 @@ Configure pinned Playwright Chromium, Firefox, and WebKit projects for CI smoke 
 
 Document worker ownership, triplanar anchoring, scatter recipe format/hash, quality behavior, obstacle activation/fault policy, save v5 migration, resource measurements, and exact remaining phases. Do not claim Palla or Tyran Phase 6/7 visuals are part of Phase 5.
 
-- [ ] **Step 6: Run complete automated verification**
+- [ ] **Step 6: Self-review every Phase 5 requirement and fix gaps**
+
+Re-read the spec sections for Veyra, orbit-to-ground continuity, surface scatter/collision, quality budgets, failure handling, tests, completion gates, delivery sequence, and documentation. For every sentence, record its proving file/test/run or fix the gap. Palla/Tyran visual identity gates remain explicitly scoped to Phases 6/7 and are not claimed complete here.
+
+- [ ] **Step 7: Request final whole-branch review and fix every finding**
+
+The reviewer receives the full merge-base diff and the completed gate ledger. Fix every Critical/Important finding, rerun covering tests, and re-review until approved.
+
+- [ ] **Step 8: Run complete automated and browser verification**
 
 Run: `npm run validate:content && npm run typecheck && npm test -- --run && npm run build && npm run test:e2e`
 
 Required result: zero failures, playable-loop and terrain-descent green, no missing-asset/shader errors, and production build validation visibly invoked.
 
-- [ ] **Step 7: Run final M3 Low/Medium reference journeys**
+- [ ] **Step 9: Run final M3 Low/Medium hardware certification last**
 
-Repeat the approved 30-second warm-up plus three five-minute journeys for Low and Medium with Phase 5 enabled. Prove the frame, submission, terrain, GPU-query, transfer, active/total/transient, quality-invariant physical-ID, and no-uncovered-obstacle gates. Record all evidence in `PERFORMANCE.md`.
+Only after Steps 1-8 pass, repeat the approved 30-second warm-up plus three five-minute journeys for Low and Medium with Phase 5 enabled. Prove >=60 FPS median, <16.7 ms frame p95, <=4 ms submission p95, <=2 ms terrain schedule/install p95, <=8 ms valid GPU p95, >=95% valid GPU query coverage, transfer and active/total/transient ceilings, quality-invariant physical IDs, and no uncovered-obstacle violations. If Medium misses, remove cloud shadows, reduce atmosphere samples, reduce the second cloud scale, reduce visual scatter, then simplify ocean glitter, one step at a time with a full rerun after each change. Never reduce terrain authority or physical proxies. Record complete passing evidence in `PERFORMANCE.md`.
 
-- [ ] **Step 8: Self-review every Phase 5 requirement and fix gaps**
-
-Re-read the spec sections for Veyra, orbit-to-ground continuity, surface scatter/collision, quality budgets, failure handling, tests, completion gates, delivery sequence, and documentation. For every sentence, record its proving file/test/run or fix the gap. Palla/Tyran visual identity gates remain explicitly scoped to Phases 6/7 and are not claimed complete here.
-
-- [ ] **Step 9: Request final whole-branch review and commit fixes**
-
-The reviewer receives the full merge-base diff and the completed gate ledger. Fix every Critical/Important finding, rerun covering tests, re-review, then run the complete automated command once more.
+- [ ] **Step 10: Commit final certification evidence**
 
 Commit: `feat: complete Veyra surface stack`

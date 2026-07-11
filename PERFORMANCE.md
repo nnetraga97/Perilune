@@ -208,16 +208,19 @@ reference result.
 
 This proves that the harness, counters, delayed queries, scene population,
 and local rendering path work. It does not constitute a full-duration record.
-Following the user's hardware-target revision, Phase 2 remains open until full
-Medium and Low M3 Max reference records pass; no Intel performance claim is
-made.
+Following the user's implementation-first sequencing revision, final hardware
+certification remains open until complete Medium and Low M3 Max reference
+records pass; it does not block feature implementation. No Intel performance
+claim is made.
 
 ### Deferred final validation
 
-Per the user's request to prioritize implementation, the broad unit/e2e pass,
-full-duration M3 Max Medium and Low records, and automated feature-group delta
-profiles are deferred to the final verification pass. Focused renderer checks,
-typecheck, and the shortened local smoke do not certify those hardware gates
+Per the user's implementation-first sequencing decision, the broad unit/e2e
+pass, full-duration M3 Max Medium and Low records, and automated feature-group
+delta profiles are deliberately deferred until all planned features, integration,
+documentation, visual calibration, and final code review are complete. Hardware
+certification is the last delivery step, not a blocker between feature tasks.
+Focused renderer checks, typecheck, and the shortened local smoke do not certify those hardware gates
 or the complete specification. Veyra's production Low, Medium, and High packs
 are admitted against the checked manifest's transfer, active-body, total, and
 transient ceilings, but final orbit-to-contact journeys and manual art review

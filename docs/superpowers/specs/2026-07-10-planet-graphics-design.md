@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 
-**Status:** Revision 3 ready for user review
+**Status:** Revision 4 approved — implementation-first sequencing, hardware certification last
 
 **Scope:** Restore the interrupted M2 baseline, then build a scalable hybrid planet-rendering pipeline centered on orbit-to-ground flight and detailed surface operations.
 
@@ -250,7 +250,7 @@ The Medium 8 ms rendering allocation is an initial feasibility allocation, not e
 | Renderer headroom | 0.6 ms |
 | **Total** | **8.0 ms** |
 
-Each feature group is independently switchable in the profiling harness. If the combined prototype misses a gate, the design is reduced in this order: remove Medium cloud shadows, reduce atmospheric samples, reduce the second cloud scale, reduce visual scatter, then simplify ocean glitter. Physical terrain and obstacle collisions are never reduced. Full Veyra work does not begin until the reduced Medium prototype passes or this spec is revised with a different target.
+Each feature group is independently switchable in the profiling harness. Short, non-certifying smoke runs guide implementation and expose regressions while features are being built. Full Medium and Low M3 Max hardware certification is deliberately the final delivery step, after the planned rendering, scatter, collision, browser, and automated-test work is complete, so development effort remains focused on implementing the feature set first. If the final combined run misses a gate, the design is reduced in this order: remove Medium cloud shadows, reduce atmospheric samples, reduce the second cloud scale, reduce visual scatter, then simplify ocean glitter. Physical terrain and obstacle collisions are never reduced. Every reduction is followed by a complete reference rerun; if the reduced implementation still misses, the spec is revised before release.
 
 Runtime global maps use exact 2:1 dimensions:
 
@@ -349,17 +349,18 @@ Automated camera journeys check for coverage gaps, black frames, shader errors, 
 
 ## Delivery Sequence
 
-This epic is implemented as separately reviewable phase plans and mergeable changes. A phase may not begin until its predecessor's gates pass.
+This epic is implemented as separately reviewable phase plans and mergeable changes. Implementation phases proceed in order and leave focused tests, the full unit suite, content validation, and the production build green. Reference-hardware certification is not an implementation-phase prerequisite; it is the final release gate after the feature sequence is complete.
 
 0. **Restore M2:** complete alarm state and persistence plus atmospheric-entry prediction, keep and validate the transfer planner, and restore build/test health. No graphics code belongs in this change.
 1. **Authority and tooling foundation:** add recipe/version schemas, `BodyOrientation`, save migration, separate solid/water/contact queries, `surfaceKind`, gas-body terminal behavior, the provenance manifest, the pinned asset compiler, `validate-content.mjs`, `prebuild`/CI wiring, and raw/package hashing. This phase contains no new art direction.
-2. **Feasibility prototype:** implement only enough disposable-or-promotable rendering to run the combined Medium/Low scene on the approved M3 Max reference. Record the protocol and results in `PERFORMANCE.md`. Reduce features in the specified order if necessary. Stop and revise this spec if the hardware gates cannot be met.
+2. **Feasibility prototype:** implement enough disposable-or-promotable rendering to exercise the combined Medium/Low scene and establish the profiling harness, counters, resource accounting, reduction controls, and short non-certifying smoke baseline. Keep the reference protocol ready, but defer the full-duration hardware run until the final certification step.
 3. **Renderer platform:** add the renderer interface, legacy adapter, transactional asset/shader loading, capability detection, context restoration, quality replacement, shared compact material descriptor, performance accounting, and star ownership. Keep all bodies on legacy visuals except prototype fixtures.
 4. **Veyra global stack:** ship its compiled geography, global material, atmosphere, ocean, clouds, lighting, and orbit-to-ground transition behind the terrestrial assignment.
 5. **Veyra surface stack:** ship regional/local materials, decals, worker-generated chunks, visual scatter, dust, and the quality-invariant physical-obstacle subsystem.
 6. **Palla:** ship spatially indexed authoritative craters, regolith/ejecta materials, boulders, landmarks, and airless lighting.
 7. **Tyran:** ship band, storm, depth, and limb-haze rendering against the already-tested non-landable gas simulation contract.
 8. **System completion:** assign the five bounded variants to the eight remaining planets or moons, ship Auren's star adapter, and tune each body. Every body receives an explicit recipe, provenance record, renderer assignment, compact-map identity, supported-view snapshots, and quality-budget check.
+9. **Final hardware certification:** only after implementation, automated verification, browser journeys, visual calibration, documentation, and final code review are complete, run the approved M3 Max Medium and Low protocols. Apply reductions only in the specified order, rerun the complete affected tier after each change, and do not claim release readiness until every applicable completion gate passes.
 
 Each step must leave the build and relevant tests green. Asset licensing and attribution changes ship with the assets they govern.
 
