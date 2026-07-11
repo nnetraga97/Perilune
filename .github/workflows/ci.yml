@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate planet content and provenance
+        run: npm run validate:content
+      - name: Verify deterministic planet compiler output
+        run: npm run compile:planet-assets
+      - name: Run unit and integration tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser journeys
+        run: npm run test:e2e

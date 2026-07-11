@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "recipes": [
+    { "bodyId": "auren", "version": 1, "hash": "805b27acb8a9758a96bffde6146741c1" },
+    { "bodyId": "ashen", "version": 1, "hash": "46e635c639f5e52e39fde8a6604e0359" },
+    { "bodyId": "vess", "version": 1, "hash": "f5294c533369d2e0ab9acf11ca8263e9" },
+    { "bodyId": "veyra", "version": 1, "hash": "92b8a8cfa5b49226469a8f275292608d" },
+    { "bodyId": "palla", "version": 1, "hash": "70fe5f0c211b08e1ceffb35158372966" },
+    { "bodyId": "wisp", "version": 1, "hash": "33726d86d0980ab861201105b5f309d9" },
+    { "bodyId": "rusk", "version": 1, "hash": "55add54cf58d7667896947068764522a" },
+    { "bodyId": "tyran", "version": 1, "hash": "3067d7e7c6ab51bffceafd80f5ebafe4" },
+    { "bodyId": "brimm", "version": 1, "hash": "adb7d1899632286846962a1966df9f09" },
+    { "bodyId": "glacia", "version": 1, "hash": "f8f4ce592807c0d7e89bd23bcf699150" },
+    { "bodyId": "mote", "version": 1, "hash": "1e4977b288dc959f5d824215dec8cd1c" },
+    { "bodyId": "farfall", "version": 1, "hash": "690ed08c99088b71f44def94dbc20190" }
+  ]
+}

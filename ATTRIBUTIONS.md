@@ -24,3 +24,9 @@ functions, patched conics, sphere-of-influence formula, quadtree LOD,
 gradient-noise fBm, PD attitude control. These are textbook methods
 (Vallado, "Fundamentals of Astrodynamics and Applications" et al.) and the
 implementations here are original code.
+
+## Planet source assets
+
+No third-party planet source assets are currently shipped. This section is
+generated from `assets/planets/manifest.json` when the first accepted source is
+added; missing attribution or modification notices fail content validation.

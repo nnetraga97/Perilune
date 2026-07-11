@@ -21,7 +21,16 @@ this repository is original work created for this project.)
 | vitest | MIT | Unit/property tests + benchmarks |
 | @playwright/test | Apache-2.0 | Browser e2e tests |
 | fast-check | MIT | Property-based testing |
+| @types/node | MIT | Node compiler-script type definitions |
 | @types/three | MIT | Type definitions |
+| tsx | MIT | Execute the TypeScript planet compiler |
+| sharp | Apache-2.0 | Pinned build-time image decode, color conversion, and resampling |
 
-No other third-party code, models, textures, audio, or fonts are included.
-All game assets are generated procedurally at runtime by original code.
+Sharp distributes libvips components under LGPL-2.1-or-later; it is a
+development-only compiler dependency and is not shipped in the browser bundle.
+
+No third-party models, textures, audio, or fonts are currently included. Any
+future planet source must pass the per-file provenance and license policy in
+`CONTENT_PIPELINE.md` and must add its generated attribution in the same
+change. A repository software license is not accepted as evidence that bundled
+third-party textures are reusable.

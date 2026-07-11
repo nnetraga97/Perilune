@@ -12,7 +12,8 @@ Perilune is a browser-based orbital-engineering game. The simulation and UI are 
 - `npm run build` — run strict TypeScript checking and produce `dist/`.
 - `npm run test:e2e` — run Playwright browser journeys.
 - `npm run bench` — run simulation benchmarks.
-- `npm run validate:content` — validate generated content; the validator is introduced in the planet-authority/tooling phase.
+- `npm run validate:content` — validate planet recipes, compiler pins, source provenance, packaged files, and transfer/GPU memory budgets.
+- `npm run compile:planet-assets` — verify deterministic terrain fingerprints; add `-- --write` only for an intentional reviewed refresh.
 
 ## Architecture
 
