@@ -370,6 +370,9 @@ export class GameState {
     const v = gv.runtime;
     const body = this.bodyOf(gv);
     if (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') {
+      if (body.def.surfaceKind !== 'solid') {
+        throw new Error(`${body.name} has no solid surface for a landed rails state`);
+      }
       // Store body-fixed pose.
       gv.rails.landedPos = inertialToBodyFixed(body, this.time, v.pos, new Vec3());
       gv.rails.landedAtt = inertialAttitudeToBodyFixed(body, this.time, v.att, new Quat());
@@ -416,6 +419,9 @@ export class GameState {
     const alt = v.pos.length() - body.radius;
     const atmoTop = body.def.atmosphere?.height ?? 0;
     if (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') {
+      if (body.def.surfaceKind !== 'solid') {
+        return { ok: false, reason: `${body.name} has no landable surface` };
+      }
       return { ok: true };
     }
     if (alt < atmoTop) return { ok: false, reason: 'Cannot warp inside the atmosphere' };
@@ -560,6 +566,10 @@ export class GameState {
       const ctx: StepContext = { body, time: this.time, sunDir: _sun };
       const result = stepVessel(v, ctx, dt);
 
+      if (result.terminalFailure) {
+        this.destroyVessel(gv, result.terminalFailure);
+        continue;
+      }
       if (result.crashed) {
         this.destroyVessel(gv, `Impact at ${result.crashSpeed.toFixed(0)} m/s`);
         continue;

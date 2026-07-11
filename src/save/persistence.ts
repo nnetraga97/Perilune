@@ -136,8 +136,11 @@ export function restoreGame(save: SaveGame): GameState {
 
   // Validate every referenced recipe before constructing any vessel state.
   for (const vessel of migrated.vessels) {
-    if (!vessel.surfacePose) continue;
     const body = game.universe.get(vessel.bodyId);
+    if (isSurfaceSituation(vessel.situation) && body.def.surfaceKind !== 'solid') {
+      throw new Error(`${body.name} is a gas body with no solid surface for landed saves`);
+    }
+    if (!vessel.surfacePose) continue;
     const currentRecipeHash = recipeForBody(body).hash;
     if (currentRecipeHash !== vessel.surfacePose.recipeHash) {
       throw new Error(

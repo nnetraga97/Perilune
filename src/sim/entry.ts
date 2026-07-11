@@ -51,6 +51,15 @@ function inertialDirectionToBodyFixed(
   return inertialToBodyFixed(body, time, position, new Vec3()).normalize();
 }
 
+function gasTerminalReason(body: Body, altitude: number): string | null {
+  if (body.def.surfaceKind !== 'gas') return null;
+  if (body.pressureAt(altitude) >= (body.def.terminalPressurePa ?? Infinity)) {
+    return 'pressure';
+  }
+  if (altitude <= -(body.def.terminalDepthMeters ?? Infinity)) return 'depth';
+  return null;
+}
+
 function canReachEntryBoundary(
   body: Body,
   position: Readonly<Vec3>,
@@ -117,7 +126,7 @@ export function predictEntry(
   let entered = false;
   let peakHeatFlux = 0;
   let previousTime = time;
-  let previousClearance = clearance(body, r, time);
+  let previousClearance = body.def.surfaceKind === 'solid' ? clearance(body, r, time) : Infinity;
 
   for (let iteration = 0; iteration < MAX_ITERATIONS && time < endTime; iteration++) {
     const radius = r.length();
@@ -129,26 +138,39 @@ export function predictEntry(
     previousR.copy(r);
     previousV.copy(v);
     previousTime = time;
-    previousClearance = clearance(body, r, time);
+    if (body.def.surfaceKind === 'solid') {
+      previousClearance = clearance(body, r, time);
+    }
 
     const acceleration = new Vec3(r.x, r.y, r.z).scale(
       -body.mu / (radius * radius * radius),
     );
+    let dragDensity = 0;
     if (atmospheric) {
       const airVelocity = new Vec3(v.x, v.y, v.z).sub(
         surfaceVelocity(body, r, rotatingSurfaceVelocity),
       );
       const speed = airVelocity.length();
-      const density = body.densityAt(altitude);
-      if (speed > 0 && density > 0) {
-        peakHeatFlux = Math.max(peakHeatFlux, 0.5 * density * speed * speed * speed);
-        if (cdA > 0) {
-          acceleration.addScaled(airVelocity, -(0.5 * density * speed * cdA) / mass);
-        }
+      dragDensity = body.densityAt(altitude);
+      if (speed > 0 && dragDensity > 0) {
+        peakHeatFlux = Math.max(
+          peakHeatFlux,
+          0.5 * dragDensity * speed * speed * speed,
+        );
       }
     }
 
     v.addScaled(acceleration, dt);
+    if (atmospheric && dragDensity > 0 && cdA > 0) {
+      const surface = surfaceVelocity(body, r, rotatingSurfaceVelocity);
+      const airVelocity = new Vec3(v.x, v.y, v.z).sub(surface);
+      const speed = airVelocity.length();
+      if (speed > 0) {
+        const dragK = (0.5 * dragDensity * cdA) / mass;
+        const nextSpeed = speed / (1 + dragK * speed * dt);
+        v.addScaled(airVelocity, nextSpeed / speed - 1);
+      }
+    }
     r.addScaled(v, dt);
     time += dt;
 
@@ -156,8 +178,24 @@ export function predictEntry(
       samples.push(r.clone());
     }
 
-    const currentClearance = clearance(body, r, time);
-    if (currentClearance <= 0) {
+    const terminalReason = gasTerminalReason(body, r.length() - body.radius);
+    if (terminalReason) {
+      const relativeVelocity = v.clone().sub(
+        surfaceVelocity(body, r, rotatingSurfaceVelocity),
+      );
+      return {
+        willEnter: true,
+        lands: false,
+        landingDirBF: null,
+        landingTime: time,
+        impactSpeed: relativeVelocity.length(),
+        peakHeatFlux,
+        samples,
+      };
+    }
+
+    const currentClearance = body.def.surfaceKind === 'solid' ? clearance(body, r, time) : Infinity;
+    if (body.def.surfaceKind === 'solid' && currentClearance <= 0) {
       const denominator = previousClearance - currentClearance;
       const fraction = denominator > 0 ? Math.min(1, Math.max(0, previousClearance / denominator)) : 1;
       const landingPosition = Vec3.lerp(previousR, r, fraction, new Vec3());

@@ -269,6 +269,8 @@ export const AUREN_SYSTEM: BodyDef[] = [
     axialTilt: 4 * DEG,
     surfaceKind: 'gas',
     terrainRecipeVersion: 1,
+    terminalPressurePa: 5_000_000,
+    terminalDepthMeters: 60_000,
     parent: 'auren',
     color: '#7fb8a4',
     scienceValue: 9,
