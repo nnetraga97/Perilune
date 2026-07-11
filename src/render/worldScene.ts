@@ -72,6 +72,9 @@ export class WorldScene {
   private readonly resizeHandler: () => void;
   private disposed = false;
   private flightTerrainBodyId: string | null = null;
+  private flightPromotedBodyId: string | null = null;
+  private readonly flightPromotionPending = new Set<string>();
+  private readonly flightPromotionFailed = new Set<string>();
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -82,12 +85,15 @@ export class WorldScene {
     this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
     this.rendererLedger = new RendererResourceLedger(this.checkedPlanetManifest.budgets);
     const textureLoader = new THREE.TextureLoader();
+    const configuredBaseUrl = import.meta.env.BASE_URL;
+    const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
     this.planetAssetLoader = new PlanetAssetLoader({
       renderer: context.renderer,
       manifest: this.checkedPlanetManifest,
       ktx2: new KTX2Loader(),
       compressedSupported: Object.values(context.caps.compressedTextures).some(Boolean),
-      resolveAssetUrl: (path) => `${import.meta.env.BASE_URL}planets/${path}`,
+      transcoderPath: `${baseUrl}basis/`,
+      resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,
       loadConventional: (path) => textureLoader.loadAsync(path),
     });
     this.camera = new THREE.PerspectiveCamera(
@@ -146,6 +152,9 @@ export class WorldScene {
       void manager.replaceQuality(tier).then(() => {
         const renderer = manager.current();
         if (renderer) this.bodyRenderers.set(bodyId, renderer);
+        if (bodyId === this.flightTerrainBodyId && this.checkedPlanetManifest.hasPack(bodyId, tier)) {
+          this.flightPromotedBodyId = bodyId;
+        }
       }).catch(() => undefined);
     }
   }
@@ -231,6 +240,7 @@ export class WorldScene {
         const replacement = manager.current();
         if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
           if (replacement) this.bodyRenderers.set(body.id, replacement);
+          if (body.id === this.flightTerrainBodyId) this.flightPromotedBodyId = body.id;
         } else {
           manager.dispose();
         }
@@ -241,6 +251,7 @@ export class WorldScene {
 
   private setFlightTerrainOwner(bodyId: string | null): void {
     const previousId = this.flightTerrainBodyId;
+    if (previousId !== bodyId && bodyId) this.flightPromotionFailed?.delete(bodyId);
     if (previousId && previousId !== bodyId) {
       const manager = this.bodyRendererManagers?.get(previousId);
       if (manager) {
@@ -253,8 +264,37 @@ export class WorldScene {
         previous.dispose();
       }
       this.bodyRenderers.delete(previousId);
+      this.flightPromotionPending?.delete(previousId);
+      if (this.flightPromotedBodyId === previousId) this.flightPromotedBodyId = null;
     }
     this.flightTerrainBodyId = bodyId;
+    this.promoteFlightRenderer(bodyId);
+  }
+
+  private promoteFlightRenderer(bodyId: string | null): void {
+    if (
+      !bodyId || this.flightPromotedBodyId === bodyId || this.flightPromotionPending.has(bodyId) ||
+      this.flightPromotionFailed.has(bodyId) ||
+      !this.checkedPlanetManifest?.hasPack(bodyId, this.quality)
+    ) return;
+    const manager = this.bodyRendererManagers?.get(bodyId);
+    if (!manager?.current()) return;
+    this.flightPromotionPending.add(bodyId);
+    void manager.rebuildCommitted().then(() => {
+      if (this.disposed || this.flightTerrainBodyId !== bodyId || this.bodyRendererManagers.get(bodyId) !== manager) return;
+      const renderer = manager.current();
+      if (renderer) this.bodyRenderers.set(bodyId, renderer);
+      this.flightPromotedBodyId = bodyId;
+    }).catch(() => {
+      if (this.flightTerrainBodyId === bodyId) this.flightPromotionFailed.add(bodyId);
+    }).finally(() => {
+      this.flightPromotionPending.delete(bodyId);
+    });
+  }
+
+  private retryFlightPromotion(bodyId: string): void {
+    this.flightPromotionFailed.delete(bodyId);
+    this.promoteFlightRenderer(bodyId);
   }
 
   visualFor(gv: GameVessel): VesselVisual {
@@ -484,6 +524,9 @@ export class WorldScene {
     this.lastBodyFrames.clear();
     this.planetAssetLoader.dispose();
     this.flightTerrainBodyId = null;
+    this.flightPromotedBodyId = null;
+    this.flightPromotionPending.clear();
+    this.flightPromotionFailed.clear();
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);
       disposeVesselVisual(visual);

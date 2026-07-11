@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { QualityTier } from './bodyRenderer';
 import { RenderBoundaryError } from './renderFailures';
+import { canonicalJson, sha256Utf8 } from './checkedManifestDigest';
 
 export interface PlanetAssetChannel {
   readonly name: string;
@@ -46,6 +47,10 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
   if (artifact?.schemaVersion !== 1 || !/^[a-f0-9]{64}$/.test(artifact.manifestSha256 ?? '')) {
     throw new Error('Invalid checked planet manifest artifact');
   }
+  const actualDigest = sha256Utf8(canonicalJson(artifact.manifest));
+  if (actualDigest !== artifact.manifestSha256) {
+    throw new Error(`Checked planet manifest digest mismatch: expected ${artifact.manifestSha256}, got ${actualDigest}`);
+  }
   const source = artifact.manifest as {
     readonly schemaVersion?: number;
     readonly packs?: readonly unknown[];
@@ -60,8 +65,8 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
   const tiers: readonly QualityTier[] = ['low', 'medium', 'high'];
   for (const tier of tiers) {
     if (
-      !Number.isFinite(source.budgets?.activeBodyGpuBytes?.[tier]) || source.budgets!.activeBodyGpuBytes![tier] <= 0 ||
-      !Number.isFinite(source.budgets?.transientPeakBytes?.[tier]) || source.budgets!.transientPeakBytes![tier] <= 0
+      !Number.isInteger(source.budgets?.activeBodyGpuBytes?.[tier]) || source.budgets!.activeBodyGpuBytes![tier] < 0 ||
+      !Number.isInteger(source.budgets?.transientPeakBytes?.[tier]) || source.budgets!.transientPeakBytes![tier] < 0
     ) {
       throw new Error(`Checked planet manifest has invalid ${tier} renderer budgets`);
     }
@@ -71,11 +76,11 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
     if (typeof pack.bodyId !== 'string' || !['low', 'medium', 'high'].includes(pack.tier ?? '')) {
       throw new Error('Checked planet manifest contains an invalid pack');
     }
-    if (!Number.isFinite(pack.transientBytes) || (pack.transientBytes ?? 0) <= 0 || !Array.isArray(pack.channels)) {
+    if (!Number.isInteger(pack.transientBytes) || (pack.transientBytes ?? -1) < 0 || !Array.isArray(pack.channels)) {
       throw new Error(`Checked planet manifest contains an invalid pack for ${pack.bodyId}/${pack.tier}`);
     }
     const channels = pack.channels.map((channel) => {
-      if (typeof channel.name !== 'string' || !Number.isFinite(channel.gpuBytes) || channel.gpuBytes <= 0) {
+      if (typeof channel.name !== 'string' || !Number.isInteger(channel.gpuBytes) || channel.gpuBytes < 0) {
         throw new Error(`Checked planet manifest contains an invalid channel for ${pack.bodyId}/${pack.tier}`);
       }
       requireLocal(channel.packagePath);
@@ -121,6 +126,7 @@ export interface PlanetAssetLoaderOptions {
   readonly ktx2: Ktx2Boundary;
   /** Derived from RenderCaps; detectSupport alone may configure RGBA fallback. */
   readonly compressedSupported: boolean;
+  readonly transcoderPath: string;
   readonly resolveAssetUrl: (manifestPath: string) => string;
   readonly loadConventional: (path: string) => Promise<THREE.Texture>;
 }
@@ -141,7 +147,8 @@ export class PlanetAssetLoader {
       throw new Error('PlanetAssetLoader requires the opaque checked manifest boundary');
     }
     this.options = options;
-    this.options.ktx2.setTranscoderPath('./basis/');
+    if (!options.transcoderPath.endsWith('/')) throw new Error('KTX2 transcoder path must end with /');
+    this.options.ktx2.setTranscoderPath(options.transcoderPath);
   }
 
   async load(bodyId: string, tier: QualityTier): Promise<LoadedPlanetPack> {

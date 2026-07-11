@@ -12,6 +12,9 @@ import {
 } from '../src/render/planetAssetLoader';
 import { compileRendererCandidate } from '../src/render/shaderCompiler';
 import { RenderBoundaryError, RenderFailureTracker } from '../src/render/renderFailures';
+import { canonicalJson, sha256Utf8 } from '../src/render/checkedManifestDigest';
+import { WorldScene } from '../src/render/worldScene';
+import checkedPlanetArtifact from '../src/generated/checked-planet-manifest.json';
 
 function candidate(bodyId: string, quality: QualityTier = 'medium') {
   const root = new THREE.Group();
@@ -41,6 +44,11 @@ const manifestBudgets = {
   activeBodyGpuBytes: { low: 100, medium: 200, high: 300 },
   transientPeakBytes: { low: 150, medium: 250, high: 350 },
 };
+const artifactFor = (manifest: unknown) => ({
+  schemaVersion: 1,
+  manifestSha256: sha256Utf8(canonicalJson(manifest)),
+  manifest,
+});
 const assets = (overrides: Partial<LoadedRendererAssets> = {}): LoadedRendererAssets => ({
   gpuBytes: 20,
   transientBytes: 10,
@@ -247,6 +255,55 @@ describe('transactional body renderer replacement', () => {
     expect(ledger.residentFlightBodyIds()).toEqual(['auren']);
   });
 
+  test('active-SOI transition releases the old owner then promotes an existing authored compact manager', async () => {
+    const ledger = new RendererResourceLedger({
+      activeBodyGpuBytes: { low: 100, medium: 100, high: 100 },
+      transientPeakBytes: { low: 100, medium: 100, high: 100 },
+    });
+    const a = managerHarness({ ledger, loadAssets: async () => assets() });
+    let promoteB = false;
+    let promotionAttempts = 0;
+    const b = managerHarness({
+      ledger,
+      loadAssets: async () => {
+        if (promoteB && ++promotionAttempts === 1) throw new Error('promotion load failed');
+        return assets({ flightScale: promoteB });
+      },
+    });
+    await a.manager.ensure(body('veyra'));
+    await b.manager.ensure(body('cinder'));
+    promoteB = true;
+    const world = Object.create(WorldScene.prototype) as WorldScene;
+    const promotionPending = new Set<string>();
+    Object.assign(world as unknown as Record<string, unknown>, {
+      scene: new THREE.Scene(),
+      bodyRendererManagers: new Map([['veyra', a.manager], ['cinder', b.manager]]),
+      bodyRenderers: new Map([['veyra', a.manager.current()], ['cinder', b.manager.current()]]),
+      checkedPlanetManifest: { hasPack: () => true },
+      flightTerrainBodyId: 'veyra',
+      flightPromotionPending: promotionPending,
+      flightPromotionFailed: new Set<string>(),
+      flightPromotedBodyId: 'veyra',
+      quality: 'medium',
+      disposed: false,
+    });
+
+    (world as unknown as { setFlightTerrainOwner(bodyId: string): void }).setFlightTerrainOwner('cinder');
+
+    await vi.waitFor(() => expect(promotionPending.size).toBe(0));
+    expect(ledger.residentFlightBodyIds()).toEqual([]);
+    expect(b.manager.current()).toBe(b.made[0].renderer);
+    (world as unknown as { setFlightTerrainOwner(bodyId: string): void }).setFlightTerrainOwner('cinder');
+    await Promise.resolve();
+    expect(promotionAttempts).toBe(1);
+    (world as unknown as { retryFlightPromotion(bodyId: string): void }).retryFlightPromotion('cinder');
+    await vi.waitFor(() => expect(ledger.residentFlightBodyIds()).toEqual(['cinder']));
+    expect(a.manager.current()).toBeNull();
+    expect(b.made).toHaveLength(3);
+    expect(b.manager.current()).toBe(b.made[2].renderer);
+    expect(promotionAttempts).toBe(2);
+  });
+
   test('dispose invalidates an in-flight transaction before it can commit', async () => {
     const load = deferred<LoadedRendererAssets>();
     const loaded = assets();
@@ -306,10 +363,15 @@ describe('planet asset loading boundary', () => {
       }],
     }],
   };
-  const checkedManifest = checkPlanetManifest({
-    schemaVersion: 1,
-    manifestSha256: 'a'.repeat(64),
-    manifest,
+  const checkedManifest = checkPlanetManifest(artifactFor(manifest));
+
+  test('matches canonical script hashing and rejects a tampered checked artifact', () => {
+    expect(sha256Utf8('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe('{"a":{"b":3,"y":2},"z":1}');
+    const original = structuredClone(manifest);
+    const artifact = artifactFor(original);
+    original.packs[0].channels[0].gpuBytes++;
+    expect(() => checkPlanetManifest(artifact)).toThrow(/digest/i);
   });
 
   test('detects KTX support before loading and uses the declared conventional fallback when unavailable', async () => {
@@ -328,6 +390,7 @@ describe('planet asset loading boundary', () => {
       renderer: {} as never,
       manifest: checkedManifest,
       compressedSupported: false,
+      transcoderPath: '/perilune/basis/',
       resolveAssetUrl: (path) => `./planets/${path}`,
       ktx2,
       loadConventional,
@@ -335,7 +398,7 @@ describe('planet asset loading boundary', () => {
 
     await loader.load('veyra', 'medium');
 
-    expect(ktx2.setTranscoderPath).toHaveBeenCalledWith('./basis/');
+    expect(ktx2.setTranscoderPath).toHaveBeenCalledWith('/perilune/basis/');
     expect(order).toEqual(['detect', 'fallback:./planets/veyra/albedo.webp']);
     expect(ktx2.loadAsync).not.toHaveBeenCalled();
     loader.dispose();
@@ -346,26 +409,35 @@ describe('planet asset loading boundary', () => {
   test('requires the opaque checked-artifact boundary and rejects invalid artifact paths', () => {
     const base = { renderer: {} as never, ktx2: {
       setTranscoderPath: vi.fn().mockReturnThis(), detectSupport: vi.fn(), loadAsync: vi.fn(), dispose: vi.fn(),
-    }, compressedSupported: false, resolveAssetUrl: (path: string) => `./planets/${path}`, loadConventional: vi.fn() };
+    }, compressedSupported: false, transcoderPath: '/perilune/basis/', resolveAssetUrl: (path: string) => `./planets/${path}`, loadConventional: vi.fn() };
     expect(() => new PlanetAssetLoader({ ...base, manifest: manifest as never })).toThrow(/checked manifest boundary/i);
     const remote = structuredClone(manifest);
     remote.packs[0].channels[0].fallbackPath = 'https://example.test/albedo.webp';
-    expect(() => checkPlanetManifest({
-      schemaVersion: 1,
-      manifestSha256: 'b'.repeat(64),
-      manifest: remote,
-    })).toThrow(/local manifest entry/i);
+    expect(() => checkPlanetManifest(artifactFor(remote))).toThrow(/local manifest entry/i);
   });
 
   test('checked artifacts expose authored pack lookup and preserve the real empty baseline', () => {
-    const empty = checkPlanetManifest({
-      schemaVersion: 1,
-      manifestSha256: 'c'.repeat(64),
-      manifest: { schemaVersion: 1, budgets: manifestBudgets, packs: [] },
-    });
+    const emptyManifest = { schemaVersion: 1, budgets: manifestBudgets, packs: [] };
+    const empty = checkPlanetManifest(artifactFor(emptyManifest));
     expect(empty.hasPack('veyra', 'medium')).toBe(false);
     expect(checkedManifest.hasPack('veyra', 'medium')).toBe(true);
     expect(empty.budgets).toEqual(manifestBudgets);
+    expect(checkPlanetManifest(checkedPlanetArtifact).packs).toHaveLength(0);
+  });
+
+  test('accepts validator-authorized zero resource values', () => {
+    const zeroManifest = {
+      schemaVersion: 1,
+      budgets: {
+        activeBodyGpuBytes: { low: 0, medium: 0, high: 0 },
+        transientPeakBytes: { low: 0, medium: 0, high: 0 },
+      },
+      packs: [{
+        bodyId: 'veyra', tier: 'medium', transientBytes: 0,
+        channels: [{ name: 'albedo', packagePath: 'a.ktx2', fallbackPath: 'a.webp', gpuBytes: 0 }],
+      }],
+    };
+    expect(checkPlanetManifest(artifactFor(zeroManifest)).hasPack('veyra', 'medium')).toBe(true);
   });
 });
 
