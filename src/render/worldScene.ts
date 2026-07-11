@@ -18,6 +18,7 @@ import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
 import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
+import type { BodyRendererKind } from '../content/bodyVisuals';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
 import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
 import { compileRendererCandidate } from './shaderCompiler';
@@ -36,6 +37,10 @@ const _tmp = new Vec3();
 const _bodyQ = new Quat();
 const _starAbs = new Vec3();
 const _bodySunDir = new Vec3();
+
+export function usesLegacyAtmosphereTint(rendererKind: BodyRendererKind | undefined): boolean {
+  return rendererKind !== 'terrestrial';
+}
 
 export function sunLightPosition(
   sunDirection: Readonly<Vec3>,
@@ -558,7 +563,8 @@ export class WorldScene {
     // ---- atmosphere tint: fade background + fog by altitude.
     const alt = v.pos.length() - body.radius;
     const atmo = body.def.atmosphere;
-    if (atmo && alt < atmo.height) {
+    const legacyAtmosphereTint = usesLegacyAtmosphereTint(this.bodyRenderers.get(body.id)?.kind);
+    if (atmo && legacyAtmosphereTint && alt < atmo.height) {
       const f = Math.max(0, 1 - alt / atmo.height);
       const dayness = Math.max(0, Vec3.dot(up, _sunDir));
       const sky = new THREE.Color().setRGB(
