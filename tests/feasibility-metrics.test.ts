@@ -24,16 +24,17 @@ describe('feasibility metrics', () => {
     expect(values).toEqual([9, 1, 5, 3, 7]);
   });
 
-  it('excludes unavailable GPU timings instead of converting them to zero', () => {
+  it('reports valid, unavailable, and disjoint GPU timings as disjoint counts', () => {
     const summary = summarizeJourney([
       sample(16, 7),
       sample(17, null),
       sample(15, 6),
-    ], { disjointGpuSamples: 2 });
+      sample(18, null),
+    ], { disjointGpuSamples: 1 });
     expect(summary.gpuP95Ms).toBe(7);
     expect(summary.validGpuSamples).toBe(2);
     expect(summary.unavailableGpuSamples).toBe(1);
-    expect(summary.disjointGpuSamples).toBe(2);
+    expect(summary.disjointGpuSamples).toBe(1);
   });
 
   it('aggregates the median of run medians and the worst run p95', () => {

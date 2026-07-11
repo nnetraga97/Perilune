@@ -181,7 +181,8 @@ export async function runFeasibilityProto(): Promise<void> {
   document.getElementById('boot')?.remove();
 
   const journeySamples: MutableSample[][] = [[], [], []];
-  const sampleByGpuLabel = new Map<string, MutableSample>();
+  const sampleByGpuLabel = new Map<string, { sample: MutableSample; journeyIndex: number }>();
+  const journeyDisjointSamples = [0, 0, 0];
   const visitedRegimes = new Set<CameraRegime>();
   let journeySummaries: JourneySummary[] = [];
   let summary: ReferenceRunSummary | null = null;
@@ -311,12 +312,21 @@ export async function runFeasibilityProto(): Promise<void> {
     camera.up.copy(cameraUp);
     camera.lookAt(lookTarget);
 
-    const gpuLabel = `frame-${frameNumber++}`;
-    gpuTimer.begin(gpuLabel);
+    const gpuLabel = `journey-${journeyIndex}-frame-${frameNumber++}`;
+    const sample = phase === 'journey'
+      ? {
+          frameMs,
+          submissionMs: 0,
+          terrainMs: fixtureStats.terrainScheduleMs + fixtureStats.terrainInstallMs,
+          gpuMs: null,
+        }
+      : null;
+    const gpuIssued = phase === 'journey' && gpuTimer.begin(gpuLabel);
     const submissionStart = performance.now();
     renderer.render(scene, camera);
     const submissionMs = performance.now() - submissionStart;
-    gpuTimer.end();
+    if (sample) sample.submissionMs = submissionMs;
+    if (phase === 'journey') gpuTimer.end();
     perf.endRender(submissionStart);
     perf.setExtra('scatter', fixtureStats.visualScatterCount);
     perf.setExtra('proxies', fixtureStats.physicalProxyCount);
@@ -325,25 +335,26 @@ export async function runFeasibilityProto(): Promise<void> {
     perf.setExtra('regime', regime);
     perf.frame(frameMs, renderer);
 
-    if (phase === 'journey') {
-      const sample: MutableSample = {
-        frameMs,
-        submissionMs,
-        terrainMs: fixtureStats.terrainScheduleMs + fixtureStats.terrainInstallMs,
-        gpuMs: null,
-      };
+    if (sample) {
       journeySamples[journeyIndex].push(sample);
-      sampleByGpuLabel.set(gpuLabel, sample);
+      if (gpuIssued) sampleByGpuLabel.set(gpuLabel, { sample, journeyIndex });
     }
     for (const timing of gpuTimer.poll()) {
-      const sample = sampleByGpuLabel.get(timing.label);
-      if (sample) sample.gpuMs = timing.milliseconds;
+      const issued = sampleByGpuLabel.get(timing.label);
+      if (issued && timing.status === 'valid') issued.sample.gpuMs = timing.milliseconds;
+      if (issued && timing.status === 'disjoint') {
+        journeyDisjointSamples[issued.journeyIndex]++;
+      }
       sampleByGpuLabel.delete(timing.label);
     }
 
     if (phase === 'complete' && !complete) {
       complete = true;
-      journeySummaries = journeySamples.map((samples) => summarizeJourney(samples as FeasibilitySample[]));
+      sampleByGpuLabel.clear();
+      journeySummaries = journeySamples.map((samples, index) => summarizeJourney(
+        samples as FeasibilitySample[],
+        { disjointGpuSamples: journeyDisjointSamples[index] },
+      ));
       summary = summarizeReferenceRun(journeySummaries);
       publish(elapsedSeconds);
       window.__FEASIBILITY_DONE__ = true;

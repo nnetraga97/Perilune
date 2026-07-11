@@ -80,6 +80,11 @@ export function summarizeJourney(
   if (samples.length === 0) throw new Error('A feasibility journey requires at least one sample');
   const frame = samples.map((entry) => entry.frameMs);
   const gpu = samples.flatMap((entry) => entry.gpuMs === null ? [] : [entry.gpuMs]);
+  const disjointGpuSamples = counts.disjointGpuSamples ?? 0;
+  if (!Number.isInteger(disjointGpuSamples) || disjointGpuSamples < 0
+    || disjointGpuSamples > samples.length - gpu.length) {
+    throw new Error(`Invalid disjoint GPU sample count ${disjointGpuSamples}`);
+  }
   const frameMedianMs = percentile(frame, 0.5);
   return Object.freeze({
     frameMedianMs,
@@ -89,8 +94,8 @@ export function summarizeJourney(
     terrainP95Ms: percentile(samples.map((entry) => entry.terrainMs), 0.95),
     gpuP95Ms: gpu.length > 0 ? percentile(gpu, 0.95) : null,
     validGpuSamples: gpu.length,
-    unavailableGpuSamples: samples.length - gpu.length,
-    disjointGpuSamples: counts.disjointGpuSamples ?? 0,
+    unavailableGpuSamples: samples.length - gpu.length - disjointGpuSamples,
+    disjointGpuSamples,
     sampleCount: samples.length,
   });
 }

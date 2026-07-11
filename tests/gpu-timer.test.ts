@@ -18,6 +18,8 @@ class FakeWebGl2 {
   availabilityReads = 0;
   disjoint = false;
   extensionAvailable = true;
+  failAllocationAt: number | null = null;
+  disjointReads = 0;
   private active: FakeQuery | null = null;
 
   getExtension(name: string): typeof this.extension | null {
@@ -25,7 +27,8 @@ class FakeWebGl2 {
     return this.extensionAvailable ? this.extension : null;
   }
 
-  createQuery(): FakeQuery {
+  createQuery(): FakeQuery | null {
+    if (this.queries.length === this.failAllocationAt) return null;
     const query = { id: this.queries.length, available: false, nanoseconds: 0 };
     this.queries.push(query);
     return query;
@@ -60,6 +63,7 @@ class FakeWebGl2 {
 
   getParameter(parameter: number): boolean {
     expect(parameter).toBe(this.extension.GPU_DISJOINT_EXT);
+    this.disjointReads++;
     return this.disjoint;
   }
 
@@ -73,7 +77,7 @@ class FakeWebGl2 {
   }
 }
 
-function timer(gl: FakeWebGl2, size = 2): GpuTimerRing {
+function timer(gl: FakeWebGl2, size = 6): GpuTimerRing {
   return new GpuTimerRing(gl as unknown as WebGL2RenderingContext, size);
 }
 
@@ -94,11 +98,13 @@ describe('GpuTimerRing', () => {
     const ring = timer(gl);
     expect(ring.begin('first')).toBe(true);
     ring.end();
-    expect(ring.begin('second')).toBe(true);
+    for (let index = 1; index < 6; index++) {
+      expect(ring.begin(`pending-${index}`)).toBe(true);
+      ring.end();
+    }
+    expect(ring.begin('saturated')).toBe(false);
     ring.end();
-    expect(ring.begin('third')).toBe(false);
-    ring.end();
-    expect(ring.snapshot()).toMatchObject({ pending: 2, saturatedBegins: 1 });
+    expect(ring.snapshot()).toMatchObject({ pending: 6, saturatedBegins: 1 });
   });
 
   it('reads only available results and preserves labels', () => {
@@ -109,26 +115,72 @@ describe('GpuTimerRing', () => {
     expect(ring.poll()).toEqual([]);
     expect(gl.resultReads).toBe(0);
     gl.complete(0, 7_250_000);
-    expect(ring.poll()).toEqual([{ label: 'combined-frame', milliseconds: 7.25 }]);
+    expect(ring.poll()).toEqual([{ label: 'combined-frame', status: 'valid', milliseconds: 7.25 }]);
     expect(gl.resultReads).toBe(1);
     expect(ring.snapshot()).toMatchObject({ pending: 0, validSamples: 1 });
   });
 
-  it('discards available results while the GPU disjoint flag is set', () => {
+  it('returns labeled disjoint events for the entire pending set as results become available', () => {
+    const gl = new FakeWebGl2();
+    const ring = timer(gl);
+    ring.begin('first-disjoint-frame');
+    ring.end();
+    ring.begin('second-disjoint-frame');
+    ring.end();
+    gl.complete(0, 4_000_000);
+    gl.disjoint = true;
+    expect(ring.poll()).toEqual([{ label: 'first-disjoint-frame', status: 'disjoint' }]);
+    expect(gl.resultReads).toBe(0);
+    expect(gl.disjointReads).toBe(1);
+    expect(ring.snapshot()).toMatchObject({ pending: 1, validSamples: 0, disjointSamples: 1 });
+
+    gl.disjoint = false;
+    gl.complete(1, 5_000_000);
+    expect(ring.poll()).toEqual([{ label: 'second-disjoint-frame', status: 'disjoint' }]);
+    expect(gl.disjointReads).toBe(2);
+    expect(ring.snapshot()).toMatchObject({ pending: 0, validSamples: 0, disjointSamples: 2 });
+  });
+
+  it('returns a labeled invalid event for a non-finite query result', () => {
     const gl = new FakeWebGl2();
     const ring = timer(gl);
     ring.begin('invalid-frame');
     ring.end();
-    gl.complete(0, 4_000_000);
-    gl.disjoint = true;
-    expect(ring.poll()).toEqual([]);
-    expect(gl.resultReads).toBe(0);
-    expect(ring.snapshot()).toMatchObject({ pending: 0, validSamples: 0, disjointSamples: 1 });
+    gl.complete(0, Number.NaN);
+    expect(ring.poll()).toEqual([{ label: 'invalid-frame', status: 'invalid' }]);
+    expect(ring.snapshot()).toMatchObject({ pending: 0, invalidSamples: 1 });
+  });
+
+  it('samples the disjoint flag once per poll', () => {
+    const gl = new FakeWebGl2();
+    const ring = timer(gl);
+    ring.begin('first'); ring.end();
+    ring.begin('second'); ring.end();
+    gl.complete(0, 1_000_000);
+    gl.complete(1, 2_000_000);
+    expect(ring.poll()).toEqual([
+      { label: 'first', status: 'valid', milliseconds: 1 },
+      { label: 'second', status: 'valid', milliseconds: 2 },
+    ]);
+    expect(gl.disjointReads).toBe(1);
+  });
+
+  it('rejects rings smaller than the production-safe minimum', () => {
+    const gl = new FakeWebGl2();
+    expect(() => timer(gl, 5)).toThrow(/at least 6/i);
+    expect(gl.queries).toHaveLength(0);
+  });
+
+  it('deletes partially allocated queries before an allocation failure escapes', () => {
+    const gl = new FakeWebGl2();
+    gl.failAllocationAt = 3;
+    expect(() => timer(gl, 6)).toThrow(/allocate/i);
+    expect(gl.deleted).toEqual(gl.queries);
   });
 
   it('deletes every allocated query on disposal', () => {
     const gl = new FakeWebGl2();
-    const ring = timer(gl, 3);
+    const ring = timer(gl, 6);
     ring.dispose();
     expect(gl.deleted).toEqual(gl.queries);
     expect(() => ring.begin('after-dispose')).toThrow(/disposed/i);

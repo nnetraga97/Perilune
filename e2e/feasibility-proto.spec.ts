@@ -29,6 +29,9 @@ interface FeasibilityState {
     submissionP95Ms: number;
     terrainP95Ms: number;
     gpuP95Ms: number | null;
+    validGpuSamples: number;
+    unavailableGpuSamples: number;
+    disjointGpuSamples: number;
   }>;
   summary: null | {
     journeyCount: number;
@@ -36,6 +39,14 @@ interface FeasibilityState {
     frameP95Ms: number;
     validGpuSamples: number;
     unavailableGpuSamples: number;
+    disjointGpuSamples: number;
+  };
+  gpuTimer: {
+    pending: number;
+    validSamples: number;
+    disjointSamples: number;
+    invalidSamples: number;
+    saturatedBegins: number;
   };
 }
 
@@ -109,9 +120,19 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
     expect(journey.frameP95Ms).toBeGreaterThan(0);
     expect(journey.submissionP95Ms).toBeGreaterThanOrEqual(0);
     expect(journey.terrainP95Ms).toBeGreaterThanOrEqual(0);
+    expect(journey.validGpuSamples + journey.unavailableGpuSamples + journey.disjointGpuSamples)
+      .toBe(journey.sampleCount);
   }
   expect(result.summary).toMatchObject({ journeyCount: 3 });
   expect(result.summary!.frameMedianMs).toBeGreaterThan(0);
   expect(result.summary!.frameP95Ms).toBeGreaterThan(0);
+  expect(result.summary!.validGpuSamples)
+    .toBe(result.journeys.reduce((sum, journey) => sum + journey.validGpuSamples, 0));
+  expect(result.summary!.unavailableGpuSamples)
+    .toBe(result.journeys.reduce((sum, journey) => sum + journey.unavailableGpuSamples, 0));
+  expect(result.summary!.disjointGpuSamples)
+    .toBe(result.journeys.reduce((sum, journey) => sum + journey.disjointGpuSamples, 0));
+  expect(result.gpuTimer.pending).toBe(0);
+  expect(result.gpuTimer.saturatedBegins).toBe(0);
   expect(result.scene.terrainCoverageGaps).toBe(0);
 });

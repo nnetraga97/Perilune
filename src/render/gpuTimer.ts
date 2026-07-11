@@ -6,20 +6,21 @@ interface DisjointTimerQueryExtension {
 interface TimerSlot {
   readonly query: WebGLQuery;
   pending: boolean;
+  discardAsDisjoint: boolean;
   label: string;
   sequence: number;
 }
 
-export interface GpuTimingSample {
-  readonly label: string;
-  readonly milliseconds: number;
-}
+export type GpuTimingSample =
+  | { readonly label: string; readonly status: 'valid'; readonly milliseconds: number }
+  | { readonly label: string; readonly status: 'disjoint' | 'invalid' };
 
 export interface GpuTimerSnapshot {
   readonly supported: boolean;
   readonly pending: number;
   readonly validSamples: number;
   readonly disjointSamples: number;
+  readonly invalidSamples: number;
   readonly unavailablePolls: number;
   readonly saturatedBegins: number;
 }
@@ -37,6 +38,7 @@ export class GpuTimerRing {
   private nextSequence = 0;
   private validSamples = 0;
   private disjointSamples = 0;
+  private invalidSamples = 0;
   private unavailablePolls = 0;
   private saturatedBegins = 0;
   private disposed = false;
@@ -45,8 +47,8 @@ export class GpuTimerRing {
     private readonly gl: WebGL2RenderingContext,
     ringSize = 8,
   ) {
-    if (!Number.isInteger(ringSize) || ringSize < 1) {
-      throw new Error(`GPU timer ring size must be a positive integer; received ${ringSize}`);
+    if (!Number.isInteger(ringSize) || ringSize < 6) {
+      throw new Error(`GPU timer ring size must be an integer of at least 6; received ${ringSize}`);
     }
     this.extension = gl.getExtension(
       'EXT_disjoint_timer_query_webgl2',
@@ -54,8 +56,18 @@ export class GpuTimerRing {
     if (!this.extension) return;
     for (let index = 0; index < ringSize; index++) {
       const query = gl.createQuery();
-      if (!query) throw new Error(`Could not allocate GPU timer query ${index + 1}/${ringSize}`);
-      this.slots.push({ query, pending: false, label: '', sequence: -1 });
+      if (!query) {
+        for (const slot of this.slots) gl.deleteQuery(slot.query);
+        this.slots.length = 0;
+        throw new Error(`Could not allocate GPU timer query ${index + 1}/${ringSize}`);
+      }
+      this.slots.push({
+        query,
+        pending: false,
+        discardAsDisjoint: false,
+        label: '',
+        sequence: -1,
+      });
     }
   }
 
@@ -74,6 +86,7 @@ export class GpuTimerRing {
     }
     slot.label = label;
     slot.sequence = this.nextSequence++;
+    slot.discardAsDisjoint = false;
     this.gl.beginQuery(this.extension.TIME_ELAPSED_EXT, slot.query);
     this.active = slot;
     return true;
@@ -98,6 +111,10 @@ export class GpuTimerRing {
     const pending = this.slots
       .filter((slot) => slot.pending)
       .sort((a, b) => a.sequence - b.sequence);
+    const disjoint = Boolean(this.gl.getParameter(this.extension.GPU_DISJOINT_EXT));
+    if (disjoint) {
+      for (const slot of pending) slot.discardAsDisjoint = true;
+    }
     for (const slot of pending) {
       const available = Boolean(
         this.gl.getQueryParameter(slot.query, this.gl.QUERY_RESULT_AVAILABLE),
@@ -106,19 +123,25 @@ export class GpuTimerRing {
         this.unavailablePolls++;
         continue;
       }
-      const disjoint = Boolean(this.gl.getParameter(this.extension.GPU_DISJOINT_EXT));
-      if (disjoint) {
+      if (slot.discardAsDisjoint) {
+        completed.push({ label: slot.label, status: 'disjoint' });
         this.disjointSamples++;
       } else {
         const nanoseconds = Number(this.gl.getQueryParameter(slot.query, this.gl.QUERY_RESULT));
         if (Number.isFinite(nanoseconds) && nanoseconds >= 0) {
-          completed.push({ label: slot.label, milliseconds: nanoseconds / 1_000_000 });
+          completed.push({
+            label: slot.label,
+            status: 'valid',
+            milliseconds: nanoseconds / 1_000_000,
+          });
           this.validSamples++;
         } else {
-          this.disjointSamples++;
+          completed.push({ label: slot.label, status: 'invalid' });
+          this.invalidSamples++;
         }
       }
       slot.pending = false;
+      slot.discardAsDisjoint = false;
       slot.label = '';
     }
     return completed;
@@ -130,6 +153,7 @@ export class GpuTimerRing {
       pending: this.slots.filter((slot) => slot.pending).length,
       validSamples: this.validSamples,
       disjointSamples: this.disjointSamples,
+      invalidSamples: this.invalidSamples,
       unavailablePolls: this.unavailablePolls,
       saturatedBegins: this.saturatedBegins,
     });
