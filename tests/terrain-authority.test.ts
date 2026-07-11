@@ -76,6 +76,64 @@ describe('planet surface authority', () => {
     expect(directionFromEquirectUv(0.1, 1)).toEqual(directionFromEquirectUv(0.9, 1));
   });
 
+  it('matches authoritative shoreline signs and finite-difference normals across 10,000 seeded samples', () => {
+    const width = 144;
+    const height = 72;
+    const veyra = new GameState().universe.get('veyra');
+    const source = new Uint8Array(width * height * 3);
+    for (let index = 0; index < source.length; index++) source[index] = (index * 29 + 17) & 0xff;
+    const heightAt = (direction: Readonly<Vec3>): number => {
+      const result = solidHeight(veyra, direction);
+      if (result.kind !== 'solid') throw new Error('expected solid Veyra terrain');
+      return result.height;
+    };
+    const maps = generateVeyraCanonicalMaps({
+      width,
+      height,
+      source: { data: source, width, height, channels: 3 },
+      radius: veyra.radius,
+      heightAt,
+      seed: veyra.def.terrain.seed,
+    });
+    const eastPosition = new Vec3();
+    const westPosition = new Vec3();
+    const northPosition = new Vec3();
+    const southPosition = new Vec3();
+    const tangentU = new Vec3();
+    const tangentV = new Vec3();
+    const expectedNormal = new Vec3();
+    const minimumAgreement = Math.cos((2 * Math.PI) / 180);
+
+    for (let y = 0; y < height; y++) {
+      const northY = Math.max(0, y - 1);
+      const southY = Math.min(height - 1, y + 1);
+      for (let x = 0; x < width; x++) {
+        const pixel = y * width + x;
+        const direction = directionFromEquirectUv((x + 0.5) / width, (y + 0.5) / height);
+        const authoritativeHeight = heightAt(direction);
+        if (Math.abs(authoritativeHeight) > maps.texelHeightRange) {
+          expect(maps.material[pixel * 4 + 3] === 255).toBe(authoritativeHeight < 0);
+        }
+
+        const eastDirection = directionFromEquirectUv((x + 1.5) / width, (y + 0.5) / height);
+        const westDirection = directionFromEquirectUv((x - 0.5) / width, (y + 0.5) / height);
+        const northDirection = directionFromEquirectUv((x + 0.5) / width, (northY + 0.5) / height);
+        const southDirection = directionFromEquirectUv((x + 0.5) / width, (southY + 0.5) / height);
+        eastPosition.copy(eastDirection).scale(veyra.radius + heightAt(eastDirection));
+        westPosition.copy(westDirection).scale(veyra.radius + heightAt(westDirection));
+        northPosition.copy(northDirection).scale(veyra.radius + heightAt(northDirection));
+        southPosition.copy(southDirection).scale(veyra.radius + heightAt(southDirection));
+        tangentU.copy(eastPosition).sub(westPosition);
+        tangentV.copy(southPosition).sub(northPosition);
+        Vec3.cross(tangentV, tangentU, expectedNormal).normalize();
+        if (expectedNormal.dot(direction) < 0) expectedNormal.negate();
+
+        const decoded = decodeOctNormal(maps.normal[pixel * 2], maps.normal[pixel * 2 + 1]);
+        expect(decoded.dot(expectedNormal)).toBeGreaterThanOrEqual(minimumAgreement);
+      }
+    }
+  });
+
   it('returns raw seafloor separately from water contact', () => {
     const veyra = new GameState().universe.get('veyra');
     const ocean = findDirection((direction) => {
