@@ -1,9 +1,11 @@
 import type * as THREE from 'three';
 import type { Body } from '../sim/universe';
-import type { BodyRenderer, QualityTier } from './bodyRenderer';
+import type { BodyRenderer, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 import { renderFailureKey, RenderFailureTracker, type RenderFailurePhase, type RenderFailureStats } from './renderFailures';
 
 export interface LoadedRendererAssets {
+  /** Owns the lifetime of the borrowed textures exposed through pack. */
+  readonly pack: Readonly<RuntimeBodyAssetPack> | null;
   readonly gpuBytes: number;
   readonly transientBytes: number;
   readonly flightScale: boolean;
@@ -81,7 +83,7 @@ export class RendererResourceLedger {
 }
 
 interface TransactionBoundaries {
-  readonly loadAssets: (body: Body, tier: QualityTier, candidate: BodyRenderer) => Promise<LoadedRendererAssets>;
+  readonly loadAssets: (body: Body, tier: QualityTier) => Promise<LoadedRendererAssets>;
   readonly prepareCandidate: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
   readonly compileCandidate: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
   readonly awaitCoverage: (candidate: BodyRenderer, body: Body, tier: QualityTier) => Promise<void>;
@@ -215,7 +217,9 @@ export class BodyRendererManager {
     let loaded: LoadedRendererAssets | null = null;
     let phase: RenderFailurePhase = 'load';
     try {
-      loaded = await this.boundaries.loadAssets(body, tier, renderer);
+      loaded = await this.boundaries.loadAssets(body, tier);
+      assertCurrent();
+      renderer.stageAssets(loaded.pack);
       assertCurrent();
       phase = 'coverage';
       await this.boundaries.prepareCandidate(renderer, body, tier);

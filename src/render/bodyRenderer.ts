@@ -3,6 +3,17 @@ import type { BodyRendererKind } from '../content/bodyVisuals';
 
 export type QualityTier = 'low' | 'medium' | 'high';
 
+export interface RuntimeBodyAssetPack {
+  readonly bodyId: string;
+  readonly tier: QualityTier;
+  readonly width: number;
+  readonly height: number;
+  readonly manifestDigest: string;
+  readonly gpuBytes: number;
+  /** Borrowed textures; the transaction asset owner, not the renderer, disposes them. */
+  readonly textures: ReadonlyMap<string, THREE.Texture>;
+}
+
 export interface VectorCoordinates { readonly x: number; readonly y: number; readonly z: number }
 export interface QuaternionCoordinates extends VectorCoordinates { readonly w: number }
 
@@ -31,6 +42,8 @@ export interface BodyRenderer {
   readonly quality: QualityTier;
   readonly root: THREE.Object3D;
   readonly ready: boolean;
+  /** Stage borrowed runtime assets before preparation and shader compilation. */
+  stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void;
   update(frame: Readonly<BodyRenderFrame>): void;
   stats(): Readonly<BodyRendererStats>;
   dispose(): void;

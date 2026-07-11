@@ -13,6 +13,8 @@ export interface PlanetAssetChannel {
 export interface PlanetAssetPack {
   readonly bodyId: string;
   readonly tier: QualityTier;
+  readonly width: number;
+  readonly height: number;
   readonly transientBytes: number;
   readonly channels: readonly PlanetAssetChannel[];
 }
@@ -76,6 +78,9 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
     if (typeof pack.bodyId !== 'string' || !['low', 'medium', 'high'].includes(pack.tier ?? '')) {
       throw new Error('Checked planet manifest contains an invalid pack');
     }
+    if (!Number.isInteger(pack.width) || (pack.width ?? 0) <= 0 || !Number.isInteger(pack.height) || (pack.height ?? 0) <= 0) {
+      throw new Error(`Checked planet manifest contains invalid dimensions for ${pack.bodyId}/${pack.tier}`);
+    }
     if (!Number.isInteger(pack.transientBytes) || (pack.transientBytes ?? -1) < 0 || !Array.isArray(pack.channels)) {
       throw new Error(`Checked planet manifest contains an invalid pack for ${pack.bodyId}/${pack.tier}`);
     }
@@ -95,6 +100,8 @@ export function checkPlanetManifest(artifact: CheckedManifestArtifact): CheckedP
     return Object.freeze({
       bodyId: pack.bodyId,
       tier: pack.tier as QualityTier,
+      width: pack.width,
+      height: pack.height,
       transientBytes: pack.transientBytes,
       channels: Object.freeze(channels),
     });

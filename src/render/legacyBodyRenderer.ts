@@ -3,7 +3,7 @@ import type { Body } from '../sim/universe';
 import type { Quat } from '../core/quat';
 import type { RenderCaps } from './context';
 import type { BodyMaterialDescriptor } from './bodyMaterial';
-import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier } from './bodyRenderer';
+import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 import { PLANET_QUALITY, PlanetRenderer } from './planet';
 import { CloudLayer } from './clouds';
 
@@ -54,6 +54,10 @@ export class LegacyBodyRenderer implements BodyRenderer {
   }
 
   get ready(): boolean { return !this.disposed; }
+
+  stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void {
+    if (pack !== null) throw new Error(`${this.bodyId} legacy renderer accepts procedural assets only`);
+  }
 
   private ensureFlightVisuals(): void {
     if (this.terrain || this.body.def.surfaceKind !== 'solid') return;

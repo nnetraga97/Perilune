@@ -17,7 +17,7 @@ import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual 
 import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
-import type { BodyRenderer, BodyRenderFrame, QualityTier } from './bodyRenderer';
+import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
 import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
 import { compileRendererCandidate } from './shaderCompiler';
@@ -225,27 +225,28 @@ export class WorldScene {
       createCandidate: (candidate, tier) => createBodyRendererCandidate({
         body: candidate, caps: this.context.caps, quality: tier,
       }),
-      loadAssets: async (candidateBody, tier, candidate) => {
+      loadAssets: async (candidateBody, tier) => {
         if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
           transactionChannels = ['legacy'];
-          return { gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined };
+          return { pack: null, gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined };
         }
         const loaded = await this.planetAssetLoader.load(candidateBody.id, tier);
         transactionChannels = loaded.pack.channels.map((channel) => channel.name);
-        const packState = Object.freeze({
+        const pack: RuntimeBodyAssetPack = Object.freeze({
+          bodyId: loaded.pack.bodyId,
+          tier: loaded.pack.tier,
+          width: loaded.pack.width,
+          height: loaded.pack.height,
           manifestDigest: this.checkedPlanetManifest.digest,
-          channels: transactionChannels,
+          gpuBytes: loaded.gpuBytes,
           textures: loaded.textures,
         });
-        candidate.root.userData.planetAssetPack = packState;
         return {
+          pack,
           gpuBytes: loaded.gpuBytes,
           transientBytes: loaded.pack.transientBytes,
           flightScale: candidateBody.id === this.flightTerrainBodyId,
-          dispose: () => {
-            if (candidate.root.userData.planetAssetPack === packState) delete candidate.root.userData.planetAssetPack;
-            loaded.dispose();
-          },
+          dispose: () => loaded.dispose(),
         };
       },
       prepareCandidate: async (candidate) => {
@@ -273,6 +274,7 @@ export class WorldScene {
     const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
     const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
+      pack: null,
       gpuBytes: hasAuthoredPack ? rendererGeometryBytes(renderer) : 0,
       transientBytes: 0,
       flightScale: false,

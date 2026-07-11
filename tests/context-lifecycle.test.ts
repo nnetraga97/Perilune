@@ -37,6 +37,7 @@ function fakeRenderer(bodyId: string, quality: QualityTier): BodyRenderer {
     quality,
     root: new THREE.Group(),
     ready: true,
+    stageAssets: vi.fn(),
     update: vi.fn(),
     stats: () => ({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 }),
     dispose: vi.fn(),
@@ -44,7 +45,7 @@ function fakeRenderer(bodyId: string, quality: QualityTier): BodyRenderer {
 }
 
 function fakeAssets(): LoadedRendererAssets {
-  return { gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: vi.fn() };
+  return { pack: null, gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: vi.fn() };
 }
 
 describe('RenderContextLifecycle', () => {

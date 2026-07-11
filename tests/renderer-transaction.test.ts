@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, test, vi } from 'vitest';
-import type { BodyRenderer, QualityTier } from '../src/render/bodyRenderer';
+import type { BodyRenderer, QualityTier, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import {
   BodyRendererManager,
   RendererResourceLedger,
@@ -19,17 +19,19 @@ import checkedPlanetArtifact from '../src/generated/checked-planet-manifest.json
 function candidate(bodyId: string, quality: QualityTier = 'medium') {
   const root = new THREE.Group();
   const dispose = vi.fn(() => root.clear());
+  const stageAssets = vi.fn();
   const renderer: BodyRenderer = {
     bodyId,
     kind: 'legacy',
     quality,
     root,
     ready: true,
+    stageAssets,
     update: vi.fn(),
     stats: () => ({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 }),
     dispose,
   };
-  return { renderer, root, dispose };
+  return { renderer, root, dispose, stageAssets };
 }
 
 function deferred<T>() {
@@ -53,8 +55,23 @@ const assets = (overrides: Partial<LoadedRendererAssets> = {}): LoadedRendererAs
   gpuBytes: 20,
   transientBytes: 10,
   flightScale: true,
+  pack: null,
   dispose: vi.fn(),
   ...overrides,
+});
+
+const runtimePack = (
+  bodyId: string,
+  tier: QualityTier,
+  marker: string = tier,
+): RuntimeBodyAssetPack => Object.freeze({
+  bodyId,
+  tier,
+  width: tier === 'high' ? 4096 : tier === 'medium' ? 2048 : 1024,
+  height: tier === 'high' ? 2048 : tier === 'medium' ? 1024 : 512,
+  manifestDigest: marker.padEnd(64, '0').slice(0, 64),
+  gpuBytes: 20,
+  textures: new Map([[marker, new THREE.Texture()]]),
 });
 
 function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRendererManager>[0]> = {}) {
@@ -84,6 +101,92 @@ function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRend
 }
 
 describe('transactional body renderer replacement', () => {
+  test('stages the typed runtime pack before preparation and compilation', async () => {
+    const order: string[] = [];
+    const pack = runtimePack('veyra', 'medium');
+    const stagedCandidates: ReturnType<typeof candidate>[] = [];
+    const { manager } = managerHarness({
+      loadAssets: async () => {
+        order.push('load');
+        return assets({ pack });
+      },
+      createCandidate: (nextBody, tier) => {
+        const next = candidate(nextBody.id, tier);
+        next.stageAssets.mockImplementation((staged) => {
+          expect(staged).toBe(pack);
+          order.push('stage');
+        });
+        stagedCandidates.push(next);
+        return next.renderer;
+      },
+      prepareCandidate: async () => { order.push('prepare'); },
+      compileCandidate: async () => { order.push('compile'); },
+    });
+
+    await manager.ensure(body('veyra'));
+
+    expect(order).toEqual(['load', 'stage', 'prepare', 'compile']);
+    expect(stagedCandidates[0].stageAssets).toHaveBeenCalledWith(pack);
+  });
+
+  test('disposes loaded textures and the candidate when staging fails while retaining committed coverage', async () => {
+    let failStaging = false;
+    const stagedCandidates: ReturnType<typeof candidate>[] = [];
+    const { manager, scene } = managerHarness({
+      createCandidate: (nextBody, tier) => {
+        const next = candidate(nextBody.id, tier);
+        if (failStaging) next.stageAssets.mockImplementation(() => { throw new Error('stage failed'); });
+        stagedCandidates.push(next);
+        return next.renderer;
+      },
+    });
+    await manager.ensure(body('veyra'));
+    const pack = runtimePack('veyra', 'high');
+    const textureDispose = vi.spyOn([...pack.textures.values()][0], 'dispose');
+    const loaded = assets({
+      pack,
+      dispose: vi.fn(() => { for (const texture of pack.textures.values()) texture.dispose(); }),
+    });
+    manager.setBoundaries({ loadAssets: async () => loaded });
+    stagedCandidates[0].root.visible = true;
+    failStaging = true;
+
+    await expect(manager.replaceQuality('high')).rejects.toThrow('stage failed');
+
+    expect(scene.children).toEqual([stagedCandidates[0].root]);
+    expect(stagedCandidates[0].dispose).not.toHaveBeenCalled();
+    expect(stagedCandidates[1].dispose).toHaveBeenCalledOnce();
+    expect(loaded.dispose).toHaveBeenCalledOnce();
+    expect(textureDispose).toHaveBeenCalledOnce();
+  });
+
+  test('stages null as a valid procedural fallback', async () => {
+    const { manager, made } = managerHarness({ loadAssets: async () => assets({ pack: null }) });
+
+    await manager.ensure(body('auren'));
+
+    expect(made[0].stageAssets).toHaveBeenCalledOnce();
+    expect(made[0].stageAssets).toHaveBeenCalledWith(null);
+  });
+
+  test('quality and context rebuilds stage only the pack loaded for each candidate', async () => {
+    const medium = runtimePack('veyra', 'medium', 'medium');
+    const high = runtimePack('veyra', 'high', 'high');
+    const restored = runtimePack('veyra', 'high', 'restored');
+    const packs = [medium, high, restored];
+    const { manager, made } = managerHarness({
+      loadAssets: async () => assets({ pack: packs.shift()! }),
+    });
+
+    await manager.ensure(body('veyra'));
+    await manager.replaceQuality('high');
+    await manager.rebuildCommitted();
+
+    expect(made.map((entry) => entry.stageAssets.mock.calls.map(([pack]) => pack))).toEqual([
+      [medium], [high], [restored],
+    ]);
+  });
+
   test('reports truthful committed, transaction, failure, and resident resource state', async () => {
     const load = deferred<LoadedRendererAssets>();
     let now = 100;
@@ -379,7 +482,7 @@ describe('planet asset loading boundary', () => {
     schemaVersion: 1,
     budgets: manifestBudgets,
     packs: [{
-      bodyId: 'veyra', tier: 'medium', transientBytes: 10,
+      bodyId: 'veyra', tier: 'medium', width: 2048, height: 1024, transientBytes: 10,
       channels: [{
         name: 'albedo',
         packagePath: 'veyra/albedo.ktx2',
@@ -446,6 +549,7 @@ describe('planet asset loading boundary', () => {
     const empty = checkPlanetManifest(artifactFor(emptyManifest));
     expect(empty.hasPack('veyra', 'medium')).toBe(false);
     expect(checkedManifest.hasPack('veyra', 'medium')).toBe(true);
+    expect(checkedManifest.packs[0]).toMatchObject({ width: 2048, height: 1024 });
     expect(empty.budgets).toEqual(manifestBudgets);
     expect(checkPlanetManifest(checkedPlanetArtifact).packs).toHaveLength(0);
   });
@@ -458,11 +562,17 @@ describe('planet asset loading boundary', () => {
         transientPeakBytes: { low: 0, medium: 0, high: 0 },
       },
       packs: [{
-        bodyId: 'veyra', tier: 'medium', transientBytes: 0,
+        bodyId: 'veyra', tier: 'medium', width: 1024, height: 512, transientBytes: 0,
         channels: [{ name: 'albedo', packagePath: 'a.ktx2', fallbackPath: 'a.webp', gpuBytes: 0 }],
       }],
     };
     expect(checkPlanetManifest(artifactFor(zeroManifest)).hasPack('veyra', 'medium')).toBe(true);
+  });
+
+  test('rejects authored packs without positive integer dimensions', () => {
+    const missingDimensions = structuredClone(manifest) as Record<string, unknown>;
+    delete (missingDimensions.packs as Array<Record<string, unknown>>)[0].width;
+    expect(() => checkPlanetManifest(artifactFor(missingDimensions))).toThrow(/dimensions/i);
   });
 });
 

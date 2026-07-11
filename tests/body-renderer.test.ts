@@ -7,7 +7,7 @@ import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { StarBodyRenderer } from '../src/render/starBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
-import type { BodyRenderFrame } from '../src/render/bodyRenderer';
+import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
 import { WorldScene } from '../src/render/worldScene';
 import type { BodyRenderer } from '../src/render/bodyRenderer';
@@ -42,6 +42,24 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
 }
 
 describe('body renderer adapters', () => {
+  test('legacy and star adapters accept procedural staging and reject authored packs', () => {
+    const solid = body('veyra');
+    const star = body('auren');
+    const legacyRenderer = new LegacyBodyRenderer(solid, bodyMaterialDescriptor(solid), caps, 'medium');
+    const starRenderer = new StarBodyRenderer(star, bodyMaterialDescriptor(star), caps, 'medium');
+    const pack: RuntimeBodyAssetPack = {
+      bodyId: 'veyra', tier: 'medium', width: 2048, height: 1024,
+      manifestDigest: '0'.repeat(64), gpuBytes: 0, textures: new Map(),
+    };
+
+    expect(() => legacyRenderer.stageAssets(null)).not.toThrow();
+    expect(() => starRenderer.stageAssets(null)).not.toThrow();
+    expect(() => legacyRenderer.stageAssets(pack)).toThrow(/procedural assets only/i);
+    expect(() => starRenderer.stageAssets(pack)).toThrow(/procedural assets only/i);
+    legacyRenderer.dispose();
+    starRenderer.dispose();
+  });
+
   test('factory selection is controlled by BODY_VISUALS, not surface or terrain data', () => {
     const star = body('auren');
     star.def.surfaceKind = 'solid';

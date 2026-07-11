@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Body } from '../sim/universe';
 import type { RenderCaps } from './context';
 import type { BodyMaterialDescriptor } from './bodyMaterial';
-import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier } from './bodyRenderer';
+import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 
 export class StarBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
@@ -62,6 +62,10 @@ export class StarBodyRenderer implements BodyRenderer {
   }
 
   get ready(): boolean { return !this.disposed; }
+
+  stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void {
+    if (pack !== null) throw new Error(`${this.bodyId} star renderer accepts procedural assets only`);
+  }
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (this.disposed) return;
