@@ -46,6 +46,15 @@ export interface GameVessel {
   rails: RailsState;
 }
 
+export type AlarmKind = 'custom' | 'transfer' | 'maneuver' | 'entry';
+
+export interface GameAlarm {
+  id: string;
+  time: number;
+  label: string;
+  kind: AlarmKind;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _br = new Vec3();
@@ -89,6 +98,9 @@ export class GameState {
   flags: Record<string, boolean> = {};
   /** Bodies whose resource fields have been surveyed from orbit. */
   scannedBodies = new Set<string>();
+  /** Mission alarms, ordered by trigger time then stable id. */
+  readonly alarms: GameAlarm[] = [];
+  private nextAlarmSerial = 1;
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
   noteRestoredVessel(id: string): void {
@@ -118,6 +130,45 @@ export class GameState {
 
   get warpRate(): number {
     return this.railsWarp ? RAILS_WARP_RATES[this.warpIndex] : PHYSICS_WARP_RATES[this.warpIndex];
+  }
+
+  addAlarm(time: number, label: string, kind: AlarmKind): GameAlarm {
+    if (!Number.isFinite(time) || time <= this.time) {
+      throw new Error('Alarm time must be finite and in the future');
+    }
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) throw new Error('Alarm label is required');
+    const alarm: GameAlarm = {
+      id: `alarm-${this.nextAlarmSerial++}`,
+      time,
+      label: trimmedLabel,
+      kind,
+    };
+    this.alarms.push(alarm);
+    this.sortAlarms();
+    return alarm;
+  }
+
+  removeAlarm(id: string): boolean {
+    const index = this.alarms.findIndex((alarm) => alarm.id === id);
+    if (index < 0) return false;
+    this.alarms.splice(index, 1);
+    return true;
+  }
+
+  private sortAlarms(): void {
+    this.alarms.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  }
+
+  /** Consume alarms due at the current time and drop all time warp. */
+  private fireDueAlarms(): boolean {
+    let fired = false;
+    while (this.alarms.length && this.alarms[0].time <= this.time + 1e-9) {
+      this.alarms.shift();
+      fired = true;
+    }
+    if (fired) this.setWarp(0, false);
+    return fired;
   }
 
   /** Place a craft on the launch pad of Veyra (Cape Skyward, lon 0). */
@@ -401,10 +452,16 @@ export class GameState {
     let steps = 0;
     if (this.railsWarp && this.warpIndex > 0) {
       // Rails warp: pure analytic time advance.
-      const dtSim = realDt * this.warpRate;
-      this.time += dtSim;
+      const requestedDt = realDt * this.warpRate;
+      const nextAlarm = this.alarms[0];
+      const endTime = nextAlarm
+        ? Math.min(this.time + requestedDt, nextAlarm.time)
+        : this.time + requestedDt;
+      const dtSim = endTime - this.time;
+      this.time = endTime;
       this.checkSoiTransitionsRails();
       this.stepBackgroundSystems(dtSim);
+      this.fireDueAlarms();
       return 0;
     }
 
@@ -416,6 +473,11 @@ export class GameState {
       this.stepBackgroundSystems(PHYSICS_DT);
       this.time += PHYSICS_DT;
       steps++;
+      if (this.fireDueAlarms()) {
+        // The accumulated remainder was requested at the old warp rate.
+        this.accumulator = 0;
+        break;
+      }
     }
     return steps;
   }
