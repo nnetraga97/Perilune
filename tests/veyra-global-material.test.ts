@@ -84,8 +84,8 @@ describe('Veyra global coordinates and material', () => {
     const material = createTerrestrialGlobalMaterial(null, descriptor);
     const dispose = vi.spyOn(material, 'dispose');
     const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, { material, oceanEnabled: false });
-    const buildChunk = (renderer as unknown as { buildChunk(key: string, node: unknown): void }).buildChunk.bind(renderer);
-    buildChunk('test', {
+    const requestChunk = (renderer as unknown as { requestChunk(key: string, node: unknown): void }).requestChunk.bind(renderer);
+    requestChunk('test', {
       face: 0, depth: 0, u0: -1, v0: -1, size: 2,
       centerDir: new Vec3(1, 0, 0), worldSize: veyra.radius * 2,
     });
@@ -93,6 +93,8 @@ describe('Veyra global coordinates and material', () => {
     expect(meshes).toHaveLength(1);
     expect(meshes[0].material).toBe(material);
     expect(meshes[0].geometry.getAttribute('bodyDirection').count)
+      .toBe(meshes[0].geometry.getAttribute('position').count);
+    expect(meshes[0].geometry.getAttribute('bodyFixedDetailAnchor').count)
       .toBe(meshes[0].geometry.getAttribute('position').count);
     renderer.dispose();
     expect(dispose).toHaveBeenCalledOnce();

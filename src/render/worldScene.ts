@@ -473,9 +473,17 @@ export class WorldScene {
       const renderer = this.rendererFor(b);
       if (!renderer) continue;
       renderer.root.visible = true;
+      const previousFrame = this.lastBodyFrames.get(b.id);
+      const inverseDelta = dt > 0 ? 1 / dt : 0;
+      const cameraBodyFixedVelocity = previousFrame ? {
+        x: (_camBF.x - previousFrame.cameraBodyFixed.x) * inverseDelta,
+        y: (_camBF.y - previousFrame.cameraBodyFixed.y) * inverseDelta,
+        z: (_camBF.z - previousFrame.cameraBodyFixed.z) * inverseDelta,
+      } : { x: 0, y: 0, z: 0 };
       const frame: BodyRenderFrame = {
         cameraRelativeOrigin: _rel,
         cameraBodyFixed: _camBF,
+        cameraBodyFixedVelocity,
         orientation: _bodyQ,
         cameraSunDirection: _sunDir,
         bodySunDirection: _bodySunDir,
@@ -489,6 +497,7 @@ export class WorldScene {
         ...frame,
         cameraRelativeOrigin: { ...frame.cameraRelativeOrigin },
         cameraBodyFixed: { ...frame.cameraBodyFixed },
+        cameraBodyFixedVelocity: { ...frame.cameraBodyFixedVelocity },
         orientation: { ...frame.orientation },
         cameraSunDirection: { ...frame.cameraSunDirection },
         bodySunDirection: { ...frame.bodySunDirection },

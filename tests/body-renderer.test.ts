@@ -32,6 +32,7 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
   return {
     cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
     cameraBodyFixed: { x: 7_000_000, y: 0, z: 0 },
+    cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: { x: -1, y: 0, z: 0 },
     bodySunDirection: { x: -1, y: 0, z: 0 },

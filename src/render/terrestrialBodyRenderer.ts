@@ -19,6 +19,7 @@ import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
 import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
 import { installCoverageDither, type CoverageDitherBinding } from './terrestrial/coverageDither';
+import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
@@ -87,6 +88,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
+      workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
     });
     this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
     this.terrain.setShadowReceiver(this.quality !== 'low');
@@ -134,7 +136,12 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const visibleBand = frame.allowFlightTerrain && cameraDistance < this.body.radius * VISIBLE_RADIUS_MULTIPLIER;
     if (prewarm) {
       this.terrain.group.visible = true;
-      this.terrain.update(frame.cameraBodyFixed, frame.orientation, origin);
+      this.terrain.update(
+        frame.cameraBodyFixed,
+        frame.orientation,
+        origin,
+        frame.cameraBodyFixedVelocity,
+      );
     } else {
       this.terrain.group.visible = false;
     }

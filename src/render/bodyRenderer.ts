@@ -20,6 +20,8 @@ export interface QuaternionCoordinates extends VectorCoordinates { readonly w: n
 export interface BodyRenderFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
   readonly cameraBodyFixed: VectorCoordinates;
+  /** Camera velocity in rotating body-fixed meters per wall-clock second. */
+  readonly cameraBodyFixedVelocity: VectorCoordinates;
   readonly orientation: QuaternionCoordinates;
   readonly cameraSunDirection: VectorCoordinates;
   readonly bodySunDirection: VectorCoordinates;

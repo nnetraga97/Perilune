@@ -44,6 +44,7 @@ function frame(radius: number, overrides: Partial<BodyRenderFrame> = {}): BodyRe
   return {
     cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
     cameraBodyFixed: { x: radius * 2, y: 0, z: 0 },
+    cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: { x: 1, y: 0, z: 0 },
     bodySunDirection: { x: 1, y: 0, z: 0 },
