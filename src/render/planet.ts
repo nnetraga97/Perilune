@@ -230,6 +230,11 @@ export class PlanetRenderer {
     if (this.ocean) this.ocean.visible = enabled;
   }
 
+  /** True only when the currently displayed terrain set covers the visible body without holes. */
+  coverageReady(): boolean {
+    return this.stats.visible > 0 && this.stats.coverageGaps === 0;
+  }
+
   resourceGeometryBytes(): Readonly<{ terrainGeometryBytes: number; oceanGeometryBytes: number; geometryCount: number }> {
     const terrainGeometryBytes = [...this.chunks.values()]
       .reduce((sum, chunk) => sum + geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry), 0);
