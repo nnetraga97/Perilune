@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
@@ -10,6 +11,11 @@ import {
   expectedReferenceForTier,
 } from './lib/feasibility-certification.mjs';
 import { observeSanitizedMacHost } from './lib/host-observation.mjs';
+import {
+  allocateLoopbackPort,
+  stopProcessTree,
+  waitForServerOrExit,
+} from './lib/profiler-process.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const values = new Map();
@@ -45,26 +51,19 @@ const build = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run'
 });
 if (build.status !== 0) process.exit(build.status ?? 1);
 
+const port = await allocateLoopbackPort();
+const runNonce = randomBytes(32).toString('hex');
 const preview = spawn(
   process.platform === 'win32' ? 'npm.cmd' : 'npm',
-  ['run', 'preview', '--', '--host', '127.0.0.1', '--port', '4173'],
-  { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] },
+  ['run', 'preview', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+  },
 );
 preview.stdout.on('data', (chunk) => process.stdout.write(chunk));
 preview.stderr.on('data', (chunk) => process.stderr.write(chunk));
-
-async function waitForServer() {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      const response = await fetch('http://127.0.0.1:4173/');
-      if (response.ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  }
-  throw new Error('Timed out waiting for the preview server');
-}
 
 const executablePath = browserExecutableForMode(
   mode,
@@ -73,9 +72,32 @@ const executablePath = browserExecutableForMode(
 );
 let browser;
 let exitCode = 0;
+let cleanupPromise;
+const cleanup = () => {
+  cleanupPromise ??= (async () => {
+    try {
+      await browser?.close();
+    } finally {
+      await stopProcessTree(preview);
+    }
+  })();
+  return cleanupPromise;
+};
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    const signalExitCode = signal === 'SIGINT' ? 130 : 143;
+    void cleanup().then(
+      () => process.exit(signalExitCode),
+      (error) => {
+        console.error(error);
+        process.exit(signalExitCode);
+      },
+    );
+  });
+}
 
 try {
-  await waitForServer();
+  await waitForServerOrExit(preview, `http://127.0.0.1:${port}/`);
   browser = await chromium.launch({
     executablePath,
     headless: mode !== 'reference',
@@ -92,12 +114,16 @@ try {
     if (message.type() === 'error') runtimeErrors.push(message.text());
   });
   const disabled = values.get('disabled') ?? '';
-  const url = `http://127.0.0.1:4173/?proto=feasibility&mode=${mode}&tier=${tier}&stage=${stage}` +
+  const url = `http://127.0.0.1:${port}/?proto=feasibility&mode=${mode}&tier=${tier}&stage=${stage}` +
+    `&nonce=${encodeURIComponent(runNonce)}` +
     (disabled ? `&disabled=${encodeURIComponent(disabled)}` : '');
   await page.goto(url);
   const timeout = mode === 'reference' ? 1_000_000 : 60_000;
   await page.waitForFunction(() => window.__FEASIBILITY_DONE__ === true, undefined, { timeout });
   const state = await page.evaluate(() => window.__FEASIBILITY__);
+  if (state?.runNonce !== runNonce) {
+    throw new Error('Feasibility state nonce did not match the profiler run nonce');
+  }
   const cdp = await context.newCDPSession(page);
   const browserVersion = await cdp.send('Browser.getVersion');
   const browserIdentity = await page.evaluate(() => ({
@@ -119,6 +145,7 @@ try {
     metadata,
     disabled,
     requestedStage: stage,
+    runNonce,
     host,
     browser: browserIdentity,
     state,
@@ -162,8 +189,7 @@ try {
   if (runtimeErrors.length > 0) exitCode = 1;
   if (eligible && !record.certification.passed) exitCode = 1;
 } finally {
-  await browser?.close();
-  preview.kill('SIGTERM');
+  await cleanup();
 }
 
 process.exitCode = exitCode;

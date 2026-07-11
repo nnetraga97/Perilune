@@ -4,7 +4,7 @@ export interface CertificationGate {
   readonly name: string;
   readonly actual: number | null;
   readonly limit: number;
-  readonly comparison: '>=' | '<' | '<=';
+  readonly comparison: '>=' | '<' | '<=' | '===';
   readonly pass: boolean;
   readonly reason: string | null;
 }
@@ -25,6 +25,7 @@ export function assessCertificationEligibility(input: {
   metadata: Readonly<Record<string, string>>;
   disabled: string;
   requestedStage: number;
+  runNonce: string;
   host: Readonly<Record<string, unknown>> | null;
   browser: Readonly<Record<string, unknown>>;
   state: Readonly<Record<string, any>>;

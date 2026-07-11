@@ -1,10 +1,16 @@
 import * as THREE from 'three';
+import planetManifest from '../../assets/planets/manifest.json';
 import { Quat } from '../core/quat';
 import { Vec3 } from '../core/vec3';
 import { AUREN_SYSTEM } from '../content/system';
 import { createRenderContext } from '../render/context';
 import { GpuTimerRing, type GpuTimerSnapshot } from '../render/gpuTimer';
 import { makeStarfield } from '../render/starfield';
+import {
+  categorizeResources,
+  drawingBufferResourceBytes,
+  geometryByteLength,
+} from '../render/resourceAccounting';
 import { bodyFixedToInertial, bodyOrientation } from '../sim/bodyOrientation';
 import { terrainHeight } from '../sim/terrain';
 import { Universe } from '../sim/universe';
@@ -24,11 +30,13 @@ import {
   type FeasibilitySceneStats,
   type ProfilingGroup,
 } from './feasibilityScene';
+import { applicationResourceTransfer, derivePlanetTransfer } from './feasibilityTransfer';
 
 type CameraRegime = 'orbit' | 'atmosphere' | 'low-flight' | 'surface';
 type FeasibilityMode = 'smoke' | 'reference';
 
 export interface FeasibilityPublicState {
+  readonly runNonce: string;
   readonly mode: FeasibilityMode;
   readonly tier: FeasibilityTier;
   /** Retained for artifact compatibility; identical to requestedReductionStage. */
@@ -47,12 +55,29 @@ export interface FeasibilityPublicState {
     readonly backend: 'webgl2';
     readonly drawingBufferWidth: number;
     readonly drawingBufferHeight: number;
+    readonly drawingBufferSamples: number;
     readonly gpuTimerSupported: boolean;
     readonly renderer: string;
     readonly vendor: string;
   };
   readonly features: Readonly<FeasibilityFeatureConfig>;
   readonly scene: Readonly<FeasibilitySceneStats>;
+  readonly resources: {
+    readonly categories: Readonly<Record<string, number>>;
+    readonly activeBodyBytes: number;
+    readonly totalRendererBytes: number;
+    readonly transientBytes: number;
+    readonly uncompressedWorstCaseBytes: number;
+  };
+  readonly transfer: {
+    readonly bodyPackCompressedBytes: number;
+    readonly bootCriticalBytes: number;
+    readonly transientBytes: number;
+    readonly manifestPackCount: number;
+    readonly selectedPackCount: number;
+    readonly applicationTransferBytes: number;
+    readonly applicationEncodedBytes: number;
+  };
   readonly visitedRegimes: readonly CameraRegime[];
   readonly journeys: readonly JourneySummary[];
   readonly summary: ReferenceRunSummary | null;
@@ -65,7 +90,10 @@ export interface FeasibilityPublicState {
     readonly maxTriangles: number;
     readonly transitionOverlapMs: number;
     readonly transitionMode: 'forced-combined-fixture';
-    readonly compressedDownloadBytes: 0;
+    readonly rendererGeometryCount: number;
+    readonly rendererTextureCount: number;
+    readonly accountedGeometryCount: number;
+    readonly accountedTextureCount: number;
   };
 }
 
@@ -128,6 +156,7 @@ export async function runFeasibilityProto(): Promise<void> {
   const mode = parseMode(params.get('mode'));
   const tier = parseTier(params.get('tier'));
   const stage = parseStage(params.get('stage'));
+  const runNonce = params.get('nonce') ?? '';
   const warmupSeconds = mode === 'reference' ? 30 : 1.5;
   const journeySeconds = mode === 'reference' ? 300 : 3;
   const drainSeconds = mode === 'reference' ? 2 : 0.75;
@@ -164,7 +193,8 @@ export async function runFeasibilityProto(): Promise<void> {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#03070c');
-  scene.add(makeStarfield(4200), fixture.group);
+  const starfield = makeStarfield(4200);
+  scene.add(starfield, fixture.group);
   const sun = new THREE.DirectionalLight('#fff1d2', 2.5);
   sun.position.set(1_200, 1_800, 900);
   sun.castShadow = true;
@@ -193,6 +223,8 @@ export async function runFeasibilityProto(): Promise<void> {
   } | null;
   const gpuName = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)) : 'masked';
   const gpuVendor = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)) : 'masked';
+  const drawingBufferSamples = Number(gl.getParameter(gl.SAMPLES));
+  const manifestTransfer = derivePlanetTransfer(planetManifest, veyra.id, tier);
 
   const perf = new PerfOverlay(uiRoot);
   perf.toggle();
@@ -229,7 +261,23 @@ export async function runFeasibilityProto(): Promise<void> {
   const publish = (elapsedSeconds: number) => {
     const buffer = new THREE.Vector2();
     renderer.getDrawingBufferSize(buffer);
+    const drawingBuffer = drawingBufferResourceBytes(buffer.x, buffer.y, drawingBufferSamples);
+    const bodyResources = fixture.resourceStats(2048 * 2048 * 4);
+    const resources = categorizeResources({
+      activeBody: bodyResources.categories,
+      rendererOnly: {
+        starfieldGeometryBytes: geometryByteLength(starfield.geometry),
+        drawingBufferColorBytes: drawingBuffer.colorBytes,
+        drawingBufferDepthBytes: drawingBuffer.depthBytes,
+      },
+      transientBytes: manifestTransfer.transientBytes,
+    });
+    const measuredTransfer = applicationResourceTransfer([
+      ...performance.getEntriesByType('navigation'),
+      ...performance.getEntriesByType('resource'),
+    ]);
     window.__FEASIBILITY__ = {
+      runNonce,
       mode,
       tier,
       reductionStage: stage,
@@ -247,12 +295,19 @@ export async function runFeasibilityProto(): Promise<void> {
         backend: 'webgl2',
         drawingBufferWidth: buffer.x,
         drawingBufferHeight: buffer.y,
+        drawingBufferSamples,
         gpuTimerSupported: gpuTimer.snapshot().supported,
         renderer: gpuName,
         vendor: gpuVendor,
       },
       features,
       scene: fixture.stats(),
+      resources,
+      transfer: {
+        ...manifestTransfer,
+        applicationTransferBytes: measuredTransfer.transferBytes,
+        applicationEncodedBytes: measuredTransfer.encodedBytes,
+      },
       visitedRegimes: [...visitedRegimes],
       journeys: journeySummaries,
       summary,
@@ -265,7 +320,10 @@ export async function runFeasibilityProto(): Promise<void> {
         maxTriangles,
         transitionOverlapMs,
         transitionMode: 'forced-combined-fixture',
-        compressedDownloadBytes: 0,
+        rendererGeometryCount: renderer.info.memory.geometries,
+        rendererTextureCount: renderer.info.memory.textures,
+        accountedGeometryCount: bodyResources.geometryCount + 1,
+        accountedTextureCount: bodyResources.textureCount,
       },
     };
   };
@@ -378,10 +436,10 @@ export async function runFeasibilityProto(): Promise<void> {
     perf.endRender(submissionStart);
     perf.setExtra('scatter', fixtureStats.visualScatterCount);
     perf.setExtra('proxies', fixtureStats.physicalProxyCount);
-    perf.setExtra('gpu MB', (fixtureStats.estimatedGpuBytes / 1048576).toFixed(1));
+    perf.setExtra('gpu MB', ((window.__FEASIBILITY__?.resources.activeBodyBytes ?? 0) / 1048576).toFixed(1));
     perf.setExtra('disjoint', gpuTimer.snapshot().disjointSamples);
     perf.setExtra('transition ms', transitionOverlapMs.toFixed(1));
-    perf.setExtra('download bytes', 0);
+    perf.setExtra('download bytes', window.__FEASIBILITY__?.transfer.bodyPackCompressedBytes ?? 0);
     perf.setExtra('regime', regime);
     perf.frame(frameMs, renderer);
 

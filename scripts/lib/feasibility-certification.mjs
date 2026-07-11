@@ -6,6 +6,34 @@ const GROUPS = Object.freeze(['terrain', 'atmosphere', 'ocean', 'clouds', 'scatt
 const REGIMES = Object.freeze(['orbit', 'atmosphere', 'low-flight', 'surface']);
 export const STABLE_CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const FRAME_BOUNDARY_TOLERANCE_MS = 1000 / 60;
+const ACTIVE_RESOURCE_CATEGORIES = Object.freeze([
+  'terrainGeometryBytes', 'oceanGeometryBytes', 'atmosphereGeometryBytes',
+  'cloudGeometryBytes', 'cloudTextureBytes', 'scatterGeometryBytes',
+  'scatterInstanceBytes', 'physicalProxyGeometryBytes', 'physicalProxyInstanceBytes',
+  'transitionGeometryBytes', 'shadowBytes',
+]);
+const RENDERER_RESOURCE_CATEGORIES = Object.freeze([
+  'starfieldGeometryBytes', 'drawingBufferColorBytes', 'drawingBufferDepthBytes',
+]);
+
+function categorySum(categories, names) {
+  return names.reduce((sum, name) => sum + (categories?.[name] ?? Number.NaN), 0);
+}
+
+function validTransfer(transfer) {
+  return [
+    'bodyPackCompressedBytes', 'bootCriticalBytes', 'transientBytes',
+    'manifestPackCount', 'selectedPackCount', 'applicationTransferBytes', 'applicationEncodedBytes',
+  ].every((field) => Number.isInteger(transfer?.[field]) && transfer[field] >= 0);
+}
+
+function consistentTransfer(transfer) {
+  if (!validTransfer(transfer)) return false;
+  if (transfer.manifestPackCount === 0 &&
+      (transfer.bodyPackCompressedBytes !== 0 || transfer.bootCriticalBytes !== 0)) return false;
+  if (transfer.selectedPackCount === 0 && transfer.bodyPackCompressedBytes !== 0) return false;
+  return transfer.applicationTransferBytes > 0 || transfer.applicationEncodedBytes > 0;
+}
 
 export function browserExecutableForMode(mode, requestedPath, pathExists) {
   if (mode === 'reference') {
@@ -67,7 +95,7 @@ function canonicalMetadata(host, browser) {
 }
 
 export function assessCertificationEligibility(input) {
-  const { mode, tier, reference, metadata, disabled, requestedStage, host, browser, state, runtimeErrors } = input;
+  const { mode, tier, reference, metadata, disabled, requestedStage, runNonce, host, browser, state, runtimeErrors } = input;
   const reasons = [];
   const expectedReference = expectedReferenceForTier(tier);
   const reject = (condition, reason) => { if (condition) reasons.push(reason); };
@@ -103,6 +131,7 @@ export function assessCertificationEligibility(input) {
   }
 
   reject(state?.mode !== mode, 'state mode must match CLI mode');
+  reject(!runNonce || state?.runNonce !== runNonce, 'state run nonce must match the profiler run nonce');
   reject(state?.tier !== tier, 'state tier must match CLI tier');
   reject(state?.requestedReductionStage !== requestedStage, 'state requested stage must match CLI stage');
   const expected = expectedConfiguration(tier, requestedStage);
@@ -115,6 +144,8 @@ export function assessCertificationEligibility(input) {
   reject(state?.caps?.backend !== 'webgl2', 'WebGL2 is required');
   reject(state?.caps?.drawingBufferWidth !== 1920 || state?.caps?.drawingBufferHeight !== 1080,
     'drawing buffer must be exactly 1920x1080');
+  reject(!Number.isInteger(state?.caps?.drawingBufferSamples) || state.caps.drawingBufferSamples < 0,
+    'drawing buffer sample metadata is required');
   reject(state?.caps?.renderer !== renderer || state?.caps?.vendor !== vendor,
     'state WebGL identity must match observed browser');
   reject(state?.caps?.gpuTimerSupported !== true || state?.gpuTimer?.supported !== true,
@@ -139,6 +170,29 @@ export function assessCertificationEligibility(input) {
   reject(!(state?.telemetry?.transitionOverlapMs >= 900_000 - FRAME_BOUNDARY_TOLERANCE_MS),
     'transition overlap must cover the 900000 ms journey window within one 60Hz frame');
   reject((runtimeErrors?.length ?? 0) !== 0, 'runtime errors must be zero');
+
+  const categories = state?.resources?.categories;
+  const activeCategoryBytes = categorySum(categories, ACTIVE_RESOURCE_CATEGORIES);
+  const rendererOnlyBytes = categorySum(categories, RENDERER_RESOURCE_CATEGORIES);
+  reject(!Number.isFinite(activeCategoryBytes) || activeCategoryBytes !== state?.resources?.activeBodyBytes,
+    'active-body resource categories must sum to activeBodyBytes');
+  reject(!Number.isFinite(rendererOnlyBytes) || activeCategoryBytes + rendererOnlyBytes !== state?.resources?.totalRendererBytes,
+    'all resource categories must sum to totalRendererBytes');
+  reject(state?.resources?.uncompressedWorstCaseBytes !==
+    state?.resources?.totalRendererBytes + state?.resources?.transientBytes,
+  'uncompressed worst-case must include renderer and transient bytes');
+  reject(!(state?.telemetry?.rendererGeometryCount > 0) ||
+    state.telemetry.rendererGeometryCount > state?.telemetry?.accountedGeometryCount,
+  'renderer geometry count must be nonzero and not exceed accounted geometry count');
+  reject(!(state?.telemetry?.rendererTextureCount > 0) ||
+    state.telemetry.rendererTextureCount > state?.telemetry?.accountedTextureCount,
+  'renderer texture count must be nonzero and not exceed accounted texture count');
+  reject(!validTransfer(state?.transfer), 'transfer derivation fields are required');
+  reject(state?.transfer?.manifestPackCount === 0 &&
+    (state?.transfer?.bodyPackCompressedBytes !== 0 || state?.transfer?.bootCriticalBytes !== 0),
+  'empty manifest transfer derivation must be zero');
+  reject(!(state?.transfer?.applicationTransferBytes > 0 || state?.transfer?.applicationEncodedBytes > 0),
+    'application Resource Timing transfer or encoded bytes are required');
 
   const totals = journeys.reduce((sum, journey) => ({
     valid: sum.valid + (journey.validGpuSamples ?? 0),
@@ -167,15 +221,46 @@ export function assessCertificationEligibility(input) {
 export function buildCertificationGates(state, tier) {
   const activeBudget = tier === 'medium' ? 128 * 1024 * 1024 : 64 * 1024 * 1024;
   const totalBudget = tier === 'medium' ? 384 * 1024 * 1024 : 256 * 1024 * 1024;
-  return Object.freeze([
+  const transientBudget = tier === 'medium' ? 192 * 1024 * 1024 : 96 * 1024 * 1024;
+  const categories = state.resources?.categories;
+  const activeCategoryBytes = categorySum(categories, ACTIVE_RESOURCE_CATEGORIES);
+  const rendererOnlyBytes = categorySum(categories, RENDERER_RESOURCE_CATEGORIES);
+  const transferValid = consistentTransfer(state.transfer);
+  const drawingBufferValid = state.caps?.drawingBufferWidth === 1920 &&
+    state.caps?.drawingBufferHeight === 1080 &&
+    Number.isInteger(state.caps?.drawingBufferSamples) && state.caps.drawingBufferSamples >= 0;
+  const gates = [
     gate('fpsMedian', state.summary.fpsMedian, 60, '>=', state.summary.fpsMedian >= 60),
     gate('frameP95Ms', state.summary.frameP95Ms, 16.7, '<', state.summary.frameP95Ms < 16.7),
-    gate('activeGpuBytes', state.scene.estimatedGpuBytes, activeBudget, '<=', state.scene.estimatedGpuBytes <= activeBudget),
-    gate('totalRendererGpuBytes', state.scene.estimatedRendererGpuBytes, totalBudget, '<=', state.scene.estimatedRendererGpuBytes <= totalBudget),
+    gate('activeBodyBytes', state.resources?.activeBodyBytes, activeBudget, '<=', state.resources?.activeBodyBytes <= activeBudget),
+    gate('totalRendererBytes', state.resources?.totalRendererBytes, totalBudget, '<=', state.resources?.totalRendererBytes <= totalBudget),
+    gate('transientBytes', state.resources?.transientBytes, transientBudget, '<=',
+      state.resources?.transientBytes === 0 || state.resources?.transientBytes <= transientBudget),
+    gate('activeResourceCategorySum', activeCategoryBytes, state.resources?.activeBodyBytes, '===',
+      activeCategoryBytes === state.resources?.activeBodyBytes),
+    gate('totalResourceCategorySum', activeCategoryBytes + rendererOnlyBytes, state.resources?.totalRendererBytes, '===',
+      activeCategoryBytes + rendererOnlyBytes === state.resources?.totalRendererBytes),
+    gate('uncompressedWorstCaseSum',
+      state.resources?.totalRendererBytes + state.resources?.transientBytes,
+      state.resources?.uncompressedWorstCaseBytes,
+      '===',
+      state.resources?.uncompressedWorstCaseBytes ===
+        state.resources?.totalRendererBytes + state.resources?.transientBytes),
+    gate('drawingBufferMetadata', drawingBufferValid ? 1 : 0, 1, '===', drawingBufferValid),
+    gate('transferDerivation', transferValid ? 1 : 0, 1, '===', transferValid),
     gate('submissionP95Ms', state.summary.submissionP95Ms, 4, '<=', state.summary.submissionP95Ms <= 4),
     gate('terrainP95Ms', state.summary.terrainP95Ms, 2, '<=', state.summary.terrainP95Ms <= 2),
     gate('gpuP95Ms', state.summary.gpuP95Ms, 8, '<=', state.summary.gpuP95Ms !== null && state.summary.gpuP95Ms <= 8),
-  ]);
+  ];
+  if (tier === 'medium') {
+    gates.push(
+      gate('bootCriticalBytes', state.transfer?.bootCriticalBytes, 12 * 1024 * 1024, '<=',
+        state.transfer?.bootCriticalBytes <= 12 * 1024 * 1024),
+      gate('bodyPackCompressedBytes', state.transfer?.bodyPackCompressedBytes, 32 * 1024 * 1024, '<=',
+        state.transfer?.bodyPackCompressedBytes <= 32 * 1024 * 1024),
+    );
+  }
+  return Object.freeze(gates);
 }
 
 function gate(name, actual, limit, comparison, pass) {

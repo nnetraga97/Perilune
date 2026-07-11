@@ -6,6 +6,7 @@ import { PlanetRenderer, PLANET_QUALITY } from '../render/planet';
 import { terrainHeight } from '../sim/terrain';
 import type { Body } from '../sim/universe';
 import type { FeasibilityFeatureConfig } from './feasibilityMetrics';
+import { geometryByteLength } from '../render/resourceAccounting';
 
 export interface ScatterRecords {
   readonly ids: Uint32Array;
@@ -128,9 +129,13 @@ export interface FeasibilitySceneStats extends FeasibilityFixtureSpec {
   readonly terrainCoverageGaps: number;
   readonly terrainScheduleMs: number;
   readonly terrainInstallMs: number;
-  readonly estimatedGpuBytes: number;
-  readonly estimatedRendererGpuBytes: number;
   readonly profilingGroups: ProfilingGroups;
+}
+
+export interface FeasibilityBodyResources {
+  readonly categories: Readonly<Record<string, number>>;
+  readonly geometryCount: number;
+  readonly textureCount: number;
 }
 
 /** Combined performance fixture. It is deliberately not the Phase 3 renderer API. */
@@ -225,15 +230,6 @@ export class FeasibilityScene {
 
   stats(): Readonly<FeasibilitySceneStats> {
     const fixture = feasibilityFixtureSpec(this.features, this.seed);
-    const instanceBytes = this.scatter.instanceMatrix.array.byteLength + this.proxies.instanceMatrix.array.byteLength;
-    const fixtureGeometryBytes = geometryByteLength(this.atmosphere.geometry) +
-      geometryByteLength(this.scatter.geometry) +
-      geometryByteLength(this.proxies.geometry) +
-      geometryByteLength(this.transitionMeshes[0].geometry);
-    const cloudTextureBytes = 2 * 512 * 256 * 4;
-    const activeBodyBytes = this.planet.stats.geometryBytes + instanceBytes + fixtureGeometryBytes + cloudTextureBytes;
-    const shadowMapBytes = 2048 * 2048 * 4;
-    const drawingBufferBytes = 1920 * 1080 * 8;
     return Object.freeze({
       ...fixture,
       terrainChunks: this.planet.stats.chunks,
@@ -241,9 +237,30 @@ export class FeasibilityScene {
       terrainCoverageGaps: this.planet.stats.coverageGaps,
       terrainScheduleMs: this.planet.stats.scheduleMs,
       terrainInstallMs: this.planet.stats.installMs,
-      estimatedGpuBytes: activeBodyBytes,
-      estimatedRendererGpuBytes: activeBodyBytes + shadowMapBytes + drawingBufferBytes,
       profilingGroups: this.profilingGroups,
+    });
+  }
+
+  resourceStats(shadowBytes: number): Readonly<FeasibilityBodyResources> {
+    const planet = this.planet.resourceGeometryBytes();
+    const clouds = this.clouds.map((cloud) => cloud.resourceStats());
+    return Object.freeze({
+      categories: Object.freeze({
+        terrainGeometryBytes: planet.terrainGeometryBytes,
+        oceanGeometryBytes: planet.oceanGeometryBytes,
+        atmosphereGeometryBytes: geometryByteLength(this.atmosphere.geometry),
+        cloudGeometryBytes: clouds.reduce((sum, cloud) => sum + cloud.geometryBytes, 0),
+        cloudTextureBytes: clouds.reduce((sum, cloud) => sum + cloud.textureBytes, 0),
+        scatterGeometryBytes: geometryByteLength(this.scatter.geometry),
+        scatterInstanceBytes: this.scatter.instanceMatrix.array.byteLength,
+        physicalProxyGeometryBytes: geometryByteLength(this.proxies.geometry),
+        physicalProxyInstanceBytes: this.proxies.instanceMatrix.array.byteLength,
+        transitionGeometryBytes: geometryByteLength(this.transitionMeshes[0].geometry),
+        shadowBytes,
+      }),
+      geometryCount: planet.geometryCount + 1 + (this.features.secondCloudScale ? 2 : 1) + 1 + 1 + 1,
+      // Cloud maps plus the authoritative 2048 directional shadow resource.
+      textureCount: (this.features.secondCloudScale ? 2 : 1) + 1,
     });
   }
 
@@ -401,12 +418,4 @@ export class FeasibilityScene {
     child.renderOrder = 1;
     return [parent, child];
   }
-}
-
-function geometryByteLength(geometry: THREE.BufferGeometry): number {
-  let bytes = 0;
-  for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength;
-  const index = geometry.getIndex();
-  if (index) bytes += index.array.byteLength;
-  return bytes;
 }

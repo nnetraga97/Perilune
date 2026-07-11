@@ -11,6 +11,7 @@
  * - Chunk builds are budgeted per frame to avoid hitches.
  */
 import * as THREE from 'three';
+import { geometryByteLength } from './resourceAccounting';
 import { Vec3 } from '../core/vec3';
 import type { Quat } from '../core/quat';
 import type { Body } from '../sim/universe';
@@ -216,6 +217,17 @@ export class PlanetRenderer {
   setOceanVisible(enabled: boolean): void {
     this.oceanVisible = enabled;
     if (this.ocean) this.ocean.visible = enabled;
+  }
+
+  resourceGeometryBytes(): Readonly<{ terrainGeometryBytes: number; oceanGeometryBytes: number; geometryCount: number }> {
+    const terrainGeometryBytes = [...this.chunks.values()]
+      .reduce((sum, chunk) => sum + geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry), 0);
+    const oceanGeometryBytes = this.ocean ? geometryByteLength(this.ocean.geometry) : 0;
+    return Object.freeze({
+      terrainGeometryBytes,
+      oceanGeometryBytes,
+      geometryCount: this.chunks.size + (this.ocean ? 1 : 0),
+    });
   }
 
   /**
@@ -524,14 +536,4 @@ export class PlanetRenderer {
     this.oceanMaterial?.dispose();
     if (this.ocean) this.ocean.geometry.dispose();
   }
-}
-
-function geometryByteLength(geometry: THREE.BufferGeometry): number {
-  let bytes = 0;
-  for (const attribute of Object.values(geometry.attributes)) {
-    bytes += attribute.array.byteLength;
-  }
-  const index = geometry.getIndex();
-  if (index) bytes += index.array.byteLength;
-  return bytes;
 }

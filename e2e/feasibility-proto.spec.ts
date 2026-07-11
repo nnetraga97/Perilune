@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 interface FeasibilityState {
+  runNonce: string;
   mode: string;
   tier: string;
   reductionStage: number;
@@ -17,6 +18,7 @@ interface FeasibilityState {
     backend: string;
     drawingBufferWidth: number;
     drawingBufferHeight: number;
+    drawingBufferSamples: number;
     gpuTimerSupported: boolean;
   };
   features: {
@@ -30,8 +32,23 @@ interface FeasibilityState {
     atmosphereSamples: number;
     transitionMeshCount: number;
     terrainCoverageGaps: number;
-    estimatedGpuBytes: number;
     profilingGroups: Record<string, boolean>;
+  };
+  resources: {
+    categories: Record<string, number>;
+    activeBodyBytes: number;
+    totalRendererBytes: number;
+    transientBytes: number;
+    uncompressedWorstCaseBytes: number;
+  };
+  transfer: {
+    bodyPackCompressedBytes: number;
+    bootCriticalBytes: number;
+    transientBytes: number;
+    manifestPackCount: number;
+    selectedPackCount: number;
+    applicationTransferBytes: number;
+    applicationEncodedBytes: number;
   };
   visitedRegimes: string[];
   journeys: Array<{
@@ -68,7 +85,10 @@ interface FeasibilityState {
     maxTriangles: number;
     transitionOverlapMs: number;
     transitionMode: string;
-    compressedDownloadBytes: number;
+    rendererGeometryCount: number;
+    rendererTextureCount: number;
+    accountedGeometryCount: number;
+    accountedTextureCount: number;
   };
 }
 
@@ -88,11 +108,13 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
     if (message.type() === 'error') errors.push(message.text());
   });
 
-  await page.goto('/?proto=feasibility&mode=smoke&tier=medium&stage=0');
+  const nonce = 'e2e-feasibility-nonce';
+  await page.goto(`/?proto=feasibility&mode=smoke&tier=medium&stage=0&nonce=${nonce}`);
   await page.waitForFunction(() => window.__FEASIBILITY__?.scene.visualScatterCount === 50_000);
 
   const initial = await page.evaluate(() => window.__FEASIBILITY__!);
   expect(initial).toMatchObject({
+    runNonce: nonce,
     mode: 'smoke',
     tier: 'medium',
     reductionStage: 0,
@@ -113,7 +135,6 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
     atmosphereSamples: 12,
     transitionMeshCount: 2,
   });
-  expect(initial.scene.estimatedGpuBytes).toBeLessThan(128 * 1024 * 1024);
   expect(initial.scene.profilingGroups).toEqual({
     terrain: true,
     atmosphere: true,
@@ -143,6 +164,7 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   const result = await page.evaluate(() => window.__FEASIBILITY__!);
   expect(errors, `console/shader errors: ${errors.join('\n')}`).toEqual([]);
   expect(result.phase).toBe('complete');
+  expect(result.runNonce).toBe(nonce);
   expect(result.visitedRegimes).toEqual(expect.arrayContaining(['orbit', 'atmosphere', 'low-flight', 'surface']));
   expect(result.journeys).toHaveLength(3);
   for (const journey of result.journeys) {
@@ -175,7 +197,37 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   expect(result.telemetry.transitionOverlapMs).toBeGreaterThan(8_900);
   expect(result.telemetry.transitionOverlapMs).toBeLessThan(9_100);
   expect(result.telemetry.transitionMode).toBe('forced-combined-fixture');
-  expect(result.telemetry.compressedDownloadBytes).toBe(0);
+  const activeCategoryNames = [
+    'terrainGeometryBytes', 'oceanGeometryBytes', 'atmosphereGeometryBytes',
+    'cloudGeometryBytes', 'cloudTextureBytes', 'scatterGeometryBytes',
+    'scatterInstanceBytes', 'physicalProxyGeometryBytes', 'physicalProxyInstanceBytes',
+    'transitionGeometryBytes', 'shadowBytes',
+  ];
+  const rendererCategoryNames = [
+    'starfieldGeometryBytes', 'drawingBufferColorBytes', 'drawingBufferDepthBytes',
+  ];
+  for (const category of [...activeCategoryNames, ...rendererCategoryNames]) {
+    expect(result.resources.categories[category], category).toBeGreaterThan(0);
+  }
+  const activeSum = activeCategoryNames.reduce((sum, name) => sum + result.resources.categories[name], 0);
+  const rendererOnlySum = rendererCategoryNames.reduce((sum, name) => sum + result.resources.categories[name], 0);
+  expect(result.resources.activeBodyBytes).toBe(activeSum);
+  expect(result.resources.totalRendererBytes).toBe(activeSum + rendererOnlySum);
+  expect(result.resources.uncompressedWorstCaseBytes)
+    .toBe(result.resources.totalRendererBytes + result.resources.transientBytes);
+  expect(result.caps.drawingBufferSamples).toBeGreaterThanOrEqual(0);
+  expect(result.telemetry.rendererGeometryCount).toBeGreaterThan(0);
+  expect(result.telemetry.rendererGeometryCount).toBeLessThanOrEqual(result.telemetry.accountedGeometryCount);
+  expect(result.telemetry.rendererTextureCount).toBeGreaterThan(0);
+  expect(result.telemetry.rendererTextureCount).toBeLessThanOrEqual(result.telemetry.accountedTextureCount);
+  expect(result.transfer.applicationTransferBytes > 0 || result.transfer.applicationEncodedBytes > 0).toBe(true);
+  expect(result.transfer).toMatchObject({
+    bodyPackCompressedBytes: 0,
+    bootCriticalBytes: 0,
+    transientBytes: 0,
+    manifestPackCount: 0,
+    selectedPackCount: 0,
+  });
   const overlay = await page.evaluate(() => (
     window as unknown as { __PERF__: { transitionMs: number; drawingBufferWidth: number; drawingBufferHeight: number } }
   ).__PERF__);

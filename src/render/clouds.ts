@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { fbm3 } from '../core/noise';
 import type { Body } from '../sim/universe';
 import type { Quat } from '../core/quat';
+import { fullMipChainBytes, geometryByteLength } from './resourceAccounting';
 
 const CLOUD_AXIS = new THREE.Vector3(0, 0, 1);
 const CLOUD_BASE = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
@@ -100,6 +101,18 @@ export class CloudLayer {
     this.mesh.geometry.dispose();
     this.material.map?.dispose();
     this.material.dispose();
+  }
+
+  resourceStats(): Readonly<{ geometryBytes: number; textureBytes: number }> {
+    const image = this.material.map?.image as HTMLCanvasElement | undefined;
+    return Object.freeze({
+      geometryBytes: geometryByteLength(this.mesh.geometry),
+      textureBytes: image ? fullMipChainBytes({
+        width: image.width,
+        height: image.height,
+        bytesPerPixel: 4,
+      }) : 0,
+    });
   }
 }
 

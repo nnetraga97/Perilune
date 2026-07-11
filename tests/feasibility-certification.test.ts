@@ -40,6 +40,7 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
   const effectiveStage = tier === 'low' ? Math.max(4, requestedStage) : requestedStage;
   return {
     mode: 'reference',
+    runNonce: 'test-run-nonce',
     tier,
     requestedReductionStage: requestedStage,
     effectiveReductionStage: effectiveStage,
@@ -48,6 +49,7 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
     elapsedSeconds: 932,
     caps: {
       backend: 'webgl2', drawingBufferWidth: 1920, drawingBufferHeight: 1080,
+      drawingBufferSamples: 4,
       gpuTimerSupported: true, renderer: browser.webglRenderer, vendor: browser.webglVendor,
     },
     features: {
@@ -69,12 +71,28 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
       terrainEnabled: true,
       transitionMeshCount: 2,
       terrainCoverageGaps: 0,
-      estimatedGpuBytes: 1,
-      estimatedRendererGpuBytes: 1,
       profilingGroups: {
         terrain: true, atmosphere: true, ocean: true, clouds: true,
         scatter: true, transition: true,
       },
+    },
+    resources: {
+      categories: {
+        terrainGeometryBytes: 10, oceanGeometryBytes: 10, atmosphereGeometryBytes: 10,
+        cloudGeometryBytes: 10, cloudTextureBytes: 10, scatterGeometryBytes: 10,
+        scatterInstanceBytes: 10, physicalProxyGeometryBytes: 10,
+        physicalProxyInstanceBytes: 10, transitionGeometryBytes: 10, shadowBytes: 10,
+        starfieldGeometryBytes: 10, drawingBufferColorBytes: 10, drawingBufferDepthBytes: 10,
+      },
+      activeBodyBytes: 110,
+      totalRendererBytes: 140,
+      transientBytes: 0,
+      uncompressedWorstCaseBytes: 140,
+    },
+    transfer: {
+      bodyPackCompressedBytes: 0, bootCriticalBytes: 0, transientBytes: 0,
+      manifestPackCount: 0, selectedPackCount: 0,
+      applicationTransferBytes: 100, applicationEncodedBytes: 80,
     },
     visitedRegimes: ['orbit', 'atmosphere', 'low-flight', 'surface'],
     journeys: [0, 1, 2].map(() => ({
@@ -90,14 +108,18 @@ function state(tier: 'medium' | 'low' = 'medium', requestedStage = 0) {
       supported: true, pending: 0, saturatedBegins: 0,
       validSamples: 288, disjointSamples: 3, invalidSamples: 0,
     },
-    telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 },
+    telemetry: {
+      transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000,
+      rendererGeometryCount: 10, rendererTextureCount: 2,
+      accountedGeometryCount: 10, accountedTextureCount: 2,
+    },
   };
 }
 
 function input(overrides: Record<string, unknown> = {}): Parameters<typeof assessCertificationEligibility>[0] {
   return {
     mode: 'reference', tier: 'medium', reference: 'm3-max-30c', metadata,
-    disabled: '', requestedStage: 0, host, browser, state: state(), runtimeErrors: [],
+    disabled: '', requestedStage: 0, runNonce: 'test-run-nonce', host, browser, state: state(), runtimeErrors: [],
     ...overrides,
   } as Parameters<typeof assessCertificationEligibility>[0];
 }
@@ -145,12 +167,39 @@ describe('feasibility certification integrity', () => {
   });
 
   it('rejects mode, tier, stage, protocol, duration, and drawing-buffer mismatches', () => {
+    expectReason({ runNonce: 'other' }, 'state run nonce must match');
     expectReason({ state: { ...state(), mode: 'smoke' } }, 'state mode must match CLI mode');
     expectReason({ state: { ...state(), tier: 'low' } }, 'state tier must match CLI tier');
     expectReason({ state: { ...state(), requestedReductionStage: 1 } }, 'state requested stage must match CLI stage');
     expectReason({ state: { ...state(), protocol: { ...state().protocol, warmupSeconds: 29 } } }, 'protocol must declare warmup30/journey300 x3/drain2');
     expectReason({ state: { ...state(), elapsedSeconds: 931.99 } }, 'elapsed time must be at least 932 seconds');
     expectReason({ state: { ...state(), caps: { ...state().caps, drawingBufferWidth: 1919 } } }, 'drawing buffer must be exactly 1920x1080');
+    expectReason({ state: { ...state(), caps: { ...state().caps, drawingBufferSamples: -1 } } }, 'drawing buffer sample metadata is required');
+  });
+
+  it('rejects inconsistent resource categories, renderer counts, and transfer derivation', () => {
+    expectReason({
+      state: { ...state(), resources: { ...state().resources, activeBodyBytes: 109 } },
+    }, 'active-body resource categories must sum');
+    expectReason({
+      state: { ...state(), telemetry: { ...state().telemetry, rendererGeometryCount: 11 } },
+    }, 'renderer geometry count must be nonzero');
+    expectReason({
+      state: { ...state(), transfer: { ...state().transfer, bodyPackCompressedBytes: -1 } },
+    }, 'transfer derivation fields are required');
+  });
+
+  it('enforces resource and Medium transfer ceilings without estimated GPU fields', () => {
+    const overActive = { ...state().resources, activeBodyBytes: 128 * 1024 * 1024 + 1 };
+    overActive.categories = { ...overActive.categories, terrainGeometryBytes: overActive.categories.terrainGeometryBytes + 128 * 1024 * 1024 + 1 - 110 };
+    expect(buildCertificationGates({ ...state(), resources: overActive }, 'medium')
+      .find((gate) => gate.name === 'activeBodyBytes')?.pass).toBe(false);
+    expect(buildCertificationGates({
+      ...state(), transfer: { ...state().transfer, bootCriticalBytes: 12 * 1024 * 1024 + 1 },
+    }, 'medium').find((gate) => gate.name === 'bootCriticalBytes')?.pass).toBe(false);
+    expect(buildCertificationGates({
+      ...state(), transfer: { ...state().transfer, bodyPackCompressedBytes: 32 * 1024 * 1024 + 1 },
+    }, 'medium').find((gate) => gate.name === 'bodyPackCompressedBytes')?.pass).toBe(false);
   });
 
   it('rejects missing journeys, regimes, groups, expected features, and scene counts', () => {
@@ -166,7 +215,7 @@ describe('feasibility certification integrity', () => {
   it('rejects weak transition overlap and runtime errors', () => {
     expectReason({ state: { ...state(), telemetry: { transitionMode: 'production-clock', transitionOverlapMs: 900_000 } } }, 'transition mode must be forced-combined-fixture');
     expect(assessCertificationEligibility(input({
-      state: { ...state(), telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 - 1000 / 60 } },
+      state: { ...state(), telemetry: { ...state().telemetry, transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 - 1000 / 60 } },
     }))).toMatchObject({ eligible: true });
     expectReason({
       state: { ...state(), telemetry: { transitionMode: 'forced-combined-fixture', transitionOverlapMs: 900_000 - 1000 / 60 - 0.001 } },
