@@ -18,6 +18,12 @@ export interface PerfSnapshot {
   chunks: number;
   heapMB: number;
   frames: number;
+  drawingBufferWidth: number;
+  drawingBufferHeight: number;
+  estimatedGpuMB: number;
+  scatterInstances: number;
+  physicalProxies: number;
+  disjointQueries: number;
 }
 
 export class PerfOverlay {
@@ -82,6 +88,7 @@ export class PerfOverlay {
         `frame      ${snap.frameMs.toFixed(2)} ms (p95 ${snap.frameP95.toFixed(1)}, p99 ${snap.frameP99.toFixed(1)})\n` +
         `sim        ${snap.simMs.toFixed(2)} ms\n` +
         `render     ${snap.renderMs.toFixed(2)} ms\n` +
+        `buffer     ${snap.drawingBufferWidth}×${snap.drawingBufferHeight}\n` +
         `draws      ${snap.drawCalls}\n` +
         `tris       ${(snap.triangles / 1000).toFixed(0)}k\n` +
         `heap       ${snap.heapMB.toFixed(0)} MB`;
@@ -110,6 +117,12 @@ export class PerfOverlay {
       chunks: Number(this.extra['chunks'] ?? 0),
       heapMB: mem ? mem.usedJSHeapSize / 1048576 : 0,
       frames: this.frames,
+      drawingBufferWidth: renderer?.getDrawingBufferSize(new THREE.Vector2()).x ?? 0,
+      drawingBufferHeight: renderer?.getDrawingBufferSize(new THREE.Vector2()).y ?? 0,
+      estimatedGpuMB: Number(this.extra['gpu MB'] ?? 0),
+      scatterInstances: Number(this.extra['scatter'] ?? 0),
+      physicalProxies: Number(this.extra['proxies'] ?? 0),
+      disjointQueries: Number(this.extra['disjoint'] ?? 0),
     };
   }
 }

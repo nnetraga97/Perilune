@@ -25,6 +25,18 @@ export interface FeasibilityFixtureSpec {
   readonly terrainEnabled: true;
 }
 
+export type ProfilingGroup = 'terrain' | 'atmosphere' | 'ocean' | 'clouds' | 'scatter' | 'transition';
+export type ProfilingGroups = Readonly<Record<ProfilingGroup, boolean>>;
+
+export const DEFAULT_PROFILING_GROUPS: ProfilingGroups = Object.freeze({
+  terrain: true,
+  atmosphere: true,
+  ocean: true,
+  clouds: true,
+  scatter: true,
+  transition: true,
+});
+
 interface Disposable {
   dispose(): void;
 }
@@ -117,6 +129,8 @@ export interface FeasibilitySceneStats extends FeasibilityFixtureSpec {
   readonly terrainScheduleMs: number;
   readonly terrainInstallMs: number;
   readonly estimatedGpuBytes: number;
+  readonly estimatedRendererGpuBytes: number;
+  readonly profilingGroups: ProfilingGroups;
 }
 
 /** Combined performance fixture. It is deliberately not the Phase 3 renderer API. */
@@ -133,6 +147,7 @@ export class FeasibilityScene {
   private readonly patchOrigin: Vec3;
   private features: Readonly<FeasibilityFeatureConfig>;
   private readonly seed: number;
+  private profilingGroups: ProfilingGroups = DEFAULT_PROFILING_GROUPS;
 
   constructor(body: Body, features: Readonly<FeasibilityFeatureConfig>) {
     if (body.def.surfaceKind !== 'solid') throw new Error('Feasibility scene requires a solid body');
@@ -176,6 +191,15 @@ export class FeasibilityScene {
     this.planet.setOceanGlitter(features.oceanGlitter);
   }
 
+  setProfilingGroup(group: ProfilingGroup, enabled: boolean): void {
+    this.profilingGroups = Object.freeze({ ...this.profilingGroups, [group]: enabled });
+    this.planet.setTerrainVisible(this.profilingGroups.terrain);
+    this.planet.setOceanVisible(this.profilingGroups.ocean);
+    this.atmosphere.visible = this.profilingGroups.atmosphere;
+    this.scatter.visible = this.profilingGroups.scatter;
+    for (const mesh of this.transitionMeshes) mesh.visible = this.profilingGroups.transition;
+  }
+
   update(
     camBodyFixed: Readonly<Vec3>,
     orientation: Readonly<Quat>,
@@ -186,7 +210,9 @@ export class FeasibilityScene {
     this.planet.update(camBodyFixed, orientation, originWorld);
     this.atmosphere.position.set(originWorld.x, originWorld.y, originWorld.z);
     for (const cloud of this.clouds) cloud.update(originWorld, orientation, time, cameraAltitude);
-    this.clouds[1].mesh.visible = this.features.secondCloudScale && this.clouds[1].mesh.visible;
+    this.clouds[0].mesh.visible = this.profilingGroups.clouds && this.clouds[0].mesh.visible;
+    this.clouds[1].mesh.visible = this.profilingGroups.clouds &&
+      this.features.secondCloudScale && this.clouds[1].mesh.visible;
 
     orientation.rotate(this.patchOrigin, ROTATED_PATCH_ORIGIN);
     this.localRoot.position.set(
@@ -200,6 +226,14 @@ export class FeasibilityScene {
   stats(): Readonly<FeasibilitySceneStats> {
     const fixture = feasibilityFixtureSpec(this.features, this.seed);
     const instanceBytes = this.scatter.instanceMatrix.array.byteLength + this.proxies.instanceMatrix.array.byteLength;
+    const fixtureGeometryBytes = geometryByteLength(this.atmosphere.geometry) +
+      geometryByteLength(this.scatter.geometry) +
+      geometryByteLength(this.proxies.geometry) +
+      geometryByteLength(this.transitionMeshes[0].geometry);
+    const cloudTextureBytes = 2 * 512 * 256 * 4;
+    const activeBodyBytes = this.planet.stats.geometryBytes + instanceBytes + fixtureGeometryBytes + cloudTextureBytes;
+    const shadowMapBytes = 2048 * 2048 * 4;
+    const drawingBufferBytes = 1920 * 1080 * 8;
     return Object.freeze({
       ...fixture,
       terrainChunks: this.planet.stats.chunks,
@@ -207,7 +241,9 @@ export class FeasibilityScene {
       terrainCoverageGaps: this.planet.stats.coverageGaps,
       terrainScheduleMs: this.planet.stats.scheduleMs,
       terrainInstallMs: this.planet.stats.installMs,
-      estimatedGpuBytes: this.planet.stats.geometryBytes + instanceBytes,
+      estimatedGpuBytes: activeBodyBytes,
+      estimatedRendererGpuBytes: activeBodyBytes + shadowMapBytes + drawingBufferBytes,
+      profilingGroups: this.profilingGroups,
     });
   }
 
@@ -365,4 +401,12 @@ export class FeasibilityScene {
     child.renderOrder = 1;
     return [parent, child];
   }
+}
+
+function geometryByteLength(geometry: THREE.BufferGeometry): number {
+  let bytes = 0;
+  for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength;
+  const index = geometry.getIndex();
+  if (index) bytes += index.array.byteLength;
+  return bytes;
 }

@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "bench": "vitest bench --run",
     "validate:content": "node scripts/validate-content.mjs",
-    "compile:planet-assets": "tsx scripts/compile-planet-assets.ts"
+    "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
+    "profile:feasibility": "node scripts/profile-feasibility.mjs"
   },
   "dependencies": {
     "three": "^0.170.0"

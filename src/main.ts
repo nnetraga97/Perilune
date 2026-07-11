@@ -20,6 +20,11 @@ async function boot(): Promise<void> {
     await runTerrainProto();
     return;
   }
+  if (proto === 'feasibility') {
+    const { runFeasibilityProto } = await import('./proto/feasibilityProto');
+    await runFeasibilityProto();
+    return;
+  }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
   await startGame();

@@ -147,6 +147,8 @@ export class PlanetRenderer {
   private readonly palette: { low: THREE.Color; mid: THREE.Color; high: THREE.Color; ocean: THREE.Color };
   private ocean: THREE.Mesh | null = null;
   private shadowReceiver = false;
+  private terrainVisible = true;
+  private oceanVisible = true;
   private geometryBytes = 0;
   /** Stats for the perf overlay. */
   stats = {
@@ -187,6 +189,7 @@ export class PlanetRenderer {
       this.ocean = new THREE.Mesh(geo, this.oceanMaterial);
       this.ocean.scale.setScalar(body.radius);
       this.group.add(this.ocean);
+      this.geometryBytes += geometryByteLength(geo);
     }
   }
 
@@ -204,6 +207,15 @@ export class PlanetRenderer {
     this.oceanMaterial.shininess = enabled ? 90 : 12;
     this.oceanMaterial.specular.set(enabled ? '#8fb8cc' : '#101820');
     this.oceanMaterial.needsUpdate = true;
+  }
+
+  setTerrainVisible(enabled: boolean): void {
+    this.terrainVisible = enabled;
+  }
+
+  setOceanVisible(enabled: boolean): void {
+    this.oceanVisible = enabled;
+    if (this.ocean) this.ocean.visible = enabled;
   }
 
   /**
@@ -254,7 +266,7 @@ export class PlanetRenderer {
     // Hide unneeded chunks, show wanted ones, place camera-relative.
     for (const chunk of this.chunks.values()) {
       const inUse = wanted.has(chunk.key);
-      chunk.mesh.visible = inUse;
+      chunk.mesh.visible = inUse && this.terrainVisible;
       if (inUse) {
         chunk.lastUsed = this.frame;
         orientation.rotate(chunk.origin, _rotatedOrigin);
@@ -269,13 +281,14 @@ export class PlanetRenderer {
           orientation.z,
           orientation.w,
         );
-        this.stats.visible++;
+        if (this.terrainVisible) this.stats.visible++;
         const geo = chunk.mesh.geometry as THREE.BufferGeometry;
         const idx = geo.getIndex();
         this.stats.triangles += idx ? idx.count / 3 : 0;
       }
     }
     if (this.ocean) {
+      this.ocean.visible = this.oceanVisible;
       this.ocean.position.set(originWorld.x, originWorld.y, originWorld.z);
       this.ocean.quaternion.set(
         orientation.x,
