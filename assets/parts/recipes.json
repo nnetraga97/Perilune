@@ -74,6 +74,80 @@
       },
       "plumeAnchors": [],
       "animationPolicy": "none"
+    },
+    {
+      "assetId": "apollo-colt-engine",
+      "partId": "eng-colt",
+      "sourceIds": [
+        "nasa-apollo-lm"
+      ],
+      "authoringPath": "authoring/apollo-colt-engine.glb",
+      "outputPath": "generated/apollo-colt-engine.glb",
+      "triangleLimit": 2000,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.398, -0.230, -0.398],
+        "max": [0.398, 0.230, 0.398]
+      },
+      "plumeAnchors": [
+        { "position": [0, -0.225, 0], "rotation": [0, 0, 0, 1], "scale": 1 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "shuttle-mule-engine",
+      "partId": "eng-mule",
+      "sourceIds": [
+        "nasa-shuttle-engines"
+      ],
+      "authoringPath": "authoring/shuttle-mule-engine.glb",
+      "outputPath": "generated/shuttle-mule-engine.glb",
+      "triangleLimit": 6000,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.275, -0.816, -1.275],
+        "max": [1.275, 0.816, 1.275]
+      },
+      "plumeAnchors": [
+        { "position": [-0.55, -0.80, 0.32], "rotation": [0, 0, 0, 1], "scale": 0.58 },
+        { "position": [0.55, -0.80, 0.32], "rotation": [0, 0, 0, 1], "scale": 0.58 },
+        { "position": [0, -0.80, -0.55], "rotation": [0, 0, 0, 1], "scale": 0.58 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "shuttle-pl400-tank",
+      "partId": "tank-s4",
+      "sourceIds": [
+        "nasa-shuttle-external-tank"
+      ],
+      "authoringPath": "authoring/shuttle-pl400-tank.glb",
+      "outputPath": "generated/shuttle-pl400-tank.glb",
+      "triangleLimit": 4500,
+      "textureMaxDimension": 1024,
+      "visualBounds": {
+        "min": [-0.612, -1.836, -0.612],
+        "max": [0.612, 1.836, 0.612]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "orion-homecoming-housing",
+      "partId": "chute-main",
+      "sourceIds": [
+        "nasa-orion-capsule"
+      ],
+      "authoringPath": "authoring/orion-homecoming-housing.glb",
+      "outputPath": "generated/orion-homecoming-housing.glb",
+      "triangleLimit": 1500,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.306, -0.179, -0.306],
+        "max": [0.306, 0.179, 0.306]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
     }
   ]
 }

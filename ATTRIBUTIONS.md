@@ -44,8 +44,11 @@ implementations here are original code.
 
 ## NASA part model source assets
 
-- **Orion Capsule** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/orion-capsule/
+- **Orion Capsule** — NASA source geometry for the pod and visual reference for Perilune's custom closed forward-bay housing; modified by Perilune. https://science.nasa.gov/3d-resources/orion-capsule/
 - **Viking Lander leg** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/viking-lander-2/
 - **Viking Lander foot** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/viking-lander-2/
 - **TDRS-C left antenna** — NASA/Ames Research Center source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/tracking-and-data-relay-satellites-tdrs-c/
 - **Mars 2020 five-inch wheel** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/mars-2020-5-inch-wheel/
+- **Apollo Lunar Module** — NASA/Michael D. Carbajal source geometry; central descent-engine bell isolated and modified by Perilune. https://science.nasa.gov/3d-resources/apollo-lunar-module/
+- **Space Shuttle (D) engine** — NASA/Johnson Space Center source geometry; modified and arranged as an unmarked three-engine assembly by Perilune. https://science.nasa.gov/3d-resources/space-shuttle-d/
+- **Space Shuttle External Tank** — NASA/Johnson Space Center source geometry; straight barrel, feedline, seam, and bracket geometry cropped and modified by Perilune. https://science.nasa.gov/3d-resources/space-shuttle-parts/
