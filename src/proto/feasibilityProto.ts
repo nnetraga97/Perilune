@@ -136,7 +136,24 @@ function regimeAt(progress: number): { regime: CameraRegime; local: number } {
   return { regime: regimes[index], local: scaled - index };
 }
 
-/** Regimes traversed by a wall-clock interval, including those skipped by a long rendered frame. */
+/**
+ * Upper bound on how far the measurement protocol may advance per rendered
+ * frame. Software renderers (CI runs on SwiftShader) stall for whole seconds
+ * on first-use shader compilation, so an unclamped wall clock lets a single
+ * frame leap across an entire journey window and leave it with one sample.
+ * Clamping guarantees a journey of J seconds spans at least
+ * J * 1000 / MAX_PROTOCOL_STEP_MS rendered frames; frames faster than the
+ * clamp advance the protocol in real time, so capable hardware is unaffected.
+ */
+export const MAX_PROTOCOL_STEP_MS = 100;
+
+/** Protocol-clock advance for one rendered frame, in milliseconds. */
+export function protocolStepMs(frameMs: number): number {
+  if (!Number.isFinite(frameMs)) return MAX_PROTOCOL_STEP_MS;
+  return Math.min(Math.max(0, frameMs), MAX_PROTOCOL_STEP_MS);
+}
+
+/** Regimes traversed by a protocol-clock interval, including those skipped by a long rendered frame. */
 export function cameraRegimesCrossed(
   previousElapsed: number,
   currentElapsed: number,
@@ -275,6 +292,9 @@ export async function runFeasibilityProto(): Promise<void> {
   let maxTriangles = 0;
   let transitionOverlapMs = 0;
   let previousJourneyElapsed = 0;
+  // The protocol clock: wall time advanced by at most MAX_PROTOCOL_STEP_MS per
+  // frame, so phases always contain enough rendered frames to summarize.
+  let protocolElapsedSeconds = 0;
 
   const camBodyFixed = new Vec3();
   const camInertial = new Vec3();
@@ -362,23 +382,24 @@ export async function runFeasibilityProto(): Promise<void> {
     }
     features = Object.freeze({ ...features, [feature]: enabled });
     fixture.setFeatures(features);
-    publish((performance.now() - startedAt) / 1000);
+    publish(protocolElapsedSeconds);
   };
   window.__SET_FEASIBILITY_GROUP__ = (group, enabled) => {
     if (!profilingGroupNames.includes(group as ProfilingGroup)) {
       throw new Error(`Unsupported feasibility profiling group ${group}`);
     }
     fixture.setProfilingGroup(group as ProfilingGroup, enabled);
-    publish((performance.now() - startedAt) / 1000);
+    publish(protocolElapsedSeconds);
   };
 
   const startedAt = performance.now();
   let lastFrameAt = startedAt;
   const frame = () => {
     const now = performance.now();
-    const elapsedSeconds = (now - startedAt) / 1000;
     const frameMs = now - lastFrameAt;
     lastFrameAt = now;
+    protocolElapsedSeconds += protocolStepMs(frameMs) / 1000;
+    const elapsedSeconds = protocolElapsedSeconds;
 
     const journeyElapsed = elapsedSeconds - warmupSeconds;
     if (journeyElapsed < 0) {
@@ -467,7 +488,7 @@ export async function runFeasibilityProto(): Promise<void> {
     maxDrawCalls = Math.max(maxDrawCalls, drawCalls);
     maxTriangles = Math.max(maxTriangles, triangles);
     if (phase === 'journey' && fixtureStats.profilingGroups.transition) {
-      transitionOverlapMs += frameMs;
+      transitionOverlapMs += protocolStepMs(frameMs);
     }
     if (phase === 'journey') gpuTimer.end();
     perf.endRender(submissionStart);

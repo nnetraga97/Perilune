@@ -160,7 +160,9 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   expect(afterToggle.scene.visualScatterCount).toBe(50_000);
   await page.evaluate(() => window.__SET_FEASIBILITY_FEATURE__?.('secondCloudScale', true));
 
-  await page.waitForFunction(() => window.__FEASIBILITY_DONE__ === true, undefined, { timeout: 60_000 });
+  // The harness advances its protocol clock at most 100ms per rendered frame,
+  // so software renderers stretch the run's wall time instead of losing samples.
+  await page.waitForFunction(() => window.__FEASIBILITY_DONE__ === true, undefined, { timeout: 150_000 });
   const result = await page.evaluate(() => window.__FEASIBILITY__!);
   expect(errors, `console/shader errors: ${errors.join('\n')}`).toEqual([]);
   expect(result.phase).toBe('complete');

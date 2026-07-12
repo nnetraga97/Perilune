@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reductionStage } from '../src/proto/feasibilityMetrics';
-import { cameraRegimesCrossed } from '../src/proto/feasibilityProto';
+import { MAX_PROTOCOL_STEP_MS, cameraRegimesCrossed, protocolStepMs } from '../src/proto/feasibilityProto';
 import { categorizeResources } from '../src/render/resourceAccounting';
 import {
   DisposableBag,
@@ -24,6 +24,19 @@ describe('feasibility scene fixture', () => {
       'orbit',
       'atmosphere',
     ]);
+  });
+
+  it('clamps the protocol clock so a stalled frame cannot skip a journey', () => {
+    expect(protocolStepMs(16.7)).toBeCloseTo(16.7);
+    expect(protocolStepMs(MAX_PROTOCOL_STEP_MS)).toBe(MAX_PROTOCOL_STEP_MS);
+    expect(protocolStepMs(12_000)).toBe(MAX_PROTOCOL_STEP_MS);
+    expect(protocolStepMs(-5)).toBe(0);
+    expect(protocolStepMs(Number.NaN)).toBe(MAX_PROTOCOL_STEP_MS);
+
+    // The smoke-mode e2e journey (3s) demands more than 20 samples; the clamp
+    // must force at least that many rendered frames per journey window.
+    const smokeJourneyMs = 3_000;
+    expect(Math.ceil(smokeJourneyMs / MAX_PROTOCOL_STEP_MS)).toBeGreaterThan(20);
   });
 
   it('generates deterministic visual scatter records', () => {
