@@ -6,6 +6,7 @@
   "gltfTransformCliVersion": "4.3.0",
   "gltfTransformCoreVersion": "4.3.0",
   "gltfTransformExtensionsVersion": "4.3.0",
+  "gltfTransformFunctionsVersion": "4.3.0",
   "draco3dGltfVersion": "1.5.7",
   "meshoptimizerVersion": "1.0.1",
   "ktxSoftwareVersion": "4.4.2",

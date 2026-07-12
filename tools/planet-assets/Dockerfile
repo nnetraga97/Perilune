@@ -20,6 +20,8 @@ RUN test "$(uname -m)" = "x86_64" && ktx --version
 
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
+RUN test "$(./node_modules/.bin/gltf-transform --version)" = "4.3.0"
+RUN node -e "if (require('./node_modules/@gltf-transform/functions/package.json').version !== '4.3.0') process.exit(1)"
 
 COPY . .
 CMD ["npm", "run", "compile:planet-assets"]
