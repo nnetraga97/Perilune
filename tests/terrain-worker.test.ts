@@ -251,6 +251,44 @@ describe('TerrainChunkWorkerPool', () => {
     pool.dispose();
   });
 
+  it('replaces an errored worker within the respawn budget, then retires the pool', async () => {
+    const workers: ControlledWorker[] = [];
+    const pool = new TerrainChunkWorkerPool({
+      size: 1,
+      workerFactory: () => {
+        const worker = new ControlledWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+
+    const first = pool.submit(request({ jobKey: 'first' }));
+    workers[0].fail('boom');
+    await expect(first).rejects.toThrow('boom');
+    expect(workers[0].terminated).toBe(true);
+    expect(workers).toHaveLength(2);
+
+    const second = pool.submit(request({ jobKey: 'second' }));
+    workers[1].complete();
+    await expect(second).resolves.toMatchObject({ jobKey: 'second' });
+    expect(pool.timings().workers).toBe(1);
+
+    const third = pool.submit(request({ jobKey: 'third' }));
+    workers[1].fail('boom again');
+    await expect(third).rejects.toThrow('boom again');
+    expect(workers).toHaveLength(3);
+
+    // The bounded budget (2 per slot) is now exhausted: the next failure
+    // retires the slot instead of spawning a replacement.
+    const fourth = pool.submit(request({ jobKey: 'fourth' }));
+    workers[2].fail('dead');
+    await expect(fourth).rejects.toThrow('dead');
+    expect(workers).toHaveLength(3);
+    expect(pool.timings().workers).toBe(0);
+    await expect(pool.submit(request({ jobKey: 'fifth' }))).rejects.toThrow(/no live workers/);
+    pool.dispose();
+  });
+
   it('does not let a stale active error reject a same-key replacement generation', async () => {
     const worker = new ControlledWorker();
     const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
