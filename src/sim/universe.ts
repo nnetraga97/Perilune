@@ -44,6 +44,8 @@ export interface TerrainDef {
   colorOcean?: string;
 }
 
+export type SurfaceKind = 'solid' | 'gas' | 'star';
+
 export interface BodyDef {
   id: string;
   name: string;
@@ -56,6 +58,14 @@ export interface BodyDef {
   rotationPeriod: number;
   /** Axial tilt (rad). */
   axialTilt: number;
+  /** Physical surface model; never inferred from terrain amplitude. */
+  surfaceKind: SurfaceKind;
+  /** Immutable terrain-recipe schema version assigned by content. */
+  terrainRecipeVersion: number;
+  /** Gas-body terminal pressure; absent on solid/star bodies. */
+  terminalPressurePa?: number;
+  /** Gas-body terminal depth below reference radius. */
+  terminalDepthMeters?: number;
   atmosphere?: AtmosphereDef;
   terrain: TerrainDef;
   /** Orbit around parent (absent for the root star). */
@@ -127,15 +137,17 @@ export class Body {
   /** Atmospheric pressure (Pa) at altitude above sea level. */
   pressureAt(altitude: number): number {
     const atm = this.def.atmosphere;
-    if (!atm || altitude >= atm.height || altitude < -1000) return 0;
-    return atm.seaLevelPressure * Math.exp(-Math.max(0, altitude) / atm.scaleHeight);
+    if (!atm || altitude >= atm.height) return 0;
+    const modelAltitude = this.def.surfaceKind === 'gas' ? altitude : Math.max(0, altitude);
+    return atm.seaLevelPressure * Math.exp(-modelAltitude / atm.scaleHeight);
   }
 
   /** Atmospheric density (kg/m^3) at altitude. */
   densityAt(altitude: number): number {
     const atm = this.def.atmosphere;
     if (!atm || altitude >= atm.height) return 0;
-    return atm.seaLevelDensity * Math.exp(-Math.max(0, altitude) / atm.scaleHeight);
+    const modelAltitude = this.def.surfaceKind === 'gas' ? altitude : Math.max(0, altitude);
+    return atm.seaLevelDensity * Math.exp(-modelAltitude / atm.scaleHeight);
   }
 
   /** Speed of sound (m/s) at altitude — simple model. */

@@ -9,6 +9,7 @@
 import { Vec3 } from '../core/vec3';
 import type { GameState, GameVessel } from './state';
 import { defOf } from './vessel';
+import { bodyFixedToInertial } from './bodyOrientation';
 
 export interface GroundStation {
   id: string;
@@ -102,14 +103,7 @@ export function evaluateComms(game: GameState, target: GameVessel): CommsStatus 
   // Ground stations (rotate with their body).
   for (const gs of GROUND_STATIONS) {
     const body = game.universe.get(gs.bodyId);
-    const spin = body.rotationAngle(game.time);
-    const cs = Math.cos(spin);
-    const ss = Math.sin(spin);
-    const pos = new Vec3(
-      gs.dir.x * cs - gs.dir.y * ss,
-      gs.dir.x * ss + gs.dir.y * cs,
-      gs.dir.z,
-    ).scale(body.radius + 500);
+    const pos = bodyFixedToInertial(body, game.time, gs.dir, new Vec3()).scale(body.radius + 500);
     game.universe.absolutePosition(body, game.time, _sp);
     pos.add(_sp);
     nodes.push({ id: gs.id, name: gs.name, pos, range: gs.range, isGround: true });

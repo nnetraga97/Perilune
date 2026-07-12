@@ -13,8 +13,25 @@ import type { Vec3Like } from '../core/vec3';
 import type { QuatLike } from '../core/quat';
 import type { Craft, Stage, PartInstance } from '../sim/vessel';
 import type { SasMode, Situation } from '../sim/flight';
+import type { AlarmKind } from '../sim/state';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 5;
+
+export interface SavedAlarm {
+  id: string;
+  time: number;
+  label: string;
+  kind: AlarmKind;
+}
+
+export interface SavedSurfacePose {
+  bodyId: string;
+  recipeHash: string;
+  scatterRecipeHash: string;
+  directionBF: Vec3Like;
+  attitudeBF: QuatLike;
+  contactOffset: number;
+}
 
 export interface SavedPart {
   key: number;
@@ -68,6 +85,8 @@ export interface SavedVessel {
   } | null;
   railsLandedPos: Vec3Like | null;
   railsLandedAtt: QuatLike | null;
+  /** Body-fixed landed pose and terrain compatibility contract (v4). */
+  surfacePose: SavedSurfacePose | null;
 }
 
 export interface SaveGame {
@@ -83,7 +102,11 @@ export interface SaveGame {
   flags: Record<string, boolean>;
   /** ISRU state: bodies surveyed for resources (added in v2). */
   isru?: { scanned: string[] };
+  /** Mission alarms (added in v3). */
+  alarms: SavedAlarm[];
 }
+
+const ALARM_KINDS: ReadonlySet<AlarmKind> = new Set(['custom', 'transfer', 'maneuver', 'entry']);
 
 export function validateSave(raw: unknown): raw is SaveGame {
   if (typeof raw !== 'object' || raw === null) return false;
@@ -91,6 +114,15 @@ export function validateSave(raw: unknown): raw is SaveGame {
   if (typeof s.saveVersion !== 'number') return false;
   if (typeof s.time !== 'number' || !Number.isFinite(s.time)) return false;
   if (!Array.isArray(s.vessels)) return false;
+  if ((s.saveVersion ?? 0) >= 3) {
+    if (!Array.isArray(s.alarms)) return false;
+    for (const alarm of s.alarms) {
+      if (typeof alarm.id !== 'string' || !alarm.id) return false;
+      if (!Number.isFinite(alarm.time)) return false;
+      if (typeof alarm.label !== 'string' || !alarm.label.trim()) return false;
+      if (!ALARM_KINDS.has(alarm.kind)) return false;
+    }
+  }
   for (const v of s.vessels) {
     if (typeof v.id !== 'string' || typeof v.bodyId !== 'string') return false;
     if (!v.craft || !Array.isArray(v.craft.parts)) return false;
@@ -99,6 +131,18 @@ export function validateSave(raw: unknown): raw is SaveGame {
       if (!p.position || !Number.isFinite(p.position.x)) return false;
     }
     if (!v.pos || !Number.isFinite(v.pos.x) || !Number.isFinite(v.vel?.x ?? NaN)) return false;
+    if ((s.saveVersion ?? 0) >= 4) {
+      if (v.surfacePose !== null && typeof v.surfacePose !== 'object') return false;
+      if (v.surfacePose) {
+        const pose = v.surfacePose;
+        if (pose.bodyId !== v.bodyId) return false;
+        if (!/^[a-f0-9]{32}$/.test(pose.recipeHash)) return false;
+        if (!/^[a-f0-9]{32}$/.test(pose.scatterRecipeHash)) return false;
+        if (!pose.directionBF || !Number.isFinite(pose.directionBF.x)) return false;
+        if (!pose.attitudeBF || !Number.isFinite(pose.attitudeBF.w)) return false;
+        if (!Number.isFinite(pose.contactOffset)) return false;
+      }
+    }
   }
   return true;
 }
@@ -114,6 +158,22 @@ export function migrateSave(raw: SaveGame): SaveGame {
   // Migrations chain version by version.
   if (save.saveVersion === 1) {
     save = { ...save, saveVersion: 2, isru: { scanned: [] } };
+  }
+  if (save.saveVersion === 2) {
+    save = { ...save, saveVersion: 3, alarms: [] };
+  }
+  if (save.saveVersion === 3) {
+    save = {
+      ...save,
+      saveVersion: 4,
+      vessels: save.vessels.map((vessel) => ({ ...vessel, surfacePose: null })),
+    };
+  }
+  if (save.saveVersion === 4) {
+    // Structural bump to version 5. Version-4 surface poses stored the physical
+    // scatter hash as an alias of the terrain hash; restoreGame rewrites those
+    // aliases to each body's declared scatter recipe once the universe is known.
+    save = { ...save, saveVersion: 5 };
   }
   if (save.saveVersion !== SAVE_VERSION) {
     throw new Error(`No migration path from save version ${save.saveVersion}.`);

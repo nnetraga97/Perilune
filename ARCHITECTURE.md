@@ -30,13 +30,16 @@ thousands of perturbed bodies) blows a budget in profiling.
 **Consequences.** Hot loops must stay allocation-free (out-parameter style in
 `src/core/`), and CI benchmarks (`npm run bench`) guard against regression.
 
-## ADR-002: Renderer — Three.js on WebGL2, WebGPU as progressive upgrade
+## ADR-002: Renderer — Three.js on required WebGL2
 
-WebGL2 is the baseline because it is what every target browser (and our
-headless CI Chromium) actually runs. The scene layer is isolated behind
-`src/render/`; Three.js's WebGPURenderer can be adopted per-machine later
-without touching simulation or UI. Custom shaders (atmosphere, plumes,
-terrain) are written for the WebGL2 pipeline first.
+WebGL2 is a hard runtime requirement because the renderer platform depends on
+its shader, texture, and delayed timer-query contracts. Startup requests a
+WebGL2 context directly and displays `Perilune requires WebGL2` when it is not
+available; there is no WebGL1 fallback. The capability probe records fragment
+precision, compressed-texture formats, texture limits, anisotropy, and sample
+count, and selects an analytic, lookup, or limb-haze atmosphere path. WebGPU
+is neither detected nor used by the current runtime. Any future backend would
+remain isolated behind `src/render/` and require its own measured contract.
 
 ## ADR-003: Coordinates — per-SOI local frames + camera-relative rendering
 
@@ -69,14 +72,43 @@ fixed timestep accumulator (default 50 Hz); rendering interpolates between
 the last two states. Time warp switches vessels to the rails regime above
 low multipliers (atmospheric "physics warp" is capped separately).
 
+## ADR-006: Body visuals — explicit, shared, and transactional
+
+- Renderer assignment lives in `src/content/bodyVisuals.ts`, outside the
+  simulation `BodyDef`. Auren is `star`, Veyra is `terrestrial`, and the ten
+  remaining bodies retain `legacy` coverage while recording an explicit later
+  terrestrial, airless, or gas-giant target archetype.
+- `BodyMaterialDescriptor` is the common identity/palette/orientation input
+  for compact flight and MapView bodies. +Z is north and longitude is
+  `atan2(y, x)`. Simulation terrain remains the only collision-height source.
+- `BodyRendererManager` stages candidate assets, coverage, shaders, and
+  budgets while retaining the committed root. Success swaps atomically;
+  failure disposes the candidate and retains the committed renderer.
+- Veyra's terrestrial renderer consumes digest-checked Low, Medium, or High
+  albedo, normal, material, and cloud channels. Its compact identity, terrain,
+  atmosphere, independent ocean, cloud deck, and coverage transition share
+  body-fixed coordinates while `solidHeight` remains collision authority.
+- `RendererResourceLedger` admits at most one flight-scale pack. Its reported
+  bytes are pack-only and are not presented as total procedural GPU memory.
+- `StarBodyRenderer` owns the flight-scale Auren disk/corona, directional
+  light, and exposure contribution. MapView owns only its compact map light.
+- Context loss pauses draws and GPU query calls. Restoration rebuilds committed
+  renderers from descriptors; partial failure settles into a renderable
+  fallback instead of mutating simulation state.
+- MapView is deliberately pack-free. It uses compact descriptor meshes,
+  authoritative body orientation at simulation time, and a focus-to-Auren
+  light vector while preserving orbital and maneuver mechanics.
+
 ## Layer map
 
 ```
 src/core/      f64 math: vec3, quat, orbit (Kepler + universal variables)
 src/sim/       universe (bodies/SOI), vessel graph, structure, aero,
                flight integrator, clock, game state
-src/content/   data-driven definitions: star system, parts, experiments
-src/render/    Three.js scene, planet quadtree LOD, vessel meshes, effects
+src/content/   data-driven definitions: star system, explicit body visuals,
+               parts, experiments
+src/render/    WebGL2 capabilities/lifecycle, transactional body renderers,
+               checked assets, planet quadtree LOD, vessel meshes, effects
 src/ui/        DOM UI: editor, flight HUD, map view, dialogs (no framework;
                HUD updates by direct node mutation, never per-frame VDOM)
 src/save/      versioned save schema, IndexedDB persistence, migration
@@ -91,5 +123,9 @@ e2e/           Playwright end-to-end + visual + perf harness
 - **Star system:** Auren (star); Ashen, Vess, **Veyra** (home), Rusk,
   Tyran (+ Brimm, Glacia, Mote), Farfall; Veyra's moons **Palla** and Wisp
 - **Species:** the Vellans; **Agency:** the Skyward Cooperative
-- All names, bodies, parts, art (procedural), and text are original.
-  See ATTRIBUTIONS.md / LICENSES.md for third-party code (Three.js et al.).
+- All names, bodies, parts, simulation code, procedural systems, and text are
+  original. Veyra's authored albedo pack uses the public-domain Natural Earth
+  II source through deterministic reprojection, warping, recoloring, and
+  packaging. That source and any future sourced assets remain recorded in
+  `ATTRIBUTIONS.md` and `LICENSES.md`; other bodies still use their legacy
+  procedural presentation until their archetype phases ship.

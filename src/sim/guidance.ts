@@ -10,11 +10,13 @@
 import { Vec3 } from '../core/vec3';
 import type { Body } from './universe';
 import type { VesselRuntime } from './flight';
+import { surfaceVelocity } from './bodyOrientation';
 
 const _up = new Vec3();
 const _vSurf = new Vec3();
 const _east = new Vec3();
 const _horiz = new Vec3();
+const _surfaceVelocity = new Vec3();
 
 export interface AscentCommand {
   /** Target attitude direction, world frame (unit). */
@@ -42,8 +44,7 @@ export function ascentGuidance(
   _up.copy(v.pos).scale(1 / r);
 
   // Surface-relative velocity.
-  const om = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-  _vSurf.set(v.vel.x + om * v.pos.y, v.vel.y - om * v.pos.x, v.vel.z);
+  _vSurf.copy(v.vel).sub(surfaceVelocity(body, v.pos, _surfaceVelocity));
   const speed = _vSurf.length();
 
   const atmoTop = body.def.atmosphere?.height ?? 12_000;

@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import { Quat } from '../core/quat';
 import { Universe } from '../sim/universe';
 import { AUREN_SYSTEM } from '../content/system';
 import { surfaceHeight } from '../sim/terrain';
@@ -15,6 +16,7 @@ import { PlanetRenderer, PLANET_QUALITY } from '../render/planet';
 import { createRenderContext } from '../render/context';
 import { PerfOverlay } from '../ui/perfOverlay';
 import { makeStarfield } from '../render/starfield';
+import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 
 export async function runTerrainProto(): Promise<void> {
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -50,6 +52,7 @@ export async function runTerrainProto(): Promise<void> {
   // Camera path: inertial-frame position relative to Veyra's center (f64).
   const camPos = new Vec3(0, -(veyra.radius + 3.0e6), 0);
   const camBodyFixed = new Vec3();
+  const bodyQ = new Quat();
   const originWorld = new Vec3();
   const up = new THREE.Vector3();
   const lookTarget = new THREE.Vector3();
@@ -70,16 +73,13 @@ export async function runTerrainProto(): Promise<void> {
 
     // Longitude drift + descent profile (smooth exponential altitude ramp).
     const t = elapsed * 0.5; // universe time, gentle spin
-    const spin = veyra.rotationAngle(t);
     const phase = Math.min(1, elapsed / DESCENT_S);
     const startAlt = 3.0e6;
     const lon = -0.35 + phase * 0.9;
 
     // Ground-following altitude target.
     const dirI = new Vec3(Math.sin(lon), -Math.cos(lon), 0.18 * (1 - phase)).normalize();
-    const cs = Math.cos(-spin);
-    const ss = Math.sin(-spin);
-    const dirBF = new Vec3(dirI.x * cs - dirI.y * ss, dirI.x * ss + dirI.y * cs, dirI.z).normalize();
+    const dirBF = inertialToBodyFixed(veyra, t, dirI, new Vec3()).normalize();
     const groundR = veyra.radius + surfaceHeight(veyra, dirBF);
     const endAlt = 3.0;
     const alt = endAlt + (startAlt - endAlt) * Math.pow(1 - phase, 3);
@@ -87,11 +87,11 @@ export async function runTerrainProto(): Promise<void> {
     camPos.copy(dirI).scale(r);
 
     // Body-fixed camera position for LOD selection.
-    camBodyFixed.set(camPos.x * cs - camPos.y * ss, camPos.x * ss + camPos.y * cs, camPos.z);
+    inertialToBodyFixed(veyra, t, camPos, camBodyFixed);
 
     // Floating origin: camera at scene origin; planet center at -camPos.
     originWorld.set(-camPos.x, -camPos.y, -camPos.z);
-    planet.update(camBodyFixed, spin, originWorld);
+    planet.update(camBodyFixed, bodyOrientation(veyra, t, bodyQ), originWorld);
     perf.setExtra('chunks', planet.stats.visible);
     perf.setExtra('alt', `${(alt / 1000).toFixed(2)} km`);
     perf.endSim(simStart);

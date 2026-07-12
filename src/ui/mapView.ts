@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import { Quat } from '../core/quat';
 import {
   OrbitalElements,
   elementsAtTime,
@@ -16,7 +17,7 @@ import {
   TWO_PI,
 } from '../core/orbit';
 import { GameState } from '../sim/state';
-import type { Body } from '../sim/universe';
+import type { Body, Universe } from '../sim/universe';
 import {
   ManeuverNode,
   nodeDeltaV,
@@ -26,8 +27,74 @@ import {
 } from '../sim/maneuver';
 import { makeStarfield } from '../render/starfield';
 import { depositSites, DepositSite } from '../sim/resources';
+import { bodyFixedToInertial, bodyOrientation } from '../sim/bodyOrientation';
+import {
+  bodyFixedUv,
+  bodyMaterialDescriptor,
+  type BodyMaterialDescriptor,
+} from '../render/bodyMaterial';
+import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
+import { createTerrestrialGlobalMaterial } from '../render/terrestrial/globalMaterial';
 
 const SCALE = 1e-5;
+const _mapOrientation = new Quat();
+
+function paletteColor(descriptor: Readonly<BodyMaterialDescriptor>, u: number, v: number): THREE.Color {
+  if (descriptor.identity === 'star') {
+    return new THREE.Color(v > 0.25 && v < 0.75 ? descriptor.albedo.high : descriptor.albedo.mid);
+  }
+  if (descriptor.identity === 'gas') {
+    const band = Math.floor(v * 18 + Math.sin(u * Math.PI * 4) * 0.35) % 4;
+    return new THREE.Color(band === 0 ? descriptor.albedo.high : band === 1 ? descriptor.albedo.low : descriptor.albedo.mid);
+  }
+  const continental = Math.sin(u * Math.PI * 12) + Math.sin(v * Math.PI * 9) * 0.7;
+  if (descriptor.albedo.ocean && continental < -0.55) return new THREE.Color(descriptor.albedo.ocean);
+  if (v < 0.18 || v > 0.82 || continental > 1.05) return new THREE.Color(descriptor.albedo.high);
+  return new THREE.Color(continental < 0 ? descriptor.albedo.low : descriptor.albedo.mid);
+}
+
+/** Build a pack-free compact body whose local colors use the shared body-fixed UV convention. */
+export function compactBodyMesh(descriptor: Readonly<BodyMaterialDescriptor>): THREE.Mesh {
+  const geometry = new THREE.SphereGeometry(1, 32, 20);
+  const positions = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const colors = new Float32Array(positions.count * 3);
+  for (let index = 0; index < positions.count; index++) {
+    const uv = bodyFixedUv({ x: positions.getX(index), y: positions.getY(index), z: positions.getZ(index) });
+    const color = paletteColor(descriptor, uv.u, uv.v);
+    colors[index * 3] = color.r;
+    colors[index * 3 + 1] = color.g;
+    colors[index * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  installBodyFixedDirectionAttribute(geometry);
+
+  const material: THREE.Material = descriptor.identity === 'star'
+    ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
+    : descriptor.identity === 'gas'
+      ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
+      : createTerrestrialGlobalMaterial(null, descriptor);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = `compact-body:${descriptor.bodyId}`;
+  mesh.userData.bodyMaterial = {
+    bodyId: descriptor.bodyId,
+    renderer: descriptor.renderer,
+    identity: descriptor.identity,
+    albedo: { ...descriptor.albedo },
+  };
+  mesh.userData.orientationConvention = descriptor.orientationConvention;
+  return mesh;
+}
+
+export function updateCompactBodyOrientation(mesh: THREE.Object3D, body: Body, time: number): void {
+  bodyOrientation(body, time, _mapOrientation);
+  mesh.quaternion.set(_mapOrientation.x, _mapOrientation.y, _mapOrientation.z, _mapOrientation.w);
+}
+
+/** Unit vector in map coordinates from the focus-body center toward Auren. */
+export function mapStarDirection(universe: Universe, focusBody: Body, time: number, out: Vec3): Vec3 {
+  universe.relativePosition(universe.root, focusBody, time, out);
+  return out.lengthSq() > 0 ? out.normalize() : out.set(1, 0, 0);
+}
 
 function orbitLine(color: string, dashed = false): THREE.Line {
   const geo = new THREE.BufferGeometry();
@@ -104,6 +171,11 @@ export class MapView {
   private depositMarkers: THREE.Sprite[] = [];
   private depositCache = new Map<string, DepositSite[]>();
   private mkDepositSprite!: () => THREE.Sprite;
+  private readonly starfield: THREE.Points;
+  private readonly sun: THREE.DirectionalLight;
+  private readonly resizeHandler: () => void;
+  private ownedStyle: HTMLStyleElement | null = null;
+  private disposed = false;
 
   private camYaw = 0.8;
   private camPitch = 0.9;
@@ -125,16 +197,18 @@ export class MapView {
   constructor(uiRoot: HTMLElement, cb: MapCallbacks) {
     this.cb = cb;
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 1e7);
-    window.addEventListener('resize', () => {
+    this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
-    });
+    };
+    window.addEventListener('resize', this.resizeHandler);
     this.scene.background = new THREE.Color('#05080c');
-    this.scene.add(makeStarfield(2600, 777));
+    this.starfield = makeStarfield(2600, 777);
+    this.scene.add(this.starfield);
     this.scene.add(new THREE.AmbientLight('#8899aa', 1.6));
-    const sun = new THREE.DirectionalLight('#fff4e0', 1.4);
-    sun.position.set(1, 0.3, 0.5);
-    this.scene.add(sun);
+    this.sun = new THREE.DirectionalLight('#fff4e0', 1.4);
+    this.sun.position.set(1, 0.3, 0.5);
+    this.scene.add(this.sun, this.sun.target);
     this.scene.add(this.vesselLine, this.nodeLine, this.encounterLine);
 
     const mkSprite = (color: string, size: number) => {
@@ -207,6 +281,7 @@ export class MapView {
       .map-encounter { font-family: var(--ui-mono); font-size: 12px; color: #c88be8; white-space: pre-line; padding-top: 4px; }
     `;
     document.head.appendChild(style);
+    this.ownedStyle = style;
   }
 
   setVisible(vis: boolean): void {
@@ -285,6 +360,14 @@ export class MapView {
     const body = game.bodyOf(gv);
     this.focusBodyId = body.id;
     const t = game.time;
+    const starDirection = mapStarDirection(game.universe, body, t, new Vec3());
+    const lightDistance = Math.max(100, this.camDist * 2);
+    this.sun.position.set(
+      starDirection.x * lightDistance,
+      starDirection.y * lightDistance,
+      starDirection.z * lightDistance,
+    );
+    this.sun.target.position.set(0, 0, 0);
 
     // Camera around focus body origin.
     const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch);
@@ -300,15 +383,13 @@ export class MapView {
       shown.add(b.id);
       let mesh = this.bodyMeshes.get(b.id);
       if (!mesh) {
-        mesh = new THREE.Mesh(
-          new THREE.SphereGeometry(1, 24, 16),
-          new THREE.MeshLambertMaterial({ color: b.def.color }),
-        );
+        mesh = compactBodyMesh(bodyMaterialDescriptor(b));
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }
       mesh.scale.setScalar(Math.max(b.radius * SCALE, this.camDist * 0.008));
       mesh.position.set(pos.x * SCALE, pos.y * SCALE, pos.z * SCALE);
+      updateCompactBodyOrientation(mesh, b, t);
       // SOI sphere (children only, subtle).
       if (b.soiRadius !== Infinity && b.id !== body.id) {
         let soi = this.soiMeshes.get(b.id);
@@ -360,9 +441,6 @@ export class MapView {
         sites = depositSites(body, 6);
         this.depositCache.set(body.id, sites);
       }
-      const spin = body.rotationAngle(t);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
       for (let i = 0; i < sites.length; i++) {
         let sprite = this.depositMarkers[i];
         if (!sprite) {
@@ -372,7 +450,8 @@ export class MapView {
         }
         const d = sites[i].dir;
         const r = body.radius * 1.02 * SCALE;
-        sprite.position.set((d.x * cs - d.y * ss) * r, (d.x * ss + d.y * cs) * r, d.z * r);
+        const inertial = bodyFixedToInertial(body, t, d, new Vec3());
+        sprite.position.set(inertial.x * r, inertial.y * r, inertial.z * r);
         sprite.scale.setScalar(this.camDist * 0.01);
         sprite.visible = true;
       }
@@ -445,5 +524,47 @@ export class MapView {
       this.dvReadout.textContent = `Δv ${nodeDeltaV(this.node).toFixed(1)} m/s`;
       this.etaReadout.textContent = `burn in ${(this.node.time - t).toFixed(0)} s`;
     }
+  }
+
+  /** Release every scene and DOM resource owned by this map instance. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    window.removeEventListener('resize', this.resizeHandler);
+
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) {
+        geometries.add(object.geometry);
+      }
+      if (
+        object instanceof THREE.Mesh || object instanceof THREE.Line ||
+        object instanceof THREE.Points || object instanceof THREE.Sprite
+      ) {
+        const owned = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of owned) materials.add(material);
+      }
+    });
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value);
+      }
+    }
+    for (const texture of textures) texture.dispose();
+    for (const material of materials) material.dispose();
+    for (const geometry of geometries) geometry.dispose();
+
+    this.bodyMeshes.clear();
+    this.bodyOrbits.clear();
+    this.soiMeshes.clear();
+    this.depositMarkers.length = 0;
+    this.depositCache.clear();
+    this.scene.clear();
+    this.panel.remove();
+    this.ownedStyle?.remove();
+    this.ownedStyle = null;
+    this.gameRef = null;
   }
 }

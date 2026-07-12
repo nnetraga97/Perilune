@@ -1,0 +1,63 @@
+import * as THREE from 'three';
+import type { Body } from '../../sim/universe';
+import type { BodyRenderFrame } from '../bodyRenderer';
+import type { RenderCaps } from '../context';
+import {
+  createAtmosphereMaterial,
+  type AtmosphereVisualCoefficients,
+} from './atmosphereMaterial';
+
+export class TerrestrialAtmosphere {
+  readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
+  readonly path: RenderCaps['atmospherePath'];
+  readonly shellRadius: number;
+  private readonly lookupTexture: THREE.DataTexture | null;
+  private disposed = false;
+
+  constructor(
+    readonly body: Body,
+    caps: Pick<RenderCaps, 'atmospherePath'>,
+    visual: Readonly<AtmosphereVisualCoefficients>,
+  ) {
+    const physical = body.def.atmosphere;
+    if (!physical) throw new Error(`${body.id} has no physical atmosphere`);
+    this.path = caps.atmospherePath;
+    this.shellRadius = body.radius + physical.height;
+    const bundle = createAtmosphereMaterial(this.path, body.radius, physical, visual);
+    this.lookupTexture = bundle.lookupTexture;
+    const geometry = new THREE.SphereGeometry(1, 96, 64);
+    this.mesh = new THREE.Mesh(geometry, bundle.material);
+    this.mesh.name = `terrestrial-atmosphere:${body.id}`;
+    this.mesh.scale.setScalar(this.shellRadius);
+    this.mesh.renderOrder = 40;
+    this.mesh.frustumCulled = true;
+  }
+
+  get material(): THREE.ShaderMaterial { return this.mesh.material; }
+
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection'>): void {
+    if (this.disposed) return;
+    const atmosphere = this.body.def.atmosphere!;
+    const { cameraRelativeOrigin: origin, cameraBodyFixed, bodySunDirection: sunDirection } = frame;
+    this.mesh.position.set(origin.x, origin.y, origin.z);
+    const camera = this.material.uniforms.uCameraBodyFixed.value as THREE.Vector3;
+    camera.set(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
+    const sun = this.material.uniforms.uSunDirection.value as THREE.Vector3;
+    sun.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
+    const cameraRadius = Math.hypot(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
+    const altitude = cameraRadius - this.body.radius;
+    const inside = cameraRadius < this.shellRadius;
+    this.material.uniforms.uInsideAtmosphere.value = inside ? 1 : 0;
+    this.material.uniforms.uAerialPerspective.value = inside
+      ? Math.exp(-Math.max(0, altitude) / atmosphere.scaleHeight)
+      : 0;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
+    this.lookupTexture?.dispose();
+  }
+}

@@ -7,6 +7,12 @@
 import * as THREE from 'three';
 import { fbm3 } from '../core/noise';
 import type { Body } from '../sim/universe';
+import type { Quat } from '../core/quat';
+import { fullMipChainBytes, geometryByteLength } from './resourceAccounting';
+
+const CLOUD_AXIS = new THREE.Vector3(0, 0, 1);
+const CLOUD_BASE = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+const CLOUD_DRIFT = new THREE.Quaternion();
 
 export function makeCloudTexture(seed: number, size = 512): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -43,34 +49,51 @@ export class CloudLayer {
   readonly mesh: THREE.Mesh;
   private material: THREE.MeshLambertMaterial;
   readonly altitude: number;
+  private readonly driftRate: number;
+  private readonly baseOpacity: number;
 
-  constructor(body: Body) {
-    this.altitude = (body.def.atmosphere?.height ?? 60_000) * 0.16;
+  constructor(body: Body, options: CloudLayerOptions = {}) {
+    this.altitude = (body.def.atmosphere?.height ?? 60_000) * (options.altitudeFraction ?? 0.16);
+    this.driftRate = options.driftRate ?? 1.2e-5;
+    this.baseOpacity = options.opacity ?? 0.92;
     const radius = body.radius + this.altitude;
     this.material = new THREE.MeshLambertMaterial({
-      map: makeCloudTexture(body.def.terrain.seed + 501),
+      map: makeCloudTexture(body.def.terrain.seed + (options.seedOffset ?? 501), options.textureSize ?? 512),
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      opacity: 0.92,
+      opacity: this.baseOpacity,
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 72, 48), this.material);
     this.mesh.scale.setScalar(radius);
     this.mesh.renderOrder = 2;
+    this.mesh.castShadow = options.castShadow ?? false;
+  }
+
+  setShadowEnabled(enabled: boolean): void {
+    this.mesh.castShadow = enabled;
   }
 
   /**
    * @param originWorld body center in camera-relative coordinates
-   * @param spin body rotation (clouds drift slightly faster than the ground)
+   * @param orientation body-fixed to inertial orientation
    * @param cameraAltitude camera altitude above surface (m)
    */
-  update(originWorld: { x: number; y: number; z: number }, spin: number, time: number, cameraAltitude: number): void {
+  update(
+    originWorld: { x: number; y: number; z: number },
+    orientation: Readonly<Quat>,
+    time: number,
+    cameraAltitude: number,
+  ): void {
     this.mesh.position.set(originWorld.x, originWorld.y, originWorld.z);
-    this.mesh.rotation.set(Math.PI / 2, 0, spin + time * 1.2e-5, 'ZXY');
+    this.mesh.quaternion
+      .set(orientation.x, orientation.y, orientation.z, orientation.w)
+      .multiply(CLOUD_DRIFT.setFromAxisAngle(CLOUD_AXIS, time * this.driftRate))
+      .multiply(CLOUD_BASE);
     // Fade when the camera is close to / inside the layer.
     const d = Math.abs(cameraAltitude - this.altitude);
     const fade = Math.max(0, Math.min(1, (d - 800) / 2500));
-    this.material.opacity = 0.92 * fade;
+    this.material.opacity = this.baseOpacity * fade;
     this.mesh.visible = this.material.opacity > 0.02;
   }
 
@@ -79,4 +102,25 @@ export class CloudLayer {
     this.material.map?.dispose();
     this.material.dispose();
   }
+
+  resourceStats(): Readonly<{ geometryBytes: number; textureBytes: number }> {
+    const image = this.material.map?.image as HTMLCanvasElement | undefined;
+    return Object.freeze({
+      geometryBytes: geometryByteLength(this.mesh.geometry),
+      textureBytes: image ? fullMipChainBytes({
+        width: image.width,
+        height: image.height,
+        bytesPerPixel: 4,
+      }) : 0,
+    });
+  }
+}
+
+export interface CloudLayerOptions {
+  readonly altitudeFraction?: number;
+  readonly seedOffset?: number;
+  readonly driftRate?: number;
+  readonly opacity?: number;
+  readonly textureSize?: number;
+  readonly castShadow?: boolean;
 }

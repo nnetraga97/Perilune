@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "compilerVersion": "2.1.0",
+  "fingerprint": {
+    "width": 64,
+    "height": 32,
+    "quantizationMeters": 0.5,
+    "byteOrder": "little-endian"
+  },
+  "bodies": [
+    {
+      "bodyId": "ashen",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "46e635c639f5e52e39fde8a6604e0359",
+      "rawHeightSha256": "df7240a939da164e54193d5b22fb76baef94471b5a339961c3ec6155a15215cf"
+    },
+    {
+      "bodyId": "auren",
+      "surfaceKind": "star",
+      "recipeVersion": 1,
+      "recipeHash": "805b27acb8a9758a96bffde6146741c1",
+      "rawHeightSha256": null
+    },
+    {
+      "bodyId": "brimm",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "adb7d1899632286846962a1966df9f09",
+      "rawHeightSha256": "2c90350523f266a57db02fd4fe4106a237d1a8bc35b6e7a470f274a54778d6b6"
+    },
+    {
+      "bodyId": "farfall",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "690ed08c99088b71f44def94dbc20190",
+      "rawHeightSha256": "66be1cbe2b0afce3a76466b4d4ca6c696726ecd7bfc0c9d3ff5361e88011ea40"
+    },
+    {
+      "bodyId": "glacia",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "f8f4ce592807c0d7e89bd23bcf699150",
+      "rawHeightSha256": "42e70fb2a6614628605af34aceab8f19f5edbb047f93f0987a0a80eb0ab05092"
+    },
+    {
+      "bodyId": "mote",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "1e4977b288dc959f5d824215dec8cd1c",
+      "rawHeightSha256": "ad50e52f95f37e59d52c5aed09b005c50d928b03e587be90af7791b511b53174"
+    },
+    {
+      "bodyId": "palla",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "70fe5f0c211b08e1ceffb35158372966",
+      "rawHeightSha256": "955850ba022089273aa5ffa4ce273ed73c4374093192ab863cf60699ec653da8"
+    },
+    {
+      "bodyId": "rusk",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "55add54cf58d7667896947068764522a",
+      "rawHeightSha256": "c19af84ec29363d58e264286c4dcad93ff375d44fd73cf2647ca3975f90e6f00"
+    },
+    {
+      "bodyId": "tyran",
+      "surfaceKind": "gas",
+      "recipeVersion": 1,
+      "recipeHash": "3067d7e7c6ab51bffceafd80f5ebafe4",
+      "rawHeightSha256": null
+    },
+    {
+      "bodyId": "vess",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "f5294c533369d2e0ab9acf11ca8263e9",
+      "rawHeightSha256": "b861c30340ceaa201e375a9c1f38f307bf63ea979267e5caa175206b6ea84b65"
+    },
+    {
+      "bodyId": "veyra",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "92b8a8cfa5b49226469a8f275292608d",
+      "rawHeightSha256": "2e237219e1d9896f44791f962b8d54769c357c0254ab0d3dca333677f8668f3d"
+    },
+    {
+      "bodyId": "wisp",
+      "surfaceKind": "solid",
+      "recipeVersion": 1,
+      "recipeHash": "33726d86d0980ab861201105b5f309d9",
+      "rawHeightSha256": "c38ce48c862fb99bee9cc9a584defc68795133a852bf31142ea733d115c4956d"
+    }
+  ],
+  "veyraCanonical": {
+    "width": 8192,
+    "height": 4096,
+    "rawHashes": {
+      "albedo": "397af7d42a4f0f9151a3de8593094cd73d1e88a8948d69b97f66d9c4e6940c04",
+      "normal": "cf5eb48f452b2535f79400fddbd1b72cb4e7469509693927d153a9492c6e7745",
+      "material": "ddedcc35548125de7da3d7f4c5fe867777350df91846e06b5b4088ed49b05afb",
+      "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
+    },
+    "identitySha256": "7f37c74e91578884b919070fe209c1f15708fe03573bad8df006860a8cfea524",
+    "heightArtifact": {
+      "path": "generated/veyra/canonical/height.s16le",
+      "checksumSha256": "7ca283b3c5d91290d7050915030193d13bb78917207a1c1819ccd6a0a1f71488",
+      "quantizationMeters": 0.5,
+      "byteOrder": "little-endian"
+    }
+  },
+  "veyraScatter": {
+    "path": "generated/veyra/canonical/scatter.json",
+    "runtimePath": "src/generated/veyra-scatter.json",
+    "scatterRecipeHash": "a486833c1abdb3bb5837db1558b8129a",
+    "terrainRecipeHash": "92b8a8cfa5b49226469a8f275292608d",
+    "recordCount": 994,
+    "cellCount": 783,
+    "cellResolution": 32,
+    "checksumSha256": "796a1d31bb824c7255ae59c728e60fce06c5a1e71f3fd7e65b455f241352b81e"
+  }
+}

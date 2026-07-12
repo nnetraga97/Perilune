@@ -13,7 +13,8 @@ import { Editor } from './ui/editor';
 import { FlightHud } from './ui/flightHud';
 import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
-import { PerfOverlay } from './ui/perfOverlay';
+import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
+import { GpuTimerRing } from './render/gpuTimer';
 import { readSave, restoreGame, serializeGame, writeSave } from './save/persistence';
 import {
   experimentKey,
@@ -37,6 +38,8 @@ class PeriluneGame {
   private map!: MapView;
   private tutorial!: Tutorial;
   private perf!: PerfOverlay;
+  private gpuProfiler!: GpuSubmissionProfiler;
+  private unsubscribeGpuRestoration: (() => void) | null = null;
   private screen: Screen = 'menu';
   private menuEl!: HTMLElement;
   private uiRoot!: HTMLElement;
@@ -56,12 +59,28 @@ class PeriluneGame {
   private controlBlocked = false;
   private nodeBurnDir = new Vec3(1, 0, 0);
   private dialogEl: HTMLElement | null = null;
+  private readonly onPageHide = (event: PageTransitionEvent): void => {
+    if (event.persisted) return;
+    window.removeEventListener('pagehide', this.onPageHide);
+    this.unsubscribeGpuRestoration?.();
+    this.unsubscribeGpuRestoration = null;
+    this.gpuProfiler.dispose();
+    this.map.dispose();
+    this.world.dispose();
+  };
 
   async start(): Promise<void> {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.uiRoot = document.getElementById('ui-root') as HTMLElement;
     this.ctx = await createRenderContext(canvas);
-    this.world = new WorldScene();
+    this.gpuProfiler = new GpuSubmissionProfiler(
+      () => new GpuTimerRing(this.ctx.renderer.getContext() as WebGL2RenderingContext, 12),
+    );
+    this.unsubscribeGpuRestoration = this.ctx.lifecycle.subscribeRestoration(async () => {
+      // Context loss invalidated old queries. Drop references now; allocate lazily on a renderable draw.
+      this.gpuProfiler.invalidateAfterContextLoss();
+    });
+    this.world = new WorldScene(this.ctx);
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
@@ -107,6 +126,7 @@ class PeriluneGame {
       onWarpToNode: (t) => this.warpToNode(t),
     });
     this.tutorial = new Tutorial(this.uiRoot);
+    window.addEventListener('pagehide', this.onPageHide);
     this.buildMenu();
     this.bindInput(canvas);
     document.getElementById('boot')?.remove();
@@ -276,7 +296,7 @@ class PeriluneGame {
     if (!save) return;
     this.game = restoreGame(save);
     this.world.dispose();
-    this.world = new WorldScene();
+    this.world = new WorldScene(this.ctx);
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
@@ -610,24 +630,30 @@ class PeriluneGame {
     if (this.screen === 'flight') {
       if (this.map.visible) {
         this.map.update(this.game);
-        this.ctx.renderer.render(this.map.scene, this.map.camera);
+        if (!this.ctx.renderPaused) {
+          this.gpuProfiler.submit('map', () => this.ctx.renderer.render(this.map.scene, this.map.camera));
+        }
       } else {
         this.world.update(this.game, dt);
-        this.ctx.renderer.render(this.world.scene, this.world.camera);
+        if (!this.ctx.renderPaused) {
+          this.gpuProfiler.submit('flight', () => this.ctx.renderer.render(this.world.scene, this.world.camera));
+        }
       }
       this.hud.update(this.game, this.map.node);
       if (this.hud.pendingWarpStep !== 0) {
         this.stepWarp(this.hud.pendingWarpStep);
         this.hud.pendingWarpStep = 0;
       }
-      const stats = this.world.planetStats();
-      this.perf.setExtra('chunks', stats.visible);
+      const stats = this.world.renderStats();
+      this.perf.setRendererMetrics(stats);
+      if (!this.ctx.renderPaused) this.gpuProfiler.poll();
+      this.perf.setGpuMetrics(this.gpuProfiler.metrics());
     } else if (this.screen === 'editor') {
       this.editor.update();
-      this.ctx.renderer.render(this.editor.scene, this.editor.camera);
+      if (!this.ctx.renderPaused) this.ctx.renderer.render(this.editor.scene, this.editor.camera);
     } else {
       // Menu: idle starfield via world scene if available.
-      this.ctx.renderer.clear();
+      if (!this.ctx.renderPaused) this.ctx.renderer.clear();
     }
     this.perf.endRender(renderStart);
     this.perf.frame(dtMs, this.ctx.renderer);

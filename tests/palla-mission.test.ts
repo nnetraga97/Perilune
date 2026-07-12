@@ -13,6 +13,7 @@ import { addPart, createCraft, Craft } from '../src/sim/vessel';
 import { specificEnergy, stateToElements, periapsisOf } from '../src/core/orbit';
 import { ManeuverNode, nodeBurnDirection, nodeDeltaV, orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
 import { groundRadiusInertial } from '../src/sim/terrain';
+import { surfaceVelocity } from '../src/sim/bodyOrientation';
 
 function buildMoonship(): Craft {
   const craft = createCraft('Palla Pathfinder');
@@ -287,7 +288,14 @@ describe('Palla round trip', () => {
     while (game.time - t0 < 3000) {
       step();
       if (!game.vessels.includes(gv)) {
-        throw new Error(`destroyed during re-entry: ${v.events.slice(-4).map((e) => e.text).join('; ')}`);
+        const localUp = v.pos.clone().normalize();
+        const relative = v.vel.clone().sub(surfaceVelocity(veyra, v.pos, new Vec3()));
+        const radial = relative.dot(localUp);
+        const horizontal = relative.clone().addScaled(localUp, -radial).length();
+        throw new Error(
+          `destroyed during re-entry: radial=${radial.toFixed(3)} horizontal=${horizontal.toFixed(3)} ` +
+          v.events.slice(-4).map((e) => e.text).join('; '),
+        );
       }
       if (v.situation === 'landed' || v.situation === 'splashed') {
         home = true;

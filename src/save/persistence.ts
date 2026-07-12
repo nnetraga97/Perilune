@@ -13,10 +13,50 @@ import type { ResourceId } from '../content/parts';
 import {
   migrateSave,
   SaveGame,
+  SavedSurfacePose,
   SavedVessel,
   SAVE_VERSION,
   validateSave,
 } from './schema';
+import {
+  bodyFixedAttitudeToInertial,
+  bodyFixedToInertial,
+  inertialAttitudeToBodyFixed,
+  inertialToBodyFixed,
+  surfaceVelocity,
+} from '../sim/bodyOrientation';
+import { contactSurface } from '../sim/terrain';
+import { recipeForBody } from '../sim/terrainRecipe';
+import { scatterRecipeForBody } from '../sim/scatterRecipe';
+
+function isSurfaceSituation(situation: SavedVessel['situation']): boolean {
+  return situation === 'prelaunch' || situation === 'landed' || situation === 'splashed';
+}
+
+function serializeSurfacePose(game: GameState, gv: GameVessel): SavedSurfacePose | null {
+  const vessel = gv.runtime;
+  if (!isSurfaceSituation(vessel.situation)) return null;
+  const body = game.bodyOf(gv);
+  if (body.def.surfaceKind !== 'solid') return null;
+  const positionBF = gv.regime === 'rails' && gv.rails.landedPos
+    ? gv.rails.landedPos.clone()
+    : inertialToBodyFixed(body, game.time, vessel.pos, new Vec3());
+  const directionBF = positionBF.clone().normalize();
+  const surface = contactSurface(body, directionBF);
+  if (surface.kind === 'none') return null;
+  const attitudeBF = gv.regime === 'rails' && gv.rails.landedAtt
+    ? gv.rails.landedAtt.clone()
+    : inertialAttitudeToBodyFixed(body, game.time, vessel.att, new Quat());
+  const recipe = recipeForBody(body);
+  return {
+    bodyId: body.id,
+    recipeHash: recipe.hash,
+    scatterRecipeHash: scatterRecipeForBody(body).hash,
+    directionBF: { ...directionBF },
+    attitudeBF: { ...attitudeBF },
+    contactOffset: positionBF.length() - (body.radius + surface.height),
+  };
+}
 
 // ------------------------------------------------------------ serialization
 
@@ -66,6 +106,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
       railsLandedAtt: gv.rails.landedAtt
         ? { x: gv.rails.landedAtt.x, y: gv.rails.landedAtt.y, z: gv.rails.landedAtt.z, w: gv.rails.landedAtt.w }
         : null,
+      surfacePose: serializeSurfacePose(game, gv),
     };
   });
 
@@ -79,6 +120,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
     science: { points: game.sciencePoints, completed: [...game.completedExperiments] },
     flags: { ...game.flags },
     isru: { scanned: [...game.scannedBodies] },
+    alarms: game.alarms.map((alarm) => ({ ...alarm })),
   };
 }
 
@@ -91,6 +133,35 @@ export function restoreGame(save: SaveGame): GameState {
   game.completedExperiments = new Set(migrated.science?.completed ?? []);
   game.flags = { ...(migrated.flags ?? {}) };
   game.scannedBodies = new Set(migrated.isru?.scanned ?? []);
+  game.restoreAlarms(migrated.alarms);
+
+  // Validate every referenced recipe before constructing any vessel state.
+  for (const vessel of migrated.vessels) {
+    const body = game.universe.get(vessel.bodyId);
+    if (isSurfaceSituation(vessel.situation) && body.def.surfaceKind !== 'solid') {
+      throw new Error(`${body.name} is a gas body with no solid surface for landed saves`);
+    }
+    if (!vessel.surfacePose) continue;
+    const pose = vessel.surfacePose;
+    const currentRecipeHash = recipeForBody(body).hash;
+    if (currentRecipeHash !== pose.recipeHash) {
+      throw new Error(
+        `Unavailable terrain recipe ${pose.recipeHash} for ${body.name}`,
+      );
+    }
+    const currentScatterHash = scatterRecipeForBody(body).hash;
+    // Version-4 saves aliased the scatter hash to the terrain hash; adopt the
+    // body's declared scatter recipe for those poses. Genuine version-5 hashes
+    // must match the currently declared recipe or the load stops before mutating.
+    const savedScatterHash = pose.scatterRecipeHash === pose.recipeHash
+      ? currentScatterHash
+      : pose.scatterRecipeHash;
+    if (savedScatterHash !== currentScatterHash) {
+      throw new Error(
+        `Unavailable physical-scatter recipe ${pose.scatterRecipeHash} for ${body.name}`,
+      );
+    }
+  }
 
   for (const sv of migrated.vessels) {
     const craft: Craft = {
@@ -131,17 +202,78 @@ export function restoreGame(save: SaveGame): GameState {
     // refreshDerived clamps charge; restore exact amount afterward.
     runtime.charge.amount = Math.min(sv.charge, runtime.charge.capacity);
 
+    let landedPos: Vec3 | null = sv.railsLandedPos
+      ? new Vec3(sv.railsLandedPos.x, sv.railsLandedPos.y, sv.railsLandedPos.z)
+      : null;
+    let landedAtt: Quat | null = sv.railsLandedAtt
+      ? new Quat(sv.railsLandedAtt.x, sv.railsLandedAtt.y, sv.railsLandedAtt.z, sv.railsLandedAtt.w)
+      : null;
+
+    if (isSurfaceSituation(sv.situation)) {
+      const body = game.universe.get(sv.bodyId);
+      let directionBF: Vec3;
+      let attitudeBF: Quat;
+      let contactOffset: number;
+      if (sv.surfacePose) {
+        directionBF = new Vec3(
+          sv.surfacePose.directionBF.x,
+          sv.surfacePose.directionBF.y,
+          sv.surfacePose.directionBF.z,
+        ).normalize();
+        attitudeBF = new Quat(
+          sv.surfacePose.attitudeBF.x,
+          sv.surfacePose.attitudeBF.y,
+          sv.surfacePose.attitudeBF.z,
+          sv.surfacePose.attitudeBF.w,
+        ).normalize();
+        contactOffset = sv.surfacePose.contactOffset;
+      } else {
+        // Version 3 and older stored an inertial pose under a Z-only spin model.
+        const legacyPosition = landedPos ?? new Vec3(sv.pos.x, sv.pos.y, sv.pos.z);
+        if (landedPos) {
+          directionBF = legacyPosition.clone().normalize();
+        } else {
+          const spin = -body.rotationAngle(migrated.time);
+          const c = Math.cos(spin);
+          const s = Math.sin(spin);
+          directionBF = new Vec3(
+            legacyPosition.x * c - legacyPosition.y * s,
+            legacyPosition.x * s + legacyPosition.y * c,
+            legacyPosition.z,
+          ).normalize();
+        }
+        const legacySpinInverse = new Quat().setFromAxisAngle(
+          new Vec3(0, 0, 1),
+          -body.rotationAngle(migrated.time),
+        );
+        attitudeBF = legacySpinInverse.multiply(
+          new Quat(sv.att.x, sv.att.y, sv.att.z, sv.att.w),
+        ).normalize();
+        const oldSurface = contactSurface(body, directionBF);
+        if (oldSurface.kind === 'none') {
+          throw new Error(`Cannot migrate landed pose for ${body.name}: no contact surface`);
+        }
+        contactOffset = legacyPosition.length() - (body.radius + oldSurface.height);
+      }
+
+      const surface = contactSurface(body, directionBF);
+      if (surface.kind === 'none') {
+        throw new Error(`Cannot restore landed pose for ${body.name}: no contact surface`);
+      }
+      landedPos = directionBF.clone().scale(body.radius + surface.height + contactOffset);
+      landedAtt = attitudeBF;
+      bodyFixedToInertial(body, migrated.time, landedPos, runtime.pos);
+      bodyFixedAttitudeToInertial(body, migrated.time, landedAtt, runtime.att);
+      surfaceVelocity(body, runtime.pos, runtime.vel);
+    }
+
     const gv: GameVessel = {
       runtime,
       regime: sv.regime,
       rails: {
         elements: sv.railsElements ? { ...sv.railsElements } : null,
-        landedPos: sv.railsLandedPos
-          ? new Vec3(sv.railsLandedPos.x, sv.railsLandedPos.y, sv.railsLandedPos.z)
-          : null,
-        landedAtt: sv.railsLandedAtt
-          ? new Quat(sv.railsLandedAtt.x, sv.railsLandedAtt.y, sv.railsLandedAtt.z, sv.railsLandedAtt.w)
-          : null,
+        landedPos,
+        landedAtt,
       },
     };
     game.vessels.push(gv);

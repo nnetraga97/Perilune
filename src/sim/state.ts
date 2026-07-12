@@ -28,6 +28,13 @@ import {
 import { evaluateStructure, splitAtJoint } from './structure';
 import { groundRadiusInertial } from './terrain';
 import { stepIsru } from './resources';
+import {
+  bodyFixedAttitudeToInertial,
+  bodyFixedToInertial,
+  inertialAttitudeToBodyFixed,
+  inertialToBodyFixed,
+  surfaceVelocity,
+} from './bodyOrientation';
 
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
@@ -46,6 +53,15 @@ export interface GameVessel {
   rails: RailsState;
 }
 
+export type AlarmKind = 'custom' | 'transfer' | 'maneuver' | 'entry';
+
+export interface GameAlarm {
+  id: string;
+  time: number;
+  label: string;
+  kind: AlarmKind;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _br = new Vec3();
@@ -60,13 +76,10 @@ export const LAUNCH_PAD_DECK_HEIGHT = 2;
 
 /** Cape Skyward surface normal in the inertial frame at a given time. */
 export function launchSiteDirection(body: Body, time: number, out: Vec3): Vec3 {
-  const spin = body.rotationAngle(time);
   const x = Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON);
   const y = Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON);
   const z = Math.sin(LAUNCH_SITE_LAT);
-  const cs = Math.cos(spin);
-  const ss = Math.sin(spin);
-  return out.set(x * cs - y * ss, x * ss + y * cs, z).normalize();
+  return bodyFixedToInertial(body, time, out.set(x, y, z), out).normalize();
 }
 
 export class GameState {
@@ -89,6 +102,9 @@ export class GameState {
   flags: Record<string, boolean> = {};
   /** Bodies whose resource fields have been surveyed from orbit. */
   scannedBodies = new Set<string>();
+  /** Mission alarms, ordered by trigger time then stable id. */
+  readonly alarms: GameAlarm[] = [];
+  private nextAlarmSerial = 1;
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
   noteRestoredVessel(id: string): void {
@@ -120,6 +136,59 @@ export class GameState {
     return this.railsWarp ? RAILS_WARP_RATES[this.warpIndex] : PHYSICS_WARP_RATES[this.warpIndex];
   }
 
+  addAlarm(time: number, label: string, kind: AlarmKind): GameAlarm {
+    if (!Number.isFinite(time) || time <= this.time) {
+      throw new Error('Alarm time must be finite and in the future');
+    }
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) throw new Error('Alarm label is required');
+    const alarm: GameAlarm = {
+      id: `alarm-${this.nextAlarmSerial++}`,
+      time,
+      label: trimmedLabel,
+      kind,
+    };
+    this.alarms.push(alarm);
+    this.sortAlarms();
+    return alarm;
+  }
+
+  removeAlarm(id: string): boolean {
+    const index = this.alarms.findIndex((alarm) => alarm.id === id);
+    if (index < 0) return false;
+    this.alarms.splice(index, 1);
+    return true;
+  }
+
+  /** Replace the queue from validated save data while preserving stable ids. */
+  restoreAlarms(alarms: readonly GameAlarm[]): void {
+    this.alarms.splice(0, this.alarms.length);
+    let maxSerial = 0;
+    for (const alarm of alarms) {
+      if (alarm.time <= this.time) continue;
+      this.alarms.push({ ...alarm });
+      const match = /^alarm-(\d+)$/.exec(alarm.id);
+      if (match) maxSerial = Math.max(maxSerial, Number(match[1]));
+    }
+    this.nextAlarmSerial = Math.max(this.nextAlarmSerial, maxSerial + 1);
+    this.sortAlarms();
+  }
+
+  private sortAlarms(): void {
+    this.alarms.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  }
+
+  /** Consume alarms due at the current time and drop all time warp. */
+  private fireDueAlarms(): boolean {
+    let fired = false;
+    while (this.alarms.length && this.alarms[0].time <= this.time + 1e-9) {
+      this.alarms.shift();
+      fired = true;
+    }
+    if (fired) this.setWarp(0, false);
+    return fired;
+  }
+
   /** Place a craft on the launch pad of Veyra (Cape Skyward, lon 0). */
   spawnOnPad(craft: Craft, name: string): GameVessel {
     const veyra = this.universe.get('veyra');
@@ -143,8 +212,7 @@ export class GameState {
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
     // Surface rotation velocity.
-    const omega = (Math.PI * 2) / veyra.def.rotationPeriod;
-    runtime.vel.set(-omega * runtime.pos.y, omega * runtime.pos.x, 0);
+    surfaceVelocity(veyra, runtime.pos, runtime.vel);
     // Point up.
     runtime.att.setLookRotation(
       new Vec3(-dirI.y, dirI.x, 0).normalize(), // forward: east-ish tangent
@@ -302,16 +370,12 @@ export class GameState {
     const v = gv.runtime;
     const body = this.bodyOf(gv);
     if (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') {
+      if (body.def.surfaceKind !== 'solid') {
+        throw new Error(`${body.name} has no solid surface for a landed rails state`);
+      }
       // Store body-fixed pose.
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(-spin);
-      const ss = Math.sin(-spin);
-      gv.rails.landedPos = new Vec3(
-        v.pos.x * cs - v.pos.y * ss,
-        v.pos.x * ss + v.pos.y * cs,
-        v.pos.z,
-      );
-      gv.rails.landedAtt = v.att.clone();
+      gv.rails.landedPos = inertialToBodyFixed(body, this.time, v.pos, new Vec3());
+      gv.rails.landedAtt = inertialAttitudeToBodyFixed(body, this.time, v.att, new Quat());
       gv.rails.elements = null;
     } else {
       gv.rails.elements = stateToElements(body.mu, v.pos, v.vel, this.time);
@@ -326,14 +390,11 @@ export class GameState {
     const v = gv.runtime;
     const body = this.bodyOf(gv);
     if (gv.rails.landedPos) {
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
-      const bf = gv.rails.landedPos;
-      v.pos.set(bf.x * cs - bf.y * ss, bf.x * ss + bf.y * cs, bf.z);
-      const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-      v.vel.set(-omega * v.pos.y, omega * v.pos.x, 0);
-      if (gv.rails.landedAtt) v.att.copy(gv.rails.landedAtt);
+      bodyFixedToInertial(body, this.time, gv.rails.landedPos, v.pos);
+      surfaceVelocity(body, v.pos, v.vel);
+      if (gv.rails.landedAtt) {
+        bodyFixedAttitudeToInertial(body, this.time, gv.rails.landedAtt, v.att);
+      }
     } else if (gv.rails.elements) {
       elementsAtTime(gv.rails.elements, this.time, v.pos, v.vel);
     }
@@ -344,15 +405,8 @@ export class GameState {
   railsPosition(gv: GameVessel, outR: Vec3, outV?: Vec3): void {
     const body = this.bodyOf(gv);
     if (gv.rails.landedPos) {
-      const spin = body.rotationAngle(this.time);
-      const cs = Math.cos(spin);
-      const ss = Math.sin(spin);
-      const bf = gv.rails.landedPos;
-      outR.set(bf.x * cs - bf.y * ss, bf.x * ss + bf.y * cs, bf.z);
-      if (outV) {
-        const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-        outV.set(-omega * outR.y, omega * outR.x, 0);
-      }
+      bodyFixedToInertial(body, this.time, gv.rails.landedPos, outR);
+      if (outV) surfaceVelocity(body, outR, outV);
     } else if (gv.rails.elements) {
       elementsAtTime(gv.rails.elements, this.time, outR, outV ?? _v);
     }
@@ -365,6 +419,9 @@ export class GameState {
     const alt = v.pos.length() - body.radius;
     const atmoTop = body.def.atmosphere?.height ?? 0;
     if (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') {
+      if (body.def.surfaceKind !== 'solid') {
+        return { ok: false, reason: `${body.name} has no landable surface` };
+      }
       return { ok: true };
     }
     if (alt < atmoTop) return { ok: false, reason: 'Cannot warp inside the atmosphere' };
@@ -401,10 +458,16 @@ export class GameState {
     let steps = 0;
     if (this.railsWarp && this.warpIndex > 0) {
       // Rails warp: pure analytic time advance.
-      const dtSim = realDt * this.warpRate;
-      this.time += dtSim;
+      const requestedDt = realDt * this.warpRate;
+      const nextAlarm = this.alarms[0];
+      const endTime = nextAlarm
+        ? Math.min(this.time + requestedDt, nextAlarm.time)
+        : this.time + requestedDt;
+      const dtSim = endTime - this.time;
+      this.time = endTime;
       this.checkSoiTransitionsRails();
       this.stepBackgroundSystems(dtSim);
+      this.fireDueAlarms();
       return 0;
     }
 
@@ -416,6 +479,11 @@ export class GameState {
       this.stepBackgroundSystems(PHYSICS_DT);
       this.time += PHYSICS_DT;
       steps++;
+      if (this.fireDueAlarms()) {
+        // The accumulated remainder was requested at the old warp rate.
+        this.accumulator = 0;
+        break;
+      }
     }
     return steps;
   }
@@ -498,6 +566,10 @@ export class GameState {
       const ctx: StepContext = { body, time: this.time, sunDir: _sun };
       const result = stepVessel(v, ctx, dt);
 
+      if (result.terminalFailure) {
+        this.destroyVessel(gv, result.terminalFailure);
+        continue;
+      }
       if (result.crashed) {
         this.destroyVessel(gv, `Impact at ${result.crashSpeed.toFixed(0)} m/s`);
         continue;

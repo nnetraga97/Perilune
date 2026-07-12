@@ -21,7 +21,24 @@ this repository is original work created for this project.)
 | vitest | MIT | Unit/property tests + benchmarks |
 | @playwright/test | Apache-2.0 | Browser e2e tests |
 | fast-check | MIT | Property-based testing |
+| @types/node | MIT | Node compiler-script type definitions |
 | @types/three | MIT | Type definitions |
+| tsx | MIT | Execute the TypeScript planet compiler |
+| sharp | Apache-2.0 | Pinned build-time image decode, color conversion, and resampling |
+| KTX-Software 4.4.2 | Apache-2.0 | Pinned build-time KTX2/Basis Universal encoding |
 
-No other third-party code, models, textures, audio, or fonts are included.
-All game assets are generated procedurally at runtime by original code.
+Sharp distributes libvips components under LGPL-2.1-or-later; it is a
+development-only compiler dependency and is not shipped in the browser bundle.
+
+Veyra's generated textures use Natural Earth II 3.2.0 as a public-domain
+authoring source. Natural Earth's public-domain terms and the exact local
+source boundary are recorded in
+`assets/planets/sources/natural-earth-ii-3.2.0/TERMS.md`. Any future planet
+source must pass the per-file provenance and license policy in
+`CONTENT_PIPELINE.md`; a repository software license is not accepted as
+evidence that bundled third-party textures are reusable.
+
+The authoritative planet-asset write command is
+`npm run compile:planet-assets:container`. Its linux/amd64 Docker image pins
+both the Node base-image digest and KTX-Software archive checksum; bind mounts
+return only the generated planet assets and checked metadata to the host.

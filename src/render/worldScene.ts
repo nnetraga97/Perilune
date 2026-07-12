@@ -8,13 +8,24 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import { Quat } from '../core/quat';
 import { GameState, GameVessel, LAUNCH_PAD_DECK_HEIGHT, launchSiteDirection } from '../sim/state';
 import { groundRadiusInertial } from '../sim/terrain';
 import type { Body } from '../sim/universe';
-import { PlanetRenderer, PLANET_QUALITY, PlanetQuality } from './planet';
-import { CloudLayer } from './clouds';
-import { buildVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
+import type { PlanetQuality } from './planet';
+import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import { makeStarfield } from './starfield';
+import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
+import type { RenderContext } from './context';
+import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack, VectorCoordinates } from './bodyRenderer';
+import type { BodyRendererKind } from '../content/bodyVisuals';
+import { createBodyRendererCandidate } from './bodyRendererFactory';
+import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
+import { compileRendererCandidate } from './shaderCompiler';
+import checkedPlanetArtifact from '../generated/checked-planet-manifest.json';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { checkPlanetManifest, PlanetAssetLoader, type CheckedPlanetManifest } from './planetAssetLoader';
+import { geometryByteLength } from './resourceAccounting';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -23,6 +34,13 @@ const _rel = new Vec3();
 const _camBF = new Vec3();
 const _sunDir = new Vec3();
 const _tmp = new Vec3();
+const _bodyQ = new Quat();
+const _starAbs = new Vec3();
+const _bodySunDir = new Vec3();
+
+export function usesLegacyAtmosphereTint(rendererKind: BodyRendererKind | undefined): boolean {
+  return rendererKind !== 'terrestrial';
+}
 
 export function sunLightPosition(
   sunDirection: Readonly<Vec3>,
@@ -32,54 +50,116 @@ export function sunLightPosition(
   return out.set(sunDirection.x * distance, sunDirection.y * distance, sunDirection.z * distance);
 }
 
+export interface WorldRendererStats {
+  readonly chunks: number;
+  readonly visibleChunks: number;
+  readonly rendererManagers: number;
+  readonly residentFlightPacks: number;
+  /** Checked flight-pack allocation only; procedural renderer resources are not mislabeled as zero. */
+  readonly residentPackGpuBytes: number;
+  readonly rendererFailures: number;
+  /** Transaction candidates are hidden and swapped atomically; no fade clock exists yet. */
+  readonly transitionActive: boolean;
+  readonly transitionMs: number;
+  readonly contextFallback: boolean;
+}
+
+export function bodyFixedCameraVelocity(
+  current: VectorCoordinates,
+  previous: Readonly<BodyRenderFrame> | undefined,
+  deltaSeconds: number,
+): VectorCoordinates {
+  if (!previous || !(deltaSeconds > 0)) return { x: 0, y: 0, z: 0 };
+  const inverseDelta = 1 / deltaSeconds;
+  return {
+    x: (current.x - previous.cameraBodyFixed.x) * inverseDelta,
+    y: (current.y - previous.cameraBodyFixed.y) * inverseDelta,
+    z: (current.z - previous.cameraBodyFixed.z) * inverseDelta,
+  };
+}
+
+export function pruneBodyFrameSamples(
+  samples: Map<string, BodyRenderFrame>,
+  sampledBodyIds: ReadonlySet<string>,
+): void {
+  for (const bodyId of samples.keys()) {
+    if (!sampledBodyIds.has(bodyId)) samples.delete(bodyId);
+  }
+}
+
+function rendererGeometryBytes(renderer: BodyRenderer): number {
+  const geometries = new Set<THREE.BufferGeometry>();
+  renderer.root.traverse((object) => {
+    if (object instanceof THREE.Mesh) geometries.add(object.geometry);
+  });
+  let bytes = 0;
+  for (const geometry of geometries) bytes += geometryByteLength(geometry);
+  return bytes;
+}
+
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
-  private readonly sun: THREE.DirectionalLight;
   private readonly ambient: THREE.AmbientLight;
-  private readonly sunSprite: THREE.Sprite;
-  private planetRenderers = new Map<string, PlanetRenderer>();
-  private cloudLayers = new Map<string, CloudLayer>();
-  private distantBodies = new Map<string, THREE.Mesh>();
+  private readonly starfield: THREE.Points;
+  private bodyRenderers = new Map<string, BodyRenderer>();
+  private bodyRendererManagers = new Map<string, BodyRendererManager>();
+  private lastBodyFrames = new Map<string, BodyRenderFrame>();
+  private readonly rendererLedger: RendererResourceLedger;
+  private readonly checkedPlanetManifest: CheckedPlanetManifest;
+  private readonly planetAssetLoader: PlanetAssetLoader;
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly launchSite: THREE.Group;
-  private quality: PlanetQuality = PLANET_QUALITY.medium;
+  private quality: QualityTier = 'medium';
+  private readonly resizeHandler: () => void;
+  private readonly unsubscribeRestoration: () => void;
+  private disposed = false;
+  private flightTerrainBodyId: string | null = null;
+  private flightPromotedBodyId: string | null = null;
+  private readonly flightPromotionPending = new Set<string>();
+  private readonly flightPromotionFailed = new Set<string>();
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
   camPitch = 0.35;
   camDist = 18;
 
-  constructor() {
+  constructor(private readonly context: RenderContext) {
+    this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
+    this.rendererLedger = new RendererResourceLedger(this.checkedPlanetManifest.budgets);
+    const textureLoader = new THREE.TextureLoader();
+    const configuredBaseUrl = import.meta.env.BASE_URL;
+    const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
+    this.planetAssetLoader = new PlanetAssetLoader({
+      renderer: context.renderer,
+      manifest: this.checkedPlanetManifest,
+      ktx2: new KTX2Loader(),
+      compressedSupported: Object.values(context.caps.compressedTextures).some(Boolean),
+      transcoderPath: `${baseUrl}basis/`,
+      resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,
+      loadConventional: (path) => textureLoader.loadAsync(path),
+    });
     this.camera = new THREE.PerspectiveCamera(
       62,
       window.innerWidth / window.innerHeight,
       0.3,
       6e8,
     );
-    window.addEventListener('resize', () => {
+    this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
-    });
+    };
+    window.addEventListener('resize', this.resizeHandler);
+    this.unsubscribeRestoration = context.lifecycle.subscribeRestoration(
+      () => this.rebuildCommittedRenderers(),
+    );
     this.scene.background = new THREE.Color('#04070a');
-    this.scene.add(makeStarfield(4200));
+    this.starfield = makeStarfield(4200);
+    this.scene.add(this.starfield);
     this.launchSite = this.buildLaunchSite();
     this.scene.add(this.launchSite);
-    this.sun = new THREE.DirectionalLight('#fff4e0', 2.6);
-    this.scene.add(this.sun);
     this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
     this.scene.add(this.ambient);
-
-    const spriteMat = new THREE.SpriteMaterial({
-      color: '#fff7dd',
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-      depthTest: false,
-    });
-    this.sunSprite = new THREE.Sprite(spriteMat);
-    this.sunSprite.scale.setScalar(4e6);
-    this.scene.add(this.sunSprite);
   }
 
   private buildLaunchSite(): THREE.Group {
@@ -108,43 +188,208 @@ export class WorldScene {
     return group;
   }
 
-  setQuality(q: PlanetQuality): void {
-    this.quality = q;
-    for (const pr of this.planetRenderers.values()) pr.setQuality(q);
+  setQuality(q: PlanetQuality | QualityTier): void {
+    const tier = typeof q === 'string'
+      ? q
+      : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
+    this.quality = tier;
+    for (const [bodyId, manager] of this.bodyRendererManagers) {
+      if (manager.current()?.quality === tier) continue;
+      void manager.replaceQuality(tier).then(() => {
+        const renderer = manager.current();
+        if (renderer) this.bodyRenderers.set(bodyId, renderer);
+        if (bodyId === this.flightTerrainBodyId && this.checkedPlanetManifest.hasPack(bodyId, tier)) {
+          this.flightPromotedBodyId = bodyId;
+        }
+      }).catch(() => undefined);
+    }
   }
 
   planetStats(): { chunks: number; visible: number } {
     let chunks = 0;
     let visible = 0;
-    for (const pr of this.planetRenderers.values()) {
-      chunks += pr.stats.chunks;
-      visible += pr.stats.visible;
+    for (const renderer of this.bodyRenderers.values()) {
+      const stats = renderer.stats();
+      chunks += stats.chunks;
+      visible += stats.visible;
     }
     return { chunks, visible };
   }
 
-  private planetFor(body: Body): PlanetRenderer {
-    let pr = this.planetRenderers.get(body.id);
-    if (!pr) {
-      pr = new PlanetRenderer(body, this.quality);
-      this.planetRenderers.set(body.id, pr);
-      this.scene.add(pr.group);
+  renderStats(): Readonly<WorldRendererStats> {
+    const body = this.planetStats();
+    let rendererFailures = 0;
+    let transitionActive = false;
+    let activeTransitionMs = 0;
+    let completedTransitionMs = 0;
+    for (const manager of this.bodyRendererManagers.values()) {
+      const stats = manager.platformStats();
+      rendererFailures += stats.failures;
+      transitionActive ||= stats.transactionActive;
+      if (stats.transactionActive) activeTransitionMs = Math.max(activeTransitionMs, stats.transitionMs);
+      else completedTransitionMs = Math.max(completedTransitionMs, stats.transitionMs);
     }
-    return pr;
+    return Object.freeze({
+      chunks: body.chunks,
+      visibleChunks: body.visible,
+      rendererManagers: this.bodyRendererManagers.size,
+      residentFlightPacks: this.rendererLedger.residentFlightBodyIds().length,
+      residentPackGpuBytes: this.rendererLedger.snapshot()?.gpuBytes ?? 0,
+      rendererFailures,
+      transitionActive,
+      transitionMs: transitionActive ? activeTransitionMs : completedTransitionMs,
+      contextFallback: this.context.lifecycle.state === 'fallback',
+    });
   }
 
-  private distantFor(body: Body): THREE.Mesh {
-    let mesh = this.distantBodies.get(body.id);
-    if (!mesh) {
-      mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 28, 18),
-        new THREE.MeshLambertMaterial({ color: body.def.color }),
-      );
-      mesh.scale.setScalar(body.radius);
-      this.distantBodies.set(body.id, mesh);
-      this.scene.add(mesh);
+  private rendererFor(body: Body): BodyRenderer | null {
+    const current = this.bodyRenderers.get(body.id);
+    if (current) return current;
+    if (this.bodyRendererManagers.has(body.id)) return null;
+    let transactionChannels: readonly string[] = [];
+    const manager = new BodyRendererManager({
+      scene: this.scene,
+      quality: this.quality,
+      createCandidate: (candidate, tier) => createBodyRendererCandidate({
+        body: candidate, caps: this.context.caps, quality: tier,
+      }),
+      loadAssets: async (candidateBody, tier) => {
+        if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
+          transactionChannels = ['legacy'];
+          return { pack: null, gpuBytes: 0, transientBytes: 0, flightScale: false, dispose: () => undefined };
+        }
+        const loaded = await this.planetAssetLoader.load(candidateBody.id, tier);
+        transactionChannels = loaded.pack.channels.map((channel) => channel.name);
+        const pack: RuntimeBodyAssetPack = Object.freeze({
+          bodyId: loaded.pack.bodyId,
+          tier: loaded.pack.tier,
+          width: loaded.pack.width,
+          height: loaded.pack.height,
+          manifestDigest: this.checkedPlanetManifest.digest,
+          gpuBytes: loaded.gpuBytes,
+          textures: loaded.textures,
+        });
+        return {
+          pack,
+          gpuBytes: loaded.gpuBytes,
+          transientBytes: loaded.pack.transientBytes,
+          flightScale: candidateBody.id === this.flightTerrainBodyId,
+          dispose: () => loaded.dispose(),
+        };
+      },
+      prepareCandidate: async (candidate) => {
+        const frame = this.lastBodyFrames.get(candidate.bodyId);
+        if (frame) candidate.update(frame);
+      },
+      compileCandidate: async (candidate, _candidateBody, tier) => {
+        for (const channel of transactionChannels.length > 0 ? transactionChannels : [candidate.kind]) {
+          await compileRendererCandidate({
+            renderer: this.context.renderer,
+            camera: this.camera,
+            root: candidate.root,
+            body: candidate.bodyId,
+            tier,
+            channel,
+          });
+        }
+      },
+      awaitCoverage: async (candidate) => {
+        if (!candidate.ready) throw new Error(`${candidate.bodyId} renderer coverage is not ready`);
+      },
+      ledger: this.rendererLedger,
+    });
+    this.bodyRendererManagers.set(body.id, manager);
+    const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });
+    const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
+    manager.adoptInitial(body, renderer, {
+      pack: null,
+      gpuBytes: hasAuthoredPack ? rendererGeometryBytes(renderer) : 0,
+      transientBytes: 0,
+      flightScale: false,
+      dispose: () => undefined,
+    });
+    this.bodyRenderers.set(body.id, renderer);
+    if (hasAuthoredPack) {
+      void manager.rebuildCommitted().then(() => {
+        const replacement = manager.current();
+        if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
+          if (replacement) this.bodyRenderers.set(body.id, replacement);
+          if (body.id === this.flightTerrainBodyId) this.flightPromotedBodyId = body.id;
+        } else {
+          manager.dispose();
+        }
+      }).catch(() => undefined);
     }
-    return mesh;
+    return renderer;
+  }
+
+  private setFlightTerrainOwner(bodyId: string | null): void {
+    const previousId = this.flightTerrainBodyId;
+    if (previousId !== bodyId && bodyId) this.flightPromotionFailed?.delete(bodyId);
+    if (previousId && previousId !== bodyId) {
+      const manager = this.bodyRendererManagers?.get(previousId);
+      if (manager) {
+        manager.dispose();
+        this.bodyRendererManagers.delete(previousId);
+      }
+      const previous = this.bodyRenderers.get(previousId);
+      if (previous && !manager) {
+        this.scene.remove(previous.root);
+        previous.dispose();
+      }
+      this.bodyRenderers.delete(previousId);
+      this.flightPromotionPending?.delete(previousId);
+      if (this.flightPromotedBodyId === previousId) this.flightPromotedBodyId = null;
+    }
+    this.flightTerrainBodyId = bodyId;
+    this.promoteFlightRenderer(bodyId);
+  }
+
+  private promoteFlightRenderer(bodyId: string | null): void {
+    if (
+      !bodyId || this.flightPromotedBodyId === bodyId || this.flightPromotionPending.has(bodyId) ||
+      this.flightPromotionFailed.has(bodyId) ||
+      !this.checkedPlanetManifest?.hasPack(bodyId, this.quality)
+    ) return;
+    const manager = this.bodyRendererManagers?.get(bodyId);
+    if (!manager?.current()) return;
+    this.flightPromotionPending.add(bodyId);
+    void manager.rebuildCommitted().then(() => {
+      if (this.disposed || this.flightTerrainBodyId !== bodyId || this.bodyRendererManagers.get(bodyId) !== manager) return;
+      const renderer = manager.current();
+      if (renderer) this.bodyRenderers.set(bodyId, renderer);
+      this.flightPromotedBodyId = bodyId;
+    }).catch(() => {
+      if (this.flightTerrainBodyId === bodyId) this.flightPromotionFailed.add(bodyId);
+    }).finally(() => {
+      this.flightPromotionPending.delete(bodyId);
+    });
+  }
+
+  /** Explicit recovery hook for context restoration or a user-requested visual retry. */
+  retryActiveBodyRenderer(): boolean {
+    const bodyId = this.flightTerrainBodyId;
+    if (!bodyId || !this.flightPromotionFailed.has(bodyId)) return false;
+    this.flightPromotionFailed.delete(bodyId);
+    this.promoteFlightRenderer(bodyId);
+    return true;
+  }
+
+  /** Rebuild every renderer owned by this live scene after WebGL restoration. */
+  async rebuildCommittedRenderers(): Promise<void> {
+    if (this.disposed) return;
+    const managers = [...this.bodyRendererManagers.entries()];
+    const results = await Promise.allSettled(managers.map(async ([bodyId, manager]) => {
+      await manager.rebuildCommitted();
+      if (this.disposed || this.bodyRendererManagers.get(bodyId) !== manager) return;
+      const renderer = manager.current();
+      if (renderer) this.bodyRenderers.set(bodyId, renderer);
+    }));
+    if (this.disposed) return;
+    const failedBodies = results.flatMap((result, index) => result.status === 'rejected' ? [managers[index][0]] : []);
+    if (failedBodies.length > 0) {
+      throw new Error(`Failed to restore body renderers: ${failedBodies.join(', ')}`);
+    }
   }
 
   visualFor(gv: GameVessel): VesselVisual {
@@ -163,6 +408,7 @@ export class WorldScene {
     for (const [id, vis] of this.vesselVisuals) {
       if (!alive.has(id)) {
         this.scene.remove(vis.group);
+        disposeVesselVisual(vis);
         this.vesselVisuals.delete(id);
       }
     }
@@ -173,6 +419,7 @@ export class WorldScene {
     const vis = this.vesselVisuals.get(id);
     if (vis) {
       this.scene.remove(vis.group);
+      disposeVesselVisual(vis);
       this.vesselVisuals.delete(id);
     }
   }
@@ -183,9 +430,14 @@ export class WorldScene {
    */
   update(game: GameState, dt: number): void {
     const active = game.active;
-    if (!active) return;
+    if (!active) {
+      this.setFlightTerrainOwner(null);
+      this.lastBodyFrames?.clear();
+      return;
+    }
     const v = active.runtime;
     const body = game.bodyOf(active);
+    this.setFlightTerrainOwner(body.id);
     const t = game.time;
 
     // ---- camera position: orbit rig around the vessel, in vessel-local
@@ -213,71 +465,72 @@ export class WorldScene {
     _vesselAbs.copy(_bodyAbs).add(v.pos);
     _camAbs.copy(_vesselAbs).add(camOffset);
 
-    // ---- sun light: from camera toward the star (star at origin).
-    _sunDir.copy(_camAbs).scale(-1).normalize();
-    sunLightPosition(_sunDir, 1e4, this.sun.position);
-    this.sun.target.position.set(0, 0, 0);
-    this.sun.target.updateMatrixWorld();
-    // Sun sprite at great distance toward the star.
-    this.sunSprite.position.set(_sunDir.x * 3e8, _sunDir.y * 3e8, _sunDir.z * 3e8);
+    // Keep star direction in f64 until the final camera-relative conversion.
+    game.universe.absolutePosition(game.universe.root, t, _starAbs);
+    _sunDir.copy(_starAbs).sub(_camAbs).normalize();
 
     // ---- planets: full LOD for the SOI body and its close family; simple
     // spheres beyond.
     const renderSet = new Set<string>();
-    const considerBodies: Body[] = [body];
-    if (body.parent) considerBodies.push(body.parent);
-    for (const child of body.children) considerBodies.push(child);
+    const considerBodies: Body[] = [];
+    const consider = (candidate: Body | null): void => {
+      if (candidate && !considerBodies.some((existing) => existing.id === candidate.id)) considerBodies.push(candidate);
+    };
+    consider(body);
+    consider(game.universe.root);
+    consider(body.parent);
+    for (const child of body.children) consider(child);
     for (const sibling of body.parent?.children ?? []) {
-      if (!considerBodies.includes(sibling)) considerBodies.push(sibling);
+      consider(sibling);
     }
 
+    const sampledBodyIds = new Set<string>();
     for (const b of considerBodies) {
-      if (b.def.isStar) continue;
       game.universe.absolutePosition(b, t, _bodyAbs);
       Vec3.sub(_bodyAbs, _camAbs, _rel); // body center in camera-relative world
       const dist = _rel.length();
       renderSet.add(b.id);
-      if (dist < b.radius * 60) {
-        // Near: quadtree terrain.
-        const pr = this.planetFor(b);
-        const spin = b.rotationAngle(t);
-        // camera in body-fixed frame
-        _tmp.copy(_camAbs).sub(_bodyAbs);
-        const cs = Math.cos(-spin);
-        const ss = Math.sin(-spin);
-        _camBF.set(_tmp.x * cs - _tmp.y * ss, _tmp.x * ss + _tmp.y * cs, _tmp.z);
-        pr.update(_camBF, spin, _rel);
-        pr.group.visible = true;
-        const distant = this.distantBodies.get(b.id);
-        if (distant) distant.visible = false;
-        // Cloud layer for atmospheric worlds.
-        if (b.def.atmosphere && b.def.terrain.amplitude > 0) {
-          let clouds = this.cloudLayers.get(b.id);
-          if (!clouds) {
-            clouds = new CloudLayer(b);
-            this.cloudLayers.set(b.id, clouds);
-            this.scene.add(clouds.mesh);
-          }
-          clouds.update(_rel, spin, t, dist - b.radius);
-        }
-      } else {
-        const clouds = this.cloudLayers.get(b.id);
-        if (clouds) clouds.mesh.visible = false;
-        // Far: single sphere.
-        const mesh = this.distantFor(b);
-        mesh.position.set(_rel.x, _rel.y, _rel.z);
-        mesh.visible = true;
-        const pr = this.planetRenderers.get(b.id);
-        if (pr) pr.group.visible = false;
-      }
+      _tmp.copy(_camAbs).sub(_bodyAbs);
+      inertialToBodyFixed(b, t, _tmp, _camBF);
+      bodyOrientation(b, t, _bodyQ);
+      _bodySunDir.copy(_starAbs).sub(_bodyAbs);
+      if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
+      const renderer = this.rendererFor(b);
+      if (!renderer) continue;
+      renderer.root.visible = true;
+      const previousFrame = this.lastBodyFrames.get(b.id);
+      const cameraBodyFixedVelocity = bodyFixedCameraVelocity(_camBF, previousFrame, dt);
+      const frame: BodyRenderFrame = {
+        cameraRelativeOrigin: _rel,
+        cameraBodyFixed: _camBF,
+        cameraBodyFixedVelocity,
+        orientation: _bodyQ,
+        cameraSunDirection: _sunDir,
+        bodySunDirection: _bodySunDir,
+        time: t,
+        deltaSeconds: dt,
+        framePressure: dt > 1 / 45,
+        altitude: dist - b.radius,
+        allowFlightTerrain: b.id === body.id && b.def.surfaceKind === 'solid',
+      };
+      const stableFrame: BodyRenderFrame = {
+        ...frame,
+        cameraRelativeOrigin: { ...frame.cameraRelativeOrigin },
+        cameraBodyFixed: { ...frame.cameraBodyFixed },
+        cameraBodyFixedVelocity: { ...frame.cameraBodyFixedVelocity },
+        orientation: { ...frame.orientation },
+        cameraSunDirection: { ...frame.cameraSunDirection },
+        bodySunDirection: { ...frame.bodySunDirection },
+      };
+      this.lastBodyFrames.set(b.id, stableFrame);
+      sampledBodyIds.add(b.id);
+      renderer.update(stableFrame);
     }
     // Hide renderers of bodies no longer relevant.
-    for (const [id, pr] of this.planetRenderers) {
-      if (!renderSet.has(id)) pr.group.visible = false;
+    for (const [id, renderer] of this.bodyRenderers) {
+      if (!renderSet.has(id)) renderer.root.visible = false;
     }
-    for (const [id, mesh] of this.distantBodies) {
-      if (!renderSet.has(id)) mesh.visible = false;
-    }
+    pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
 
     // Cape Skyward is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.
@@ -343,7 +596,8 @@ export class WorldScene {
     // ---- atmosphere tint: fade background + fog by altitude.
     const alt = v.pos.length() - body.radius;
     const atmo = body.def.atmosphere;
-    if (atmo && alt < atmo.height) {
+    const legacyAtmosphereTint = usesLegacyAtmosphereTint(this.bodyRenderers.get(body.id)?.kind);
+    if (atmo && legacyAtmosphereTint && alt < atmo.height) {
       const f = Math.max(0, 1 - alt / atmo.height);
       const dayness = Math.max(0, Vec3.dot(up, _sunDir));
       const sky = new THREE.Color().setRGB(
@@ -364,9 +618,46 @@ export class WorldScene {
   }
 
   dispose(): void {
-    for (const pr of this.planetRenderers.values()) pr.dispose();
-    this.planetRenderers.clear();
-    for (const cl of this.cloudLayers.values()) cl.dispose();
-    this.cloudLayers.clear();
+    if (this.disposed) return;
+    this.disposed = true;
+    this.unsubscribeRestoration();
+    window.removeEventListener('resize', this.resizeHandler);
+    for (const manager of this.bodyRendererManagers.values()) manager.dispose();
+    this.bodyRendererManagers.clear();
+    for (const renderer of this.bodyRenderers.values()) {
+      if (renderer.root.parent === this.scene) this.scene.remove(renderer.root);
+    }
+    this.bodyRenderers.clear();
+    this.lastBodyFrames.clear();
+    this.planetAssetLoader.dispose();
+    this.flightTerrainBodyId = null;
+    this.flightPromotedBodyId = null;
+    this.flightPromotionPending.clear();
+    this.flightPromotionFailed.clear();
+    for (const visual of this.vesselVisuals.values()) {
+      this.scene.remove(visual.group);
+      disposeVesselVisual(visual);
+    }
+    this.vesselVisuals.clear();
+    disposeOwnedGroup(this.launchSite);
+    this.starfield.geometry.dispose();
+    const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];
+    for (const material of starfieldMaterials) material.dispose();
+    this.scene.clear();
   }
+}
+
+/** Dispose geometry/materials wholly owned by one scene group, once each. */
+function disposeOwnedGroup(root: THREE.Object3D): void {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    geometries.add(object.geometry);
+    const owned = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of owned) materials.add(material);
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
+  root.clear();
 }

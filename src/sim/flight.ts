@@ -23,6 +23,7 @@ import { AeroModel, buildAeroModel, evaluateAero, newAeroForces, AeroForces } fr
 import type { Body } from './universe';
 import { groundRadiusInertial } from './terrain';
 import { RESOURCE_DENSITY } from '../content/parts';
+import { surfaceVelocity } from './bodyOrientation';
 
 export type SasMode =
   | 'off'
@@ -206,9 +207,15 @@ export interface StepResult {
   destroyedParts: number[];
   crashed: boolean;
   crashSpeed: number;
+  terminalFailure: string | null;
 }
 
-const stepResult: StepResult = { destroyedParts: [], crashed: false, crashSpeed: 0 };
+const stepResult: StepResult = {
+  destroyedParts: [],
+  crashed: false,
+  crashSpeed: 0,
+  terminalFailure: null,
+};
 
 /** True if the engine part can currently produce thrust. */
 export function engineHasFuel(craft: Craft, part: PartInstance): boolean {
@@ -250,6 +257,7 @@ export function stepVessel(
   stepResult.destroyedParts.length = 0;
   stepResult.crashed = false;
   stepResult.crashSpeed = 0;
+  stepResult.terminalFailure = null;
   const { body, time } = ctx;
 
   // Periodic recompute of mass properties (fuel drain shifts CoM slowly).
@@ -275,8 +283,7 @@ export function stepVessel(
   const density = body.densityAt(altitude);
   const sos = body.speedOfSoundAt(altitude);
   // Air co-rotates with the planet: v_wind = ω × r.
-  const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-  _wind.set(-omega * v.pos.y, omega * v.pos.x, 0);
+  surfaceVelocity(body, v.pos, _wind);
   Vec3.sub(v.vel, _wind, _vAir);
 
   // ------------------------------------------------------------ attitude control
@@ -398,8 +405,9 @@ export function stepVessel(
   for (const p of v.craft.parts) {
     const chute = defOf(p).parachute;
     if (!chute || !p.activated) continue;
-    const terrainR = groundRadiusInertial(body, _up, time);
-    const aglAlt = r - terrainR;
+    const aglAlt = body.def.surfaceKind === 'solid'
+      ? r - groundRadiusInertial(body, _up, time)
+      : Infinity;
     let deployFrac = 0;
     if (p.deployed) deployFrac = 1;
     else if (pressure > 1000 && aglAlt < chute.semiDeployAlt) {
@@ -435,79 +443,82 @@ export function stepVessel(
   stepThermal(v, ctx, density, dt);
 
   // ----------------------------------------------------------- ground contact
-  const terrainR = groundRadiusInertial(body, _up, time);
-  const isOverOcean = body.def.terrain.oceanLevel > 0 && terrainR <= body.radius + 0.01;
-
+  let isOverOcean = false;
   let hasWheels = false;
-  for (const p of v.craft.parts) {
-    if (defOf(p).wheel) {
-      hasWheels = true;
-      break;
-    }
-  }
+  let contactNear = false;
+  if (body.def.surfaceKind === 'solid') {
+    const terrainR = groundRadiusInertial(body, _up, time);
+    isOverOcean = body.def.terrain.oceanLevel > 0 && terrainR <= body.radius + 0.01;
 
-  let contactNear: boolean;
-  if (hasWheels) {
-    // Multi-point wheel contact (rovers, aircraft gear).
-    contactNear = stepWheeledContact(v, body, time, mass, com, dt, isOverOcean);
-    if (stepResult.crashed) return stepResult;
-  } else {
-    // Single bottom-point contact for stacks (legs, hull).
-    // Vessel bottom extent along craft -Y from CoM.
-    let minY = Infinity;
     for (const p of v.craft.parts) {
-      const def = defOf(p);
-      let bottom = p.position.y - def.shape.height / 2;
-      if (def.leg) bottom -= def.leg.length;
-      minY = Math.min(minY, bottom);
+      if (defOf(p).wheel) {
+        hasWheels = true;
+        break;
+      }
     }
-    const bottomOffset = com.y - minY;
-    // World position of the bottom point.
-    v.att.rotate(_tmp.set(0, -bottomOffset, 0), _bottom);
-    _bottom.add(v.pos);
-    const bottomR = _bottom.length();
-    const penetration = terrainR - bottomR;
-    contactNear = penetration > -0.5;
 
-    if (penetration > 0) {
-      // All contact logic uses GROUND-RELATIVE velocity (the surface rotates
-      // with the planet at hundreds of m/s in the inertial frame).
-      _vRel.copy(v.vel).sub(_wind);
-      const vRad = Vec3.dot(_vRel, _up);
-      const vHoriz = _tmp2.copy(_vRel).addScaled(_up, -vRad).length();
-      const impactSpeed = Math.max(-vRad, vHoriz * 0.4);
+    if (hasWheels) {
+      // Multi-point wheel contact (rovers, aircraft gear).
+      contactNear = stepWheeledContact(v, body, time, mass, com, dt, isOverOcean);
+      if (stepResult.crashed) return stepResult;
+    } else {
+      // Single bottom-point contact for stacks (legs, hull).
+      // Vessel bottom extent along craft -Y from CoM.
+      let minY = Infinity;
+      for (const p of v.craft.parts) {
+        const def = defOf(p);
+        let bottom = p.position.y - def.shape.height / 2;
+        if (def.leg) bottom -= def.leg.length;
+        minY = Math.min(minY, bottom);
+      }
+      const bottomOffset = com.y - minY;
+      // World position of the bottom point.
+      v.att.rotate(_tmp.set(0, -bottomOffset, 0), _bottom);
+      _bottom.add(v.pos);
+      const bottomR = _bottom.length();
+      const penetration = terrainR - bottomR;
+      contactNear = penetration > -0.5;
 
-      // Crash check on first contact.
-      if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
-        const tolerance = crashToleranceOfLowestPart(v.craft);
-        if (impactSpeed > tolerance) {
-          stepResult.crashed = true;
-          stepResult.crashSpeed = impactSpeed;
-          return stepResult;
+      if (penetration > 0) {
+        // All contact logic uses GROUND-RELATIVE velocity (the surface rotates
+        // with the planet at hundreds of m/s in the inertial frame).
+        _vRel.copy(v.vel).sub(_wind);
+        const vRad = Vec3.dot(_vRel, _up);
+        const vHoriz = _tmp2.copy(_vRel).addScaled(_up, -vRad).length();
+        const impactSpeed = Math.max(-vRad, vHoriz * 0.4);
+
+        // Crash check on first contact.
+        if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
+          const tolerance = crashToleranceOfLowestPart(v.craft);
+          if (impactSpeed > tolerance) {
+            stepResult.crashed = true;
+            stepResult.crashSpeed = impactSpeed;
+            return stepResult;
+          }
         }
-      }
 
-      // Spring-damper ground reaction (water is softer).
-      const k = isOverOcean ? mass * 8 : mass * 40;
-      const c = isOverOcean ? mass * 4 : mass * 9;
-      const fN = Math.max(0, k * penetration - c * vRad);
-      _tmp.copy(_up).scale(fN);
-      _force.add(_tmp);
-      // Friction: oppose horizontal motion relative to the ground.
-      _tmp2.copy(_vRel).addScaled(_up, -vRad);
-      const hSpeed = _tmp2.length();
-      if (hSpeed > 0.01) {
-        const fric = Math.min(fN * (isOverOcean ? 0.3 : 0.75), (hSpeed * mass) / dt);
-        _tmp2.scale(-fric / hSpeed);
-        _force.add(_tmp2);
+        // Spring-damper ground reaction (water is softer).
+        const k = isOverOcean ? mass * 8 : mass * 40;
+        const c = isOverOcean ? mass * 4 : mass * 9;
+        const fN = Math.max(0, k * penetration - c * vRad);
+        _tmp.copy(_up).scale(fN);
+        _force.add(_tmp);
+        // Friction: oppose horizontal motion relative to the ground.
+        _tmp2.copy(_vRel).addScaled(_up, -vRad);
+        const hSpeed = _tmp2.length();
+        if (hSpeed > 0.01) {
+          const fric = Math.min(fN * (isOverOcean ? 0.3 : 0.75), (hSpeed * mass) / dt);
+          _tmp2.scale(-fric / hSpeed);
+          _force.add(_tmp2);
+        }
+        // Contact torque: reaction applied at the bottom point rights/tips the craft.
+        Vec3.sub(_bottom, v.pos, _lever);
+        _tmp.copy(_up).scale(fN * 0.6);
+        Vec3.cross(_lever, _tmp, _tmp2);
+        _torqueW.add(_tmp2);
+        // Strong angular damping in contact (legs absorb wobble).
+        v.angVel.scale(Math.max(0, 1 - dt * 3));
       }
-      // Contact torque: reaction applied at the bottom point rights/tips the craft.
-      Vec3.sub(_bottom, v.pos, _lever);
-      _tmp.copy(_up).scale(fN * 0.6);
-      Vec3.cross(_lever, _tmp, _tmp2);
-      _torqueW.add(_tmp2);
-      // Strong angular damping in contact (legs absorb wobble).
-      v.angVel.scale(Math.max(0, 1 - dt * 3));
     }
   }
 
@@ -531,6 +542,20 @@ export function stepVessel(
     v.angVel.scale(damp);
   }
   v.att.integrate(v.angVel, dt);
+
+  if (body.def.surfaceKind === 'gas') {
+    const currentAltitude = v.pos.length() - body.radius;
+    const terminalPressure = body.def.terminalPressurePa ?? Infinity;
+    const terminalDepth = body.def.terminalDepthMeters ?? Infinity;
+    if (body.pressureAt(currentAltitude) >= terminalPressure) {
+      stepResult.terminalFailure = `Destroyed by atmospheric pressure on ${body.name}`;
+      return stepResult;
+    }
+    if (currentAltitude <= -terminalDepth) {
+      stepResult.terminalFailure = `Lost below the terminal depth of ${body.name}`;
+      return stepResult;
+    }
+  }
 
   // --------------------------------------------------------- situation update
   updateSituation(v, ctx, contactNear, isOverOcean, hasWheels);
@@ -600,8 +625,6 @@ function stepWheeledContact(
   const hasCharge = v.charge.amount > 0.01;
   const drive = hasCharge ? clamp(v.controls.wheelDrive, -1, 1) : 0;
   const steer = clamp(v.controls.wheelSteer, -1, 1);
-  const planetOmega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-
   // World-frame angular velocity for contact-point velocities.
   v.att.rotate(v.angVel, _wWorld);
 
@@ -625,10 +648,11 @@ function stepWheeledContact(
 
     // Contact-point velocity relative to the rotating ground:
     // v + ω_craft×offset − ω_planet×r.
+    surfaceVelocity(body, _cPt, _wind);
     _cVp.set(
-      v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y + planetOmega * _cPt.y,
-      v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - planetOmega * _cPt.x,
-      v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x,
+      v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y - _wind.x,
+      v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - _wind.y,
+      v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x - _wind.z,
     );
     const vRad = Vec3.dot(_cVp, _cUp);
 
@@ -726,10 +750,11 @@ function stepWheeledContact(
     if (pen > -0.3) anyNear = true;
     if (pen > 0) {
       contacts++;
+      surfaceVelocity(body, _cPt, _wind);
       _cVp.set(
-        v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y + planetOmega * _cPt.y,
-        v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - planetOmega * _cPt.x,
-        v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x,
+        v.vel.x + _wWorld.y * _cOff.z - _wWorld.z * _cOff.y - _wind.x,
+        v.vel.y + _wWorld.z * _cOff.x - _wWorld.x * _cOff.z - _wind.y,
+        v.vel.z + _wWorld.x * _cOff.y - _wWorld.y * _cOff.x - _wind.z,
       );
       const vRad = Vec3.dot(_cVp, _cUp);
       if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
@@ -918,12 +943,8 @@ function computeCommandTorque(v: VesselRuntime, body: Body, out: Vec3, dt: numbe
   const altNow = rNow - body.radius;
   const surfaceRef =
     altNow < (body.def.atmosphere?.height ?? Math.max(10_000, body.radius * 0.08));
-  const om = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
   _refVel.copy(v.vel);
-  if (surfaceRef && om !== 0) {
-    _refVel.x += om * v.pos.y;
-    _refVel.y -= om * v.pos.x;
-  }
+  if (surfaceRef) _refVel.sub(surfaceVelocity(body, v.pos, _wind));
   const dir = _err;
   switch (v.sas) {
     case 'prograde':
@@ -990,8 +1011,7 @@ function updateSituation(
 
   if (inContact) {
     // Surface speed relative to rotating ground.
-    const omega = body.def.rotationPeriod !== 0 ? (Math.PI * 2) / body.def.rotationPeriod : 0;
-    _wind.set(-omega * v.pos.y, omega * v.pos.x, 0);
+    surfaceVelocity(body, v.pos, _wind);
     const groundSpeed = _tmp.copy(v.vel).sub(_wind).length();
     // Rolling on wheels still counts as landed (drive ≠ fly).
     if (groundSpeed < 0.6 || (onWheels && !overOcean)) {

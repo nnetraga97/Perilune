@@ -10,6 +10,7 @@ import { RESOURCE_DENSITY, PartDef } from '../content/parts';
 import { defOf } from './vessel';
 import type { Body } from './universe';
 import type { GameState, GameVessel } from './state';
+import { inertialToBodyFixed } from './bodyOrientation';
 
 /**
  * Ore concentration 0..1 for a unit direction in the body's rotating
@@ -17,7 +18,7 @@ import type { GameState, GameVessel } from './state';
  */
 export function oreConcentration(body: Body, dir: Readonly<Vec3>): number {
   const t = body.def.terrain;
-  if (t.amplitude === 0) return 0; // star / gas giants
+  if (body.def.surfaceKind !== 'solid') return 0;
   const f = 2.6;
   const s = t.seed + 101;
   const n = fbm3(dir.x * f, dir.y * f, dir.z * f, s, 4);
@@ -77,11 +78,8 @@ function siteDirection(game: GameState, gv: GameVessel, out: Vec3): Vec3 {
     return out.copy(gv.rails.landedPos).normalize();
   }
   const body = game.universe.get(gv.runtime.bodyId);
-  const ang = -body.rotationAngle(game.time);
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
   const p = gv.runtime.pos;
-  return out.set(p.x * c - p.y * s, p.x * s + p.y * c, p.z).normalize();
+  return inertialToBodyFixed(body, game.time, p, out).normalize();
 }
 
 /**
