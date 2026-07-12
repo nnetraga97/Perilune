@@ -383,8 +383,14 @@ class PeriluneGame {
       background: rgba(14,24,32,0.97); border: 1px solid var(--ui-accent);
       border-radius: 10px; padding: 18px 22px; max-width: 420px; z-index: 80; pointer-events: auto;
     `;
-    d.innerHTML = `<div style="font-size:17px;color:#fff;margin-bottom:8px">${title}</div>
-      <div style="font-size:13px;color:#c4d2dd;line-height:1.5;margin-bottom:12px">${text}</div>`;
+    // textContent, not innerHTML: title/text include user-authored names.
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-size:17px;color:#fff;margin-bottom:8px';
+    heading.textContent = title;
+    const message = document.createElement('div');
+    message.style.cssText = 'font-size:13px;color:#c4d2dd;line-height:1.5;margin-bottom:12px';
+    message.textContent = text;
+    d.append(heading, message);
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
     for (const a of actions) {

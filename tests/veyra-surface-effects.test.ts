@@ -114,6 +114,58 @@ describe('TerrestrialScatter streaming', () => {
     scatter.dispose();
   });
 
+  it('quarantines cells whose generation throws and retries them later', () => {
+    // The first sampler call in each update probes the camera origin and must
+    // succeed; subsequent calls generate cell instances and are made to fail.
+    let originProbe = 0;
+    let cellsShouldThrow = true;
+    const flakySampler: SurfaceSampler = (x, y, z) => {
+      if (originProbe-- > 0) return landSampler(x, y, z);
+      if (cellsShouldThrow) throw new Error('recipe fault');
+      return landSampler(x, y, z);
+    };
+    const scatter = new TerrestrialScatter(RADIUS, 7, flakySampler, 'low');
+    const frame = (): void => {
+      originProbe = 1;
+      scatter.update(scatterFrame());
+    };
+    expect(frame).not.toThrow();
+    expect(scatter.stats().activeCells).toBe(0);
+    cellsShouldThrow = false;
+    frame();
+    // Still quarantined inside the retry window.
+    expect(scatter.stats().activeCells).toBe(0);
+    for (let i = 0; i < 121; i++) frame();
+    expect(scatter.stats().activeCells).toBeGreaterThan(0);
+    scatter.dispose();
+  });
+
+  it('keeps overflowed cells cached instead of regenerating them every frame', () => {
+    const low = SCATTER_TIERS.low as { capacity: number };
+    const originalCapacity = low.capacity;
+    low.capacity = 4;
+    try {
+      let samplerCalls = 0;
+      const countingSampler: SurfaceSampler = (x, y, z) => {
+        samplerCalls++;
+        return landSampler(x, y, z);
+      };
+      const scatter = new TerrestrialScatter(RADIUS, 7, countingSampler, 'low');
+      scatter.update(scatterFrame());
+      const dropsAfterFirst = scatter.stats().droppedCells;
+      expect(dropsAfterFirst).toBeGreaterThan(0);
+      const callsAfterFirst = samplerCalls;
+      scatter.update(scatterFrame());
+      // Overflowed cells stay cached: only the origin sample runs again, and the
+      // drop stat counts overflow transitions, not frames.
+      expect(samplerCalls - callsAfterFirst).toBeLessThanOrEqual(1);
+      expect(scatter.stats().droppedCells).toBe(dropsAfterFirst);
+      scatter.dispose();
+    } finally {
+      low.capacity = originalCapacity;
+    }
+  });
+
   it('rebuilds pools on quality change and disposes once', () => {
     const scatter = new TerrestrialScatter(RADIUS, 7, landSampler, 'low');
     scatter.update(scatterFrame());
@@ -155,6 +207,44 @@ describe('surface decals and dust', () => {
       if (Number.isNaN(positions[i])) { expect(Number.isNaN(shifted[i])).toBe(true); continue; }
       expect(shifted[i]).toBeCloseTo(positions[i], 6);
     }
+    effects.dispose();
+  });
+
+  it('caches decal cells so a static camera does not re-query the terrain evaluator', () => {
+    let samplerCalls = 0;
+    const countingSampler: SurfaceSampler = (x, y, z) => {
+      samplerCalls++;
+      return landSampler(x, y, z);
+    };
+    const effects = new TerrestrialSurfaceEffects(RADIUS, 7, countingSampler, 'medium');
+    effects.update(effectsFrame());
+    const afterFirstFrame = samplerCalls;
+    expect(afterFirstFrame).toBeGreaterThan(0);
+    effects.update(effectsFrame({ time: 3.5 }));
+    // Only the per-frame camera-origin sample runs again; decal cells are cached.
+    expect(samplerCalls - afterFirstFrame).toBeLessThanOrEqual(1);
+    effects.dispose();
+  });
+
+  it('lifts and advects dust along the radial up axis, not body-fixed +Y', () => {
+    const effects = new TerrestrialSurfaceEffects(RADIUS, 7, landSampler, 'high');
+    // Camera sits on the +X axis, so radial up is body-fixed +X; the 30 m/s
+    // radial velocity must blow particles out along +X while the tangent
+    // (+Y east, +Z north) coordinates stay wrapped inside the local box.
+    effects.update(effectsFrame({ cameraBodyFixedVelocity: { x: 30, y: 0, z: 0 }, altitude: 20 }));
+    const active = effects.stats().dust;
+    expect(active).toBeGreaterThan(100);
+    const positions = (effects as unknown as { dustPositions: Float32Array }).dustPositions;
+    let maxUp = -Infinity;
+    for (let i = 0; i < active; i++) {
+      const up = positions[i * 3];
+      const east = positions[i * 3 + 1];
+      const north = positions[i * 3 + 2];
+      expect(Math.abs(east)).toBeLessThanOrEqual(15.001);
+      expect(Math.abs(north)).toBeLessThanOrEqual(15.001);
+      maxUp = Math.max(maxUp, up);
+    }
+    expect(maxUp).toBeGreaterThan(15);
     effects.dispose();
   });
 

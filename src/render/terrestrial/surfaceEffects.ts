@@ -54,9 +54,37 @@ export interface TerrestrialSurfaceEffectsStats {
 const _matrix = new THREE.Matrix4();
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
+const _yawQuaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _normal = new THREE.Vector3();
+const DECAL_COLOR_RGB: Record<DecalKind, THREE.Color> = {
+  soil: new THREE.Color(DECAL_COLOR.soil),
+  rock: new THREE.Color(DECAL_COLOR.rock),
+  'wet-shore': new THREE.Color(DECAL_COLOR['wet-shore']),
+  scuff: new THREE.Color(DECAL_COLOR.scuff),
+};
+
+/** Radial-up tangent frame at a body-fixed direction (east, north columns). */
+interface TangentBasis {
+  ex: number; ey: number; ez: number;
+  nx: number; ny: number; nz: number;
+}
+
+function tangentBasis(dirX: number, dirY: number, dirZ: number): TangentBasis {
+  let ex = -dirY;
+  let ey = dirX;
+  let ez = 0;
+  if (ex * ex + ey * ey + ez * ez < 1e-9) { ex = 1; ey = 0; ez = 0; }
+  const eLen = Math.hypot(ex, ey, ez);
+  ex /= eLen; ey /= eLen; ez /= eLen;
+  return {
+    ex, ey, ez,
+    nx: dirY * ez - dirZ * ey,
+    ny: dirZ * ex - dirX * ez,
+    nz: dirX * ey - dirY * ex,
+  };
+}
 
 function hashDecalSeed(seed: number, cx: number, cy: number, cz: number): number {
   let h = (seed ^ 0x2545f491) >>> 0;
@@ -116,6 +144,14 @@ export function generateDecalCell(
   return decals;
 }
 
+interface DecalCellEntry {
+  readonly cx: number;
+  readonly cy: number;
+  readonly cz: number;
+  readonly instances: readonly DecalData[];
+  lastSeen: number;
+}
+
 export class TerrestrialSurfaceEffects {
   readonly group = new THREE.Group();
   private decalMesh!: THREE.InstancedMesh;
@@ -124,6 +160,9 @@ export class TerrestrialSurfaceEffects {
   private dustSeeds!: Float32Array;
   private dustCount = 0;
   private decalCount = 0;
+  /** Deterministic decal cells cached across frames; regeneration is the exception. */
+  private readonly decalCells = new Map<string, DecalCellEntry>();
+  private frameIndex = 0;
   private tier: QualityTier;
   private disposed = false;
 
@@ -173,11 +212,13 @@ export class TerrestrialSurfaceEffects {
     if (tier === this.tier || this.disposed) return;
     this.tier = tier;
     this.releaseObjects();
+    this.decalCells.clear();
     this.build();
   }
 
   update(frame: Readonly<TerrestrialSurfaceEffectsFrame>): void {
     if (this.disposed) return;
+    this.frameIndex++;
     const params = SURFACE_EFFECTS_TIERS[this.tier];
     const cam = frame.cameraBodyFixed;
     const camLength = Math.hypot(cam.x, cam.y, cam.z) || 1;
@@ -187,9 +228,10 @@ export class TerrestrialSurfaceEffects {
     const surface = this.sampler(dirX, dirY, dirZ);
     const originRadius = this.radius + Math.max(0, surface.height);
     const localOrigin = { x: dirX * originRadius, y: dirY * originRadius, z: dirZ * originRadius };
+    const basis = tangentBasis(dirX, dirY, dirZ);
 
-    this.updateDecals(params, localOrigin, dirX, dirY, dirZ);
-    this.updateDust(frame, params, localOrigin);
+    this.updateDecals(params, localOrigin, basis);
+    this.updateDust(frame, params, basis, dirX, dirY, dirZ);
 
     _quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
     _position.set(localOrigin.x, localOrigin.y, localOrigin.z).applyQuaternion(_quaternion);
@@ -204,46 +246,56 @@ export class TerrestrialSurfaceEffects {
   private updateDecals(
     params: SurfaceEffectsTierParams,
     localOrigin: VectorCoordinates,
-    dirX: number, dirY: number, dirZ: number,
+    basis: TangentBasis,
   ): void {
-    let ex = -dirY, ey = dirX, ez = 0;
-    if (ex * ex + ey * ey + ez * ez < 1e-9) { ex = 1; ey = 0; ez = 0; }
-    const eLen = Math.hypot(ex, ey, ez);
-    ex /= eLen; ey /= eLen; ez /= eLen;
-    const fx = dirY * ez - dirZ * ey;
-    const fy = dirZ * ex - dirX * ez;
-    const fz = dirX * ey - dirY * ex;
     const cs = params.decalCellSize;
     const steps = Math.ceil(params.decalRadius / cs);
     const colors = this.decalMesh.instanceColor!;
-    const seen = new Set<string>();
     let count = 0;
     for (let iy = -steps; iy <= steps && count < params.decalCapacity; iy++) {
       for (let ix = -steps; ix <= steps && count < params.decalCapacity; ix++) {
-        const wx = localOrigin.x + ex * ix * cs + fx * iy * cs;
-        const wy = localOrigin.y + ey * ix * cs + fy * iy * cs;
-        const wz = localOrigin.z + ez * ix * cs + fz * iy * cs;
+        const wx = localOrigin.x + basis.ex * ix * cs + basis.nx * iy * cs;
+        const wy = localOrigin.y + basis.ey * ix * cs + basis.ny * iy * cs;
+        const wz = localOrigin.z + basis.ez * ix * cs + basis.nz * iy * cs;
         const cx = Math.floor(wx / cs);
         const cy = Math.floor(wy / cs);
         const cz = Math.floor(wz / cs);
         const key = `${cx},${cy},${cz}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        for (const decal of generateDecalCell(this.seed, cx, cy, cz, this.radius, cs, this.sampler)) {
+        let cell = this.decalCells.get(key);
+        if (cell?.lastSeen === this.frameIndex) continue;
+        if (!cell) {
+          cell = {
+            cx, cy, cz,
+            instances: generateDecalCell(this.seed, cx, cy, cz, this.radius, cs, this.sampler),
+            lastSeen: this.frameIndex,
+          };
+          this.decalCells.set(key, cell);
+        }
+        cell.lastSeen = this.frameIndex;
+        for (const decal of cell.instances) {
           if (count >= params.decalCapacity) break;
           _normal.set(decal.nx, decal.ny, decal.nz);
           if (_normal.lengthSq() < 1e-9) _normal.set(decal.px, decal.py, decal.pz);
           _quaternion.setFromUnitVectors(_up, _normal.normalize());
-          _quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(_up, decal.yaw));
+          _quaternion.multiply(_yawQuaternion.setFromAxisAngle(_up, decal.yaw));
           _position.set(decal.px - localOrigin.x, decal.py - localOrigin.y, decal.pz - localOrigin.z);
           _scale.set(decal.scale, decal.scale, decal.scale);
           _matrix.compose(_position, _quaternion, _scale);
           this.decalMesh.setMatrixAt(count, _matrix);
-          const color = new THREE.Color(DECAL_COLOR[decal.kind]);
+          const color = DECAL_COLOR_RGB[decal.kind];
           colors.setXYZ(count, color.r, color.g, color.b);
           count++;
         }
       }
+    }
+    // 20% distance hysteresis: retire cached cells whose center left the padded radius.
+    const retireRadius = params.decalRadius * 1.2;
+    for (const [key, cell] of this.decalCells) {
+      if (cell.lastSeen === this.frameIndex) continue;
+      const centerX = (cell.cx + 0.5) * cs - localOrigin.x;
+      const centerY = (cell.cy + 0.5) * cs - localOrigin.y;
+      const centerZ = (cell.cz + 0.5) * cs - localOrigin.z;
+      if (Math.hypot(centerX, centerY, centerZ) > retireRadius) this.decalCells.delete(key);
     }
     this.decalCount = count;
     this.decalMesh.count = count;
@@ -254,16 +306,19 @@ export class TerrestrialSurfaceEffects {
   private updateDust(
     frame: Readonly<TerrestrialSurfaceEffectsFrame>,
     params: SurfaceEffectsTierParams,
-    localOrigin: VectorCoordinates,
+    basis: TangentBasis,
+    upX: number, upY: number, upZ: number,
   ): void {
     // Dryness rises as altitude falls near the surface; dust only kicks up low.
     const dryness = Math.max(0, 1 - Math.max(0, frame.altitude) / 400);
-    const speed = Math.hypot(
-      frame.cameraBodyFixedVelocity.x,
-      frame.cameraBodyFixedVelocity.y,
-      frame.cameraBodyFixedVelocity.z,
-    );
+    const velocity = frame.cameraBodyFixedVelocity;
+    const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
     const target = Math.round(params.dustCapacity * dryness * Math.min(1, speed / 40));
+    // Advect and lift in the surface tangent frame: east/north wrap in the local
+    // box while lift acts along the radial up axis, wherever we are on the body.
+    const velocityEast = velocity.x * basis.ex + velocity.y * basis.ey + velocity.z * basis.ez;
+    const velocityNorth = velocity.x * basis.nx + velocity.y * basis.ny + velocity.z * basis.nz;
+    const velocityUp = velocity.x * upX + velocity.y * upY + velocity.z * upZ;
     const box = 30;
     for (let i = 0; i < params.dustCapacity; i++) {
       if (i >= target) {
@@ -276,19 +331,19 @@ export class TerrestrialSurfaceEffects {
       }
       if (this.dustSeeds[i] === 0) this.dustSeeds[i] = ((i + 1) * 0x9e3779b1) >>> 0;
       const random = mulberry32((this.dustSeeds[i] ^ Math.floor(frame.time * 2)) >>> 0);
-      // Body-fixed drift: advect by velocity, wrap in a local box around the camera.
       const phase = (frame.time * 0.7 + i) % 1;
-      const bx = ((random() / 0xffffffff) - 0.5) * box + frame.cameraBodyFixedVelocity.x * phase;
-      const by = ((random() / 0xffffffff) - 0.5) * box + frame.cameraBodyFixedVelocity.y * phase + 0.5 + phase * 2;
-      const bz = ((random() / 0xffffffff) - 0.5) * box + frame.cameraBodyFixedVelocity.z * phase;
-      this.dustPositions[i * 3] = ((bx % box) + box) % box - box / 2;
-      this.dustPositions[i * 3 + 1] = by;
-      this.dustPositions[i * 3 + 2] = ((bz % box) + box) % box - box / 2;
+      const east = ((random() / 0xffffffff) - 0.5) * box + velocityEast * phase;
+      const up = ((random() / 0xffffffff) - 0.5) * box + velocityUp * phase + 0.5 + phase * 2;
+      const north = ((random() / 0xffffffff) - 0.5) * box + velocityNorth * phase;
+      const wrappedEast = ((east % box) + box) % box - box / 2;
+      const wrappedNorth = ((north % box) + box) % box - box / 2;
+      this.dustPositions[i * 3] = basis.ex * wrappedEast + upX * up + basis.nx * wrappedNorth;
+      this.dustPositions[i * 3 + 1] = basis.ey * wrappedEast + upY * up + basis.ny * wrappedNorth;
+      this.dustPositions[i * 3 + 2] = basis.ez * wrappedEast + upZ * up + basis.nz * wrappedNorth;
     }
     this.dustCount = target;
     this.dustPoints.geometry.setDrawRange(0, target);
     (this.dustPoints.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    void localOrigin;
   }
 
   stats(): Readonly<TerrestrialSurfaceEffectsStats> {
@@ -309,5 +364,6 @@ export class TerrestrialSurfaceEffects {
     if (this.disposed) return;
     this.disposed = true;
     this.releaseObjects();
+    this.decalCells.clear();
   }
 }

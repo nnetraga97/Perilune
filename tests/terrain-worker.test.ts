@@ -126,6 +126,44 @@ describe('terrain chunk geometry builder', () => {
       result.index.buffer,
     ]);
   });
+
+  it('winds every skirt wall outward so front-face culling keeps the crack curtain visible', () => {
+    const input = request();
+    const result = buildTerrainChunkGeometry(input);
+    const skirtBase = input.resolution ** 2;
+    const originLength = Math.hypot(...result.origin) || 1;
+    const radial = result.origin.map((component) => component / originLength);
+    let skirtTriangles = 0;
+    for (let start = 0; start < result.index.length; start += 3) {
+      const triangle = [result.index[start], result.index[start + 1], result.index[start + 2]];
+      if (!triangle.some((vertex) => vertex >= skirtBase)) continue;
+      skirtTriangles++;
+      const [a, b, c] = triangle.map((vertex) => [
+        result.position[vertex * 3],
+        result.position[vertex * 3 + 1],
+        result.position[vertex * 3 + 2],
+      ]);
+      const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const normal = [
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+      ];
+      const centroid = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+      // Positions are chunk-origin relative, so the centroid minus its radial
+      // component points from the chunk center toward the edge the wall sits on.
+      const radialComponent = centroid[0] * radial[0] + centroid[1] * radial[1] + centroid[2] * radial[2];
+      const outward = [
+        centroid[0] - radial[0] * radialComponent,
+        centroid[1] - radial[1] * radialComponent,
+        centroid[2] - radial[2] * radialComponent,
+      ];
+      const facing = normal[0] * outward[0] + normal[1] * outward[1] + normal[2] * outward[2];
+      expect(facing).toBeGreaterThan(0);
+    }
+    expect(skirtTriangles).toBe((input.resolution - 1) * 4 * 2);
+  });
 });
 
 class ControlledWorker implements WorkerLike {
@@ -210,6 +248,44 @@ describe('TerrainChunkWorkerPool', () => {
     worker.complete();
     await expect(recovered).resolves.toMatchObject({ jobKey: 'recovered' });
     expect(pool.timings()).toMatchObject({ pending: 0, active: 0 });
+    pool.dispose();
+  });
+
+  it('replaces an errored worker within the respawn budget, then retires the pool', async () => {
+    const workers: ControlledWorker[] = [];
+    const pool = new TerrainChunkWorkerPool({
+      size: 1,
+      workerFactory: () => {
+        const worker = new ControlledWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+
+    const first = pool.submit(request({ jobKey: 'first' }));
+    workers[0].fail('boom');
+    await expect(first).rejects.toThrow('boom');
+    expect(workers[0].terminated).toBe(true);
+    expect(workers).toHaveLength(2);
+
+    const second = pool.submit(request({ jobKey: 'second' }));
+    workers[1].complete();
+    await expect(second).resolves.toMatchObject({ jobKey: 'second' });
+    expect(pool.timings().workers).toBe(1);
+
+    const third = pool.submit(request({ jobKey: 'third' }));
+    workers[1].fail('boom again');
+    await expect(third).rejects.toThrow('boom again');
+    expect(workers).toHaveLength(3);
+
+    // The bounded budget (2 per slot) is now exhausted: the next failure
+    // retires the slot instead of spawning a replacement.
+    const fourth = pool.submit(request({ jobKey: 'fourth' }));
+    workers[2].fail('dead');
+    await expect(fourth).rejects.toThrow('dead');
+    expect(workers).toHaveLength(3);
+    expect(pool.timings().workers).toBe(0);
+    await expect(pool.submit(request({ jobKey: 'fifth' }))).rejects.toThrow(/no live workers/);
     pool.dispose();
   });
 

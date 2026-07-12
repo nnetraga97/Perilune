@@ -67,8 +67,8 @@ function rotateCoordinates(
 }
 
 /** Map cube-face UV (with tan warp for even angular spacing) to unit sphere dir. */
-function faceToDir(face: FaceBasis, u: number, v: number, out: Vec3): Vec3 {
-  return terrainFaceToDirection(FACES.indexOf(face), u, v, out);
+function faceToDir(faceIndex: number, u: number, v: number, out: Vec3): Vec3 {
+  return terrainFaceToDirection(faceIndex, u, v, out);
 }
 
 interface Chunk {
@@ -187,6 +187,10 @@ export class PlanetRenderer {
   private terrainVisible = true;
   private oceanVisible = true;
   private geometryBytes = 0;
+  /** Worker-safe frozen recipe clone, built once — never per chunk request. */
+  private readonly recipeSnapshot: TerrainChunkGeometryRequest['recipe'];
+  private readonly paletteSnapshot: TerrainChunkGeometryRequest['palette'];
+  private lastOverlapCount = 0;
   /** Stats for the perf overlay. */
   stats = {
     chunks: 0,
@@ -216,6 +220,22 @@ export class PlanetRenderer {
       high: new THREE.Color(body.def.terrain.colorHigh),
       ocean: new THREE.Color(body.def.terrain.colorOcean ?? body.def.terrain.colorLow),
     };
+    const recipe = recipeForBody(body);
+    this.recipeSnapshot = Object.freeze({
+      ...recipe,
+      terrain: Object.freeze({ ...recipe.terrain }),
+      craters: Object.freeze(recipe.craters.map((crater) => Object.freeze({
+        ...crater,
+        center: Object.freeze({ ...crater.center }),
+      }))),
+    });
+    const tuple = (value: THREE.Color): [number, number, number] => [value.r, value.g, value.b];
+    this.paletteSnapshot = Object.freeze({
+      low: tuple(this.palette.low),
+      mid: tuple(this.palette.mid),
+      high: tuple(this.palette.high),
+      ocean: tuple(this.palette.ocean),
+    });
     if (options.oceanEnabled !== false && body.def.terrain.oceanLevel > 0 && body.def.terrain.colorOcean) {
       this.oceanMaterial = new THREE.MeshPhongMaterial({
         color: new THREE.Color(body.def.terrain.colorOcean),
@@ -350,7 +370,7 @@ export class PlanetRenderer {
         u0: -1,
         v0: -1,
         size: 2,
-        centerDir: faceToDir(FACES[f], 0, 0, new Vec3()),
+        centerDir: faceToDir(f, 0, 0, new Vec3()),
         worldSize: this.body.radius * 1.57,
       });
     }
@@ -360,7 +380,7 @@ export class PlanetRenderer {
     if (this.replacementChunks) this.buildsThisUpdate = this.quality.buildBudget;
     for (const f of orderedFaces) {
       if (!this.selectNode(
-        { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(FACES[f], 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
+        { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(f, 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
         camBodyFixed,
         camDir,
         horizonCos,
@@ -382,7 +402,7 @@ export class PlanetRenderer {
       const predictedWanted = new Set<string>();
       for (const f of planetFaceOrder(predictedDirection)) {
         this.selectNode(
-          { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(FACES[f], 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
+          { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(f, 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
           predictedCamera,
           predictedDirection,
           horizonCos,
@@ -392,7 +412,12 @@ export class PlanetRenderer {
       }
     }
     this.stats.scheduleMs = Math.max(0, performance.now() - scheduleStart);
-    this.stats.overlapChunks = countLodOverlaps(wanted);
+    // Overlay statistic only: the ancestor-key reconstruction walks every wanted
+    // chunk with string parsing, so refresh it periodically instead of per frame.
+    if (this.frame === 1 || this.frame % 15 === 0) {
+      this.lastOverlapCount = countLodOverlaps(wanted);
+    }
+    this.stats.overlapChunks = this.lastOverlapCount;
 
     // Hide unneeded chunks, show wanted ones, place camera-relative.
     for (const chunk of this.chunks.values()) {
@@ -469,7 +494,7 @@ export class PlanetRenderer {
           u0: cu,
           v0: cv,
           size: half,
-          centerDir: faceToDir(FACES[node.face], cu + half / 2, cv + half / 2, new Vec3()),
+          centerDir: faceToDir(node.face, cu + half / 2, cv + half / 2, new Vec3()),
           worldSize: node.worldSize / 2,
         });
       }
@@ -529,20 +554,10 @@ export class PlanetRenderer {
   }
 
   private chunkRequest(key: string, node: QuadNode): TerrainChunkGeometryRequest {
-    const recipe = recipeForBody(this.body);
-    const snapshot = Object.freeze({
-      ...recipe,
-      terrain: Object.freeze({ ...recipe.terrain }),
-      craters: Object.freeze(recipe.craters.map((crater) => Object.freeze({
-        ...crater,
-        center: Object.freeze({ ...crater.center }),
-      }))),
-    });
-    const tuple = (value: THREE.Color): [number, number, number] => [value.r, value.g, value.b];
     return {
       jobKey: key,
       generation: this.generation,
-      recipe: snapshot,
+      recipe: this.recipeSnapshot,
       radius: this.body.radius,
       face: node.face,
       u0: node.u0,
@@ -550,12 +565,7 @@ export class PlanetRenderer {
       size: node.size,
       resolution: this.quality.gridRes,
       skirtDepth: terrainSkirtDepth(node.worldSize, this.quality.gridRes),
-      palette: {
-        low: tuple(this.palette.low),
-        mid: tuple(this.palette.mid),
-        high: tuple(this.palette.high),
-        ocean: tuple(this.palette.ocean),
-      },
+      palette: this.paletteSnapshot,
     };
   }
 
