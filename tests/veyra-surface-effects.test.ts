@@ -114,6 +114,58 @@ describe('TerrestrialScatter streaming', () => {
     scatter.dispose();
   });
 
+  it('quarantines cells whose generation throws and retries them later', () => {
+    // The first sampler call in each update probes the camera origin and must
+    // succeed; subsequent calls generate cell instances and are made to fail.
+    let originProbe = 0;
+    let cellsShouldThrow = true;
+    const flakySampler: SurfaceSampler = (x, y, z) => {
+      if (originProbe-- > 0) return landSampler(x, y, z);
+      if (cellsShouldThrow) throw new Error('recipe fault');
+      return landSampler(x, y, z);
+    };
+    const scatter = new TerrestrialScatter(RADIUS, 7, flakySampler, 'low');
+    const frame = (): void => {
+      originProbe = 1;
+      scatter.update(scatterFrame());
+    };
+    expect(frame).not.toThrow();
+    expect(scatter.stats().activeCells).toBe(0);
+    cellsShouldThrow = false;
+    frame();
+    // Still quarantined inside the retry window.
+    expect(scatter.stats().activeCells).toBe(0);
+    for (let i = 0; i < 121; i++) frame();
+    expect(scatter.stats().activeCells).toBeGreaterThan(0);
+    scatter.dispose();
+  });
+
+  it('keeps overflowed cells cached instead of regenerating them every frame', () => {
+    const low = SCATTER_TIERS.low as { capacity: number };
+    const originalCapacity = low.capacity;
+    low.capacity = 4;
+    try {
+      let samplerCalls = 0;
+      const countingSampler: SurfaceSampler = (x, y, z) => {
+        samplerCalls++;
+        return landSampler(x, y, z);
+      };
+      const scatter = new TerrestrialScatter(RADIUS, 7, countingSampler, 'low');
+      scatter.update(scatterFrame());
+      const dropsAfterFirst = scatter.stats().droppedCells;
+      expect(dropsAfterFirst).toBeGreaterThan(0);
+      const callsAfterFirst = samplerCalls;
+      scatter.update(scatterFrame());
+      // Overflowed cells stay cached: only the origin sample runs again, and the
+      // drop stat counts overflow transitions, not frames.
+      expect(samplerCalls - callsAfterFirst).toBeLessThanOrEqual(1);
+      expect(scatter.stats().droppedCells).toBe(dropsAfterFirst);
+      scatter.dispose();
+    } finally {
+      low.capacity = originalCapacity;
+    }
+  });
+
   it('rebuilds pools on quality change and disposes once', () => {
     const scatter = new TerrestrialScatter(RADIUS, 7, landSampler, 'low');
     scatter.update(scatterFrame());

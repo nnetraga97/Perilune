@@ -184,11 +184,16 @@ const _normal = new THREE.Vector3();
  * around the body-fixed camera. Instances are stored relative to a per-frame
  * local origin so planet-scale positions never reach f32 instance matrices.
  */
+/** Frames before a cell whose generation threw is retried from its stable seed. */
+const FAILED_CELL_RETRY_FRAMES = 120;
+
 export class TerrestrialScatter {
   readonly group = new THREE.Group();
   private pools: ScatterPool[] = [];
   private cells = new Map<string, ScatterCell>();
-  private failed = new Set<string>();
+  /** Cells whose generation threw, mapped to the frame at which to retry. */
+  private failedRetryAt = new Map<string, number>();
+  private overflowedKeys = new Set<string>();
   private frameIndex = 0;
   private tier: QualityTier;
   private disposed = false;
@@ -235,7 +240,8 @@ export class TerrestrialScatter {
       pool.mesh.dispose();
     }
     this.cells.clear();
-    this.failed.clear();
+    this.failedRetryAt.clear();
+    this.overflowedKeys.clear();
     this.buildPools();
   }
 
@@ -279,10 +285,22 @@ export class TerrestrialScatter {
         const key = `${cx},${cy},${cz}`;
         if (active.has(key)) continue;
         active.add(key);
-        if (this.failed.has(key)) continue;
+        const retryAt = this.failedRetryAt.get(key);
+        if (retryAt !== undefined) {
+          if (this.frameIndex < retryAt) continue;
+          this.failedRetryAt.delete(key);
+        }
         let cell = this.cells.get(key);
         if (!cell) {
-          const instances = generateScatterCell(this.seed, cx, cy, cz, this.radius, tier, this.sampler);
+          // A failed cell is discarded and deterministically regenerated on a
+          // later update rather than failing the whole frame.
+          let instances: readonly ScatterInstanceData[];
+          try {
+            instances = generateScatterCell(this.seed, cx, cy, cz, this.radius, tier, this.sampler);
+          } catch {
+            this.failedRetryAt.set(key, this.frameIndex + FAILED_CELL_RETRY_FRAMES);
+            continue;
+          }
           cell = { key, instances, lastSeen: this.frameIndex };
           this.cells.set(key, cell);
         }
@@ -338,12 +356,13 @@ export class TerrestrialScatter {
         pool.mesh.setMatrixAt(counts[instance.cls]++, _matrix);
       }
     }
-    // A cell that could not fit its instances is dropped and retried later from
-    // its stable seed, never left partially placed.
+    // Overflowed cells stay cached — deleting them caused an every-frame
+    // regenerate/overflow loop. Their remaining instances place naturally once
+    // retiring cells free capacity; the stat counts new overflow events only.
     for (const key of overflowed) {
-      this.cells.delete(key);
-      this.droppedCells++;
+      if (!this.overflowedKeys.has(key)) this.droppedCells++;
     }
+    this.overflowedKeys = overflowed;
     for (const pool of this.pools) {
       pool.count = counts[pool.cls];
       pool.mesh.count = pool.count;
@@ -381,7 +400,8 @@ export class TerrestrialScatter {
     }
     this.pools = [];
     this.cells.clear();
-    this.failed.clear();
+    this.failedRetryAt.clear();
+    this.overflowedKeys.clear();
   }
 }
 
