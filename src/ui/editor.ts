@@ -22,7 +22,7 @@ import {
 import { PARTS, PartDef, partById } from '../content/parts';
 import { buildAeroModel } from '../sim/aero';
 import { computeMassProperties } from '../sim/vessel';
-import { buildVesselVisual, disposeVesselVisual, VesselVisual } from '../render/vesselMesh';
+import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisualSource } from '../render/vesselMesh';
 import type { PartModelLibrary } from '../render/partModelLibrary';
 import { listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 
@@ -369,6 +369,16 @@ export class Editor {
 
   get selectedPartKey(): number | null {
     return this.selectedKey;
+  }
+
+  /**
+   * Read-only test probe: how a placed part is currently rendered — an imported
+   * checked model or the procedural fallback — or null if no such part. Does not
+   * mutate editor state.
+   */
+  visualSourceForPart(key: number): VesselVisualSource | null {
+    const source = this.visual?.partMeshes.get(key)?.userData.visualSource;
+    return source === 'model' || source === 'procedural' ? source : null;
   }
 
   get selectionHighlighted(): boolean {

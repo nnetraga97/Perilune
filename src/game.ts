@@ -152,6 +152,8 @@ class PeriluneGame {
     // All ACTIONS in tests go through real UI events.
     (window as unknown as Record<string, unknown>).__TEST__ = {
       screen: () => this.screen,
+      partVisualSource: (key: number) => this.editor.visualSourceForPart(key),
+      plumeCount: (key: number) => this.world.plumeCountForPart(key),
       partCount: () => this.editor.craft.parts.length,
       stageCount: () => this.editor.craft.stages.length,
       parts: () => this.editor.craft.parts.map((p) => ({ defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),

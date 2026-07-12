@@ -119,6 +119,8 @@ export class WorldScene {
   private flightPromotedBodyId: string | null = null;
   private readonly flightPromotionPending = new Set<string>();
   private readonly flightPromotionFailed = new Set<string>();
+  /** Last active vessel id, tracked for the read-only plume-count test probe. */
+  private activeVesselId: string | null = null;
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -406,6 +408,17 @@ export class WorldScene {
     return vis;
   }
 
+  /**
+   * Read-only test probe: number of nozzle plume holders for a part on the
+   * active vessel (three for the Mule, one for the Colt), or 0 if absent.
+   * Does not mutate scene state.
+   */
+  plumeCountForPart(key: number): number {
+    if (this.activeVesselId === null) return 0;
+    const group = this.vesselVisuals.get(this.activeVesselId)?.plumes.get(key);
+    return group ? group.children.length : 0;
+  }
+
   /** Drop visuals of vessels that no longer exist. */
   private pruneVessels(game: GameState): void {
     const alive = new Set(game.vessels.map((v) => v.runtime.id));
@@ -434,6 +447,7 @@ export class WorldScene {
    */
   update(game: GameState, dt: number): void {
     const active = game.active;
+    this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
       this.setFlightTerrainOwner(null);
       this.lastBodyFrames?.clear();

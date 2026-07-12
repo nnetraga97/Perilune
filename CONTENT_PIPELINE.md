@@ -92,6 +92,45 @@ Public-Domain, and CC-BY-4.0. NASA/JPL records require the additional case
 review fields enforced by the validator. SA, NC, ND, unknown, and ambiguous
 licenses fail validation.
 
+## NASA-style part models
+
+Eight parts (`pod-voyager`, `leg-lander`, `eng-colt`, `ant-dish`, `wheel-mesa`,
+`eng-mule`, `tank-s4`, `chute-main`) render an optional checked model on top of
+their guaranteed procedural fallback. The authoring path is explicit and never
+runs during `prebuild`:
+
+```bash
+npm run fetch:part-sources
+blender --version
+npm run compile:part-assets:container
+npm run validate:content
+npm run build
+```
+
+`fetch:part-sources` downloads each checksum-pinned NASA-3D-Resources source to
+the ignored `assets/parts/sources/` directory and verifies its SHA-256 before
+use; those downloads are never committed. The reviewed Blender intermediates in
+`assets/parts/authoring/*.glb` and the compiled runtime assets in
+`assets/parts/generated/*.glb` **are** committed, along with the opaque
+`src/generated/checked-part-manifest.json` boundary that the runtime validates
+and brands before loading. `sync:renderer-assets` copies only checksum-verified
+generated GLBs into `public/parts/`.
+
+`compile:part-assets:container` is the authoritative write path: it runs the
+pinned glTF Transform CLI (Meshopt + KTX2, per-part triangle/texture limits and
+visual bounds from `assets/parts/recipes.json`) inside the pinned KTX container,
+then validates. The bare `compile:part-assets` defaults to dry-run verification;
+only `--write` replaces generated files.
+
+Development validation (`validate:content`) is **technical only** — schema,
+unique IDs, safe paths, SHA-256 formats, numeric bounds, and the combined
+triangle/transfer/GPU and reference-craft budgets. NASA branding and usage
+review (no logos, flags, mission patches, vehicle names, or identifying text in
+runtime assets) is a **manual gate before production**, not a validator check;
+missing review metadata never fails development validation. The stowed
+`chute-main` housing is custom work derived only from Orion visual language and
+ships with no canopy or deployment animation (`animationPolicy: "none"`).
+
 ## Runtime Content
 
 All content is data-driven TypeScript modules under `src/content/`:

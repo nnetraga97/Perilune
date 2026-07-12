@@ -1,9 +1,13 @@
 /**
  * Perilune part catalog — original part designs for the Skyward Cooperative.
  *
- * Geometry is procedural (cylinders/cones/panels) so every part renders from
- * primitives with PBR materials; no external art assets are required for the
- * vertical slice. Sizes: stack class S = 0.6 m radius, M = 1.25 m radius.
+ * Every part has procedural geometry (cylinders/cones/panels with PBR
+ * materials) as its guaranteed render fallback. Eight parts additionally carry
+ * a `modelAssetId` naming a checked NASA-style render model (see
+ * CONTENT_PIPELINE.md); the shared part-model library swaps that model in when
+ * loaded, but `PartShape` remains the sole authority for physics, mass, and
+ * attachments regardless of which visual renders. Sizes: stack class
+ * S = 0.6 m radius, M = 1.25 m radius.
  */
 
 export type ResourceId = 'propellant' | 'solidFuel' | 'monoprop' | 'charge' | 'ablator' | 'ore';
