@@ -408,7 +408,10 @@ export class FlightHud {
           .map((k) => v.craft.parts.find((p) => p.key === k))
           .filter(Boolean)
           .map((p) => defOf(p!).name);
-        div.innerHTML = `<div class="hud-stage-title">STAGE ${i}</div>${names.join(', ') || '(empty)'}`;
+        const stageTitle = document.createElement('div');
+        stageTitle.className = 'hud-stage-title';
+        stageTitle.textContent = `STAGE ${i}`;
+        div.append(stageTitle, names.join(', ') || '(empty)');
         this.stageListEl.appendChild(div);
       });
     }

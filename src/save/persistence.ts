@@ -9,7 +9,7 @@ import { Quat } from '../core/quat';
 import { GameState, GameVessel } from '../sim/state';
 import { createVesselRuntime, refreshDerived } from '../sim/flight';
 import type { Craft, PartInstance, AttachKind } from '../sim/vessel';
-import type { ResourceId } from '../content/parts';
+import { partById, type ResourceId } from '../content/parts';
 import {
   migrateSave,
   SaveGame,
@@ -448,6 +448,101 @@ export async function deleteSave(slot: string): Promise<void> {
 }
 
 // Craft library (editor save/load of designs)
+
+const CRAFT_NAME_MAX_LENGTH = 80;
+const ATTACH_KINDS: readonly AttachKind[] = ['root', 'stack-top', 'stack-bottom', 'surface'];
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function vectorTriple(value: unknown): { x: number; y: number; z: number } | null {
+  const v = value as { x?: unknown; y?: unknown; z?: unknown } | null;
+  if (!v || !finiteNumber(v.x) || !finiteNumber(v.y) || !finiteNumber(v.z)) return null;
+  return { x: v.x, y: v.y, z: v.z };
+}
+
+/**
+ * Structural validation for craft files: they are user-authored data that may
+ * have been shared between players, so every field is checked and rebuilt
+ * instead of being trusted (unknown parts, non-finite numbers, dangling keys,
+ * or oversized names reject the file). Returns a fresh sanitized object.
+ */
+export function validateCraftFile(raw: unknown): Craft | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const data = raw as Record<string, unknown>;
+  if (typeof data.name !== 'string' || data.name.length === 0) return null;
+  if (!finiteNumber(data.version) || !Array.isArray(data.parts) || !Array.isArray(data.stages)) return null;
+
+  const parts: PartInstance[] = [];
+  const keys = new Set<number>();
+  for (const rawPart of data.parts) {
+    const part = rawPart as Record<string, unknown>;
+    if (!Number.isInteger(part.key) || keys.has(part.key as number)) return null;
+    if (typeof part.defId !== 'string') return null;
+    try {
+      partById(part.defId);
+    } catch {
+      return null;
+    }
+    if (part.parentKey !== null && !Number.isInteger(part.parentKey)) return null;
+    if (!ATTACH_KINDS.includes(part.attach as AttachKind)) return null;
+    const position = vectorTriple(part.position);
+    const rotationBase = vectorTriple(part.rotation);
+    const rotationW = (part.rotation as { w?: unknown } | null)?.w;
+    if (!position || !rotationBase || !finiteNumber(rotationW)) return null;
+    const resources: Partial<Record<ResourceId, number>> = {};
+    if (typeof part.resources !== 'object' || part.resources === null) return null;
+    for (const [resource, amount] of Object.entries(part.resources)) {
+      if (!finiteNumber(amount) || amount < 0) return null;
+      resources[resource as ResourceId] = amount;
+    }
+    if (!Number.isInteger(part.symmetry)) return null;
+    keys.add(part.key as number);
+    parts.push({
+      key: part.key as number,
+      defId: part.defId,
+      parentKey: part.parentKey as number | null,
+      attach: part.attach as AttachKind,
+      position,
+      rotation: { ...rotationBase, w: rotationW },
+      resources,
+      symmetry: part.symmetry as number,
+      ...(typeof part.activated === 'boolean' ? { activated: part.activated } : {}),
+      ...(typeof part.deployed === 'boolean' ? { deployed: part.deployed } : {}),
+      ...(finiteNumber(part.temperature) ? { temperature: part.temperature } : {}),
+    });
+  }
+  for (const part of parts) {
+    if (part.parentKey !== null && !keys.has(part.parentKey)) return null;
+  }
+
+  const stages: Craft['stages'] = [];
+  for (const rawStage of data.stages) {
+    const stage = rawStage as Record<string, unknown>;
+    if (!Array.isArray(stage.partKeys)) return null;
+    const partKeys: number[] = [];
+    for (const key of stage.partKeys) {
+      if (!Number.isInteger(key) || !keys.has(key as number)) return null;
+      partKeys.push(key as number);
+    }
+    stages.push({ partKeys });
+  }
+
+  const maxKey = parts.reduce((max, part) => Math.max(max, part.key), 0);
+  const nextKey = Number.isInteger(data.nextKey) && (data.nextKey as number) > maxKey
+    ? (data.nextKey as number)
+    : maxKey + 1;
+
+  return {
+    name: data.name.slice(0, CRAFT_NAME_MAX_LENGTH),
+    version: data.version,
+    parts,
+    stages,
+    nextKey,
+  };
+}
+
 export async function writeCraftFile(name: string, craft: Craft): Promise<boolean> {
   try {
     const json = JSON.stringify(craft);
@@ -462,9 +557,7 @@ export async function readCraftFile(name: string): Promise<Craft | null> {
   const json = await idbGet(`craft:${name}`);
   if (!json) return null;
   try {
-    const craft = JSON.parse(json) as Craft;
-    if (!Array.isArray(craft.parts)) return null;
-    return craft;
+    return validateCraftFile(JSON.parse(json) as unknown);
   } catch {
     return null;
   }
