@@ -223,18 +223,22 @@ export function buildTerrainChunkGeometry(
 
   const rawIndices = terrainGridIndices(res);
   const skirtBase = res * res;
-  const addEdge = (grid: readonly number[], skirtOffset: number): void => {
+  // All four edges are traversed in +u or +v order, so the winding that faces
+  // outward on the v0/u1 edges faces inward on the v1/u0 edges; those two are
+  // flipped so every skirt wall survives front-face culling.
+  const addEdge = (grid: readonly number[], skirtOffset: number, flip: boolean): void => {
     for (let index = 0; index < grid.length - 1; index++) {
       const g0 = grid[index];
       const g1 = grid[index + 1];
       const s0 = skirtBase + skirtOffset + index;
-      rawIndices.push(g0, s0, g1, g1, s0, s0 + 1);
+      if (flip) rawIndices.push(g0, g1, s0, g1, s0 + 1, s0);
+      else rawIndices.push(g0, s0, g1, g1, s0, s0 + 1);
     }
   };
-  addEdge(Array.from({ length: res }, (_, i) => i), 0);
-  addEdge(Array.from({ length: res }, (_, i) => (res - 1) * res + i), res);
-  addEdge(Array.from({ length: res }, (_, j) => j * res), res * 2);
-  addEdge(Array.from({ length: res }, (_, j) => j * res + res - 1), res * 3);
+  addEdge(Array.from({ length: res }, (_, i) => i), 0, false);
+  addEdge(Array.from({ length: res }, (_, i) => (res - 1) * res + i), res, true);
+  addEdge(Array.from({ length: res }, (_, j) => j * res), res * 2, true);
+  addEdge(Array.from({ length: res }, (_, j) => j * res + res - 1), res * 3, false);
   const index = vertexCount <= 65_535 ? new Uint16Array(rawIndices) : new Uint32Array(rawIndices);
 
   return {
