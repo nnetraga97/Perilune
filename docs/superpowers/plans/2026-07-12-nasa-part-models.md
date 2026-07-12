@@ -21,6 +21,7 @@
 - The reference craft with six wheels and four legs must stay at or below 60,000 part triangles.
 - Maximum texture dimensions are 1024x1024 for the pod and tank and 512x512 for the other six models.
 - Preserve the user's unrelated working-tree changes in `src/render/terrain/chunkGeometry.ts`, `src/sim/vessel.ts`, `src/core/cubeSphere.ts`, and `src/sim/physicalObstacles.ts`.
+- Implement and integrate Tasks 1-9 before expanding automated coverage. During those tasks, use typechecking, content validation, asset inspection, and focused manual smoke checks only; Task 10 owns the consolidated unit, integration, browser, and issue-fix round.
 
 ---
 
@@ -55,13 +56,9 @@
 
 ### Tests and documentation
 
-- `tests/part-asset-schema.test.ts`
-- `tests/part-source-fetch.test.ts`
-- `tests/part-asset-compiler.test.ts`
-- `tests/part-model-manifest.test.ts`
-- `tests/part-model-library.test.ts`
-- `tests/vessel-mesh.test.ts`
-- `e2e/part-models.spec.ts`
+- `tests/part-asset-schema.test.ts`, `tests/part-source-fetch.test.ts`, `tests/part-asset-compiler.test.ts` — pipeline regression coverage added together in Task 10.
+- `tests/part-model-manifest.test.ts`, `tests/part-model-library.test.ts`, `tests/vessel-mesh.test.ts` — runtime regression coverage added together in Task 10.
+- `e2e/part-models.spec.ts` — full eight-part acceptance and fallback coverage added in Task 10.
 - `CONTENT_PIPELINE.md`, `ATTRIBUTIONS.md`, `QA.md`
 
 ---
@@ -74,7 +71,6 @@
 - Create: `src/generated/checked-part-manifest.json` as the empty bootstrap artifact
 - Create: `tools/part-assets/compiler-lock.json`
 - Create: `scripts/lib/part-asset-schema.mjs`
-- Create: `tests/part-asset-schema.test.ts`
 - Modify: `scripts/validate-content.mjs`
 - Modify: `package.json`
 - Modify: `package-lock.json`
@@ -86,52 +82,7 @@
 - Produces: `validateCheckedPartManifest(root): string[]`
 - Consumes later: recipe records keyed by `assetId` and source records keyed by `sourceId`.
 
-- [ ] **Step 1: Add the failing schema tests**
-
-```ts
-import { describe, expect, it } from 'vitest';
-import { validatePartAssetDocuments } from '../scripts/lib/part-asset-schema.mjs';
-
-describe('part asset schema', () => {
-  it('accepts an empty technical manifest while the pipeline is bootstrapped', () => {
-    expect(validatePartAssetDocuments(
-      { schemaVersion: 1, sources: [] },
-      { schemaVersion: 1, budgets: { transferBytes: 6291456, gpuBytes: 33554432, combinedTriangles: 30000 }, models: [] },
-    )).toEqual([]);
-  });
-
-  it('rejects duplicate IDs, unsafe paths, invalid checksums, and excessive totals', () => {
-    const errors = validatePartAssetDocuments(
-      { schemaVersion: 1, sources: [
-        { sourceId: 'same', url: 'https://example.test/a', checksumSha256: 'x', localPath: '../a.glb' },
-        { sourceId: 'same', url: 'https://example.test/b', checksumSha256: 'x', localPath: 'sources/b.glb' },
-      ] },
-      { schemaVersion: 1, budgets: { transferBytes: 1, gpuBytes: 1, combinedTriangles: 1 }, models: [] },
-    );
-    expect(errors.join('\n')).toMatch(/Duplicate sourceId|safe relative path|SHA-256/);
-  });
-
-  it('does not require branding-review metadata', () => {
-    const errors = validatePartAssetDocuments(
-      { schemaVersion: 1, sources: [{
-        sourceId: 'nasa-test', url: 'https://science.nasa.gov/3d-resources/',
-        checksumSha256: 'a'.repeat(64), localPath: 'sources/test.glb',
-        author: 'NASA', usageUrl: 'https://www.nasa.gov/nasa-brand-center/images-and-media/',
-      }] },
-      { schemaVersion: 1, budgets: { transferBytes: 6291456, gpuBytes: 33554432, combinedTriangles: 30000 }, models: [] },
-    );
-    expect(errors).toEqual([]);
-  });
-});
-```
-
-- [ ] **Step 2: Run the test and verify the module is missing**
-
-Run: `npm test -- tests/part-asset-schema.test.ts`
-
-Expected: FAIL because `scripts/lib/part-asset-schema.mjs` does not exist.
-
-- [ ] **Step 3: Add exact pinned dependencies and scripts**
+- [ ] **Step 1: Add exact pinned dependencies and scripts**
 
 Add these exact dev dependencies:
 
@@ -155,7 +106,7 @@ Run: `npm install`
 
 Expected: `package-lock.json` records the exact direct versions above.
 
-- [ ] **Step 4: Add source records and an initially empty recipe set**
+- [ ] **Step 2: Add source records and an initially empty recipe set**
 
 Use these exact source records in `assets/parts/sources.json`:
 
@@ -174,22 +125,22 @@ Every URL must use commit `11ebb4ee043715aefbba6aeec8a61746fad67fa7` under `raw.
 
 Initialize `assets/parts/recipes.json` with schema version 1, the three approved global budgets, and an empty `models` array. Add `assets/parts/sources/**` and `public/parts/` to `.gitignore`; keep `assets/parts/authoring/` and `assets/parts/generated/` tracked.
 
-- [ ] **Step 5: Implement technical-only schema validation**
+- [ ] **Step 3: Implement technical-only schema validation**
 
 `validatePartAssetDocuments()` must enforce schema versions, unique IDs, HTTPS source URLs, 64-character lowercase SHA-256 values, safe relative paths, numeric bounds, positive limits, unique `partId` assignments, and the approved total budget ceilings. It must not require a license classification or branding-review object.
 
 At the end of `scripts/validate-content.mjs`, append errors from both part validation functions before the existing final error/report branch. `validateCheckedPartManifest()` may accept a missing checked artifact only while `recipes.models` is empty; after the first recipe is added, absence is an error. Write the empty bootstrap artifact as canonical JSON with an empty `manifest.models` array and a matching `manifestSha256`, using the same canonical serializer that Task 3 will reuse.
 
-- [ ] **Step 6: Run focused and existing validator tests**
+- [ ] **Step 4: Run the bootstrap validation check**
 
-Run: `npm test -- tests/part-asset-schema.test.ts tests/content-validator.test.ts`
+Run: `npm run validate:content`
 
-Expected: PASS.
+Expected: exits 0 with the empty recipe set and correctly hashed empty checked artifact.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add .gitignore package.json package-lock.json assets/parts src/generated/checked-part-manifest.json scripts/lib/part-asset-schema.mjs scripts/validate-content.mjs tests/part-asset-schema.test.ts tools/part-assets/compiler-lock.json
+git add .gitignore package.json package-lock.json assets/parts src/generated/checked-part-manifest.json scripts/lib/part-asset-schema.mjs scripts/validate-content.mjs tools/part-assets/compiler-lock.json
 git commit -m "build: define part asset contracts"
 ```
 
@@ -200,53 +151,16 @@ git commit -m "build: define part asset contracts"
 **Files:**
 - Create: `scripts/lib/part-source-fetch.mjs`
 - Create: `scripts/fetch-part-sources.mjs`
-- Create: `tests/part-source-fetch.test.ts`
 
 **Interfaces:**
 - Consumes: source records from `assets/parts/sources.json`.
 - Produces: `fetchPinnedSource(source, destination, fetchImpl): Promise<'downloaded' | 'verified'>`.
 
-- [ ] **Step 1: Write failing atomic-download tests**
-
-```ts
-import { createHash } from 'node:crypto';
-import { mkdtemp, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { fetchPinnedSource } from '../scripts/lib/part-source-fetch.mjs';
-
-describe('part source fetch', () => {
-  it('writes verified bytes atomically and reuses a valid destination', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'perilune-parts-'));
-    const bytes = new Uint8Array([1, 2, 3, 4]);
-    const source = { sourceId: 'asset', url: 'https://example.test/asset.glb', checksumSha256: createHash('sha256').update(bytes).digest('hex') };
-    const destination = join(dir, 'asset.glb');
-    const fetchImpl = async () => new Response(bytes, { status: 200 });
-    await expect(fetchPinnedSource(source, destination, fetchImpl)).resolves.toBe('downloaded');
-    await expect(readFile(destination)).resolves.toEqual(Buffer.from(bytes));
-    await expect(fetchPinnedSource(source, destination, async () => { throw new Error('must not fetch'); })).resolves.toBe('verified');
-  });
-
-  it('removes partial bytes after a checksum mismatch', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'perilune-parts-'));
-    const destination = join(dir, 'asset.glb');
-    const source = { sourceId: 'asset', url: 'https://example.test/asset.glb', checksumSha256: 'a'.repeat(64) };
-    await expect(fetchPinnedSource(source, destination, async () => new Response(new Uint8Array([9])))).rejects.toThrow(/checksum mismatch/i);
-    await expect(readFile(`${destination}.partial`)).rejects.toThrow();
-  });
-});
-```
-
-- [ ] **Step 2: Verify the tests fail, then implement the helper**
-
-Run: `npm test -- tests/part-source-fetch.test.ts`
-
-Expected before implementation: FAIL due to missing module.
+- [ ] **Step 1: Implement the atomic fetch helper**
 
 Implement streaming download to `<destination>.partial`, SHA-256 verification, atomic rename, cleanup on error, and reuse only when the existing destination checksum matches.
 
-- [ ] **Step 3: Implement the entrypoint**
+- [ ] **Step 2: Implement the entrypoint**
 
 `scripts/fetch-part-sources.mjs` must load the source manifest, create `assets/parts/sources/`, fetch all records sequentially for readable errors, and print one line per source:
 
@@ -255,16 +169,16 @@ part source nasa-orion-capsule: downloaded
 part source nasa-viking-leg: verified
 ```
 
-- [ ] **Step 4: Run the real fetch and validation**
+- [ ] **Step 3: Run the real fetch and validation**
 
 Run: `npm run fetch:part-sources && npm run validate:content`
 
 Expected: all eight files exist under the ignored source directory with the exact checksums in Task 1; validation passes without branding metadata.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/lib/part-source-fetch.mjs scripts/fetch-part-sources.mjs tests/part-source-fetch.test.ts
+git add scripts/lib/part-source-fetch.mjs scripts/fetch-part-sources.mjs
 git commit -m "build: fetch pinned part sources"
 ```
 
@@ -276,7 +190,6 @@ git commit -m "build: fetch pinned part sources"
 - Create: `scripts/lib/glb-stats.mjs`
 - Create: `scripts/compile-part-assets.mjs`
 - Create: `scripts/compile-part-assets-container.mjs`
-- Create: `tests/part-asset-compiler.test.ts`
 - Modify: `tools/planet-assets/Dockerfile`
 - Modify: `scripts/sync-renderer-assets.mjs`
 
@@ -285,80 +198,11 @@ git commit -m "build: fetch pinned part sources"
 - Produces: `compilePartAssets({ root, write, optimize }): Promise<CheckedPartArtifact>`.
 - Produces: `inspectGlb(bytes): { triangles, geometryBytes, textureBytes, boundsMin, boundsMax, extensionsUsed, animationClips }`.
 
-- [ ] **Step 1: Add failing compiler tests with a generated triangle fixture**
-
-```ts
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { compilePartAssets } from '../scripts/compile-part-assets.mjs';
-
-describe('part asset compiler', () => {
-  it('writes a stable checked artifact and rejects a triangle overrun', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'perilune-compile-'));
-    await mkdir(join(root, 'assets/parts/authoring'), { recursive: true });
-    await mkdir(join(root, 'assets/parts/generated'), { recursive: true });
-    await mkdir(join(root, 'src/generated'), { recursive: true });
-    await writeFile(join(root, 'assets/parts/recipes.json'), JSON.stringify({
-      schemaVersion: 1,
-      budgets: { transferBytes: 6291456, gpuBytes: 33554432, combinedTriangles: 30000 },
-      models: [{ assetId: 'fixture', partId: 'pod-voyager', inputPath: 'authoring/fixture.glb', outputPath: 'generated/fixture.glb', triangleLimit: 1, textureMaxDimension: 512, visualBounds: { min: [-1, -1, -1], max: [1, 1, 1] }, plumeAnchors: [] }],
-    }));
-    await writeFile(join(root, 'assets/parts/authoring/fixture.glb'), minimalTriangleGlb());
-    await expect(compilePartAssets({ root, write: true, optimize: async (input) => input })).resolves.toMatchObject({ schemaVersion: 1 });
-    const first = await readFile(join(root, 'src/generated/checked-part-manifest.json'));
-    await compilePartAssets({ root, write: true, optimize: async (input) => input });
-    await expect(readFile(join(root, 'src/generated/checked-part-manifest.json'))).resolves.toEqual(first);
-  });
-});
-```
-
-Define the fixture in the test so it does not depend on a checked-in binary:
-
-```ts
-function minimalTriangleGlb(): Buffer {
-  const positions = Buffer.alloc(36);
-  [-1, 0, 0, 1, 0, 0, 0, 1, 0].forEach((value, index) => positions.writeFloatLE(value, index * 4));
-  const indices = Buffer.alloc(8);
-  [0, 1, 2].forEach((value, index) => indices.writeUInt16LE(value, index * 2));
-  const bin = Buffer.concat([positions, indices]);
-  const document = {
-    asset: { version: '2.0' },
-    buffers: [{ byteLength: bin.length }],
-    bufferViews: [
-      { buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 },
-      { buffer: 0, byteOffset: 36, byteLength: 6, target: 34963 },
-    ],
-    accessors: [
-      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [-1, 0, 0], max: [1, 1, 0] },
-      { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
-    ],
-    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, mode: 4 }] }],
-    nodes: [{ mesh: 0 }], scenes: [{ nodes: [0] }], scene: 0,
-  };
-  const json = Buffer.from(JSON.stringify(document));
-  const jsonChunk = Buffer.concat([json, Buffer.alloc((4 - (json.length % 4)) % 4, 0x20)]);
-  const header = Buffer.alloc(12);
-  header.write('glTF', 0); header.writeUInt32LE(2, 4);
-  header.writeUInt32LE(12 + 8 + jsonChunk.length + 8 + bin.length, 8);
-  const jsonHeader = Buffer.alloc(8);
-  jsonHeader.writeUInt32LE(jsonChunk.length, 0); jsonHeader.writeUInt32LE(0x4e4f534a, 4);
-  const binHeader = Buffer.alloc(8);
-  binHeader.writeUInt32LE(bin.length, 0); binHeader.writeUInt32LE(0x004e4942, 4);
-  return Buffer.concat([header, jsonHeader, jsonChunk, binHeader, bin]);
-}
-```
-
-- [ ] **Step 2: Verify failure, then implement GLB inspection**
-
-Run: `npm test -- tests/part-asset-compiler.test.ts`
-
-Expected before implementation: FAIL due to missing compiler.
+- [ ] **Step 1: Implement GLB inspection**
 
 `inspectGlb()` must validate the GLB magic/version/length, parse the JSON chunk, sum indexed triangle counts, sum referenced geometry buffer views, read accessor bounds, report embedded image buffer bytes and animation count, and reject non-finite accessor bounds.
 
-- [ ] **Step 3: Implement compilation through the pinned CLI**
+- [ ] **Step 2: Implement compilation through the pinned CLI**
 
 For each recipe, calculate `simplifyRatio = Math.min(1, triangleLimit / sourceTriangles)` and invoke:
 
@@ -380,7 +224,7 @@ gltf-transform optimize INPUT OUTPUT.partial \
 
 Inspect the partial result, enforce the recipe and global budgets, rename atomically, then write canonical JSON to `src/generated/checked-part-manifest.json` with `{ schemaVersion, manifestSha256, manifest }`.
 
-- [ ] **Step 4: Add the authoritative container path**
+- [ ] **Step 3: Add the authoritative container path**
 
 Extend the existing pinned KTX container so it also runs the pinned glTF Transform CLI. `compile-part-assets-container.mjs` must bind-mount `assets/parts` and `src/generated`, then execute:
 
@@ -390,20 +234,20 @@ npm run compile:part-assets -- --write && npm run validate:content
 
 The normal compiler must default to dry-run verification; only `--write` replaces generated files.
 
-- [ ] **Step 5: Copy only checked part assets to public output**
+- [ ] **Step 4: Copy only checked part assets to public output**
 
 Extend `sync-renderer-assets.mjs` to read the checked part artifact, verify its digest and every GLB checksum, clear `public/parts/`, and copy only declared output paths. Preserve the existing Basis and planet behavior.
 
-- [ ] **Step 6: Run focused tests and an empty-manifest compile**
+- [ ] **Step 5: Run the empty-manifest pipeline smoke check**
 
-Run: `npm test -- tests/part-asset-compiler.test.ts && npm run compile:part-assets -- --write && npm run sync:renderer-assets`
+Run: `npm run compile:part-assets -- --write && npm run sync:renderer-assets && npm run validate:content`
 
 Expected: PASS; the checked artifact contains zero models until Tasks 4 and 5, and `public/parts/` is empty.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/lib/glb-stats.mjs scripts/compile-part-assets.mjs scripts/compile-part-assets-container.mjs scripts/sync-renderer-assets.mjs tests/part-asset-compiler.test.ts tools/planet-assets/Dockerfile src/generated/checked-part-manifest.json
+git add scripts/lib/glb-stats.mjs scripts/compile-part-assets.mjs scripts/compile-part-assets-container.mjs scripts/sync-renderer-assets.mjs tools/planet-assets/Dockerfile src/generated/checked-part-manifest.json
 git commit -m "build: compile checked part models"
 ```
 
@@ -555,8 +399,6 @@ git commit -m "art: complete NASA part model slice"
 **Files:**
 - Create: `src/render/partModelManifest.ts`
 - Create: `src/render/partModelLibrary.ts`
-- Create: `tests/part-model-manifest.test.ts`
-- Create: `tests/part-model-library.test.ts`
 
 **Interfaces:**
 - Produces: `checkPartModelManifest(artifact): CheckedPartModelManifest`.
@@ -564,48 +406,28 @@ git commit -m "art: complete NASA part model slice"
 - Produces: `PartModelLibrary.preload(): Promise<void>`.
 - Produces: `PartModelLibrary.instantiate(assetId): { object, plumeAnchors } | null`.
 
-- [ ] **Step 1: Write failing opaque-boundary and fallback tests**
-
-```ts
-it('rejects a changed checked manifest digest', () => {
-  const artifact = fixtureArtifact();
-  artifact.manifest.models[0].triangleCount++;
-  expect(() => checkPartModelManifest(artifact)).toThrow(/digest mismatch/i);
-});
-
-it('settles failed models and clones successful shared resources', async () => {
-  const backend = { load: vi.fn()
-    .mockResolvedValueOnce(new THREE.Group())
-    .mockRejectedValueOnce(new Error('broken')), dispose: vi.fn() };
-  const library = new PartModelLibrary(fixtureManifestTwoModels(), backend);
-  await expect(library.preload()).resolves.toBeUndefined();
-  expect(library.instantiate('good')).not.toBeNull();
-  expect(library.instantiate('broken')).toBeNull();
-});
-```
-
-Implement `fixtureArtifact()` by building a one-model manifest with a valid 64-character asset checksum and computing its canonical SHA-256 before the assertion mutates it. Implement `fixtureManifestTwoModels()` through `checkPartModelManifest()` with `good` and `broken` records, valid finite bounds, empty anchors, and totals below all three budgets; do not cast an unchecked object to the opaque type.
-
-- [ ] **Step 2: Implement manifest checking**
+- [ ] **Step 1: Implement manifest checking**
 
 Mirror the checked-planet-manifest pattern: canonicalize and hash the embedded manifest, validate safe paths/checksums/bounds/anchors/budgets, freeze records, and brand accepted objects through a `WeakSet`. Expose `model(assetId)` and `modelForPart(partId)` lookups.
 
-- [ ] **Step 3: Implement the browser backend and synchronous instantiation**
+- [ ] **Step 2: Implement the browser backend and synchronous instantiation**
 
 Create a backend around `GLTFLoader`, `KTX2Loader`, and `MeshoptDecoder`. Fetch each GLB as bytes, verify SHA-256 with `crypto.subtle.digest`, parse it through `GLTFLoader.parseAsync`, and cache the root scene. `preload()` uses `Promise.allSettled` and logs one error per rejected record. `instantiate()` returns `scene.clone(true)` plus frozen anchors only after preload.
 
-- [ ] **Step 4: Verify resource ownership**
+- [ ] **Step 3: Implement explicit shared-resource ownership**
 
-Add tests proving two instances have different `Object3D` identities, shared geometry/material identities, independent transforms, one logged error per failed asset, and a single disposal of cached geometry/materials/textures when the library is disposed.
+When caching a parsed scene, collect geometry, material, and texture identities into `Set`s. Clones borrow those resources. `dispose()` traverses the sets once, disposes each identity once, clears the cache, and makes later `instantiate()` calls return `null`.
 
-Run: `npm test -- tests/part-model-manifest.test.ts tests/part-model-library.test.ts`
+- [ ] **Step 4: Run the runtime compile check**
 
-Expected: PASS.
+Run: `npm run typecheck`
+
+Expected: exits 0 with the new opaque manifest boundary and browser backend.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/render/partModelManifest.ts src/render/partModelLibrary.ts tests/part-model-manifest.test.ts tests/part-model-library.test.ts
+git add src/render/partModelManifest.ts src/render/partModelLibrary.ts
 git commit -m "feat: preload checked part models"
 ```
 
@@ -616,47 +438,21 @@ git commit -m "feat: preload checked part models"
 **Files:**
 - Modify: `src/content/parts.ts:47-109,117-134,194-231,304-353,742-772,927-957`
 - Modify: `src/render/vesselMesh.ts:1-227`
-- Create: `tests/vessel-mesh.test.ts`
-- Modify: `tests/vessel.test.ts`
 
 **Interfaces:**
 - Consumes: `PartModelLibrary.instantiate(assetId)` and `PartEffectAnchor`.
 - Produces: `buildVesselVisual(craft, models?: PartModelLibrary): VesselVisual`.
 - Changes: `VesselVisual.plumes` from `Map<number, THREE.Mesh>` to `Map<number, THREE.Group>`.
 
-- [ ] **Step 1: Write failing body-selection and plume-count tests**
+- [ ] **Step 1: Add model IDs without changing gameplay fields**
 
-```ts
-it('uses a model clone and suppresses the procedural accent body', () => {
-  const craft = createCraft('model');
-  addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
-  const library = fakeLibrary('orion-voyager-pod', new THREE.Group());
-  const visual = buildVesselVisual(craft, library);
-  expect(visual.partMeshes.get(1)?.userData.visualSource).toBe('model');
-});
+Add `modelAssetId?: string` to `PartDef` and assign the eight exact asset IDs from Tasks 4 and 5. Do not alter any mass, cost, shape, attachment, resource, engine, parachute, or staging field.
 
-it('creates three Mule plumes and one Colt plume under their part holders', () => {
-  const craft = createCraft('engines');
-  const mule = addPart(craft, 'eng-mule', null, 'root', { x: -2, y: 0, z: 0 });
-  const colt = addPart(craft, 'eng-colt', null, 'root', { x: 2, y: 0, z: 0 });
-  const visual = buildVesselVisual(craft, fakeEngineLibrary());
-  expect(visual.plumes.get(mule.key)?.children).toHaveLength(3);
-  expect(visual.plumes.get(colt.key)?.children).toHaveLength(1);
-  expect(visual.plumes.get(mule.key)?.parent).toBe(visual.partMeshes.get(mule.key));
-});
-```
-
-Define `fakeLibrary(assetId, object, plumeAnchors = [])` as an object whose `instantiate(requestedId)` returns `{ object: object.clone(true), plumeAnchors }` only for the matching ID and otherwise returns `null`. Define `fakeEngineLibrary()` with the exact Colt and Mule anchor arrays from Task 5. This keeps the tests on the public `PartModelLibrary` surface without fetching GLBs.
-
-- [ ] **Step 2: Add model IDs without changing gameplay fields**
-
-Add `modelAssetId?: string` to `PartDef` and assign the eight exact asset IDs from Tasks 4 and 5. Add a catalog test asserting all eight IDs are unique and every non-model gameplay property is unchanged from the pre-task fixture.
-
-- [ ] **Step 3: Select imported bodies with fallback**
+- [ ] **Step 2: Select imported bodies with fallback**
 
 Change `buildPartMesh()` to ask the optional library for `def.modelAssetId`. Add the imported object when available and set `holder.userData.visualSource = 'model'`; otherwise build the current body and accent band and set `visualSource = 'procedural'`.
 
-- [ ] **Step 4: Build plume groups from anchors**
+- [ ] **Step 3: Build plume groups from anchors**
 
 For each engine, use authored anchors from the instantiated model or this default:
 
@@ -666,20 +462,20 @@ For each engine, use authored anchors from the instantiated model or this defaul
 
 Create one holder per anchor, position/quaternion it from metadata, multiply plume dimensions by `def.engine.plumeScale * anchor.scale`, and parent the complete group to the part holder. Store power on the group and apply throttle/vacuum scaling to each plume holder without overwriting anchor placement.
 
-- [ ] **Step 5: Preserve shared resources during removal**
+- [ ] **Step 4: Preserve shared resources during removal**
 
 Keep imported geometry/materials out of `ownedGeometries`. Ensure `disposeVesselVisual()` and destroyed-part pruning dispose only plume/helper geometry created for that vessel.
 
-- [ ] **Step 6: Run focused and simulation regression tests**
+- [ ] **Step 5: Run a compile and manual construction smoke check**
 
-Run: `npm test -- tests/vessel-mesh.test.ts tests/vessel.test.ts tests/ascent.test.ts tests/palla-mission.test.ts`
+Run: `npm run typecheck && npm run build`
 
-Expected: PASS; simulation results remain unchanged.
+Expected: exits 0. In the workshop, place the pod, Mule, and Colt; confirm visible model bodies and three/one plume holders without assessing final polish yet.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/content/parts.ts src/render/vesselMesh.ts tests/vessel-mesh.test.ts tests/vessel.test.ts
+git add src/content/parts.ts src/render/vesselMesh.ts
 git commit -m "feat: render model-backed vessel parts"
 ```
 
@@ -691,18 +487,12 @@ git commit -m "feat: render model-backed vessel parts"
 - Modify: `src/game.ts:30-140,699-703`
 - Modify: `src/render/worldScene.ts:115-150,390-430,630-650`
 - Modify: `src/ui/editor.ts:60-135,320-345,650-665`
-- Modify: `tests/renderer-transaction.test.ts`
-- Modify: `e2e/editor-interactions.spec.ts`
 
 **Interfaces:**
 - Consumes: one initialized `PartModelLibrary`.
 - Changes constructors: `new WorldScene(context, partModels)` and `new Editor(uiRoot, callbacks, partModels)`.
 
-- [ ] **Step 1: Write failing injection assertions**
-
-Add tests that construct `WorldScene` and `Editor` with a fake library and assert model instantiation is requested during vessel/editor visual construction. Add a test that `pagehide` disposes the shared library exactly once after world/editor teardown.
-
-- [ ] **Step 2: Initialize before the workshop becomes interactive**
+- [ ] **Step 1: Initialize before the workshop becomes interactive**
 
 In `PeriluneGame.start()`, after `createRenderContext()`:
 
@@ -717,43 +507,45 @@ await this.partModels.preload();
 
 Then pass the library to `WorldScene` and `Editor`. Do not add a status dot or animated loading control.
 
-- [ ] **Step 3: Use the library in every vessel build path**
+- [ ] **Step 2: Use the library in every vessel build path**
 
 Pass it to world vessel creation, editor rebuilds, and temporary ghost construction. When creating a translucent ghost, assign temporary materials only to the clone and dispose those temporary materials when the ghost is dropped.
 
-- [ ] **Step 4: Handle context restoration and shutdown**
+- [ ] **Step 3: Handle context restoration and shutdown**
 
-Keep the parsed scenes, geometry, material, and texture objects in the library across WebGL context restoration; Three.js will upload those CPU-side objects again. Rebuild editor/world vessel clones without a second network preload, and add a renderer-transaction assertion that model fetch counts do not increase. On `pagehide`, remove vessel visuals first and then dispose the library exactly once.
+Keep the parsed scenes, geometry, material, and texture objects in the library across WebGL context restoration; Three.js will upload those CPU-side objects again. Rebuild editor/world vessel clones without a second network preload. On `pagehide`, remove vessel visuals first and then dispose the library exactly once.
 
-- [ ] **Step 5: Run typecheck and editor tests**
+- [ ] **Step 4: Run the integrated workshop smoke check**
 
-Run: `npm run typecheck && npm test -- tests/renderer-transaction.test.ts && npm run test:e2e -- e2e/editor-interactions.spec.ts`
+Run: `npm run typecheck && npm run build && npm run dev`
 
-Expected: PASS; editor placement and selection use imported nested meshes without changing attachment behavior.
+Expected: compile/build exits 0. In the browser, place, select, move, save, launch, stage, and return to the editor with a model-backed craft; procedural fallback still appears if a model URL is temporarily made invalid.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/game.ts src/render/worldScene.ts src/ui/editor.ts tests/renderer-transaction.test.ts e2e/editor-interactions.spec.ts
+git add src/game.ts src/render/worldScene.ts src/ui/editor.ts
 git commit -m "feat: share part models across editor and flight"
 ```
 
 ---
 
-### Task 9: Add browser fallback, lifecycle, and full-slice acceptance coverage
+### Task 9: Add acceptance probes and finish pipeline documentation
 
 **Files:**
-- Create: `e2e/part-models.spec.ts`
 - Modify: `src/game.ts` test probe only
 - Modify: `src/ui/editor.ts` read-only visual lookup
 - Modify: `src/render/worldScene.ts` read-only plume lookup
+- Modify: `CONTENT_PIPELINE.md`
+- Modify: `ATTRIBUTIONS.md`
 - Modify: `QA.md`
+- Modify: `README.md` only if it currently describes all parts as procedural
 
 **Interfaces:**
-- Consumes: the eight model-backed part definitions and runtime library.
-- Produces: browser-visible test probes for visual source and plume child count only; no action bypasses UI.
+- Produces: browser-visible read-only probes for visual source and plume child count; no probe performs an action.
+- Documents: fetch, author, compile, validate, sync, fallback, and manual visual-review behavior.
 
-- [ ] **Step 1: Add read-only probes**
+- [ ] **Step 1: Add read-only acceptance probes**
 
 Expose through `window.__TEST__`:
 
@@ -762,54 +554,9 @@ partVisualSource: (key: number) => this.editor.visualSourceForPart(key),
 plumeCount: (key: number) => this.world.plumeCountForPart(key),
 ```
 
-Add `Editor.visualSourceForPart(key): 'model' | 'procedural' | null`, which reads the holder's `userData.visualSource`, and `WorldScene.plumeCountForPart(key): number`, which finds the active vessel's plume group and returns its child count. Neither method may mutate game state.
+Add `Editor.visualSourceForPart(key): 'model' | 'procedural' | null`, which reads the holder's `userData.visualSource`, and `WorldScene.plumeCountForPart(key): number`, which finds the active vessel's plume group and returns its child count. Neither method may mutate game state. Placement, launch, throttle, staging, saving, and selection continue through real UI events.
 
-Keep placement, launch, and staging actions driven by real UI events.
-
-- [ ] **Step 2: Write the eight-part editor journey**
-
-The test must place all eight enhanced definitions, assert each holder reports `model`, select and drag a nested imported mesh, save the craft, reload it, and verify the eight part IDs and model sources survive.
-
-- [ ] **Step 3: Write plume and fallback journeys**
-
-- Launch a staged craft containing the Mule and Colt; assert three and one plume children respectively and verify visibility follows real staging/throttle UI.
-- Route one part GLB request to return HTTP 500; reload the workshop and assert only that part reports `procedural` while the other seven report `model` and launch remains available.
-- Confirm `chute-main` has no animation clips and remains the stowed housing after arming and deployment state changes.
-
-- [ ] **Step 4: Run targeted browser and full unit suites**
-
-Run:
-
-```bash
-npm run test:e2e -- e2e/part-models.spec.ts e2e/editor-interactions.spec.ts e2e/game-loop.spec.ts
-npm test
-npm run build
-```
-
-Expected: all commands PASS.
-
-- [ ] **Step 5: Document the manual visual matrix and commit**
-
-Add a `NASA-style part models` QA section covering front/back/top/bottom reference comparison, attachment gaps, normals, clipping, material color space, logo/text inspection, six-wheel/four-leg reference craft triangle count, and stowed chute state.
-
-```bash
-git add src/game.ts src/ui/editor.ts src/render/worldScene.ts e2e/part-models.spec.ts QA.md
-git commit -m "test: certify NASA part model slice"
-```
-
----
-
-### Task 10: Finalize pipeline documentation and verify a clean handoff
-
-**Files:**
-- Modify: `CONTENT_PIPELINE.md`
-- Modify: `ATTRIBUTIONS.md`
-- Modify: `README.md` only if it currently describes all parts as procedural
-
-**Interfaces:**
-- Documents: fetch, author, compile, validate, sync, and fallback behavior.
-
-- [ ] **Step 1: Document exact authoring commands**
+- [ ] **Step 2: Document the authoring pipeline**
 
 Add this sequence to `CONTENT_PIPELINE.md`:
 
@@ -823,24 +570,106 @@ npm run build
 
 Explain that source downloads are ignored, reviewed authoring GLBs and generated runtime GLBs are committed, development validation is technical, and branding/usage review is manual before production.
 
-- [ ] **Step 2: Remove stale procedural-only claims**
+- [ ] **Step 3: Remove stale procedural-only claims and finish attribution**
 
-Update `src/content/parts.ts`'s file header and any README statement that says external art assets are unnecessary for all parts. Preserve the statement that procedural geometry is the fallback.
+Update `src/content/parts.ts`'s file header and any README statement that says external art assets are unnecessary for all parts. Preserve the statement that procedural geometry is the fallback. Ensure `ATTRIBUTIONS.md` contains all eight pinned NASA source-page links and identifies the stowed housing as custom work derived only from Orion visual language.
 
-- [ ] **Step 3: Run the final verification matrix**
+- [ ] **Step 4: Document the manual visual matrix**
+
+Add a `NASA-style part models` QA section covering front/back/top/bottom reference comparison, attachment gaps, normals, clipping, material color space, logo/text inspection, six-wheel/four-leg reference-craft triangle count, three/one engine plume alignment, and stowed chute state.
+
+- [ ] **Step 5: Commit the probes and documentation**
 
 ```bash
-git diff --check
+git add src/game.ts src/ui/editor.ts src/render/worldScene.ts src/content/parts.ts CONTENT_PIPELINE.md ATTRIBUTIONS.md QA.md README.md
+git commit -m "docs: finish NASA part model handoff"
+```
+
+---
+
+### Task 10: Run the consolidated test, fix, and acceptance round
+
+**Files:**
+- Create: `tests/part-asset-schema.test.ts`
+- Create: `tests/part-source-fetch.test.ts`
+- Create: `tests/part-asset-compiler.test.ts`
+- Create: `tests/part-model-manifest.test.ts`
+- Create: `tests/part-model-library.test.ts`
+- Create: `tests/vessel-mesh.test.ts`
+- Create: `e2e/part-models.spec.ts`
+- Modify: `tests/vessel.test.ts`
+- Modify: `tests/renderer-transaction.test.ts`
+- Modify: `e2e/editor-interactions.spec.ts`
+- Modify if a failure identifies a defect: `scripts/lib/part-asset-schema.mjs`, `scripts/lib/part-source-fetch.mjs`, `scripts/lib/glb-stats.mjs`, `scripts/compile-part-assets.mjs`, `src/render/partModelManifest.ts`, `src/render/partModelLibrary.ts`, `src/render/vesselMesh.ts`, `src/render/worldScene.ts`, `src/ui/editor.ts`, `src/game.ts`
+
+**Interfaces:**
+- Consumes: the complete eight-part implementation from Tasks 1-9.
+- Produces: regression coverage and fixes for pipeline determinism, runtime fallback, resource lifecycle, editor interaction, flight staging, and scope exclusions.
+
+- [ ] **Step 1: Add the pipeline regression suite**
+
+Cover these exact cases:
+
+- schema accepts the valid eight-source/eight-recipe documents without branding-review metadata;
+- schema rejects duplicate IDs, unsafe paths, malformed SHA-256 values, duplicate `partId` assignments, invalid bounds, and every global-budget overrun;
+- source fetch writes through `.partial`, renames only after checksum verification, reuses a verified destination, and removes partial bytes after a mismatch;
+- compiler emits byte-identical canonical checked manifests across two runs, rejects triangle/texture/bounds/animation-policy overruns, and the sync step copies only declared checksummed GLBs.
+
+Run: `npm test -- tests/part-asset-schema.test.ts tests/part-source-fetch.test.ts tests/part-asset-compiler.test.ts`
+
+Expected: PASS after correcting any pipeline defects exposed by the cases above.
+
+- [ ] **Step 2: Add the runtime and vessel regression suite**
+
+Cover these exact cases:
+
+- changed manifest digest is rejected before lookup;
+- preload settles individual failures and `instantiate()` returns `null` only for failed/unavailable assets;
+- two instances have different `Object3D` identities, shared geometry/material identities, and independent transforms;
+- library disposal releases each cached geometry/material/texture once;
+- each of the eight `PartDef` records has the exact model ID while all gameplay fields remain unchanged;
+- imported body selection suppresses the procedural accent, a missing model selects procedural fallback, Mule creates three plumes, Colt creates one, and plume groups remain parented to their part holders;
+- existing ascent, staging, parachute, save, mission, destruction, and renderer-restoration behavior remains unchanged, including no extra model fetch after context restoration.
+
+Run:
+
+```bash
+npm test -- tests/part-model-manifest.test.ts tests/part-model-library.test.ts tests/vessel-mesh.test.ts
+npm test -- tests/vessel.test.ts tests/ascent.test.ts tests/palla-mission.test.ts tests/renderer-transaction.test.ts
+```
+
+Expected: PASS after fixing implementation defects rather than weakening assertions or changing gameplay data.
+
+- [ ] **Step 3: Add the full browser acceptance journey**
+
+In `e2e/part-models.spec.ts`, drive real UI events to:
+
+- place all eight enhanced definitions and assert every holder reports `model`;
+- select and drag a nested imported mesh, save, reload, and confirm the eight part IDs and visual sources survive;
+- launch a staged Mule/Colt craft, confirm three/one plume children, and verify visibility follows actual staging and throttle controls;
+- return HTTP 500 for one part GLB, reload, and confirm only that part reports `procedural` while the other seven report `model` and launch remains available;
+- arm/deploy `chute-main` and confirm its rendered object remains the static stowed housing with no animation clips.
+
+Run: `npm run test:e2e -- e2e/part-models.spec.ts e2e/editor-interactions.spec.ts e2e/game-loop.spec.ts`
+
+Expected: PASS after correcting nested-mesh selection, lifecycle, staging, or fallback defects found by the journey.
+
+- [ ] **Step 4: Run the complete stabilization matrix and fix failures**
+
+Run this sequence after the focused failures are resolved:
+
+```bash
 npm run validate:content
 npm run typecheck
 npm test
 npm run test:e2e -- e2e/part-models.spec.ts e2e/editor-interactions.spec.ts e2e/game-loop.spec.ts
 npm run build
+git diff --check
 ```
 
-Expected: every command exits 0; the checked manifest contains exactly eight models; the working tree contains no generated drift from the compile or sync commands.
+Expected: every command exits 0; the checked manifest contains exactly eight models; compile and sync commands produce no generated drift.
 
-- [ ] **Step 4: Confirm scope exclusions**
+- [ ] **Step 5: Confirm the deferred scope stayed deferred**
 
 Run:
 
@@ -850,9 +679,9 @@ rg -n "Saturn V|Ares 1|completed craft|deploy(ed|ment).*canopy" src assets/parts
 
 Expected: no completed-craft implementation and no deployed-canopy implementation; references may appear only in documentation that explicitly marks them deferred.
 
-- [ ] **Step 5: Commit documentation**
+- [ ] **Step 6: Commit the consolidated stabilization round**
 
 ```bash
-git add CONTENT_PIPELINE.md ATTRIBUTIONS.md README.md src/content/parts.ts
-git commit -m "docs: document part model pipeline"
+git add tests e2e scripts src assets/parts src/generated
+git commit -m "test: stabilize NASA part model slice"
 ```
