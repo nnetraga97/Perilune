@@ -158,6 +158,44 @@ describe('surface decals and dust', () => {
     effects.dispose();
   });
 
+  it('caches decal cells so a static camera does not re-query the terrain evaluator', () => {
+    let samplerCalls = 0;
+    const countingSampler: SurfaceSampler = (x, y, z) => {
+      samplerCalls++;
+      return landSampler(x, y, z);
+    };
+    const effects = new TerrestrialSurfaceEffects(RADIUS, 7, countingSampler, 'medium');
+    effects.update(effectsFrame());
+    const afterFirstFrame = samplerCalls;
+    expect(afterFirstFrame).toBeGreaterThan(0);
+    effects.update(effectsFrame({ time: 3.5 }));
+    // Only the per-frame camera-origin sample runs again; decal cells are cached.
+    expect(samplerCalls - afterFirstFrame).toBeLessThanOrEqual(1);
+    effects.dispose();
+  });
+
+  it('lifts and advects dust along the radial up axis, not body-fixed +Y', () => {
+    const effects = new TerrestrialSurfaceEffects(RADIUS, 7, landSampler, 'high');
+    // Camera sits on the +X axis, so radial up is body-fixed +X; the 30 m/s
+    // radial velocity must blow particles out along +X while the tangent
+    // (+Y east, +Z north) coordinates stay wrapped inside the local box.
+    effects.update(effectsFrame({ cameraBodyFixedVelocity: { x: 30, y: 0, z: 0 }, altitude: 20 }));
+    const active = effects.stats().dust;
+    expect(active).toBeGreaterThan(100);
+    const positions = (effects as unknown as { dustPositions: Float32Array }).dustPositions;
+    let maxUp = -Infinity;
+    for (let i = 0; i < active; i++) {
+      const up = positions[i * 3];
+      const east = positions[i * 3 + 1];
+      const north = positions[i * 3 + 2];
+      expect(Math.abs(east)).toBeLessThanOrEqual(15.001);
+      expect(Math.abs(north)).toBeLessThanOrEqual(15.001);
+      maxUp = Math.max(maxUp, up);
+    }
+    expect(maxUp).toBeGreaterThan(15);
+    effects.dispose();
+  });
+
   it('raises no dust high above the surface', () => {
     const effects = new TerrestrialSurfaceEffects(RADIUS, 7, landSampler, 'medium');
     effects.update(effectsFrame({ cameraBodyFixedVelocity: { x: 30, y: 0, z: 0 }, altitude: 5000 }));
