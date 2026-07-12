@@ -106,6 +106,12 @@ export interface PartDef {
   oreCapacity?: number;
   color?: string;
   accent?: string;
+  /**
+   * Optional checked NASA-style render model. The renderer swaps in this model
+   * when the shared library has it loaded; procedural geometry stays the
+   * guaranteed fallback and remains the sole authority for physics/attachments.
+   */
+  modelAssetId?: string;
 }
 
 const S = 0.6;
@@ -115,6 +121,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- pods
   {
     id: 'pod-voyager',
+    modelAssetId: 'orion-voyager-pod',
     name: 'Voyager Pod',
     blurb: 'A snug single-seat command pod. The window is small; the view is not.',
     category: 'pods',
@@ -211,6 +218,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-s4',
+    modelAssetId: 'shuttle-pl400-tank',
     name: 'PL-400 Tank',
     blurb: 'A long drink of propellant for small stacks.',
     category: 'tanks',
@@ -302,6 +310,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-mule',
+    modelAssetId: 'shuttle-mule-engine',
     name: 'K-180 "Mule"',
     blurb: 'Brute force with paperwork. Lifts what you bolt above it.',
     category: 'engines',
@@ -336,6 +345,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-colt',
+    modelAssetId: 'apollo-colt-engine',
     name: 'V-2 "Colt"',
     blurb: 'Tiny, eager, and precise. Landers love it.',
     category: 'engines',
@@ -625,6 +635,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- utility
   {
     id: 'chute-main',
+    modelAssetId: 'orion-homecoming-housing',
     name: 'Homecoming Chute',
     blurb: 'The last part to do its job, and the most appreciated.',
     category: 'utility',
@@ -740,6 +751,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'ant-dish',
+    modelAssetId: 'tdrs-longtalk-dish',
     name: 'Longtalk Dish',
     blurb: 'For conversations across very awkward distances.',
     category: 'utility',
@@ -757,6 +769,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'leg-lander',
+    modelAssetId: 'viking-stilt-leg',
     name: 'Stilt Leg',
     blurb: 'A sprung landing leg. Prefers gentle arrivals; tolerates honest ones.',
     category: 'utility',
@@ -941,6 +954,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'wheel-mesa',
+    modelAssetId: 'mars-mesa-wheel',
     name: 'Mesa Wheel',
     blurb: 'Heavy-duty traction for serious expedition rovers.',
     category: 'ground',
