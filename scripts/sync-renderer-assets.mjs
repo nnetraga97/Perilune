@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from './lib/canonical-json.mjs';
+import { swapDirectoryAtomically } from './lib/atomic-publish.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDir = resolve(root, 'node_modules/three/examples/jsm/libs/basis');
@@ -94,6 +95,8 @@ if (!Array.isArray(checkedPartArtifact.manifest?.models)) {
 }
 const partSourceDir = resolve(root, 'assets/parts');
 const partDestinationDir = resolve(root, 'public/parts');
+const partStagedDir = resolve(root, `public/parts.stage-${process.pid}`);
+const partBackupDir = resolve(root, `public/parts.backup-${process.pid}`);
 const checkedPartFiles = [];
 for (const model of checkedPartArtifact.manifest.models) {
   const source = checkedAssetPath(partSourceDir, model.outputPath);
@@ -104,15 +107,24 @@ for (const model of checkedPartArtifact.manifest.models) {
   }
   checkedPartFiles.push({ model, source, expected });
 }
-await rm(partDestinationDir, { recursive: true, force: true });
-await mkdir(partDestinationDir, { recursive: true });
-let partFiles = 0;
-for (const { model, source, expected } of checkedPartFiles) {
-  const destination = checkedAssetPath(partDestinationDir, model.outputPath);
-  await mkdir(dirname(destination), { recursive: true });
-  await copyFile(source, destination);
-  const actual = await readFile(destination);
-  if (!actual.equals(expected)) throw new Error(`Part asset verification failed: ${destination}`);
-  partFiles++;
+await rm(partStagedDir, { recursive: true, force: true });
+await mkdir(partStagedDir, { recursive: true });
+try {
+  for (const { model, source, expected } of checkedPartFiles) {
+    const stagedDestination = checkedAssetPath(partStagedDir, model.outputPath);
+    await mkdir(dirname(stagedDestination), { recursive: true });
+    await copyFile(source, stagedDestination);
+    const actual = await readFile(stagedDestination);
+    if (!actual.equals(expected) || createHash('sha256').update(actual).digest('hex') !== model.sha256) {
+      throw new Error(`Staged part asset verification failed: ${stagedDestination}`);
+    }
+  }
+  await swapDirectoryAtomically({
+    stagedPath: partStagedDir,
+    targetPath: partDestinationDir,
+    backupPath: partBackupDir,
+  });
+} finally {
+  await rm(partStagedDir, { recursive: true, force: true });
 }
-console.log(`renderer assets: verified ${partFiles} checked part model files`);
+console.log(`renderer assets: verified ${checkedPartFiles.length} checked part model files`);

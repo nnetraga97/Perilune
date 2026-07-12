@@ -2,10 +2,80 @@ const GLB_MAGIC = 0x46546c67;
 const GLB_VERSION = 2;
 const JSON_CHUNK = 0x4e4f534a;
 const BIN_CHUNK = 0x004e4942;
+const KTX2_IDENTIFIER = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
 
 function requireInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer`);
   return value;
+}
+
+function uint64(view, offset, label) {
+  const value = view.getBigUint64(offset, true);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`${label} exceeds the safe integer range`);
+  return Number(value);
+}
+
+function inspectKtx2(bytes, label) {
+  if (bytes.byteLength < 80) throw new Error(`${label} KTX2 payload is too short`);
+  if (KTX2_IDENTIFIER.some((value, index) => bytes[index] !== value)) {
+    throw new Error(`${label} must contain a KTX2 payload`);
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const typeSize = requireInteger(view.getUint32(16, true), `${label} KTX2 type size`);
+  const width = requireInteger(view.getUint32(20, true), `${label} KTX2 width`);
+  const height = requireInteger(view.getUint32(24, true), `${label} KTX2 height`);
+  const depth = requireInteger(view.getUint32(28, true), `${label} KTX2 depth`);
+  const layers = requireInteger(view.getUint32(32, true), `${label} KTX2 layer count`);
+  const faces = requireInteger(view.getUint32(36, true), `${label} KTX2 face count`);
+  const levels = requireInteger(view.getUint32(40, true), `${label} KTX2 level count`);
+  const supercompression = requireInteger(view.getUint32(44, true), `${label} KTX2 supercompression scheme`);
+  if (typeSize === 0 || supercompression > 3) throw new Error(`${label} KTX2 header is invalid`);
+  if (width === 0 || height === 0) throw new Error(`${label} KTX2 dimensions must be positive`);
+  if (depth !== 0 || layers !== 0 || faces !== 1) {
+    throw new Error(`${label} KTX2 must be a single-layer 2D texture`);
+  }
+  const fullLevelCount = Math.floor(Math.log2(Math.max(width, height))) + 1;
+  if (levels === 0 || levels > fullLevelCount || 80 + levels * 24 > bytes.byteLength) {
+    throw new Error(`${label} KTX2 level index is invalid`);
+  }
+  const dataFormatOffset = requireInteger(view.getUint32(48, true), `${label} KTX2 data format offset`);
+  const dataFormatLength = requireInteger(view.getUint32(52, true), `${label} KTX2 data format length`);
+  const keyValueOffset = requireInteger(view.getUint32(56, true), `${label} KTX2 key/value offset`);
+  const keyValueLength = requireInteger(view.getUint32(60, true), `${label} KTX2 key/value length`);
+  const supercompressionOffset = uint64(view, 64, `${label} KTX2 supercompression offset`);
+  const supercompressionLength = uint64(view, 72, `${label} KTX2 supercompression length`);
+  const levelDataMinimum = 80 + levels * 24;
+  if (dataFormatLength === 0 || dataFormatOffset < levelDataMinimum ||
+    dataFormatOffset + dataFormatLength > bytes.byteLength ||
+    (keyValueLength > 0 && keyValueOffset < levelDataMinimum) ||
+    keyValueOffset + keyValueLength > bytes.byteLength ||
+    (supercompressionLength > 0 && supercompressionOffset < levelDataMinimum) ||
+    supercompressionOffset + supercompressionLength > bytes.byteLength) {
+    throw new Error(`${label} KTX2 metadata ranges are invalid`);
+  }
+  for (let level = 0; level < levels; level++) {
+    const entryOffset = 80 + level * 24;
+    const byteOffset = uint64(view, entryOffset, `${label} KTX2 level ${level} offset`);
+    const byteLength = uint64(view, entryOffset + 8, `${label} KTX2 level ${level} length`);
+    uint64(view, entryOffset + 16, `${label} KTX2 level ${level} uncompressed length`);
+    if (byteLength === 0 || byteOffset < levelDataMinimum || byteOffset + byteLength > bytes.byteLength) {
+      throw new Error(`${label} KTX2 level ${level} exceeds its payload`);
+    }
+  }
+
+  // Runtime accounting deliberately assumes uncompressed RGBA8 allocation for
+  // every texel in a complete mip chain, regardless of KTX2 payload encoding.
+  let mipWidth = width;
+  let mipHeight = height;
+  let gpuBytes = 0;
+  for (;;) {
+    gpuBytes += mipWidth * mipHeight * 4;
+    if (mipWidth === 1 && mipHeight === 1) break;
+    mipWidth = Math.max(1, Math.floor(mipWidth / 2));
+    mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+  }
+  if (!Number.isSafeInteger(gpuBytes)) throw new Error(`${label} KTX2 GPU allocation exceeds the safe integer range`);
+  return { width, height, levels, gpuBytes };
 }
 
 function accessorAt(document, index, label) {
@@ -100,7 +170,7 @@ function includeTransformedBounds(targetMin, targetMax, local, matrix) {
 }
 
 /** Inspect the structural and budget-relevant contents of a binary glTF file. */
-export function inspectGlb(input) {
+export function inspectGlb(input, { requireKtx2 = false } = {}) {
   const bytes = input instanceof Uint8Array
     ? input
     : input instanceof ArrayBuffer ? new Uint8Array(input) : null;
@@ -117,6 +187,7 @@ export function inspectGlb(input) {
   let offset = 12;
   let jsonBytes;
   let binLength = 0;
+  let binStart = 0;
   let hasBinChunk = false;
   let chunkIndex = 0;
   while (offset < bytes.byteLength) {
@@ -135,6 +206,7 @@ export function inspectGlb(input) {
       if (hasBinChunk) throw new Error('GLB contains more than one BIN chunk');
       hasBinChunk = true;
       binLength = chunkLength;
+      binStart = start;
     }
     offset = end;
     chunkIndex++;
@@ -153,10 +225,13 @@ export function inspectGlb(input) {
 
   const bufferViews = Array.isArray(document.bufferViews) ? document.bufferViews : [];
   const buffers = Array.isArray(document.buffers) ? document.buffers : [];
+  for (const [index, buffer] of buffers.entries()) {
+    if (!buffer || typeof buffer !== 'object' || Array.isArray(buffer)) throw new Error(`GLB buffer ${index} must be an object`);
+    if (buffer.uri !== undefined) throw new Error(`GLB buffer ${index} must not have a uri`);
+  }
   const declaredBufferLength = buffers[0]?.byteLength;
   if (declaredBufferLength !== undefined) {
     requireInteger(declaredBufferLength, 'GLB buffer byteLength');
-    if (buffers[0].uri !== undefined) throw new Error('GLB buffer 0 must be embedded');
     if (declaredBufferLength > binLength) throw new Error('GLB BIN chunk is shorter than its declared buffer');
   }
   function bufferViewAt(index, label) {
@@ -287,20 +362,48 @@ export function inspectGlb(input) {
   let geometryBytes = 0;
   for (const index of geometryViews) geometryBytes += bufferViewAt(index, 'GLB geometry').byteLength;
 
-  const imageViews = new Set();
+  const imageViews = [];
   for (const [index, image] of (document.images ?? []).entries()) {
-    if (image.bufferView !== undefined) {
-      bufferViewAt(image.bufferView, `GLB image ${index}`);
-      imageViews.add(image.bufferView);
+    if (!image || typeof image !== 'object' || Array.isArray(image)) throw new Error(`GLB image ${index} must be an object`);
+    if (image.uri !== undefined) throw new Error(`GLB image ${index} must not have a uri`);
+    if (image.bufferView === undefined) throw new Error(`GLB image ${index} must have an embedded bufferView`);
+    if (requireKtx2 && image.mimeType !== 'image/ktx2') {
+      throw new Error(`GLB image ${index} mimeType must be image/ktx2 after optimization`);
     }
+    bufferViewAt(image.bufferView, `GLB image ${index}`);
+    imageViews.push({ imageIndex: index, bufferViewIndex: image.bufferView });
   }
   let textureBytes = 0;
-  for (const index of imageViews) textureBytes += bufferViewAt(index, 'GLB image').byteLength;
+  let textureGpuBytes = 0;
+  let textureMaxDimension = 0;
+  const textures = [];
+  for (const { imageIndex, bufferViewIndex } of imageViews) {
+    const bufferView = bufferViewAt(bufferViewIndex, `GLB image ${imageIndex}`);
+    if ((bufferView.buffer ?? 0) !== 0) throw new Error('GLB images must use embedded buffer 0');
+    textureBytes += bufferView.byteLength;
+    const payload = bytes.subarray(
+      binStart + (bufferView.byteOffset ?? 0),
+      binStart + (bufferView.byteOffset ?? 0) + bufferView.byteLength,
+    );
+    const isKtx2 = KTX2_IDENTIFIER.every((value, identifierIndex) => payload[identifierIndex] === value);
+    if (requireKtx2 && !isKtx2) {
+      throw new Error(`GLB image ${imageIndex} bufferView ${bufferViewIndex} must be embedded KTX2 after optimization`);
+    }
+    if (isKtx2) {
+      const texture = inspectKtx2(payload, `GLB image ${imageIndex} bufferView ${bufferViewIndex}`);
+      textures.push(texture);
+      textureGpuBytes += texture.gpuBytes;
+      textureMaxDimension = Math.max(textureMaxDimension, texture.width, texture.height);
+    }
+  }
 
   return {
     triangles,
     geometryBytes,
     textureBytes,
+    textureGpuBytes,
+    textureMaxDimension,
+    textures,
     boundsMin,
     boundsMax,
     extensionsUsed: [...new Set(document.extensionsUsed ?? [])].sort(),

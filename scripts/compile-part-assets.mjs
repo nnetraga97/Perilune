@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256Bytes } from './lib/canonical-json.mjs';
@@ -8,6 +8,7 @@ import {
   validatePartAssetDocuments,
 } from './lib/part-asset-schema.mjs';
 import { inspectGlb } from './lib/glb-stats.mjs';
+import { publishFilesAtomically } from './lib/atomic-publish.mjs';
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -79,50 +80,81 @@ export async function compilePartAssets({ root = defaultRoot, write = false, opt
   if (inputErrors.length) throw new Error(`Part asset inputs are invalid:\n${inputErrors.join('\n')}`);
 
   const partRoot = resolve(root, 'assets/parts');
+  const stageRoot = resolve(partRoot, `.compile-stage-${process.pid}`);
+  const planned = recipes.models.map((recipe, index) => {
+    const authoringPath = recipe.authoringPath ?? `authoring/${recipe.assetId}.glb`;
+    const outputPath = recipe.outputPath ?? `generated/${recipe.assetId}.glb`;
+    const inputPath = checkedPath(partRoot, authoringPath, `Part recipe ${recipe.assetId} authoringPath`);
+    const finalPath = checkedPath(partRoot, outputPath, `Part recipe ${recipe.assetId} outputPath`);
+    if (!finalPath.toLowerCase().endsWith('.glb')) {
+      throw new Error(`Part recipe ${recipe.assetId} outputPath must end in .glb`);
+    }
+    return {
+      recipe,
+      outputPath,
+      inputPath,
+      finalPath,
+      stagedPath: resolve(stageRoot, `${String(index).padStart(2, '0')}-${recipe.assetId}.glb`),
+    };
+  });
+  const inputOwners = new Map();
+  const outputOwners = new Map();
+  for (const plan of planned) {
+    const priorInput = inputOwners.get(plan.inputPath);
+    if (priorInput) throw new Error(`Part recipes ${priorInput} and ${plan.recipe.assetId} resolve to the same inputPath`);
+    inputOwners.set(plan.inputPath, plan.recipe.assetId);
+    const priorOutput = outputOwners.get(plan.finalPath);
+    if (priorOutput) throw new Error(`Part recipes ${priorOutput} and ${plan.recipe.assetId} resolve to the same outputPath`);
+    outputOwners.set(plan.finalPath, plan.recipe.assetId);
+  }
+  for (const plan of planned) {
+    const inputOwner = inputOwners.get(plan.finalPath);
+    if (inputOwner) throw new Error(`Part recipe ${plan.recipe.assetId} outputPath collides with ${inputOwner} inputPath`);
+  }
+
   const models = [];
   const pending = [];
+  const artifactPath = resolve(root, 'src/generated/checked-part-manifest.json');
+  const artifactStagedPath = `${artifactPath}.stage-${process.pid}`;
+  await rm(stageRoot, { recursive: true, force: true });
+  await rm(artifactStagedPath, { force: true });
+  await mkdir(stageRoot, { recursive: true });
   try {
-    for (const recipe of recipes.models) {
-      const authoringPath = recipe.authoringPath ?? `authoring/${recipe.assetId}.glb`;
-      const outputPath = recipe.outputPath ?? `generated/${recipe.assetId}.glb`;
-      const inputPath = checkedPath(partRoot, authoringPath, `Part recipe ${recipe.assetId} authoringPath`);
-      const finalPath = checkedPath(partRoot, outputPath, `Part recipe ${recipe.assetId} outputPath`);
-      if (!finalPath.toLowerCase().endsWith('.glb')) {
-        throw new Error(`Part recipe ${recipe.assetId} outputPath must end in .glb`);
-      }
-      // glTF Transform infers the output encoding from the last suffix. Keep
-      // .glb last so the checked temporary artifact is binary glTF.
-      const partialPath = finalPath.replace(/\.glb$/i, '.partial.glb');
+    for (const { recipe, outputPath, inputPath, finalPath, stagedPath } of planned) {
       await mkdir(dirname(finalPath), { recursive: true });
-      await rm(partialPath, { force: true });
-      const directoryBefore = new Set(await readdir(dirname(finalPath)));
-      let unexpectedSidecars = [];
+      const directoryBefore = new Set(await readdir(stageRoot));
 
       const sourceStats = inspectGlb(await readFile(inputPath));
       if (sourceStats.triangles <= 0) throw new Error(`Authoring part ${recipe.assetId} has no indexed triangles`);
       const simplifyRatio = Math.min(1, recipe.triangleLimit / sourceStats.triangles);
       try {
-        await optimize({ inputPath, outputPath: partialPath, simplifyRatio, textureMaxDimension: recipe.textureMaxDimension, recipe });
-        unexpectedSidecars = (await readdir(dirname(finalPath)))
-          .filter((name) => !directoryBefore.has(name) && name !== basename(partialPath))
-          .map((name) => resolve(dirname(finalPath), name));
+        await optimize({ inputPath, outputPath: stagedPath, simplifyRatio, textureMaxDimension: recipe.textureMaxDimension, recipe });
+        const unexpectedSidecars = (await readdir(stageRoot))
+          .filter((name) => !directoryBefore.has(name) && name !== basename(stagedPath))
+          .map((name) => resolve(stageRoot, name));
         if (unexpectedSidecars.length) {
           throw new Error(
             `glTF Transform emitted unexpected sidecars for ${recipe.assetId}: ` +
             unexpectedSidecars.map((path) => basename(path)).join(', '),
           );
         }
-        const bytes = await readFile(partialPath);
-        const stats = inspectGlb(bytes);
+        const bytes = await readFile(stagedPath);
+        const stats = inspectGlb(bytes, { requireKtx2: true });
         if (stats.triangles > recipe.triangleLimit) {
           throw new Error(`Compiled part ${recipe.assetId} has ${stats.triangles} triangles; limit is ${recipe.triangleLimit}`);
         }
         if (recipe.animationPolicy === 'none' && stats.animationClips !== 0) {
           throw new Error(`Compiled part ${recipe.assetId} contains ${stats.animationClips} animation clips`);
         }
+        if (stats.textureMaxDimension > recipe.textureMaxDimension) {
+          throw new Error(
+            `Compiled part ${recipe.assetId} texture dimension ${stats.textureMaxDimension} exceeds ` +
+            `${recipe.textureMaxDimension}`,
+          );
+        }
         enforceBounds(stats, recipe);
-        const transferBytes = (await stat(partialPath)).size;
-        const gpuBytes = stats.geometryBytes + stats.textureBytes;
+        const transferBytes = (await stat(stagedPath)).size;
+        const gpuBytes = stats.geometryBytes + stats.textureGpuBytes;
         if (Number.isSafeInteger(recipe.transferLimit) && transferBytes > recipe.transferLimit) {
           throw new Error(`Compiled part ${recipe.assetId} exceeds its transferLimit`);
         }
@@ -141,11 +173,11 @@ export async function compilePartAssets({ root = defaultRoot, write = false, opt
           boundsMax: stats.boundsMax,
           plumeAnchors: recipe.plumeAnchors,
         });
-        pending.push({ partialPath, finalPath });
+        pending.push({ stagedPath, targetPath: finalPath });
       } catch (error) {
-        const newPaths = (await readdir(dirname(finalPath)))
+        const newPaths = (await readdir(stageRoot))
           .filter((name) => !directoryBefore.has(name))
-          .map((name) => resolve(dirname(finalPath), name));
+          .map((name) => resolve(stageRoot, name));
         await Promise.all(newPaths.map((path) => rm(path, { recursive: true, force: true })));
         throw error;
       }
@@ -166,21 +198,24 @@ export async function compilePartAssets({ root = defaultRoot, write = false, opt
     const manifest = { schemaVersion: 1, models };
     const artifact = { schemaVersion: 1, manifestSha256: sha256Bytes(canonicalJson(manifest)), manifest };
     if (write) {
-      for (const { partialPath, finalPath } of pending) await rename(partialPath, finalPath);
-      const artifactPath = resolve(root, 'src/generated/checked-part-manifest.json');
-      const artifactPartialPath = `${artifactPath}.partial`;
       await mkdir(dirname(artifactPath), { recursive: true });
-      await writeFile(artifactPartialPath, `${canonicalJson(artifact)}\n`);
-      await rename(artifactPartialPath, artifactPath);
+      await writeFile(artifactStagedPath, `${canonicalJson(artifact)}\n`);
+      await publishFilesAtomically([
+        ...pending,
+        { stagedPath: artifactStagedPath, targetPath: artifactPath },
+      ]);
       console.log(`part assets: wrote ${models.length} checked models`);
     } else {
-      for (const { partialPath } of pending) await rm(partialPath, { force: true });
       console.log(`part assets: verified ${models.length} checked models (dry run)`);
     }
     return artifact;
   } catch (error) {
-    await Promise.all(pending.map(({ partialPath }) => rm(partialPath, { force: true })));
     throw error;
+  } finally {
+    await Promise.all([
+      rm(stageRoot, { recursive: true, force: true }),
+      rm(artifactStagedPath, { force: true }),
+    ]);
   }
 }
 
