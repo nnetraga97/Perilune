@@ -196,7 +196,8 @@ describe('M2 release blockers', () => {
     tank.resources.propellant = 0;
     for (let frame = 0; frame < 120; frame++) sync(visual, craft, 1, 1, 1 / 60);
     expect(plume.visible).toBe(false);
-    expect(plume.scale.x).toBeLessThan(0.02);
+    // Plume groups hold one nozzle holder per authored anchor; each collapses when off.
+    expect(plume.children[0].scale.x).toBeLessThan(0.02);
   });
 
 });

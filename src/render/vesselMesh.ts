@@ -248,10 +248,12 @@ export function syncVesselVisual(
     if (Math.abs(power - targetPower) < 0.001) power = targetPower;
     plumeGroup.userData.power = power;
     plumeGroup.visible = power > 0.015;
-    if (plumeGroup.visible) {
-      const vacuumFlare = 1 + (1 - pressureFrac) * 1.3;
-      for (const nozzle of plumeGroup.children) {
+    const vacuumFlare = 1 + (1 - pressureFrac) * 1.3;
+    for (const nozzle of plumeGroup.children) {
+      if (plumeGroup.visible) {
         nozzle.scale.set(power * vacuumFlare, 0.6 + power * 0.7, power * vacuumFlare);
+      } else {
+        nozzle.scale.set(0, 0, 0);
       }
     }
   }
