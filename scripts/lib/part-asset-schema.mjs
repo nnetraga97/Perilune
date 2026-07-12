@@ -23,6 +23,8 @@ const PART_TEXTURE_LIMITS = Object.freeze({
   'chute-main': 512,
 });
 
+const SCOPED_PART_IDS = new Set(Object.keys(PART_TEXTURE_LIMITS));
+
 const REFERENCE_CRAFT_COPIES = Object.freeze({
   'pod-voyager': 1,
   'leg-lander': 4,
@@ -133,6 +135,9 @@ function validateRecipe(recipe, sourceIds, errors) {
   const label = `Part recipe ${recipe?.assetId ?? '<unknown>'}`;
   requireIdentifier(recipe?.assetId, `${label} assetId`, errors);
   requireIdentifier(recipe?.partId, `${label} partId`, errors);
+  if (typeof recipe?.partId === 'string' && !SCOPED_PART_IDS.has(recipe.partId)) {
+    errors.push(`${label} partId ${recipe.partId} is not one of the eight scoped part IDs`);
+  }
 
   const recipeSourceIds = Array.isArray(recipe?.sourceIds)
     ? recipe.sourceIds
@@ -235,6 +240,9 @@ function validateCheckedModel(model, recipeByAssetId, errors) {
   const label = `Checked part model ${model?.assetId ?? '<unknown>'}`;
   requireIdentifier(model?.assetId, `${label} assetId`, errors);
   requireIdentifier(model?.partId, `${label} partId`, errors);
+  if (typeof model?.partId === 'string' && !SCOPED_PART_IDS.has(model.partId)) {
+    errors.push(`${label} partId ${model.partId} is not one of the eight scoped part IDs`);
+  }
   const recipe = recipeByAssetId.get(model?.assetId);
   if (!recipe) errors.push(`${label} has no matching recipe`);
   else if (model.partId !== recipe.partId) errors.push(`${label} partId does not match its recipe`);
