@@ -22,7 +22,8 @@ import {
 import { PARTS, PartDef, partById } from '../content/parts';
 import { buildAeroModel } from '../sim/aero';
 import { computeMassProperties } from '../sim/vessel';
-import { buildVesselVisual, VesselVisual } from '../render/vesselMesh';
+import { buildVesselVisual, disposeVesselVisual, VesselVisual } from '../render/vesselMesh';
+import type { PartModelLibrary } from '../render/partModelLibrary';
 import { listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 
 function el(tag: string, cls: string, parent: HTMLElement, text = ''): HTMLElement {
@@ -65,6 +66,9 @@ export class Editor {
 
   private visual: VesselVisual | null = null;
   private ghost: THREE.Object3D | null = null;
+  /** Ghost's visual wrapper and its temporary translucent materials, released on drop. */
+  private ghostVisual: VesselVisual | null = null;
+  private ghostMaterials: THREE.Material[] = [];
   private holdingDef: PartDef | null = null;
   private selectedKey: number | null = null;
   private selectionHelper: THREE.BoxHelper | null = null;
@@ -97,7 +101,7 @@ export class Editor {
     | { kind: 'root'; pos: Vec3 }
     | null = null;
 
-  constructor(uiRoot: HTMLElement, cb: EditorCallbacks) {
+  constructor(uiRoot: HTMLElement, cb: EditorCallbacks, private readonly partModels?: PartModelLibrary) {
     this.cb = cb;
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
     window.addEventListener('resize', () => {
@@ -327,18 +331,24 @@ export class Editor {
     if (this.ghost) this.scene.remove(this.ghost);
     const tmpCraft = createCraft('ghost');
     addPart(tmpCraft, def.id, null, 'root', { x: 0, y: 0, z: 0 });
-    const vis = buildVesselVisual(tmpCraft);
+    const vis = buildVesselVisual(tmpCraft, this.partModels);
+    // Give the clone its own translucent materials; never mutate shared model
+    // materials. Track them so drop can dispose exactly what pickup created.
+    this.ghostMaterials = [];
     vis.group.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.isMesh) {
-        mesh.material = new THREE.MeshStandardMaterial({
+        const material = new THREE.MeshStandardMaterial({
           color: '#6db3d6',
           transparent: true,
           opacity: 0.55,
           depthWrite: false,
         });
+        mesh.material = material;
+        this.ghostMaterials.push(material);
       }
     });
+    this.ghostVisual = vis;
     this.ghost = vis.group;
     this.scene.add(this.ghost);
   }
@@ -349,6 +359,12 @@ export class Editor {
       this.scene.remove(this.ghost);
       this.ghost = null;
     }
+    if (this.ghostVisual) {
+      disposeVesselVisual(this.ghostVisual);
+      this.ghostVisual = null;
+    }
+    for (const material of this.ghostMaterials) material.dispose();
+    this.ghostMaterials = [];
   }
 
   get selectedPartKey(): number | null {
@@ -657,7 +673,7 @@ export class Editor {
       this.selectionHelper = null;
     }
     if (this.visual) this.scene.remove(this.visual.group);
-    this.visual = buildVesselVisual(this.craft);
+    this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
     if (this.selectedKey !== null) this.setSelected(this.selectedKey);
   }

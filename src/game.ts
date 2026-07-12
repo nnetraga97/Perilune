@@ -9,6 +9,9 @@ import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
 import { Craft, defOf } from './sim/vessel';
 import { createRenderContext, RenderContext } from './render/context';
 import { WorldScene } from './render/worldScene';
+import { checkPartModelManifest } from './render/partModelManifest';
+import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
+import checkedPartArtifact from './generated/checked-part-manifest.json';
 import { Editor } from './ui/editor';
 import { FlightHud } from './ui/flightHud';
 import { MapView } from './ui/mapView';
@@ -33,6 +36,7 @@ class PeriluneGame {
   private ctx!: RenderContext;
   private game = new GameState();
   private world!: WorldScene;
+  private partModels!: PartModelLibrary;
   private editor!: Editor;
   private hud!: FlightHud;
   private map!: MapView;
@@ -66,7 +70,9 @@ class PeriluneGame {
     this.unsubscribeGpuRestoration = null;
     this.gpuProfiler.dispose();
     this.map.dispose();
+    // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
+    this.partModels.dispose();
   };
 
   async start(): Promise<void> {
@@ -80,12 +86,22 @@ class PeriluneGame {
       // Context loss invalidated old queries. Drop references now; allocate lazily on a renderable draw.
       this.gpuProfiler.invalidateAfterContextLoss();
     });
-    this.world = new WorldScene(this.ctx);
+    // One shared, preloaded part-model library backs both flight and the editor.
+    // Procedural geometry remains the fallback if any model fails to load.
+    const configuredBaseUrl = import.meta.env.BASE_URL;
+    const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
+    const checkedParts = checkPartModelManifest(checkedPartArtifact);
+    this.partModels = createBrowserPartModelLibrary(this.ctx.renderer, checkedParts, {
+      transcoderPath: `${baseUrl}basis/`,
+      resolveAssetUrl: (path) => `${baseUrl}parts/${path}`,
+    });
+    await this.partModels.preload();
+    this.world = new WorldScene(this.ctx, this.partModels);
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
       onExit: () => this.showMenu(),
-    });
+    }, this.partModels);
     this.hud = new FlightHud(this.uiRoot, {
       onStage: () => this.stage(),
       onToggleMap: () => this.toggleMap(),

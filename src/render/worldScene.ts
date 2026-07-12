@@ -14,6 +14,7 @@ import { groundRadiusInertial } from '../sim/terrain';
 import type { Body } from '../sim/universe';
 import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
+import type { PartModelLibrary } from './partModelLibrary';
 import { makeStarfield } from './starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
@@ -124,7 +125,10 @@ export class WorldScene {
   camPitch = 0.35;
   camDist = 18;
 
-  constructor(private readonly context: RenderContext) {
+  constructor(
+    private readonly context: RenderContext,
+    private readonly partModels?: PartModelLibrary,
+  ) {
     this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
     this.rendererLedger = new RendererResourceLedger(this.checkedPlanetManifest.budgets);
     const textureLoader = new THREE.TextureLoader();
@@ -395,7 +399,7 @@ export class WorldScene {
   visualFor(gv: GameVessel): VesselVisual {
     let vis = this.vesselVisuals.get(gv.runtime.id);
     if (!vis) {
-      vis = buildVesselVisual(gv.runtime.craft);
+      vis = buildVesselVisual(gv.runtime.craft, this.partModels);
       this.vesselVisuals.set(gv.runtime.id, vis);
       this.scene.add(vis.group);
     }
