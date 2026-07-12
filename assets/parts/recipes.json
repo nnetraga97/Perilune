@@ -5,5 +5,75 @@
     "totalTransferBytes": 6291456,
     "totalGpuBytes": 33554432
   },
-  "models": []
+  "models": [
+    {
+      "assetId": "orion-voyager-pod",
+      "partId": "pod-voyager",
+      "sourceIds": [
+        "nasa-orion-capsule"
+      ],
+      "authoringPath": "authoring/orion-voyager-pod.glb",
+      "outputPath": "generated/orion-voyager-pod.glb",
+      "triangleLimit": 6000,
+      "textureMaxDimension": 1024,
+      "visualBounds": {
+        "min": [-0.612, -0.434, -0.612],
+        "max": [0.612, 0.434, 0.612]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "viking-stilt-leg",
+      "partId": "leg-lander",
+      "sourceIds": [
+        "nasa-viking-leg",
+        "nasa-viking-foot"
+      ],
+      "authoringPath": "authoring/viking-stilt-leg.glb",
+      "outputPath": "generated/viking-stilt-leg.glb",
+      "triangleLimit": 2500,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.45, -0.575, -0.3],
+        "max": [0.45, 0.575, 0.3]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "tdrs-longtalk-dish",
+      "partId": "ant-dish",
+      "sourceIds": [
+        "nasa-tdrs-left-antenna"
+      ],
+      "authoringPath": "authoring/tdrs-longtalk-dish.glb",
+      "outputPath": "generated/tdrs-longtalk-dish.glb",
+      "triangleLimit": 3500,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.561, -0.179, -0.561],
+        "max": [0.561, 0.179, 0.561]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "mars-mesa-wheel",
+      "partId": "wheel-mesa",
+      "sourceIds": [
+        "nasa-mars-2020-wheel"
+      ],
+      "authoringPath": "authoring/mars-mesa-wheel.glb",
+      "outputPath": "generated/mars-mesa-wheel.glb",
+      "triangleLimit": 3500,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.51, -0.173, -0.51],
+        "max": [0.51, 0.173, 0.51]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    }
+  ]
 }

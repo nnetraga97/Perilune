@@ -41,3 +41,11 @@ implementations here are original code.
   The shipped canonical height field is derived solely from Perilune's original
   procedural `solidHeight` terrain; Natural Earth contributes visual albedo
   detail only and is not collision-height authority.
+
+## NASA part model source assets
+
+- **Orion Capsule** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/orion-capsule/
+- **Viking Lander leg** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/viking-lander-2/
+- **Viking Lander foot** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/viking-lander-2/
+- **TDRS-C left antenna** — NASA/Ames Research Center source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/tracking-and-data-relay-satellites-tdrs-c/
+- **Mars 2020 five-inch wheel** — NASA source geometry; modified by Perilune. https://science.nasa.gov/3d-resources/mars-2020-5-inch-wheel/
