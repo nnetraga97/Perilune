@@ -10,6 +10,30 @@ export const PART_ASSET_BUDGET_CEILINGS = Object.freeze({
   totalGpuBytes: 32 * 1024 * 1024,
 });
 
+export const REFERENCE_CRAFT_TRIANGLE_LIMIT = 60_000;
+
+const PART_TEXTURE_LIMITS = Object.freeze({
+  'pod-voyager': 1024,
+  'leg-lander': 512,
+  'eng-colt': 512,
+  'ant-dish': 512,
+  'wheel-mesa': 512,
+  'eng-mule': 512,
+  'tank-s4': 1024,
+  'chute-main': 512,
+});
+
+const REFERENCE_CRAFT_COPIES = Object.freeze({
+  'pod-voyager': 1,
+  'leg-lander': 4,
+  'eng-colt': 1,
+  'ant-dish': 1,
+  'wheel-mesa': 6,
+  'eng-mule': 1,
+  'tank-s4': 1,
+  'chute-main': 1,
+});
+
 const SHA256 = /^[a-f0-9]{64}$/;
 const HTTPS = /^https:\/\//;
 const identifier = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -124,6 +148,11 @@ function validateRecipe(recipe, sourceIds, errors) {
   }
   requirePositiveInteger(recipe?.triangleLimit, `${label} triangleLimit`, errors);
   requirePositiveInteger(recipe?.textureMaxDimension, `${label} textureMaxDimension`, errors);
+  const textureLimit = PART_TEXTURE_LIMITS[recipe?.partId];
+  if (textureLimit !== undefined && Number.isSafeInteger(recipe?.textureMaxDimension) &&
+    recipe.textureMaxDimension > textureLimit) {
+    errors.push(`${label} textureMaxDimension exceeds the ${textureLimit} limit for ${recipe.partId}`);
+  }
   validateBounds(recipe?.visualBounds?.min, recipe?.visualBounds?.max, `${label} visualBounds`, errors);
   validateAnchors(recipe?.plumeAnchors, `${label} plumeAnchors`, errors);
   if (recipe?.animationPolicy !== undefined && recipe.animationPolicy !== 'none') {
@@ -161,16 +190,26 @@ export function validatePartAssetDocuments(sources, recipes) {
     const assetIds = new Set();
     const partIds = new Set();
     let triangleLimit = 0;
+    let referenceCraftTriangleLimit = 0;
     for (const recipe of recipes.models) {
       validateRecipe(recipe, sourceIds, errors);
       if (assetIds.has(recipe?.assetId)) errors.push(`Duplicate part assetId ${recipe.assetId}`);
       assetIds.add(recipe?.assetId);
       if (partIds.has(recipe?.partId)) errors.push(`Duplicate partId assignment ${recipe.partId}`);
       partIds.add(recipe?.partId);
-      if (Number.isSafeInteger(recipe?.triangleLimit) && recipe.triangleLimit > 0) triangleLimit += recipe.triangleLimit;
+      if (Number.isSafeInteger(recipe?.triangleLimit) && recipe.triangleLimit > 0) {
+        triangleLimit += recipe.triangleLimit;
+        referenceCraftTriangleLimit += recipe.triangleLimit * (REFERENCE_CRAFT_COPIES[recipe?.partId] ?? 0);
+      }
     }
     if (triangleLimit > PART_ASSET_BUDGET_CEILINGS.totalTriangleLimit) {
       errors.push(`Part recipe triangle limits exceed the approved total ceiling ${PART_ASSET_BUDGET_CEILINGS.totalTriangleLimit}`);
+    }
+    if (referenceCraftTriangleLimit > REFERENCE_CRAFT_TRIANGLE_LIMIT) {
+      errors.push(
+        `Part recipe triangle limits exceed the approved reference craft ceiling ` +
+        `${REFERENCE_CRAFT_TRIANGLE_LIMIT}`,
+      );
     }
   }
   return errors;
@@ -218,11 +257,14 @@ export function validateCheckedPartManifest(root) {
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];
   }
+  const errors = [];
+  const recipeModels = Array.isArray(recipes?.models) ? recipes.models : [];
+  if (!Array.isArray(recipes?.models)) errors.push('Part recipes must contain a models array');
   const path = resolve(root, 'src/generated/checked-part-manifest.json');
   if (!existsSync(path)) {
-    return Array.isArray(recipes?.models) && recipes.models.length === 0
-      ? []
-      : ['Checked part manifest is missing after part recipes were added'];
+    if (Array.isArray(recipes?.models) && recipes.models.length === 0) return errors;
+    errors.push('Checked part manifest is missing after part recipes were added');
+    return errors;
   }
 
   let artifact;
@@ -231,7 +273,6 @@ export function validateCheckedPartManifest(root) {
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];
   }
-  const errors = [];
   if (artifact?.schemaVersion !== 1) errors.push('Checked part manifest schemaVersion must be 1');
   if (artifact?.manifest?.schemaVersion !== 1) errors.push('Embedded part manifest schemaVersion must be 1');
   requireSha256(artifact?.manifestSha256, 'Checked part manifest manifestSha256', errors);
@@ -246,10 +287,15 @@ export function validateCheckedPartManifest(root) {
     return errors;
   }
 
-  const recipeByAssetId = new Map((recipes.models ?? []).map((recipe) => [recipe.assetId, recipe]));
+  const recipeByAssetId = new Map(
+    recipeModels
+      .filter((recipe) => recipe && typeof recipe === 'object' && !Array.isArray(recipe))
+      .map((recipe) => [recipe.assetId, recipe]),
+  );
   const assetIds = new Set();
   const partIds = new Set();
   let triangles = 0;
+  let referenceCraftTriangles = 0;
   let transferBytes = 0;
   let gpuBytes = 0;
   for (const model of artifact.manifest.models) {
@@ -258,18 +304,28 @@ export function validateCheckedPartManifest(root) {
     assetIds.add(model?.assetId);
     if (partIds.has(model?.partId)) errors.push(`Duplicate checked partId assignment ${model.partId}`);
     partIds.add(model?.partId);
-    if (Number.isSafeInteger(model?.triangles) && model.triangles >= 0) triangles += model.triangles;
+    if (Number.isSafeInteger(model?.triangles) && model.triangles >= 0) {
+      triangles += model.triangles;
+      referenceCraftTriangles += model.triangles * (REFERENCE_CRAFT_COPIES[model?.partId] ?? 0);
+    }
     if (Number.isSafeInteger(model?.transferBytes) && model.transferBytes >= 0) transferBytes += model.transferBytes;
     if (Number.isSafeInteger(model?.gpuBytes) && model.gpuBytes >= 0) gpuBytes += model.gpuBytes;
   }
-  if (artifact.manifest.models.length !== (recipes.models ?? []).length) {
+  if (artifact.manifest.models.length !== recipeModels.length) {
     errors.push('Checked part manifest model count does not match part recipes');
   }
-  for (const recipe of recipes.models ?? []) {
-    if (!assetIds.has(recipe.assetId)) errors.push(`Checked part manifest is missing ${recipe.assetId}`);
+  for (const recipe of recipeModels) {
+    if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe)) {
+      errors.push('Part recipes models entries must be objects');
+    } else if (!assetIds.has(recipe.assetId)) {
+      errors.push(`Checked part manifest is missing ${recipe.assetId}`);
+    }
   }
   for (const [name, total] of Object.entries({ totalTriangleLimit: triangles, totalTransferBytes: transferBytes, totalGpuBytes: gpuBytes })) {
     if (total > PART_ASSET_BUDGET_CEILINGS[name]) errors.push(`Checked part models exceed ${name}`);
+  }
+  if (referenceCraftTriangles > REFERENCE_CRAFT_TRIANGLE_LIMIT) {
+    errors.push('Checked part models exceed referenceCraftTriangleLimit');
   }
   return errors;
 }
