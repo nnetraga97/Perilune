@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256Bytes, sha256File } from './lib/canonical-json.mjs';
+import { validateCheckedPartManifest, validatePartAssetInputs } from './lib/part-asset-schema.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = resolve(
@@ -820,6 +821,9 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
     }
   }
 }
+
+errors.push(...validatePartAssetInputs(root));
+errors.push(...validateCheckedPartManifest(root));
 
 if (errors.length) {
   for (const error of errors) console.error(`content validation: ${error}`);

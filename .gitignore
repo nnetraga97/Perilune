@@ -2,6 +2,7 @@ node_modules/
 dist/
 public/basis/
 public/planets/
+public/parts/
 .vite/
 playwright-report/
 test-results/
@@ -11,4 +12,5 @@ artifacts/performance/
 assets/planets/sources/**/*.zip
 assets/planets/sources/**/*.tif
 assets/planets/sources/**/*.partial
+assets/parts/sources/**
 .DS_Store

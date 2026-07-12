@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "budgets": {
+    "totalTriangleLimit": 30000,
+    "totalTransferBytes": 6291456,
+    "totalGpuBytes": 33554432
+  },
+  "models": []
+}

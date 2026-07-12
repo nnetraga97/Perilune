@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "sourceId": "nasa-orion-capsule",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Printing/Orion%20Capsule/Orion%20Capsule%20(no%20fbc).stl",
+      "sha256": "abc4c69c27afa55c4a06bc9972b8872979f1473fb26e15224fb0f77f1cd81dc7",
+      "localPath": "sources/nasa-orion-capsule.stl",
+      "author": "NASA",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/orion-capsule/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-viking-leg",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Printing/Viking%20Lander/Leg%20x%203.stl",
+      "sha256": "16a25c37736604edbbb1b090bdfb01b536478647cc6f88b9acee858586dfe470",
+      "localPath": "sources/nasa-viking-leg.stl",
+      "author": "NASA",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/viking-lander-2/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-viking-foot",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Printing/Viking%20Lander/3D%20Foot%20x%203.stl",
+      "sha256": "e221d4c5aedd7933a0cecfac0489cd0e8f25d43e7e40c007c5212023018198ef",
+      "localPath": "sources/nasa-viking-foot.stl",
+      "author": "NASA",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/viking-lander-2/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-apollo-lm",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Models/Apollo%20Lunar%20Module/Apollo%20Lunar%20Module.glb",
+      "sha256": "379101dfcee399267addf771709107c35e826b0b9e5233272f123e4c8a585c4e",
+      "localPath": "sources/nasa-apollo-lm.glb",
+      "author": "NASA/Michael D. Carbajal",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/apollo-lunar-module/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-tdrs-left-antenna",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Models/Tracking%20and%20Data%20Relay%20Satellites%20(TDRS)%20(C)/Tracking%20and%20Data%20Relay%20Satellites%20(TDRS)%20(C)%20(left%20antenna).glb",
+      "sha256": "bf2a8cc618dce8c549ec726d8a530f67e17f116b6311dcea6ae06b7b47c12985",
+      "localPath": "sources/nasa-tdrs-left-antenna.glb",
+      "author": "NASA/Ames Research Center",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/tracking-and-data-relay-satellites-tdrs-c/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-mars-2020-wheel",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Printing/Mars%202020%205%20inch%20wheel/Mars%202020%205%20inch%20wheel.stl",
+      "sha256": "6318740c1ce44b5d4deb85866dd2a2cef9195197019553c78f0c439ab737c4ad",
+      "localPath": "sources/nasa-mars-2020-wheel.stl",
+      "author": "NASA",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/mars-2020-5-inch-wheel/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-shuttle-engines",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Models/Space%20Shuttle%20(D)/Space%20Shuttle%20(D)%20eng.glb",
+      "sha256": "e31cfb57e3365f036d40cee79ac9e2f8b5f4c48849f6aa9e19aee4075846a0bc",
+      "localPath": "sources/nasa-shuttle-engines.glb",
+      "author": "NASA/Johnson Space Center",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/space-shuttle-d/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    },
+    {
+      "sourceId": "nasa-shuttle-external-tank",
+      "url": "https://raw.githubusercontent.com/nasa/NASA-3D-Resources/11ebb4ee043715aefbba6aeec8a61746fad67fa7/3D%20Models/Space%20Shuttle%20Parts/External%20tank.glb",
+      "sha256": "ee2d727e23d796dd94a29dcbce03d645faea485b006edbb7319abdbf445d5ee7",
+      "localPath": "sources/nasa-shuttle-external-tank.glb",
+      "author": "NASA/Johnson Space Center",
+      "assetPageUrl": "https://science.nasa.gov/3d-resources/space-shuttle-parts/",
+      "usageUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+    }
+  ]
+}

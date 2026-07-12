@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "containerImage": "node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf",
+  "nodeVersion": "22.23.1",
+  "gltfTransformCliVersion": "4.3.0",
+  "gltfTransformCoreVersion": "4.3.0",
+  "gltfTransformExtensionsVersion": "4.3.0",
+  "draco3dGltfVersion": "1.5.7",
+  "meshoptimizerVersion": "1.0.1",
+  "ktxSoftwareVersion": "4.4.2",
+  "compressionThreads": 1
+}
