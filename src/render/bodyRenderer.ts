@@ -22,6 +22,10 @@ export interface BodyRenderFrame {
   readonly cameraBodyFixed: VectorCoordinates;
   /** Camera velocity in rotating body-fixed meters per wall-clock second. */
   readonly cameraBodyFixedVelocity: VectorCoordinates;
+  /** Perspective camera vertical field of view in radians. */
+  readonly verticalFovRadians: number;
+  /** Physical drawing-buffer height in pixels, including device pixel ratio. */
+  readonly drawingBufferHeight: number;
   readonly orientation: QuaternionCoordinates;
   readonly cameraSunDirection: VectorCoordinates;
   readonly bodySunDirection: VectorCoordinates;

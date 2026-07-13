@@ -33,6 +33,8 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
     cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
     cameraBodyFixed: { x: 7_000_000, y: 0, z: 0 },
     cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
+    verticalFovRadians: Math.PI / 3,
+    drawingBufferHeight: 1080,
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: { x: -1, y: 0, z: 0 },
     bodySunDirection: { x: -1, y: 0, z: 0 },

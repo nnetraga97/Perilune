@@ -39,6 +39,7 @@ const _tmp = new Vec3();
 const _bodyQ = new Quat();
 const _starAbs = new Vec3();
 const _bodySunDir = new Vec3();
+const _drawingBufferSize = new THREE.Vector2();
 
 export function usesLegacyAtmosphereTint(rendererKind: BodyRendererKind | undefined): boolean {
   return rendererKind !== 'terrestrial';
@@ -476,6 +477,9 @@ export class WorldScene {
     }
     const v = active.runtime;
     const body = game.bodyOf(active);
+    this.context.renderer.getDrawingBufferSize(_drawingBufferSize);
+    const verticalFovRadians = THREE.MathUtils.degToRad(this.camera.fov);
+    const drawingBufferHeight = Math.max(1, Math.floor(_drawingBufferSize.y));
     this.setFlightTerrainOwner(body.id);
     const t = game.time;
 
@@ -543,6 +547,8 @@ export class WorldScene {
         cameraRelativeOrigin: _rel,
         cameraBodyFixed: _camBF,
         cameraBodyFixedVelocity,
+        verticalFovRadians,
+        drawingBufferHeight,
         orientation: _bodyQ,
         cameraSunDirection: _sunDir,
         bodySunDirection: _bodySunDir,
