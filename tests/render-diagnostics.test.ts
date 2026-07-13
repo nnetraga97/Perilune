@@ -100,7 +100,7 @@ describe('RenderDiagnostics', () => {
     const warn = vi.fn();
     const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, now: () => now, warn });
     const baseTransition = {
-      bodyId: 'veyra', requestedPresentation: 'terrain' as const, state: 'fading' as const,
+      bodyId: 'veyra', rendererIdentity: 'renderer-a', requestedPresentation: 'terrain' as const, state: 'fading' as const,
       progress: 0.8, compactCoverage: 0.2, terrainCoverage: 0.8, coverageReady: true,
       gapCount: 0, prewarm: true, visibleBand: true, framePressure: false,
       compactVisible: true, terrainVisible: true, terrainVisibleChunks: 10,
@@ -115,7 +115,7 @@ describe('RenderDiagnostics', () => {
       activeWorkers: 1, queuedWorkers: 1, scheduleMs: 1, installMs: 1, buildP99Ms: 2,
     });
     diagnostics.observeCloudShell({
-      bodyId: 'veyra', shell: 'weather', classification: 'outside', radius: 1,
+      bodyId: 'veyra', rendererIdentity: 'renderer-a', shell: 'weather', classification: 'outside', radius: 1,
       shellAltitude: 10, signedDistance: 20, opacity: 2, baseOpacity: 0.46,
       side: 'front', materialVersion: 1, textureIdentity: 'texture-a', visible: true,
       renderOrder: 31, driftAngle: 0,

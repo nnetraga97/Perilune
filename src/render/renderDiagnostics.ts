@@ -71,6 +71,7 @@ export interface RenderDiagnosticsPort {
 }
 
 export interface TransitionDiagnosticObservation extends RenderDiagnosticContext {
+  readonly rendererIdentity: string;
   readonly requestedPresentation: 'compact' | 'terrain';
   readonly state: CoverageTransitionState;
   readonly progress: number;
@@ -87,6 +88,7 @@ export interface TransitionDiagnosticObservation extends RenderDiagnosticContext
 }
 
 export interface TerrainDiagnosticEvent extends RenderDiagnosticContext {
+  readonly rendererIdentity?: string;
   readonly event: string;
   readonly key?: string;
   readonly face?: number;
@@ -97,6 +99,7 @@ export interface TerrainDiagnosticEvent extends RenderDiagnosticContext {
 }
 
 export interface TerrainDiagnosticSample extends RenderDiagnosticContext {
+  readonly rendererIdentity?: string;
   readonly terrainRequested: boolean;
   readonly generation: number;
   readonly visible: number;
@@ -118,6 +121,7 @@ export interface TerrainDiagnosticSample extends RenderDiagnosticContext {
 }
 
 export interface CloudShellDiagnosticObservation extends RenderDiagnosticContext {
+  readonly rendererIdentity: string;
   readonly shell: 'weather' | 'wisps';
   readonly classification: 'inside' | 'outside' | 'crossing';
   readonly radius: number;
@@ -210,8 +214,9 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
   private failures = 0;
   private readonly lastSampleByKey = new Map<string, number>();
   private readonly anomalyCodeSet = new Set<string>();
-  private transitionState: TransitionDiagnosticObservation | null = null;
-  private terrainState: TerrainDiagnosticSample | null = null;
+  private readonly lastAnomalyRecordByCode = new Map<string, number>();
+  private readonly transitionStates = new Map<string, TransitionDiagnosticObservation>();
+  private readonly terrainStates = new Map<string, TerrainDiagnosticSample>();
   private readonly installedTerrainKeys = new Map<string, number>();
   private readonly pendingTerrainKeys = new Map<string, Readonly<{ generation: number; startedMs: number }>>();
   private readonly cloudState = new Map<string, CloudShellDiagnosticObservation>();
@@ -285,7 +290,12 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
   ): void {
     try {
       const normalizedCode = boundedText(code);
-      this.record({ subsystem, event: normalizedCode, severity: 'anomaly', data: { code: normalizedCode, ...data } }, context);
+      const current = this.now();
+      const lastRecord = this.lastAnomalyRecordByCode.get(normalizedCode);
+      if (lastRecord === undefined || current - lastRecord >= this.sampleIntervalMs) {
+        this.lastAnomalyRecordByCode.set(normalizedCode, current);
+        this.record({ subsystem, event: normalizedCode, severity: 'anomaly', data: { code: normalizedCode, ...data } }, context);
+      }
       if (this.anomalyCodeSet.has(normalizedCode)) return;
       this.anomalyCodeSet.add(normalizedCode);
       try {
@@ -300,10 +310,12 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
 
   observeTransition(observation: Readonly<TransitionDiagnosticObservation>): void {
     try {
-      const previous = this.transitionState;
+      const stateKey = `${observation.bodyId ?? 'unknown'}:${observation.rendererIdentity}`;
+      const previous = this.transitionStates.get(stateKey) ?? null;
       const context = this.contextFrom(observation);
       const data: RenderDiagnosticData = {
         requestedPresentation: observation.requestedPresentation,
+        rendererIdentity: observation.rendererIdentity,
         state: observation.state,
         progress: observation.progress,
         compactCoverage: observation.compactCoverage,
@@ -320,7 +332,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
       if (!previous || previous.state !== observation.state || previous.requestedPresentation !== observation.requestedPresentation) {
         this.record({ subsystem: 'transition', event: 'presentation-state', severity: 'state', data }, context);
       }
-      this.sample(`transition:${observation.bodyId ?? 'unknown'}`, {
+      this.sample(`transition:${stateKey}`, {
         subsystem: 'transition', event: 'presentation-sample', severity: 'sample', data,
       }, context);
       if (previous && previous.requestedPresentation === 'terrain' && observation.requestedPresentation === 'terrain') {
@@ -340,7 +352,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
       if (!observation.compactVisible && (!observation.terrainVisible || observation.terrainVisibleChunks === 0)) {
         this.anomaly('transition-zero-visible-coverage', 'transition', data, context);
       }
-      this.transitionState = Object.freeze({ ...observation });
+      this.transitionStates.set(stateKey, Object.freeze({ ...observation }));
     } catch {
       this.failures++;
     }
@@ -349,7 +361,10 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
   observeTerrainEvent(observation: Readonly<TerrainDiagnosticEvent>): void {
     try {
       const context = this.contextFrom(observation);
+      const sourceKey = `${observation.bodyId ?? 'unknown'}:${observation.rendererIdentity ?? 'unknown'}`;
+      const terrainKey = observation.key ? `${sourceKey}:${observation.key}` : sourceKey;
       const data: RenderDiagnosticData = {
+        rendererIdentity: observation.rendererIdentity ?? null,
         key: observation.key ?? null,
         face: observation.face ?? null,
         depth: observation.depth ?? null,
@@ -358,19 +373,21 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         ...(observation.data ?? {}),
       };
       if (observation.event === 'request' && observation.key && observation.generation !== undefined) {
-        if (this.installedTerrainKeys.get(observation.key) === observation.generation) {
+        if (this.installedTerrainKeys.get(terrainKey) === observation.generation) {
           this.anomaly('terrain-repeat-request-after-install', 'terrain', data, context);
         }
-        this.pendingTerrainKeys.set(observation.key, Object.freeze({ generation: observation.generation, startedMs: this.now() }));
+        this.pendingTerrainKeys.set(terrainKey, Object.freeze({ generation: observation.generation, startedMs: this.now() }));
       }
       if (observation.event === 'installed' && observation.key && observation.generation !== undefined) {
-        this.pendingTerrainKeys.delete(observation.key);
-        this.installedTerrainKeys.set(observation.key, observation.generation);
+        this.pendingTerrainKeys.delete(terrainKey);
+        this.installedTerrainKeys.set(terrainKey, observation.generation);
       }
       if ((observation.event === 'cancelled' || observation.event === 'failed' || observation.event === 'stale-completion') && observation.key) {
-        this.pendingTerrainKeys.delete(observation.key);
+        this.pendingTerrainKeys.delete(terrainKey);
       }
-      this.recordDetailed({ subsystem: 'terrain', event: `chunk-${observation.event}`, severity: 'state', data }, context);
+      this.sample(`terrain-event:${sourceKey}:${observation.event}`, {
+        subsystem: 'terrain', event: `chunk-${observation.event}`, severity: 'state', data,
+      }, context);
     } catch {
       this.failures++;
     }
@@ -378,12 +395,14 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
 
   observeTerrainSample(observation: Readonly<TerrainDiagnosticSample>): void {
     try {
-      const previous = this.terrainState;
+      const stateKey = `${observation.bodyId ?? 'unknown'}:${observation.rendererIdentity ?? 'unknown'}`;
+      const previous = this.terrainStates.get(stateKey) ?? null;
       const context = this.contextFrom(observation);
       const depths: Record<string, number> = {};
       for (const [key, value] of Object.entries(observation.visibleByDepth ?? {})) depths[`visibleDepth${key}`] = value;
       const data: RenderDiagnosticData = {
         generation: observation.generation,
+        rendererIdentity: observation.rendererIdentity ?? null,
         terrainRequested: observation.terrainRequested,
         visible: observation.visible,
         chunks: observation.chunks,
@@ -402,7 +421,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         buildP99Ms: observation.buildP99Ms,
         ...depths,
       };
-      this.sample(`terrain:${observation.bodyId ?? 'unknown'}`, {
+      this.sample(`terrain:${stateKey}`, {
         subsystem: 'terrain', event: 'terrain-sample', severity: 'sample', data,
       }, context);
       if (observation.oldestPendingAgeMs > 2_000) {
@@ -416,7 +435,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
           this.anomaly('terrain-factor-of-two-sample-delta', 'terrain', data, context);
         }
       }
-      this.terrainState = Object.freeze({ ...observation, visibleByDepth: Object.freeze({ ...(observation.visibleByDepth ?? {}) }) });
+      this.terrainStates.set(stateKey, Object.freeze({ ...observation, visibleByDepth: Object.freeze({ ...(observation.visibleByDepth ?? {}) }) }));
     } catch {
       this.failures++;
     }
@@ -424,11 +443,12 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
 
   observeCloudShell(observation: Readonly<CloudShellDiagnosticObservation>): void {
     try {
-      const key = `${observation.bodyId ?? 'unknown'}:${observation.shell}`;
+      const key = `${observation.bodyId ?? 'unknown'}:${observation.rendererIdentity}:${observation.shell}`;
       const previous = this.cloudState.get(key);
       const context = this.contextFrom(observation);
       const data: RenderDiagnosticData = {
         shell: observation.shell,
+        rendererIdentity: observation.rendererIdentity,
         classification: observation.classification,
         radius: observation.radius,
         shellAltitude: observation.shellAltitude,
@@ -469,8 +489,8 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
   noteRendererBoundary(data: RenderDiagnosticData = {}, context: Readonly<RenderDiagnosticContext> = {}): void {
     try {
       this.boundaryGeneration++;
-      this.transitionState = null;
-      this.terrainState = null;
+      this.transitionStates.clear();
+      this.terrainStates.clear();
       this.installedTerrainKeys.clear();
       this.pendingTerrainKeys.clear();
       this.cloudState.clear();
@@ -565,7 +585,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
 
   private factorOfTwoChange(previous: number, current: number): boolean {
     if (previous === current) return false;
-    if (previous <= 0 || current <= 0) return previous > 0 || current > 0;
+    if (previous <= 0 || current <= 0) return false;
     return current > previous * 2 || previous > current * 2;
   }
 }

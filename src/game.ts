@@ -28,7 +28,7 @@ import {
 import { logEvent } from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { nodeBurnDirection, nodeDeltaV } from './sim/maneuver';
-import { stateToElements } from './core/orbit';
+import { apoapsisOf, periapsisOf, stateToElements } from './core/orbit';
 import { RenderDiagnostics } from './render/renderDiagnostics';
 import type { RenderStartupOptions } from './render/renderStartupOptions';
 
@@ -218,8 +218,39 @@ class PeriluneGame {
         if (!gv) return null;
         return gv.runtime.pos.length() - this.game.bodyOf(gv).radius;
       },
+      verticalSpeed: () => {
+        const gv = this.game.active;
+        if (!gv) return null;
+        const radial = gv.runtime.pos.clone().normalize();
+        return gv.runtime.vel.dot(radial);
+      },
+      orbit: () => {
+        const gv = this.game.active;
+        if (!gv) return null;
+        const body = this.game.bodyOf(gv);
+        const elements = stateToElements(body.mu, gv.runtime.pos, gv.runtime.vel, this.game.time);
+        return {
+          apoapsisAltitude: apoapsisOf(elements) - body.radius,
+          periapsisAltitude: periapsisOf(elements) - body.radius,
+          eccentricity: elements.e,
+        };
+      },
+      currentStage: () => this.game.active?.runtime.craft.stages.length ?? null,
+      activeBody: () => this.game.active?.runtime.bodyId ?? null,
+      renderCheckpoint: () => {
+        const size = new THREE.Vector2();
+        this.ctx.renderer.getDrawingBufferSize(size);
+        return {
+          canvasWidth: this.ctx.renderer.domElement.clientWidth,
+          canvasHeight: this.ctx.renderer.domElement.clientHeight,
+          drawingBufferWidth: size.x,
+          drawingBufferHeight: size.y,
+          stats: this.world.renderStats(),
+        };
+      },
       situation: () => this.game.active?.runtime.situation ?? null,
       speed: () => this.game.active?.runtime.vel.length() ?? 0,
+      properAcceleration: () => this.game.active?.runtime.properAccel ?? 0,
       throttle: () => this.game.active?.runtime.controls.throttle ?? 0,
       vesselCount: () => this.game.vessels.length,
       time: () => this.game.time,

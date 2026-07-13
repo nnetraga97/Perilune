@@ -26,6 +26,7 @@ export class TerrestrialCloudDeck {
     readonly quality: QualityTier,
     cloudTexture: THREE.Texture,
     private readonly diagnostics?: RenderDiagnosticsPort,
+    private readonly diagnosticSource: string = `clouds:${body.id}`,
   ) {
     if (!body.def.atmosphere) throw new Error(`${body.id} has no atmosphere for clouds`);
     const makeShell = (
@@ -133,6 +134,7 @@ export class TerrestrialCloudDeck {
       this.diagnostics?.observeCloudShell?.({
         simulationTime: frame.time,
         bodyId: this.body.id,
+        rendererIdentity: this.diagnosticSource,
         altitudeMeters: frame.altitude,
         shell: shell.name,
         classification,

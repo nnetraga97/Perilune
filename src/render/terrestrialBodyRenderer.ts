@@ -140,6 +140,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       oceanEnabled: false,
       workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
       diagnostics: this.diagnostics,
+      diagnosticSource: this.root.uuid,
     });
     this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
     this.terrain.setShadowReceiver(this.quality !== 'low');
@@ -159,7 +160,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.fallbackCloudTexture.needsUpdate = true;
       cloudMap = this.fallbackCloudTexture;
     }
-    this.clouds = new TerrestrialCloudDeck(this.body, this.quality, cloudMap, this.diagnostics);
+    this.clouds = new TerrestrialCloudDeck(this.body, this.quality, cloudMap, this.diagnostics, this.root.uuid);
 
     const seed = this.body.def.terrain.seed;
     this.scatter = new TerrestrialScatter(this.body.radius, seed, this.surfaceSampler, this.quality);
@@ -219,6 +220,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.diagnostics?.observeTransition?.({
       simulationTime: frame.time,
       bodyId: this.bodyId,
+      rendererIdentity: this.root.uuid,
       altitudeMeters: frame.altitude,
       requestedPresentation: visibleBand ? 'terrain' : 'compact',
       state: snapshot.state,

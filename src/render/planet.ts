@@ -126,6 +126,7 @@ export interface PlanetRendererOptions {
   readonly workerPool?: TerrainChunkWorkerPool;
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly now?: () => number;
+  readonly diagnosticSource?: string;
 }
 
 export interface TerrainChunkKeyInfo {
@@ -242,6 +243,7 @@ export class PlanetRenderer {
   private lastOverlapCount = 0;
   private readonly diagnostics: RenderDiagnosticsPort | undefined;
   private readonly now: () => number;
+  private readonly diagnosticSource: string;
   private readonly pendingStartedAt = new Map<string, number>();
   private readonly installedGenerations = new Map<string, number>();
   private lastWantedKeys = new Set<string>();
@@ -271,6 +273,7 @@ export class PlanetRenderer {
     this.workerPool = options.workerPool ?? null;
     this.diagnostics = options.diagnostics;
     this.now = options.now ?? (() => performance.now());
+    this.diagnosticSource = options.diagnosticSource ?? `planet:${body.id}`;
     this.palette = {
       low: new THREE.Color(body.def.terrain.colorLow),
       mid: new THREE.Color(body.def.terrain.colorMid),
@@ -752,6 +755,7 @@ export class PlanetRenderer {
     this.diagnostics.observeTerrainEvent?.({
       ...this.diagnosticContext,
       bodyId: this.body.id,
+      rendererIdentity: this.diagnosticSource,
       event,
       key,
       face: info?.face,
@@ -776,15 +780,13 @@ export class PlanetRenderer {
       this.lastWantedKeys = new Set(wanted);
       return;
     }
-    for (const key of wanted) {
-      if (!this.lastWantedKeys.has(key)) this.terrainEvent('visibility-on', key, this.generation);
-    }
+    // Per-depth totals and grouped replacements capture visibility churn at
+    // bounded rates; emitting every key change would overwhelm the trace.
     for (const key of this.lastWantedKeys) {
       if (wanted.has(key)) continue;
-      this.terrainEvent('visibility-off', key, this.generation);
       const info = terrainChunkKeyInfo(key);
       const appearingChildren = info.childKeys.filter((child) => wanted.has(child));
-      if (appearingChildren.length === 0) continue;
+      if (appearingChildren.length !== 4) continue;
       const installedChildren = info.childKeys.filter((child) => this.chunks.has(child));
       this.diagnostics.recordDetailed({
         subsystem: 'terrain', event: 'parent-children-replacement', severity: 'state',
@@ -822,6 +824,7 @@ export class PlanetRenderer {
     this.diagnostics.observeTerrainSample?.({
       ...this.diagnosticContext,
       bodyId: this.body.id,
+      rendererIdentity: this.diagnosticSource,
       generation: this.generation,
       visible: this.stats.visible,
       chunks: this.chunks.size,

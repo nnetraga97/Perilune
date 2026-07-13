@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { validateCraftFile } from '../src/save/persistence';
 import { buildTwoStageRocket } from './vessel.test';
+import diagnosticCraft from '../e2e/fixtures/veyra-diagnostic-craft.json';
 
 function serialized(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(buildTwoStageRocket())) as Record<string, unknown>;
 }
 
 describe('craft file validation', () => {
+  it('accepts the checked-in Veyra diagnostic craft and every staged key is registered', () => {
+    const validated = validateCraftFile(diagnosticCraft);
+    expect(validated).not.toBeNull();
+    expect(validated!.parts).toHaveLength(12);
+    const keys = new Set(validated!.parts.map((part) => part.key));
+    expect(validated!.stages.flatMap((stage) => stage.partKeys).every((key) => keys.has(key))).toBe(true);
+  });
+
   it('accepts a well-formed craft and rebuilds it structurally intact', () => {
     const craft = buildTwoStageRocket();
     const validated = validateCraftFile(JSON.parse(JSON.stringify(craft)));
