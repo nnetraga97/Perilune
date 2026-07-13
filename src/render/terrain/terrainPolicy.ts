@@ -8,6 +8,7 @@ export interface TerrainQualityPolicy {
   readonly schedulingBudgetMs: number;
   readonly installationBudgetMs: number;
   readonly maximumWorkers: number;
+  readonly maximumDesiredLeaves: number;
   readonly predictionSeconds: number;
   readonly normalTransitionSeconds: number;
   readonly pressureTransitionSeconds: number;
@@ -31,6 +32,7 @@ export const TERRAIN_QUALITY_POLICY: Readonly<Record<QualityTier, TerrainQuality
     schedulingBudgetMs: 2,
     installationBudgetMs: 2,
     maximumWorkers: 4,
+    maximumDesiredLeaves: 320,
     predictionSeconds: 0.5,
     normalTransitionSeconds: 0.35,
     pressureTransitionSeconds: 0.2,
@@ -45,6 +47,7 @@ export const TERRAIN_QUALITY_POLICY: Readonly<Record<QualityTier, TerrainQuality
     schedulingBudgetMs: 2,
     installationBudgetMs: 2,
     maximumWorkers: 4,
+    maximumDesiredLeaves: 480,
     predictionSeconds: 0.5,
     normalTransitionSeconds: 0.35,
     pressureTransitionSeconds: 0.2,
@@ -59,6 +62,7 @@ export const TERRAIN_QUALITY_POLICY: Readonly<Record<QualityTier, TerrainQuality
     schedulingBudgetMs: 2,
     installationBudgetMs: 2,
     maximumWorkers: 4,
+    maximumDesiredLeaves: 640,
     predictionSeconds: 0.5,
     normalTransitionSeconds: 0.35,
     pressureTransitionSeconds: 0.2,

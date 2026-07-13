@@ -22,6 +22,8 @@ export interface TerrainCoverageResolution {
   readonly renderedKeys: ReadonlySet<string>;
   readonly fallbackKeys: ReadonlySet<string>;
   readonly continuityKeys: ReadonlySet<string>;
+  /** Installed replacement quadrants retained until their complete sibling set is ready. */
+  readonly stagingKeys: ReadonlySet<string>;
   readonly protectionKeys: ReadonlySet<string>;
   readonly requests: readonly TerrainCoverageRequest[];
   readonly rootsReady: boolean;
@@ -81,6 +83,7 @@ export function resolveTerrainCoverage(input: {
   const renderedKeys = new Set<string>();
   const fallbackKeys = new Set<string>();
   const continuityKeys = new Set<string>();
+  const stagingKeys = new Set<string>();
   const requests = new Map<string, TerrainCoverageRequest>();
 
   const renderable = (tile: Readonly<TerrainTileDescriptor>): boolean => (
@@ -175,7 +178,9 @@ export function resolveTerrainCoverage(input: {
     const replacementCovers = children.map(completeInstalledCover);
     if (replacementCovers.some((cover) => cover === null)) {
       for (let index = 0; index < children.length; index++) {
-        if (!replacementCovers[index]) request(children[index], 'coverage-blocker', 'replacement');
+        const cover = replacementCovers[index];
+        if (!cover) request(children[index], 'coverage-blocker', 'replacement');
+        else for (const key of cover) stagingKeys.add(key);
       }
       const fallback = directCover ?? inheritedFallback;
       if (!fallback) return false;
@@ -211,12 +216,14 @@ export function resolveTerrainCoverage(input: {
     ...renderedKeys,
     ...fallbackKeys,
     ...continuityKeys,
+    ...stagingKeys,
     ...(rootsReady ? roots.map((root) => root.key) : []),
   ]);
   return Object.freeze({
     renderedKeys,
     fallbackKeys,
     continuityKeys,
+    stagingKeys,
     protectionKeys,
     requests: Object.freeze([...requests.values()].sort((a, b) => (
       REQUEST_RANK[a.requestClass] - REQUEST_RANK[b.requestClass]

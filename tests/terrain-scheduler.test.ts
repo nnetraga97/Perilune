@@ -155,6 +155,17 @@ describe('terrain request scheduler', () => {
     expect(executor.posted.at(-1)?.jobKey).toBe('coverage');
   });
 
+  it('promotes repeated requests without allowing a later priority downgrade', () => {
+    const executor = new ManualExecutor();
+    const scheduler = new TerrainRequestScheduler(executor, 1_000);
+    scheduler.request(scheduled('shared', 'predicted-refinement'), 0);
+    scheduler.request(scheduled('shared', 'coverage-blocker', { root: true }), 1);
+    scheduler.request(scheduled('shared', 'visible-refinement'), 2);
+    scheduler.request(scheduled('other', 'coverage-blocker'), 2);
+    scheduler.dispatch(2, 1);
+    expect(executor.posted.at(-1)?.jobKey).toBe('shared');
+  });
+
   it('reserves before dispatch and blocks oversubmission until installation releases bytes', () => {
     const executor = new ManualExecutor(2);
     const scheduler = new TerrainRequestScheduler(executor, 100);

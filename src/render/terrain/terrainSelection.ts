@@ -28,6 +28,7 @@ export interface TerrainSelectionResult {
   readonly leaves: readonly TerrainTileDescriptor[];
   readonly splitKeys: ReadonlySet<string>;
   readonly changes: readonly TerrainSelectionChange[];
+  readonly screenSpaceErrors: ReadonlyMap<string, number>;
 }
 
 export type TerrainVisibilityPredicate = (
@@ -115,6 +116,7 @@ export function selectTerrainDetail(
   const leaves: TerrainTileDescriptor[] = [];
   const splitKeys = new Set<string>();
   const changes: TerrainSelectionChange[] = [];
+  const screenSpaceErrors = new Map<string, number>();
   const cameraDistance = Math.hypot(
     frame.cameraBodyFixed.x,
     frame.cameraBodyFixed.y,
@@ -136,8 +138,10 @@ export function selectTerrainDetail(
       drawingBufferHeight: frame.drawingBufferHeight,
       verticalFovRadians: frame.verticalFovRadians,
     });
+    screenSpaceErrors.set(tile.key, sse);
     const previouslySplit = previousSplitKeys.has(tile.key);
-    const split = tile.id.depth < provider.maximumDepth
+    const split = leaves.length + 3 < quality.maximumDesiredLeaves
+      && tile.id.depth < provider.maximumDepth
       && nextTerrainSplitState(previouslySplit, sse, quality);
     if (split !== previouslySplit) {
       changes.push(Object.freeze({ key: tile.key, depth: tile.id.depth, screenSpaceError: sse, split }));
@@ -161,6 +165,7 @@ export function selectTerrainDetail(
     leaves: Object.freeze(leaves.sort((a, b) => a.key.localeCompare(b.key))),
     splitKeys,
     changes: Object.freeze(changes),
+    screenSpaceErrors,
   });
 }
 

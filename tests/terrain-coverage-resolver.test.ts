@@ -92,6 +92,8 @@ describe('complete terrain coverage resolution', () => {
     const result = resolve(surface, children, records);
     expect([...result.renderedKeys]).toEqual([root.key]);
     expect(result.fallbackKeys.has(root.key)).toBe(true);
+    expect([...result.stagingKeys]).toEqual([children[0].key]);
+    expect(result.protectionKeys.has(children[0].key)).toBe(true);
     expect(result.requests.filter((request) => request.reason === 'replacement').map((request) => request.tile.key))
       .toEqual(children.slice(1).map((child) => child.key).sort());
     expect(result.completeCoverage).toBe(true);

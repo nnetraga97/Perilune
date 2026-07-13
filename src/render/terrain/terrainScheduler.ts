@@ -16,6 +16,8 @@ export interface TerrainScheduleRequest {
   readonly distanceToViewCenter: number;
   readonly depth: number;
   readonly estimatedBytes: number;
+  /** Universal generation fallbacks win within the coverage-blocker class. */
+  readonly root?: boolean;
 }
 
 export interface TerrainSchedulerExecutor {
@@ -141,7 +143,15 @@ export class TerrainRequestScheduler {
     const key = entryKey(input.request.jobKey, input.request.generation);
     const existing = this.entries.get(key);
     if (existing) {
-      existing.input = input;
+      const requestClass = CLASS_RANK[input.requestClass] < CLASS_RANK[existing.input.requestClass]
+        ? input.requestClass
+        : existing.input.requestClass;
+      existing.input = Object.freeze({
+        ...input,
+        requestClass,
+        visible: existing.input.visible || input.visible,
+        root: Boolean(existing.input.root || input.root),
+      });
       existing.requested = true;
       return;
     }
@@ -269,9 +279,14 @@ export class TerrainRequestScheduler {
     });
   }
 
+  state(jobKey: string, generation: number): 'queued' | 'building' | 'completed' | 'failed' | null {
+    return this.entries.get(entryKey(jobKey, generation))?.state ?? null;
+  }
+
   private compare(a: Readonly<ScheduleEntry>, b: Readonly<ScheduleEntry>, now: number): number {
     const classDifference = CLASS_RANK[a.input.requestClass] - CLASS_RANK[b.input.requestClass];
     if (classDifference !== 0) return classDifference;
+    if (Boolean(a.input.root) !== Boolean(b.input.root)) return a.input.root ? -1 : 1;
     if (a.input.visible !== b.input.visible) return a.input.visible ? -1 : 1;
     const aAgeSeconds = Math.max(0, now - a.queuedAt) / 1_000;
     const bAgeSeconds = Math.max(0, now - b.queuedAt) / 1_000;
