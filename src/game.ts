@@ -29,6 +29,8 @@ import { logEvent } from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { nodeBurnDirection, nodeDeltaV } from './sim/maneuver';
 import { stateToElements } from './core/orbit';
+import { RenderDiagnostics } from './render/renderDiagnostics';
+import type { RenderStartupOptions } from './render/renderStartupOptions';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -63,6 +65,24 @@ class PeriluneGame {
   private controlBlocked = false;
   private nodeBurnDir = new Vec3(1, 0, 0);
   private dialogEl: HTMLElement | null = null;
+  private readonly diagnostics: RenderDiagnostics;
+  private readonly renderOptions: RenderStartupOptions;
+
+  constructor(options: Readonly<RenderStartupOptions>) {
+    this.renderOptions = Object.freeze({ ...options });
+    this.diagnostics = new RenderDiagnostics({
+      quality: options.quality,
+      detailed: options.renderDebug,
+    });
+    window.__RENDER_DIAGNOSTICS__ = this.diagnostics.browserApi();
+    this.diagnostics.record({
+      subsystem: 'renderer',
+      event: 'render-startup-options',
+      severity: 'state',
+      data: { quality: options.quality, renderDebug: options.renderDebug },
+    });
+  }
+
   private readonly onPageHide = (event: PageTransitionEvent): void => {
     if (event.persisted) return;
     window.removeEventListener('pagehide', this.onPageHide);
@@ -73,12 +93,31 @@ class PeriluneGame {
     // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
     this.partModels.dispose();
+    if (window.__RENDER_DIAGNOSTICS__) delete window.__RENDER_DIAGNOSTICS__;
   };
 
   async start(): Promise<void> {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.uiRoot = document.getElementById('ui-root') as HTMLElement;
     this.ctx = await createRenderContext(canvas);
+    const drawingBuffer = new THREE.Vector2();
+    this.ctx.renderer.getDrawingBufferSize(drawingBuffer);
+    this.diagnostics.record({
+      subsystem: 'renderer',
+      event: 'render-context-created',
+      severity: 'state',
+      data: {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        drawingBufferWidth: drawingBuffer.x,
+        drawingBufferHeight: drawingBuffer.y,
+        backend: this.ctx.caps.backend,
+        maxTextureSize: this.ctx.caps.maxTextureSize,
+        maxAnisotropy: this.ctx.caps.maxAnisotropy,
+        drawingBufferSamples: this.ctx.caps.drawingBufferSamples,
+        compressedTextureFormats: Object.values(this.ctx.caps.compressedTextures).filter(Boolean).length,
+      },
+    });
     this.gpuProfiler = new GpuSubmissionProfiler(
       () => new GpuTimerRing(this.ctx.renderer.getContext() as WebGL2RenderingContext, 12),
     );
@@ -96,7 +135,10 @@ class PeriluneGame {
       resolveAssetUrl: (path) => `${baseUrl}parts/${path}`,
     });
     await this.partModels.preload();
-    this.world = new WorldScene(this.ctx, this.partModels);
+    this.world = new WorldScene(this.ctx, this.partModels, {
+      quality: this.renderOptions.quality,
+      diagnostics: this.diagnostics,
+    });
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
@@ -314,7 +356,10 @@ class PeriluneGame {
     if (!save) return;
     this.game = restoreGame(save);
     this.world.dispose();
-    this.world = new WorldScene(this.ctx);
+    this.world = new WorldScene(this.ctx, this.partModels, {
+      quality: this.renderOptions.quality,
+      diagnostics: this.diagnostics,
+    });
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
@@ -720,7 +765,7 @@ class PeriluneGame {
   }
 }
 
-export async function startGame(): Promise<void> {
-  const game = new PeriluneGame();
+export async function startGame(options: Readonly<RenderStartupOptions>): Promise<void> {
+  const game = new PeriluneGame(options);
   await game.start();
 }

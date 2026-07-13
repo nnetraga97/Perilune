@@ -27,6 +27,7 @@ import checkedPlanetArtifact from '../generated/checked-planet-manifest.json';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { checkPlanetManifest, PlanetAssetLoader, type CheckedPlanetManifest } from './planetAssetLoader';
 import { geometryByteLength } from './resourceAccounting';
+import type { RenderDiagnosticsPort } from './renderDiagnostics';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -63,6 +64,11 @@ export interface WorldRendererStats {
   readonly transitionActive: boolean;
   readonly transitionMs: number;
   readonly contextFallback: boolean;
+}
+
+export interface WorldSceneOptions {
+  readonly quality: 'medium' | 'high';
+  readonly diagnostics: RenderDiagnosticsPort;
 }
 
 export function bodyFixedCameraVelocity(
@@ -111,7 +117,8 @@ export class WorldScene {
   private readonly planetAssetLoader: PlanetAssetLoader;
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly launchSite: THREE.Group;
-  private quality: QualityTier = 'medium';
+  private quality: QualityTier;
+  private readonly diagnostics: RenderDiagnosticsPort;
   private readonly resizeHandler: () => void;
   private readonly unsubscribeRestoration: () => void;
   private disposed = false;
@@ -129,9 +136,21 @@ export class WorldScene {
 
   constructor(
     private readonly context: RenderContext,
-    private readonly partModels?: PartModelLibrary,
+    private readonly partModels: PartModelLibrary | undefined,
+    options: Readonly<WorldSceneOptions>,
   ) {
+    this.quality = options.quality;
+    this.diagnostics = options.diagnostics;
     this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
+    this.diagnostics.record({
+      subsystem: 'renderer',
+      event: 'world-scene-created',
+      severity: 'state',
+      data: {
+        quality: this.quality,
+        manifestDigest: this.checkedPlanetManifest.digest,
+      },
+    });
     this.rendererLedger = new RendererResourceLedger(this.checkedPlanetManifest.budgets);
     const textureLoader = new THREE.TextureLoader();
     const configuredBaseUrl = import.meta.env.BASE_URL;
@@ -637,6 +656,12 @@ export class WorldScene {
 
   dispose(): void {
     if (this.disposed) return;
+    this.diagnostics.record({
+      subsystem: 'renderer',
+      event: 'world-scene-disposed',
+      severity: 'state',
+      data: { quality: this.quality },
+    });
     this.disposed = true;
     this.unsubscribeRestoration();
     window.removeEventListener('resize', this.resizeHandler);

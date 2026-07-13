@@ -3,9 +3,11 @@
  * game shell.
  */
 import { RenderCapabilityError } from './render/context';
+import { parseRenderStartupOptions } from './render/renderStartupOptions';
 
 const params = new URLSearchParams(location.search);
 const proto = params.get('proto');
+const renderStartupOptions = parseRenderStartupOptions(location.search);
 
 function setBoot(status: string, progress: number): void {
   const el = document.getElementById('boot-status');
@@ -28,7 +30,7 @@ async function boot(): Promise<void> {
   }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
-  await startGame();
+  await startGame(renderStartupOptions);
 }
 
 boot().catch((err) => {
