@@ -6,9 +6,33 @@ import {
   fullMipChainBytes,
   geometryByteLength,
   instancedResourceBytes,
+  terrainGeometryAllocation,
 } from '../src/render/resourceAccounting';
 
 describe('resource accounting', () => {
+  it('charges committed fixed resources before allocating streamed terrain', () => {
+    expect(terrainGeometryAllocation({
+      activeBodyBudgetBytes: 1_000,
+      committedTextureBytes: 300,
+      fixedPassBytes: 200,
+      scatterBytes: 100,
+      effectBytes: 50,
+    })).toEqual({ allocationBytes: 350, chargedBytes: 650, overBudgetBytes: 0 });
+    expect(terrainGeometryAllocation({
+      activeBodyBudgetBytes: 100,
+      committedTextureBytes: 80,
+      fixedPassBytes: 30,
+      scatterBytes: 0,
+      effectBytes: 0,
+    })).toEqual({ allocationBytes: 0, chargedBytes: 110, overBudgetBytes: 10 });
+    expect(() => terrainGeometryAllocation({
+      activeBodyBudgetBytes: 100,
+      committedTextureBytes: -1,
+      fixedPassBytes: 0,
+      scatterBytes: 0,
+      effectBytes: 0,
+    })).toThrow(/committedTextureBytes/i);
+  });
   it('counts every BufferGeometry attribute and its index', () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));

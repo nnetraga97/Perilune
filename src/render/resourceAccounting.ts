@@ -71,3 +71,36 @@ export function categorizeResources(input: {
     uncompressedWorstCaseBytes: totalRendererBytes + input.transientBytes,
   });
 }
+
+export interface TerrainGeometryAllocationInput {
+  readonly activeBodyBudgetBytes: number;
+  readonly committedTextureBytes: number;
+  readonly fixedPassBytes: number;
+  readonly scatterBytes: number;
+  readonly effectBytes: number;
+}
+
+export interface TerrainGeometryAllocation {
+  readonly allocationBytes: number;
+  readonly chargedBytes: number;
+  readonly overBudgetBytes: number;
+}
+
+/** Remaining active-body allocation available to streamed terrain geometry. */
+export function terrainGeometryAllocation(
+  input: Readonly<TerrainGeometryAllocationInput>,
+): TerrainGeometryAllocation {
+  for (const [name, value] of Object.entries(input)) {
+    if (!Number.isInteger(value) || value < 0) throw new Error(`Invalid ${name} ${value}`);
+  }
+  const chargedBytes = input.committedTextureBytes
+    + input.fixedPassBytes
+    + input.scatterBytes
+    + input.effectBytes;
+  const remaining = input.activeBodyBudgetBytes - chargedBytes;
+  return Object.freeze({
+    allocationBytes: Math.max(0, remaining),
+    chargedBytes,
+    overBudgetBytes: Math.max(0, -remaining),
+  });
+}

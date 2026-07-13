@@ -42,8 +42,18 @@ export interface BodyRendererManagerStats {
 
 export class RendererResourceLedger {
   private resident: ResidentPack | null = null;
+  private readonly budgets: TierBudgets;
 
-  constructor(private readonly budgets: TierBudgets) {}
+  constructor(budgets: TierBudgets) {
+    this.budgets = Object.freeze({
+      activeBodyGpuBytes: Object.freeze({ ...budgets.activeBodyGpuBytes }),
+      transientPeakBytes: Object.freeze({ ...budgets.transientPeakBytes }),
+    });
+  }
+
+  activeBodyBudget(tier: QualityTier): number {
+    return this.budgets.activeBodyGpuBytes[tier];
+  }
 
   assertCanStage(tier: QualityTier, assets: Readonly<LoadedRendererAssets>): void {
     if (assets.transientBytes > this.budgets.transientPeakBytes[tier]) {

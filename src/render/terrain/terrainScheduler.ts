@@ -27,9 +27,17 @@ export interface TerrainSchedulerExecutor {
   timings(): TerrainWorkerTimings;
 }
 
+export interface TerrainReservationPort {
+  readonly hardReservationBytes: number;
+  tryReserve(key: string, bytes: number, requestClass: TerrainRequestClass): boolean;
+  releaseReservation(key: string): boolean;
+  reservationBytes(): number;
+}
+
 export interface TerrainScheduledCompletion {
   readonly result: TerrainChunkGeometryResult;
   readonly requestClass: TerrainRequestClass;
+  readonly reservationKey: string;
   readonly reservedBytes: number;
 }
 
@@ -83,17 +91,48 @@ function validateInput(input: Readonly<TerrainScheduleRequest>): void {
   }
 }
 
+class SimpleTerrainReservationPort implements TerrainReservationPort {
+  private readonly reservations = new Map<string, number>();
+  private total = 0;
+
+  constructor(readonly hardReservationBytes: number) {}
+
+  tryReserve(key: string, bytes: number): boolean {
+    if (this.reservations.has(key)) return false;
+    if (this.total + bytes > this.hardReservationBytes) return false;
+    this.reservations.set(key, bytes);
+    this.total += bytes;
+    return true;
+  }
+
+  releaseReservation(key: string): boolean {
+    const bytes = this.reservations.get(key);
+    if (bytes === undefined) return false;
+    this.reservations.delete(key);
+    this.total -= bytes;
+    return true;
+  }
+
+  reservationBytes(): number { return this.total; }
+}
+
 export class TerrainRequestScheduler {
   private readonly entries = new Map<string, ScheduleEntry>();
-  private reservedBytes = 0;
+  private readonly reservations: TerrainReservationPort;
 
   constructor(
     private readonly executor: TerrainSchedulerExecutor,
-    private readonly hardReservationBytes: number,
+    reservationPolicy: number | TerrainReservationPort,
   ) {
+    const hardReservationBytes = typeof reservationPolicy === 'number'
+      ? reservationPolicy
+      : reservationPolicy.hardReservationBytes;
     if (!Number.isFinite(hardReservationBytes) || hardReservationBytes < 0) {
       throw new Error(`Invalid terrain hard reservation ${hardReservationBytes}`);
     }
+    this.reservations = typeof reservationPolicy === 'number'
+      ? new SimpleTerrainReservationPort(reservationPolicy)
+      : reservationPolicy;
   }
 
   request(input: Readonly<TerrainScheduleRequest>, now: number): void {
@@ -153,14 +192,16 @@ export class TerrainRequestScheduler {
           entry.requested
           && (entry.state === 'queued' || entry.state === 'failed')
           && entry.nextRetryAt <= now
-          && this.reservedBytes + entry.input.estimatedBytes <= this.hardReservationBytes
         ))
         .sort((a, b) => this.compare(a, b, now));
-      const entry = candidates[0];
+      const entry = candidates.find((candidate) => this.reservations.tryReserve(
+        entryKey(candidate.input.request.jobKey, candidate.input.request.generation),
+        candidate.input.estimatedBytes,
+        candidate.input.requestClass,
+      ));
       if (!entry) break;
       entry.state = 'building';
       entry.reservedBytes = entry.input.estimatedBytes;
-      this.reservedBytes += entry.reservedBytes;
       submitted++;
       const key = entryKey(entry.input.request.jobKey, entry.input.request.generation);
       void this.executor.submit(entry.input.request).catch(() => {
@@ -197,6 +238,7 @@ export class TerrainRequestScheduler {
       completed.push(Object.freeze({
         result,
         requestClass: entry.input.requestClass,
+        reservationKey: key,
         reservedBytes: entry.reservedBytes,
       }));
     }
@@ -222,8 +264,8 @@ export class TerrainRequestScheduler {
     for (const entry of this.entries.values()) counts[entry.state]++;
     return Object.freeze({
       ...counts,
-      reservedBytes: this.reservedBytes,
-      hardReservationBytes: this.hardReservationBytes,
+      reservedBytes: this.reservations.reservationBytes(),
+      hardReservationBytes: this.reservations.hardReservationBytes,
     });
   }
 
@@ -244,8 +286,10 @@ export class TerrainRequestScheduler {
   }
 
   private release(entry: ScheduleEntry): void {
-    this.reservedBytes -= entry.reservedBytes;
-    if (this.reservedBytes < 0) this.reservedBytes = 0;
+    this.reservations.releaseReservation(entryKey(
+      entry.input.request.jobKey,
+      entry.input.request.generation,
+    ));
     entry.reservedBytes = 0;
   }
 }

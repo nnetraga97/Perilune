@@ -102,6 +102,15 @@ function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRend
 }
 
 describe('transactional body renderer replacement', () => {
+  test('exposes tier limits without granting mutation ownership', () => {
+    const source = structuredClone(manifestBudgets);
+    const ledger = new RendererResourceLedger(source);
+    source.activeBodyGpuBytes.low = 999;
+    expect(ledger.activeBodyBudget('low')).toBe(100);
+    expect(ledger.activeBodyBudget('medium')).toBe(200);
+    expect(ledger.activeBodyBudget('high')).toBe(300);
+  });
+
   test('records the successful transaction phases in causal order', async () => {
     let now = 0;
     const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => now++ });
