@@ -196,20 +196,21 @@ export class TerrainRequestScheduler {
       throw new Error(`Invalid terrain submission limit ${maximumSubmissions}`);
     }
     let submitted = 0;
-    while (submitted < maximumSubmissions && this.executor.availableSlots() > 0) {
-      const candidates = [...this.entries.values()]
-        .filter((entry) => (
-          entry.requested
-          && (entry.state === 'queued' || entry.state === 'failed')
-          && entry.nextRetryAt <= now
-        ))
-        .sort((a, b) => this.compare(a, b, now));
-      const entry = candidates.find((candidate) => this.reservations.tryReserve(
-        entryKey(candidate.input.request.jobKey, candidate.input.request.generation),
-        candidate.input.estimatedBytes,
-        candidate.input.requestClass,
-      ));
-      if (!entry) break;
+    const candidates = [...this.entries.values()]
+      .filter((entry) => (
+        entry.requested
+        && (entry.state === 'queued' || entry.state === 'failed')
+        && entry.nextRetryAt <= now
+      ))
+      .sort((a, b) => this.compare(a, b, now));
+    for (const entry of candidates) {
+      if (submitted >= maximumSubmissions || this.executor.availableSlots() <= 0) break;
+      const reserved = this.reservations.tryReserve(
+        entryKey(entry.input.request.jobKey, entry.input.request.generation),
+        entry.input.estimatedBytes,
+        entry.input.requestClass,
+      );
+      if (!reserved) continue;
       entry.state = 'building';
       entry.reservedBytes = entry.input.estimatedBytes;
       submitted++;

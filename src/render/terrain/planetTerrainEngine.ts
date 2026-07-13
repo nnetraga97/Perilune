@@ -152,8 +152,11 @@ export class PlanetTerrainEngine {
   private installationQueue: ReturnType<TerrainRequestScheduler['drainCompleted']> = [];
   private previousSplitKeys = new Set<string>();
   private previousRenderedKeys = new Set<string>();
-  private requestedThisFrame = new Set<string>();
   private readonly requestedAt = new Map<string, number>();
+  private readonly lastRequestedFrame = new Map<string, number>();
+  private requestOrder: string[] = [];
+  private requestCursor = 0;
+  private newRequestsThisFrame = 0;
   private previousTransitionStates = new Map<string, string>();
   private diagnosticContext: Readonly<RenderDiagnosticContext & { terrainRequested?: boolean }> = {};
   private diagnosticLifecycleBatch: string[] = [];
@@ -245,9 +248,13 @@ export class PlanetTerrainEngine {
       frame.deltaSeconds, frame.framePressure, this.frame,
     );
     const incompleteTransitions = this.observeTransitions(transitionSnapshots);
+    const stableRenderedKeys = this.serializeUntransitionedReplacements(
+      coverage.renderedKeys,
+      transitionSnapshots,
+    );
     const immediateReplacements = this.countImmediateReplacements(
       this.previousRenderedKeys,
-      coverage.renderedKeys,
+      stableRenderedKeys,
       transitionSnapshots,
     );
     if (immediateReplacements > 0) {
@@ -255,7 +262,7 @@ export class PlanetTerrainEngine {
         count: immediateReplacements,
       }, this.diagnosticContext);
     }
-    const renderKeys = new Set(coverage.renderedKeys);
+    const renderKeys = new Set(stableRenderedKeys);
     for (const transition of transitionSnapshots) {
       renderKeys.add(transition.parentKey);
       for (const child of transition.childKeys) renderKeys.add(child);
@@ -265,17 +272,25 @@ export class PlanetTerrainEngine {
       this.provider, this.quality, frame, this.previousSplitKeys, frame.visible,
     );
     const scheduleStarted = this.now();
-    this.requestedThisFrame = new Set();
-    for (const request of coverage.requests) this.queue(request.tile, request.requestClass, frame);
+    const queueBudgetMs = this.quality.schedulingBudgetMs * 0.6;
+    this.newRequestsThisFrame = 0;
+    for (const request of coverage.requests) {
+      if (request.tile.id.depth === 0) this.queue(request.tile, request.requestClass, frame);
+    }
+    for (const request of coverage.requests) {
+      if (request.tile.id.depth === 0) continue;
+      if (this.now() - scheduleStarted >= queueBudgetMs) break;
+      this.queue(request.tile, request.requestClass, frame);
+    }
     for (const tile of balanced) {
-      if (this.now() - scheduleStarted >= this.quality.schedulingBudgetMs) break;
+      if (this.now() - scheduleStarted >= queueBudgetMs) break;
       this.queue(tile, 'visible-refinement', frame, selected.screenSpaceErrors.get(tile.key));
     }
     for (const tile of predicted.leaves) {
-      if (this.now() - scheduleStarted >= this.quality.schedulingBudgetMs) break;
+      if (this.now() - scheduleStarted >= queueBudgetMs) break;
       this.queue(tile, 'predicted-refinement', frame, predicted.screenSpaceErrors.get(tile.key));
     }
-    this.cancelObsoleteRequests();
+    this.cancelObsoleteRequests(64);
     this.scheduler.dispatch(this.now(), this.quality.submissionsPerFrame);
     this.synchronizeSchedulerStates();
     const scheduleMs = Math.max(0, this.now() - scheduleStarted);
@@ -283,6 +298,7 @@ export class PlanetTerrainEngine {
     this.applyRenderState(renderKeys, transitionSnapshots, frame);
     const protection = new Set([
       ...coverage.protectionKeys,
+      ...stableRenderedKeys,
       ...this.transitions.protectionKeys(),
       ...predicted.leaves.map((tile) => tile.key),
     ]);
@@ -303,7 +319,7 @@ export class PlanetTerrainEngine {
     }
 
     this.previousSplitKeys = new Set(selected.splitKeys);
-    this.previousRenderedKeys = new Set(coverage.renderedKeys);
+    this.previousRenderedKeys = new Set(stableRenderedKeys);
     const residency = this.residency.stats();
     const scheduler = this.scheduler.stats();
     let triangles = 0;
@@ -363,18 +379,22 @@ export class PlanetTerrainEngine {
   ): void {
     const existing = this.records.get(tile.key);
     if (existing?.state === 'installed' || existing?.state === 'ready') return;
-    this.requestedThisFrame.add(tile.key);
     const newRequest = !existing || existing.state === 'unloaded' || existing.state === 'failed';
+    const admissionLimit = this.quality.submissionsPerFrame;
+    if (newRequest && tile.id.depth > 0 && this.newRequestsThisFrame >= admissionLimit) return;
+    this.lastRequestedFrame.set(tile.key, this.frame);
     const request = this.provider.buildRequest(
       tile.id,
       skirtDepth(this.provider, tile, this.quality.gridResolution),
     );
     if (newRequest) {
+      this.newRequestsThisFrame++;
       this.records.set(tile.key, {
         tile, state: 'queued', generation: request.generation,
         materialGeneration: this.provider.generation, gpuValid: false,
       });
       this.requestedAt.set(tile.key, this.now());
+      this.requestOrder.push(tile.key);
     }
     const bounds = terrainTileBoundingSphere(this.provider, tile);
     const distanceToBounds = Math.max(0, Math.hypot(
@@ -443,6 +463,7 @@ export class PlanetTerrainEngine {
         materialGeneration: this.provider.generation, gpuValid: false,
       });
       this.terrainEvent('installation-discarded', tile, { reason: decision.reason, bytes });
+      this.records.delete(tile.key);
       return;
     }
     this.disposeChunk(tile.key, true);
@@ -460,6 +481,7 @@ export class PlanetTerrainEngine {
       materialGeneration: this.provider.generation, gpuValid: true,
     });
     this.requestedAt.delete(tile.key);
+    this.lastRequestedFrame.delete(tile.key);
     this.terrainEvent('installed', tile, { bytes, requestClass, reservationKey });
     if (tile.id.depth === 0) this.residency.protectPermanently(tile.key);
   }
@@ -487,7 +509,9 @@ export class PlanetTerrainEngine {
   }
 
   private synchronizeSchedulerStates(): void {
-    for (const [key, record] of this.records) {
+    for (const key of this.lastRequestedFrame.keys()) {
+      const record = this.records.get(key);
+      if (!record) continue;
       if (record.state === 'installed' || record.state === 'ready') continue;
       const state = this.scheduler.state(key, record.generation);
       if (state === 'queued' || state === 'building' || state === 'failed') {
@@ -497,17 +521,67 @@ export class PlanetTerrainEngine {
     }
   }
 
-  private cancelObsoleteRequests(): void {
-    for (const [key, record] of this.records) {
-      if (
-        this.requestedThisFrame.has(key)
-        || (record.state !== 'queued' && record.state !== 'building' && record.state !== 'failed')
-      ) continue;
+  private cancelObsoleteRequests(maximumCancellations: number): void {
+    if (this.requestOrder.length === 0) return;
+    let inspected = 0;
+    let cancelled = 0;
+    const maximumInspections = Math.min(this.requestOrder.length, maximumCancellations * 4);
+    while (inspected < maximumInspections && cancelled < maximumCancellations && this.requestOrder.length > 0) {
+      if (this.requestCursor >= this.requestOrder.length) this.requestCursor = 0;
+      const key = this.requestOrder[this.requestCursor++];
+      inspected++;
+      const lastRequested = this.lastRequestedFrame.get(key);
+      if (lastRequested === undefined || this.frame - lastRequested <= 5) continue;
+      const record = this.records.get(key);
+      if (!record || (record.state !== 'queued' && record.state !== 'building' && record.state !== 'failed')) {
+        this.lastRequestedFrame.delete(key);
+        continue;
+      }
       this.scheduler.cancel(key, record.generation);
       this.requestedAt.delete(key);
+      this.lastRequestedFrame.delete(key);
       this.terrainEvent('cancelled', record.tile, { reason: 'demand-changed' });
-      this.records.set(key, { ...record, state: 'unloaded', gpuValid: false });
+      this.records.delete(key);
+      cancelled++;
     }
+    if (this.requestOrder.length > this.lastRequestedFrame.size * 2 + 1_024) {
+      this.requestOrder = this.requestOrder.filter((key) => this.lastRequestedFrame.has(key));
+      this.requestCursor = 0;
+    }
+  }
+
+  private serializeUntransitionedReplacements(
+    desired: ReadonlySet<string>,
+    transitions: ReturnType<TerrainLodTransitionManager['snapshots']>,
+  ): ReadonlySet<string> {
+    const stable = new Set(desired);
+    const transitioningParents = new Set(transitions.map((transition) => transition.parentKey));
+    const isDescendant = (candidateKey: string, ancestor: Readonly<TerrainTileDescriptor>): boolean => {
+      const candidate = this.records.get(candidateKey)?.tile;
+      if (!candidate || candidate.id.face !== ancestor.id.face || candidate.id.depth <= ancestor.id.depth) return false;
+      const scale = 2 ** (candidate.id.depth - ancestor.id.depth);
+      return Math.floor(candidate.id.x / scale) === ancestor.id.x
+        && Math.floor(candidate.id.y / scale) === ancestor.id.y;
+    };
+    for (const previousKey of this.previousRenderedKeys) {
+      if (stable.has(previousKey) || transitioningParents.has(previousKey)) continue;
+      const previous = this.records.get(previousKey)?.tile;
+      if (!previous) continue;
+      const replacingDescendants = [...stable].filter((key) => isDescendant(key, previous));
+      if (replacingDescendants.length === 0) continue;
+      for (const key of replacingDescendants) stable.delete(key);
+      stable.add(previousKey);
+    }
+    for (const desiredKey of [...stable]) {
+      if (this.previousRenderedKeys.has(desiredKey) || transitioningParents.has(desiredKey)) continue;
+      const desiredTile = this.records.get(desiredKey)?.tile;
+      if (!desiredTile) continue;
+      const previousDescendants = [...this.previousRenderedKeys].filter((key) => isDescendant(key, desiredTile));
+      if (previousDescendants.length === 0) continue;
+      stable.delete(desiredKey);
+      for (const key of previousDescendants) stable.add(key);
+    }
+    return stable;
   }
 
   private applyRenderState(
@@ -547,8 +621,8 @@ export class PlanetTerrainEngine {
     this.chunks.delete(key);
     if (!keepResidency) this.residency.removeInstalled(key, true);
     const record = this.records.get(key);
-    if (record) this.records.set(key, { ...record, state: 'unloaded', gpuValid: false });
     if (record) this.terrainEvent('evicted', record.tile, { reason });
+    this.records.delete(key);
   }
 
   private terrainEvent(
@@ -757,6 +831,9 @@ export class PlanetTerrainEngine {
     this.workerPool?.dispose();
     for (const key of [...this.chunks.keys()]) this.disposeChunk(key, true, 'engine-dispose');
     this.records.clear();
+    this.requestedAt.clear();
+    this.lastRequestedFrame.clear();
+    this.requestOrder = [];
     this.residency.clear();
     this.transitions.clear();
     this.dither.dispose();

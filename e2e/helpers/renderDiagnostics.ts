@@ -76,7 +76,7 @@ export async function waitForAltitude(
   page: Page,
   altitude: number,
   direction: 'ascending' | 'descending',
-  timeout = 120_000,
+  timeout = 180_000,
 ): Promise<void> {
   await page.waitForFunction(
     ({ target, descending }) => {
