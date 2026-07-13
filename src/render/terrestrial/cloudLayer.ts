@@ -20,6 +20,7 @@ export class TerrestrialCloudDeck {
   readonly shells: readonly [TerrestrialCloudShell, TerrestrialCloudShell];
   private disposed = false;
   private shadowRequested = true;
+  private lastDiagnosticObservationAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     readonly body: Body,
@@ -106,6 +107,9 @@ export class TerrestrialCloudDeck {
     if (this.disposed) return;
     const origin = frame.cameraRelativeOrigin;
     this.group.position.set(origin.x, origin.y, origin.z);
+    const diagnosticNow = performance.now();
+    const diagnosticDue = this.diagnostics !== undefined
+      && (this.diagnostics.detailed || diagnosticNow - this.lastDiagnosticObservationAt >= 100);
     for (const shell of this.shells) {
       DRIFT_QUATERNION.setFromAxisAngle(DRIFT_AXIS, frame.time * shell.driftRate);
       shell.mesh.quaternion
@@ -125,34 +129,37 @@ export class TerrestrialCloudDeck {
         shell.mesh.material.side = desiredSide;
         shell.mesh.material.needsUpdate = true;
       }
-      const signedDistance = frame.altitude - shell.altitude;
-      const classification = Math.abs(signedDistance) <= 5_200
-        ? 'crossing'
-        : signedDistance >= 0 ? 'outside' : 'inside';
-      const opacity = shell.mesh.material.uniforms.uOpacity.value as number;
-      const texture = shell.mesh.material.uniforms.uCloudMap.value as THREE.Texture;
-      this.diagnostics?.observeCloudShell?.({
-        simulationTime: frame.time,
-        bodyId: this.body.id,
-        rendererIdentity: this.diagnosticSource,
-        altitudeMeters: frame.altitude,
-        shell: shell.name,
-        classification,
-        radius: this.body.radius + shell.altitude,
-        shellAltitude: shell.altitude,
-        signedDistance,
-        opacity,
-        baseOpacity: shell.baseOpacity,
-        side: shell.mesh.material.side === THREE.FrontSide ? 'front'
-          : shell.mesh.material.side === THREE.BackSide ? 'back'
-            : shell.mesh.material.side === THREE.DoubleSide ? 'double' : 'unknown',
-        materialVersion: shell.mesh.material.version,
-        textureIdentity: texture.uuid,
-        visible: shell.mesh.visible && this.group.visible,
-        renderOrder: shell.mesh.renderOrder,
-        driftAngle: frame.time * shell.driftRate,
-      });
+      if (diagnosticDue) {
+        const signedDistance = frame.altitude - shell.altitude;
+        const classification = Math.abs(signedDistance) <= 5_200
+          ? 'crossing'
+          : signedDistance >= 0 ? 'outside' : 'inside';
+        const opacity = shell.mesh.material.uniforms.uOpacity.value as number;
+        const texture = shell.mesh.material.uniforms.uCloudMap.value as THREE.Texture;
+        this.diagnostics?.observeCloudShell?.({
+          simulationTime: frame.time,
+          bodyId: this.body.id,
+          rendererIdentity: this.diagnosticSource,
+          altitudeMeters: frame.altitude,
+          shell: shell.name,
+          classification,
+          radius: this.body.radius + shell.altitude,
+          shellAltitude: shell.altitude,
+          signedDistance,
+          opacity,
+          baseOpacity: shell.baseOpacity,
+          side: shell.mesh.material.side === THREE.FrontSide ? 'front'
+            : shell.mesh.material.side === THREE.BackSide ? 'back'
+              : shell.mesh.material.side === THREE.DoubleSide ? 'double' : 'unknown',
+          materialVersion: shell.mesh.material.version,
+          textureIdentity: texture.uuid,
+          visible: shell.mesh.visible && this.group.visible,
+          renderOrder: shell.mesh.renderOrder,
+          driftAngle: frame.time * shell.driftRate,
+        });
+      }
     }
+    if (diagnosticDue) this.lastDiagnosticObservationAt = diagnosticNow;
   }
 
   dispose(): void {

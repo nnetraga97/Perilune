@@ -6,9 +6,15 @@ export interface DiagnosticProbe {
   partCount(): number;
   altitude(): number | null;
   verticalSpeed(): number | null;
+  flightVector(): {
+    noseUpCos: number;
+    verticalSpeed: number;
+    horizontalSpeed: number;
+  } | null;
   properAcceleration(): number;
   situation(): string | null;
   currentStage(): number | null;
+  fuel(): number;
   activeBody(): string | null;
   time(): number;
   orbit(): { apoapsisAltitude: number; periapsisAltitude: number; eccentricity: number } | null;
@@ -52,6 +58,7 @@ export async function readFlight(page: Page): Promise<{
   properAcceleration: number;
   situation: string | null;
   stage: number | null;
+  fuel: number;
   time: number;
 }> {
   return page.evaluate(() => ({
@@ -60,6 +67,7 @@ export async function readFlight(page: Page): Promise<{
     properAcceleration: window.__TEST__.properAcceleration(),
     situation: window.__TEST__.situation(),
     stage: window.__TEST__.currentStage(),
+    fuel: window.__TEST__.fuel(),
     time: window.__TEST__.time(),
   }));
 }
@@ -82,12 +90,47 @@ export async function waitForAltitude(
   );
 }
 
+export async function waitForOrbitMetric(
+  page: Page,
+  metric: 'apoapsisAltitude' | 'periapsisAltitude',
+  threshold: number,
+  comparison: 'above' | 'below',
+  timeout = 120_000,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ key, value, above }) => {
+      const orbit = window.__TEST__.orbit();
+      if (!orbit || !Number.isFinite(orbit[key])) return false;
+      return above ? orbit[key] >= value : orbit[key] <= value;
+    },
+    { key: metric, value: threshold, above: comparison === 'above' },
+    { timeout },
+  );
+}
+
+export async function latestCloudClassification(
+  page: Page,
+  shell: 'weather' | 'wisps',
+): Promise<string | null> {
+  return page.evaluate((shellName) => {
+    const entries = window.__RENDER_DIAGNOSTICS__?.snapshot().entries ?? [];
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      if (entry.event === 'cloud-shell-sample' && entry.data.shell === shellName) {
+        return typeof entry.data.classification === 'string' ? entry.data.classification : null;
+      }
+    }
+    return null;
+  }, shell);
+}
+
 export async function captureCheckpoint(
   page: Page,
   browser: Browser,
   tier: 'medium' | 'high',
   name: string,
   errors: readonly string[],
+  manifestDigest: string,
 ): Promise<void> {
   const directory = `test-results/veyra-render-diagnostics/${tier}`;
   await mkdir(directory, { recursive: true });
@@ -96,6 +139,7 @@ export async function captureCheckpoint(
     flight: {
       altitude: window.__TEST__.altitude(),
       verticalSpeed: window.__TEST__.verticalSpeed(),
+      flightVector: window.__TEST__.flightVector(),
       situation: window.__TEST__.situation(),
       time: window.__TEST__.time(),
       orbit: window.__TEST__.orbit(),
@@ -112,6 +156,7 @@ export async function captureCheckpoint(
   await writeFile(`${directory}/${name}.json`, JSON.stringify({
     tier,
     checkpoint: name,
+    manifestDigest,
     browser: browser.browserType().name(),
     browserVersion: browser.version(),
     consoleErrors: [...errors],

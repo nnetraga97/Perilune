@@ -96,6 +96,8 @@ export interface TerrainDiagnosticEvent extends RenderDiagnosticContext {
   readonly generation?: number;
   readonly parentKey?: string | null;
   readonly data?: RenderDiagnosticData;
+  /** Event is preserved in a producer-owned per-frame batch. */
+  readonly batched?: boolean;
 }
 
 export interface TerrainDiagnosticSample extends RenderDiagnosticContext {
@@ -152,19 +154,20 @@ const DEFAULT_CAPACITY = 4_096;
 const DEFAULT_SAMPLE_INTERVAL_MS = 100;
 const COVERAGE_TOLERANCE = 1e-6;
 const MAX_TEXT_LENGTH = 500;
+const MAX_EVENT_BATCH_LENGTH = 8_000;
 
 function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function boundedText(value: unknown): string {
+function boundedText(value: unknown, maxLength = MAX_TEXT_LENGTH): string {
   let text: string;
   try {
     text = typeof value === 'string' ? value : String(value);
   } catch {
     text = '[unprintable]';
   }
-  return text.length <= MAX_TEXT_LENGTH ? text : `${text.slice(0, MAX_TEXT_LENGTH)}…`;
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }
 
 function normalizeData(source: RenderDiagnosticData | undefined): Readonly<Record<string, RenderDiagnosticValue>> {
@@ -173,7 +176,9 @@ function normalizeData(source: RenderDiagnosticData | undefined): Readonly<Recor
   for (const key of Object.keys(source)) {
     const value: unknown = (source as Record<string, unknown>)[key];
     if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-      result[key] = typeof value === 'string' ? boundedText(value) : value;
+      result[key] = typeof value === 'string'
+        ? boundedText(value, key === 'events' ? MAX_EVENT_BATCH_LENGTH : MAX_TEXT_LENGTH)
+        : value;
     } else if (typeof value === 'number') {
       result[key] = Number.isFinite(value) ? value : boundedText(value);
     } else {
@@ -385,9 +390,13 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
       if ((observation.event === 'cancelled' || observation.event === 'failed' || observation.event === 'stale-completion') && observation.key) {
         this.pendingTerrainKeys.delete(terrainKey);
       }
-      this.sample(`terrain-event:${sourceKey}:${observation.event}`, {
-        subsystem: 'terrain', event: `chunk-${observation.event}`, severity: 'state', data,
-      }, context);
+      if (observation.event === 'evicted' && observation.key) {
+        this.pendingTerrainKeys.delete(terrainKey);
+        this.installedTerrainKeys.delete(terrainKey);
+      }
+      if (!observation.batched) {
+        this.recordDetailed({ subsystem: 'terrain', event: `chunk-${observation.event}`, severity: 'state', data }, context);
+      }
     } catch {
       this.failures++;
     }

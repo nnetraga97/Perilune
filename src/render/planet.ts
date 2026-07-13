@@ -248,6 +248,8 @@ export class PlanetRenderer {
   private readonly installedGenerations = new Map<string, number>();
   private lastWantedKeys = new Set<string>();
   private diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: false };
+  private diagnosticLifecycleBatch: string[] | null = null;
+  private lastAggregateObservationAt = Number.NEGATIVE_INFINITY;
   /** Stats for the perf overlay. */
   stats = {
     chunks: 0,
@@ -389,6 +391,7 @@ export class PlanetRenderer {
     diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: true },
   ): void {
     this.diagnosticContext = diagnosticContext;
+    this.diagnosticLifecycleBatch = this.diagnostics?.detailed ? [] : null;
     this.frame++;
     this.buildsThisUpdate = 0;
     this.stats.visible = 0;
@@ -493,7 +496,10 @@ export class PlanetRenderer {
     }
     this.stats.overlapChunks = this.lastOverlapCount;
 
-    this.observeWantedChanges(wanted);
+    const observationNow = this.now();
+    if (this.diagnostics?.detailed || observationNow - this.lastAggregateObservationAt >= 100) {
+      this.observeWantedChanges(wanted);
+    }
 
     // Hide unneeded chunks, show wanted ones, place camera-relative.
     for (const chunk of this.chunks.values()) {
@@ -533,7 +539,11 @@ export class PlanetRenderer {
     this.evictStale();
     this.stats.chunks = this.chunks.size;
     this.stats.geometryBytes = this.geometryBytes;
-    this.observeTerrainSample(wanted);
+    if (observationNow - this.lastAggregateObservationAt >= 100) {
+      this.lastAggregateObservationAt = observationNow;
+      this.observeTerrainSample(wanted, observationNow);
+    }
+    this.flushDiagnosticLifecycleBatch();
   }
 
   private selectNode(
@@ -763,7 +773,11 @@ export class PlanetRenderer {
       parentKey: info?.parentKey,
       generation,
       data,
+      batched: this.diagnosticLifecycleBatch !== null,
     });
+    if (this.diagnosticLifecycleBatch) {
+      this.diagnosticLifecycleBatch.push(JSON.stringify({ event, key, generation, ...data }));
+    }
   }
 
   private workerCounts(): Readonly<Record<string, number>> {
@@ -780,13 +794,17 @@ export class PlanetRenderer {
       this.lastWantedKeys = new Set(wanted);
       return;
     }
-    // Per-depth totals and grouped replacements capture visibility churn at
-    // bounded rates; emitting every key change would overwhelm the trace.
+    if (this.diagnostics.detailed) {
+      for (const key of wanted) {
+        if (!this.lastWantedKeys.has(key)) this.terrainEvent('visibility-on', key, this.generation);
+      }
+    }
     for (const key of this.lastWantedKeys) {
       if (wanted.has(key)) continue;
+      if (this.diagnostics.detailed) this.terrainEvent('visibility-off', key, this.generation);
       const info = terrainChunkKeyInfo(key);
-      const appearingChildren = info.childKeys.filter((child) => wanted.has(child));
-      if (appearingChildren.length !== 4) continue;
+      const coveredQuadrants = info.childKeys.filter((child) => this.wantedContainsSubtree(wanted, child));
+      if (coveredQuadrants.length !== 4) continue;
       const installedChildren = info.childKeys.filter((child) => this.chunks.has(child));
       this.diagnostics.recordDetailed({
         subsystem: 'terrain', event: 'parent-children-replacement', severity: 'state',
@@ -794,7 +812,8 @@ export class PlanetRenderer {
           parentKey: key,
           child0: info.childKeys[0], child1: info.childKeys[1],
           child2: info.childKeys[2], child3: info.childKeys[3],
-          appearingChildren: appearingChildren.length,
+          appearingChildren: info.childKeys.filter((child) => wanted.has(child)).length,
+          coveredQuadrants: coveredQuadrants.length,
           installedChildren: installedChildren.length,
           generation: this.generation,
         },
@@ -810,9 +829,8 @@ export class PlanetRenderer {
     this.lastWantedKeys = new Set(wanted);
   }
 
-  private observeTerrainSample(wanted: ReadonlySet<string>): void {
+  private observeTerrainSample(wanted: ReadonlySet<string>, now: number): void {
     if (!this.diagnostics) return;
-    const now = this.now();
     let oldestPendingAgeMs = 0;
     for (const started of this.pendingStartedAt.values()) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, now - started);
     const visibleByDepth: Record<string, number> = {};
@@ -843,5 +861,47 @@ export class PlanetRenderer {
       buildP99Ms: timings?.buildP99Ms ?? 0,
       visibleByDepth,
     });
+  }
+
+  private wantedContainsSubtree(wanted: ReadonlySet<string>, rootKey: string): boolean {
+    if (wanted.has(rootKey)) return true;
+    const root = terrainChunkKeyInfo(rootKey);
+    for (const key of wanted) {
+      let info = terrainChunkKeyInfo(key);
+      while (info.depth > root.depth && info.parentKey) info = terrainChunkKeyInfo(info.parentKey);
+      if (info.key === rootKey) return true;
+    }
+    return false;
+  }
+
+  private flushDiagnosticLifecycleBatch(): void {
+    const events = this.diagnosticLifecycleBatch;
+    this.diagnosticLifecycleBatch = null;
+    if (!events || events.length === 0 || !this.diagnostics) return;
+    const batches: string[] = [];
+    let current = '';
+    for (const event of events) {
+      const next = current ? `${current}\n${event}` : event;
+      if (next.length > 8_000 && current) {
+        batches.push(current);
+        current = event;
+      } else {
+        current = next;
+      }
+    }
+    if (current) batches.push(current);
+    for (let index = 0; index < batches.length; index++) {
+      this.diagnostics.recordDetailed({
+        subsystem: 'terrain', event: 'terrain-lifecycle-batch', severity: 'state',
+        data: {
+          frame: this.frame,
+          generation: this.generation,
+          batchIndex: index,
+          batchCount: batches.length,
+          eventCount: events.length,
+          events: batches[index],
+        },
+      }, { ...this.diagnosticContext, bodyId: this.body.id });
+    }
   }
 }

@@ -11,7 +11,7 @@ describe('craft file validation', () => {
   it('accepts the checked-in Veyra diagnostic craft and every staged key is registered', () => {
     const validated = validateCraftFile(diagnosticCraft);
     expect(validated).not.toBeNull();
-    expect(validated!.parts).toHaveLength(12);
+    expect(validated!.parts).toHaveLength(20);
     const keys = new Set(validated!.parts.map((part) => part.key));
     expect(validated!.stages.flatMap((stage) => stage.partKeys).every((key) => keys.has(key))).toBe(true);
   });

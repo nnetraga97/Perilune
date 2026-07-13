@@ -129,4 +129,30 @@ describe('RenderDiagnostics', () => {
       'cloud-opacity-out-of-range',
     ]));
   });
+
+  it('preserves lifecycle batches beyond the ordinary diagnostic text limit', () => {
+    const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, now: () => 1 });
+    const events = Array.from({ length: 20 }, (_, index) => JSON.stringify({
+      event: 'visibility-on',
+      key: `0:8:${index.toFixed(6)}:-1.000000`,
+      detail: 'x'.repeat(40),
+    })).join('\n');
+    expect(events.length).toBeGreaterThan(500);
+    diagnostics.recordDetailed({
+      subsystem: 'terrain', event: 'terrain-lifecycle-batch', severity: 'state', data: { events },
+    });
+    expect(diagnostics.snapshot().entries[0].data.events).toBe(events);
+  });
+
+  it('does not report a repeat request after the installed chunk was evicted', () => {
+    const warn = vi.fn();
+    const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, now: () => 1, warn });
+    const observation = { bodyId: 'veyra', rendererIdentity: 'renderer-a', key: '1:0:-1.000000:-1.000000', generation: 1 };
+    diagnostics.observeTerrainEvent({ ...observation, event: 'request' });
+    diagnostics.observeTerrainEvent({ ...observation, event: 'installed' });
+    diagnostics.observeTerrainEvent({ ...observation, event: 'evicted' });
+    diagnostics.observeTerrainEvent({ ...observation, event: 'request' });
+    expect(diagnostics.snapshot().anomalyCodes).not.toContain('terrain-repeat-request-after-install');
+    expect(warn).not.toHaveBeenCalled();
+  });
 });

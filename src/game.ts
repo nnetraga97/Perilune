@@ -31,6 +31,7 @@ import { nodeBurnDirection, nodeDeltaV } from './sim/maneuver';
 import { apoapsisOf, periapsisOf, stateToElements } from './core/orbit';
 import { RenderDiagnostics } from './render/renderDiagnostics';
 import type { RenderStartupOptions } from './render/renderStartupOptions';
+import { surfaceVelocity } from './sim/bodyOrientation';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -224,6 +225,20 @@ class PeriluneGame {
         const radial = gv.runtime.pos.clone().normalize();
         return gv.runtime.vel.dot(radial);
       },
+      flightVector: () => {
+        const gv = this.game.active;
+        if (!gv) return null;
+        const body = this.game.bodyOf(gv);
+        const radial = gv.runtime.pos.clone().normalize();
+        const nose = gv.runtime.att.rotate(new Vec3(0, 1, 0), new Vec3());
+        const relativeVelocity = gv.runtime.vel.clone().sub(surfaceVelocity(body, gv.runtime.pos, new Vec3()));
+        const verticalSpeed = relativeVelocity.dot(radial);
+        return {
+          noseUpCos: nose.dot(radial),
+          verticalSpeed,
+          horizontalSpeed: Math.sqrt(Math.max(0, relativeVelocity.lengthSq() - verticalSpeed * verticalSpeed)),
+        };
+      },
       orbit: () => {
         const gv = this.game.active;
         if (!gv) return null;
@@ -235,7 +250,7 @@ class PeriluneGame {
           eccentricity: elements.e,
         };
       },
-      currentStage: () => this.game.active?.runtime.craft.stages.length ?? null,
+      currentStage: () => this.game.active?.runtime.currentStage ?? null,
       activeBody: () => this.game.active?.runtime.bodyId ?? null,
       renderCheckpoint: () => {
         const size = new THREE.Vector2();

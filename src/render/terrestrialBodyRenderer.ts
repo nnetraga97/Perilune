@@ -88,6 +88,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private fallbackCloudTexture: THREE.DataTexture | null = null;
   private disposed = false;
   private initialized = false;
+  private lastDiagnosticObservationAt = Number.NEGATIVE_INFINITY;
   private terrainActive = false;
   private coverageProgress = 0;
 
@@ -217,25 +218,29 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       frame.framePressure,
     );
     this.applyCoverage(snapshot.progress, prewarm);
-    this.diagnostics?.observeTransition?.({
-      simulationTime: frame.time,
-      bodyId: this.bodyId,
-      rendererIdentity: this.root.uuid,
-      altitudeMeters: frame.altitude,
-      requestedPresentation: visibleBand ? 'terrain' : 'compact',
-      state: snapshot.state,
-      progress: snapshot.progress,
-      compactCoverage: snapshot.compactCoverage,
-      terrainCoverage: snapshot.terrainCoverage,
-      coverageReady: prewarm && this.terrain.coverageReady(),
-      gapCount: this.terrain.stats.coverageGaps,
-      prewarm,
-      visibleBand,
-      framePressure: frame.framePressure,
-      compactVisible: this.compact.visible,
-      terrainVisible: this.terrain.group.visible && this.terrainActive,
-      terrainVisibleChunks: this.terrainActive ? this.terrain.stats.visible : 0,
-    });
+    const diagnosticNow = performance.now();
+    if (this.diagnostics && (this.diagnostics.detailed || diagnosticNow - this.lastDiagnosticObservationAt >= 100)) {
+      this.lastDiagnosticObservationAt = diagnosticNow;
+      this.diagnostics.observeTransition?.({
+        simulationTime: frame.time,
+        bodyId: this.bodyId,
+        rendererIdentity: this.root.uuid,
+        altitudeMeters: frame.altitude,
+        requestedPresentation: visibleBand ? 'terrain' : 'compact',
+        state: snapshot.state,
+        progress: snapshot.progress,
+        compactCoverage: snapshot.compactCoverage,
+        terrainCoverage: snapshot.terrainCoverage,
+        coverageReady: prewarm && this.terrain.coverageReady(),
+        gapCount: this.terrain.stats.coverageGaps,
+        prewarm,
+        visibleBand,
+        framePressure: frame.framePressure,
+        compactVisible: this.compact.visible,
+        terrainVisible: this.terrain.group.visible && this.terrainActive,
+        terrainVisibleChunks: this.terrainActive ? this.terrain.stats.visible : 0,
+      });
+    }
     this.updateSurfaceDetail(frame, prewarm && snapshot.progress > 0);
   }
 
