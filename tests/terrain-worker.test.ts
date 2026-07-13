@@ -251,6 +251,22 @@ describe('TerrainChunkWorkerPool', () => {
     expect(worker.terminated).toBe(true);
   });
 
+  it('reports executor capacity and cancels only work that has not reached a worker', async () => {
+    const worker = new ControlledWorker();
+    const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
+    expect(pool.availableSlots()).toBe(1);
+    const active = pool.submit(request({ jobKey: 'active' }));
+    const queued = pool.submit(request({ jobKey: 'queued' }));
+    expect(pool.availableSlots()).toBe(0);
+    expect(pool.cancelQueued('active', 7)).toBe(false);
+    expect(pool.cancelQueued('queued', 7)).toBe(true);
+    await expect(queued).rejects.toThrow(/cancelled before dispatch/i);
+    worker.complete();
+    await expect(active).resolves.toMatchObject({ jobKey: 'active' });
+    expect(pool.availableSlots()).toBe(1);
+    pool.dispose();
+  });
+
   it('rejects synchronous postMessage failures and continues dispatching', async () => {
     const worker = new ThrowOnceWorker();
     const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });

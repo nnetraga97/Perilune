@@ -87,6 +87,23 @@ export class TerrainChunkWorkerPool {
     });
   }
 
+  availableSlots(): number {
+    if (this.disposed) return 0;
+    return this.slots.filter((slot) => !slot.dead && slot.job === null).length;
+  }
+
+  /** Cancel work that has not reached a worker. Building jobs are immutable. */
+  cancelQueued(jobKey: string, generation: number): boolean {
+    const index = this.queue.findIndex((job) => (
+      job.request.jobKey === jobKey && job.request.generation === generation
+    ));
+    if (index < 0) return false;
+    const [job] = this.queue.splice(index, 1);
+    if (this.jobs.get(jobKey) === job) this.jobs.delete(jobKey);
+    job.reject(new Error(`Terrain job ${jobKey} cancelled before dispatch`));
+    return true;
+  }
+
   cancelGeneration(generation: number): void {
     for (const job of [...this.jobs.values()]) {
       if (job.request.generation !== generation) continue;
