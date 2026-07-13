@@ -25,6 +25,7 @@ import {
 } from './terrainSelection';
 import { screenSpaceErrorPixels } from './terrainPolicy';
 import type { PlanetSurfaceProvider, TerrainTileDescriptor } from './surfaceProvider';
+import { terrainTileParent } from './tile';
 
 export interface PlanetTerrainFrame extends TerrainSelectionFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
@@ -243,15 +244,15 @@ export class PlanetTerrainEngine {
       materialGeneration: this.provider.generation,
     });
 
-    this.requestTransitions(coverage.renderedKeys);
+    const stableRenderedKeys = this.serializeTransitionTarget(
+      coverage.renderedKeys,
+      this.transitions.snapshots(),
+    );
+    this.requestTransitions(stableRenderedKeys);
     const transitionSnapshots = this.transitions.advance(
       frame.deltaSeconds, frame.framePressure, this.frame,
     );
     const incompleteTransitions = this.observeTransitions(transitionSnapshots);
-    const stableRenderedKeys = this.serializeUntransitionedReplacements(
-      coverage.renderedKeys,
-      transitionSnapshots,
-    );
     const immediateReplacements = this.countImmediateReplacements(
       this.previousRenderedKeys,
       stableRenderedKeys,
@@ -346,7 +347,7 @@ export class PlanetTerrainEngine {
       allocationBytes: residency.allocationBytes,
       protectedBytes: residency.protectedBytes,
       desiredLeaves: balanced.length,
-      renderedLeaves: coverage.renderedKeys.size,
+      renderedLeaves: stableRenderedKeys.size,
       fallbackTiles: coverage.fallbackKeys.size,
       balanceViolations: balanceViolations.length,
       activeTransitions: transitionSnapshots.length,
@@ -550,36 +551,86 @@ export class PlanetTerrainEngine {
     }
   }
 
-  private serializeUntransitionedReplacements(
+  private serializeTransitionTarget(
     desired: ReadonlySet<string>,
     transitions: ReturnType<TerrainLodTransitionManager['snapshots']>,
   ): ReadonlySet<string> {
-    const stable = new Set(desired);
-    const transitioningParents = new Set(transitions.map((transition) => transition.parentKey));
-    const isDescendant = (candidateKey: string, ancestor: Readonly<TerrainTileDescriptor>): boolean => {
-      const candidate = this.records.get(candidateKey)?.tile;
-      if (!candidate || candidate.id.face !== ancestor.id.face || candidate.id.depth <= ancestor.id.depth) return false;
+    if (this.previousRenderedKeys.size === 0) return new Set(desired);
+    const stable = new Set(this.previousRenderedKeys);
+    const desiredTiles = [...desired]
+      .map((key) => this.records.get(key)?.tile)
+      .filter((tile): tile is TerrainTileDescriptor => tile !== undefined);
+    const isDescendantOrSelf = (
+      candidate: Readonly<TerrainTileDescriptor>,
+      ancestor: Readonly<TerrainTileDescriptor>,
+    ): boolean => {
+      if (candidate.id.face !== ancestor.id.face || candidate.id.depth < ancestor.id.depth) return false;
       const scale = 2 ** (candidate.id.depth - ancestor.id.depth);
       return Math.floor(candidate.id.x / scale) === ancestor.id.x
         && Math.floor(candidate.id.y / scale) === ancestor.id.y;
     };
+    const transitionBlocked = (tile: Readonly<TerrainTileDescriptor>): boolean => transitions.some((transition) => {
+      const parent = this.records.get(transition.parentKey)?.tile;
+      return parent !== undefined
+        && (isDescendantOrSelf(tile, parent) || isDescendantOrSelf(parent, tile));
+    });
+
+    // A resolved cover may jump several levels after workers finish a batch.
+    // Expose only the next complete quartet so every visible replacement has
+    // an explicit parent/child transition instead of popping or deadlocking.
     for (const previousKey of this.previousRenderedKeys) {
-      if (stable.has(previousKey) || transitioningParents.has(previousKey)) continue;
       const previous = this.records.get(previousKey)?.tile;
-      if (!previous) continue;
-      const replacingDescendants = [...stable].filter((key) => isDescendant(key, previous));
-      if (replacingDescendants.length === 0) continue;
-      for (const key of replacingDescendants) stable.delete(key);
-      stable.add(previousKey);
+      if (!previous) {
+        stable.delete(previousKey);
+        continue;
+      }
+      if (desired.has(previousKey) || transitionBlocked(previous)) continue;
+      const wantsFiner = desiredTiles.some((tile) => (
+        tile.id.depth > previous.id.depth && isDescendantOrSelf(tile, previous)
+      ));
+      if (!wantsFiner) continue;
+      const children = this.provider.children(previous);
+      if (!children.every((child) => this.chunks.has(child.key))) continue;
+      stable.delete(previousKey);
+      for (const child of children) stable.add(child.key);
     }
-    for (const desiredKey of [...stable]) {
-      if (this.previousRenderedKeys.has(desiredKey) || transitioningParents.has(desiredKey)) continue;
-      const desiredTile = this.records.get(desiredKey)?.tile;
-      if (!desiredTile) continue;
-      const previousDescendants = [...this.previousRenderedKeys].filter((key) => isDescendant(key, desiredTile));
-      if (previousDescendants.length === 0) continue;
-      stable.delete(desiredKey);
-      for (const key of previousDescendants) stable.add(key);
+
+    // Merge one complete sibling quartet at a time when the desired cover has
+    // moved to an ancestor. Deep branches therefore unwind as smoothly as
+    // they refine.
+    const mergeParents = new Map<string, TerrainTileDescriptor>();
+    for (const key of stable) {
+      const tile = this.records.get(key)?.tile;
+      if (!tile || tile.id.depth === 0) continue;
+      const parentId = terrainTileParent(tile.id);
+      if (!parentId) continue;
+      const parent = this.provider.tile(parentId);
+      mergeParents.set(parent.key, parent);
+    }
+    for (const parent of [...mergeParents.values()].sort((a, b) => b.id.depth - a.id.depth)) {
+      if (transitionBlocked(parent) || !this.chunks.has(parent.key)) continue;
+      const children = this.provider.children(parent);
+      if (!children.every((child) => stable.has(child.key))) continue;
+      const wantsFiner = desiredTiles.some((tile) => (
+        tile.id.depth > parent.id.depth && isDescendantOrSelf(tile, parent)
+      ));
+      const wantsParentOrAncestor = desiredTiles.some((tile) => isDescendantOrSelf(parent, tile));
+      if (wantsFiner || !wantsParentOrAncestor) continue;
+      for (const child of children) stable.delete(child.key);
+      stable.add(parent.key);
+    }
+
+    // A newly visible root can have no relationship to the previous frame's
+    // cover. Add it directly; related refinement remains serialized above.
+    for (const desiredTile of desiredTiles) {
+      const overlapsStableCover = [...stable].some((key) => {
+        const stableTile = this.records.get(key)?.tile;
+        return stableTile !== undefined && (
+          isDescendantOrSelf(desiredTile, stableTile)
+          || isDescendantOrSelf(stableTile, desiredTile)
+        );
+      });
+      if (!overlapsStableCover && this.chunks.has(desiredTile.key)) stable.add(desiredTile.key);
     }
     return stable;
   }

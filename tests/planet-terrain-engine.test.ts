@@ -255,6 +255,34 @@ describe('PlanetTerrainEngine', () => {
     engine.dispose();
   });
 
+  it('advances completed refinement through serialized parent-child transitions', () => {
+    const diagnostics = new RenderDiagnostics({
+      quality: 'high', detailed: true, sampleIntervalMs: 0, now: () => performance.now(),
+    });
+    const engine = new PlanetTerrainEngine({
+      provider: provider(1, 4),
+      quality: policy({
+        maximumDesiredLeaves: 128,
+        submissionsPerFrame: 12,
+        installationBudgetMs: 20,
+      }),
+      material: new THREE.MeshBasicMaterial(),
+      terrainAllocationBytes: 4_000_000,
+      diagnostics,
+      diagnosticSource: 'refinement-test',
+    });
+    const surfaceFrame = { ...frame(), deltaSeconds: 0.1 };
+    for (let iteration = 0; iteration < 240; iteration++) engine.update(surfaceFrame);
+
+    const samples = diagnostics.snapshot().entries.filter((entry) => entry.event === 'terrain-sample');
+    const latest = samples.at(-1)?.data;
+    expect(latest?.desiredMaximumDepth).toBeGreaterThan(2);
+    expect(latest?.pending).toBe(0);
+    expect(latest?.renderedMaximumDepth).toBeGreaterThan(2);
+    expect(engine.stats.coverageGaps).toBe(0);
+    engine.dispose();
+  });
+
   it('ignores stale frame generations and owns worker/geometry disposal but not the shared material', () => {
     const worker = new ManualWorker();
     const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
