@@ -405,18 +405,18 @@ The terrain engine receives the nonnegative result. It evicts toward 75% of that
 - [ ] Invoke the user-authorized Superpowers final-review workflow only after all automated and visual gates pass.
 - [ ] Commit any final in-scope correction separately with a precise message; do not create a catch-all commit when no correction is needed.
 
-## Stop Conditions and Review Gates
+## Hands-Off Decision Policy
 
-Stop and return to the user before widening scope if any of these occur:
+Implementation proceeds without intermediate approval prompts. When any of the following gates occurs, choose the safest reversible option that remains inside the approved terrain scope, record the evidence and decision, keep the repository in a testable state, and include the decision in the end-of-work report:
 
 - the analytical terrain bound is so loose that Medium or High requests maximum depth across most of the visible hemisphere;
 - the checked active-body budget leaves less space than the six measured root geometries require;
 - cross-face 2:1 balance requires changing the cube projection or authoritative terrain sampling;
 - shared-material per-draw dither cannot be made identical across color/depth/shadow passes without cloning authored textures;
 - the existing E2E craft cannot reproduce both the ascent and descent terrain bands after deterministic test-only timing controls are exhausted; or
-- fixing a failing acceptance gate requires cloud, atmosphere, ocean, physics, asset-authoring, or content-manifest changes outside this plan.
+- an acceptance failure appears to require cloud, atmosphere, ocean, physics, asset-authoring, or content-manifest changes outside this plan.
 
-At those gates, preserve the completed commits and present the measured evidence and available choices before continuing.
+Do not silently widen scope. If progress truly requires new authority, destructive action, external coordination, or an out-of-scope subsystem change, preserve completed commits and stop at that hard blocker. Otherwise defer questions and tradeoff review until the implementation and validation pass is complete.
 
 ## Completion Definition
 
