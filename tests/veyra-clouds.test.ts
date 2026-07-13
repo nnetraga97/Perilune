@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { TerrestrialCloudDeck } from '../src/render/terrestrial/cloudLayer';
+import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 
 const universe = new GameState().universe;
 const veyra = universe.get('veyra');
@@ -21,6 +22,29 @@ const frame = {
 };
 
 describe('Veyra two-scale clouds', () => {
+  it('records static shell facts and dynamic crossing classifications for both shells', () => {
+    let now = 0;
+    const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, now: () => now++ });
+    const texture = cloudTexture();
+    const deck = new TerrestrialCloudDeck(veyra, 'high', texture, diagnostics);
+    const weather = deck.shells[0];
+    const wisps = deck.shells[1];
+    deck.update({ ...frame, altitude: weather.altitude - 6_000 });
+    now += 100;
+    deck.update({ ...frame, altitude: weather.altitude });
+    now += 100;
+    deck.update({ ...frame, altitude: wisps.altitude + 6_000 });
+
+    const snapshot = diagnostics.snapshot();
+    expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-created')).toHaveLength(2);
+    expect(snapshot.entries.find((entry) => entry.event === 'cloud-shell-created' && entry.data.shell === 'weather')?.data)
+      .toMatchObject({ widthSegments: 96, heightSegments: 60, textureIdentity: texture.uuid, shadowMaterial: true });
+    expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-sample').map((entry) => entry.data.classification))
+      .toEqual(expect.arrayContaining(['inside', 'crossing', 'outside']));
+    deck.dispose();
+    expect(diagnostics.snapshot().entries.filter((entry) => entry.event === 'cloud-shell-disposed')).toHaveLength(2);
+  });
+
   it('owns two shells with distinct altitude, scale, and drift rates', () => {
     const deck = new TerrestrialCloudDeck(veyra, 'medium', cloudTexture());
     expect(deck.shells.map((shell) => shell.name)).toEqual(['weather', 'wisps']);

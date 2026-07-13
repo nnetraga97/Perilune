@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
 import { createCloudMaterial, createCloudShadowMaterial } from './cloudMaterial';
+import type { RenderDiagnosticsPort } from '../renderDiagnostics';
 
 const DRIFT_AXIS = new THREE.Vector3(0, 0, 1);
 const DRIFT_QUATERNION = new THREE.Quaternion();
@@ -24,6 +25,7 @@ export class TerrestrialCloudDeck {
     readonly body: Body,
     readonly quality: QualityTier,
     cloudTexture: THREE.Texture,
+    private readonly diagnostics?: RenderDiagnosticsPort,
   ) {
     if (!body.def.atmosphere) throw new Error(`${body.id} has no atmosphere for clouds`);
     const makeShell = (
@@ -50,6 +52,33 @@ export class TerrestrialCloudDeck {
       if (name === 'weather' && quality !== 'low') {
         mesh.customDepthMaterial = createCloudShadowMaterial(cloudTexture, textureScale);
       }
+      this.diagnostics?.record({
+        subsystem: 'clouds',
+        event: 'cloud-shell-created',
+        severity: 'state',
+        data: {
+          body: body.id,
+          quality,
+          shell: name,
+          radius: body.radius + altitude,
+          shellAltitude: altitude,
+          geometryType: geometry.type,
+          widthSegments: segments[0],
+          heightSegments: segments[1],
+          side: 'front',
+          renderOrder: mesh.renderOrder,
+          baseOpacity: opacity,
+          textureIdentity: cloudTexture.uuid,
+          wrapS: cloudTexture.wrapS,
+          wrapT: cloudTexture.wrapT,
+          minFilter: cloudTexture.minFilter,
+          magFilter: cloudTexture.magFilter,
+          anisotropy: cloudTexture.anisotropy,
+          colorSpace: cloudTexture.colorSpace,
+          textureScale,
+          shadowMaterial: mesh.customDepthMaterial !== undefined,
+        },
+      }, { bodyId: body.id });
       return Object.freeze({ name, mesh, altitude, driftRate, baseOpacity: opacity });
     };
     const segments: readonly [number, number] = quality === 'low' ? [48, 30] : quality === 'medium' ? [72, 44] : [96, 60];
@@ -95,6 +124,32 @@ export class TerrestrialCloudDeck {
         shell.mesh.material.side = desiredSide;
         shell.mesh.material.needsUpdate = true;
       }
+      const signedDistance = frame.altitude - shell.altitude;
+      const classification = Math.abs(signedDistance) <= 5_200
+        ? 'crossing'
+        : signedDistance >= 0 ? 'outside' : 'inside';
+      const opacity = shell.mesh.material.uniforms.uOpacity.value as number;
+      const texture = shell.mesh.material.uniforms.uCloudMap.value as THREE.Texture;
+      this.diagnostics?.observeCloudShell?.({
+        simulationTime: frame.time,
+        bodyId: this.body.id,
+        altitudeMeters: frame.altitude,
+        shell: shell.name,
+        classification,
+        radius: this.body.radius + shell.altitude,
+        shellAltitude: shell.altitude,
+        signedDistance,
+        opacity,
+        baseOpacity: shell.baseOpacity,
+        side: shell.mesh.material.side === THREE.FrontSide ? 'front'
+          : shell.mesh.material.side === THREE.BackSide ? 'back'
+            : shell.mesh.material.side === THREE.DoubleSide ? 'double' : 'unknown',
+        materialVersion: shell.mesh.material.version,
+        textureIdentity: texture.uuid,
+        visible: shell.mesh.visible && this.group.visible,
+        renderOrder: shell.mesh.renderOrder,
+        driftAngle: frame.time * shell.driftRate,
+      });
     }
   }
 
@@ -102,6 +157,10 @@ export class TerrestrialCloudDeck {
     if (this.disposed) return;
     this.disposed = true;
     for (const shell of this.shells) {
+      this.diagnostics?.record({
+        subsystem: 'clouds', event: 'cloud-shell-disposed', severity: 'state',
+        data: { body: this.body.id, quality: this.quality, shell: shell.name },
+      }, { bodyId: this.body.id });
       shell.mesh.geometry.dispose();
       shell.mesh.material.dispose();
       shell.mesh.customDepthMaterial?.dispose();

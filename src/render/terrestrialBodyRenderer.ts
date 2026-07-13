@@ -159,7 +159,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.fallbackCloudTexture.needsUpdate = true;
       cloudMap = this.fallbackCloudTexture;
     }
-    this.clouds = new TerrestrialCloudDeck(this.body, this.quality, cloudMap);
+    this.clouds = new TerrestrialCloudDeck(this.body, this.quality, cloudMap, this.diagnostics);
 
     const seed = this.body.def.terrain.seed;
     this.scatter = new TerrestrialScatter(this.body.radius, seed, this.surfaceSampler, this.quality);
