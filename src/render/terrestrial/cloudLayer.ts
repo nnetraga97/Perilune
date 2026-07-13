@@ -6,6 +6,8 @@ import type { RenderDiagnosticsPort } from '../renderDiagnostics';
 
 const DRIFT_AXIS = new THREE.Vector3(0, 0, 1);
 const DRIFT_QUATERNION = new THREE.Quaternion();
+const INVERSE_DRIFT_QUATERNION = new THREE.Quaternion();
+const CAMERA_CLOUD_FIXED = new THREE.Vector3();
 
 export interface TerrestrialCloudShell {
   readonly name: 'weather' | 'wisps';
@@ -28,28 +30,36 @@ export class TerrestrialCloudDeck {
     cloudTexture: THREE.Texture,
     private readonly diagnostics?: RenderDiagnosticsPort,
     private readonly diagnosticSource: string = `clouds:${body.id}`,
+    maxAnisotropy = 1,
   ) {
     if (!body.def.atmosphere) throw new Error(`${body.id} has no atmosphere for clouds`);
+    const requestedAnisotropy = quality === 'low' ? 2 : quality === 'medium' ? 4 : 8;
+    cloudTexture.anisotropy = Math.max(1, Math.min(maxAnisotropy, requestedAnisotropy));
+    cloudTexture.needsUpdate = true;
     const makeShell = (
       name: TerrestrialCloudShell['name'],
       altitudeFraction: number,
       driftRate: number,
       textureScale: number,
       opacity: number,
+      parallaxStrength: number,
       segments: readonly [number, number],
     ): TerrestrialCloudShell => {
       const altitude = body.def.atmosphere!.height * altitudeFraction;
+      const shellRadius = body.radius + altitude;
       const geometry = new THREE.SphereGeometry(1, segments[0], segments[1]);
       const material = createCloudMaterial(cloudTexture, {
         textureScale,
         opacity,
         tint: name === 'weather' ? '#e9edf0' : '#d7e1e8',
+        shellRadius,
+        parallaxStrength,
       });
       material.name = `terrestrial-cloud:${name}`;
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `terrestrial-cloud:${body.id}:${name}`;
-      mesh.scale.setScalar(body.radius + altitude);
-      // Outside the deck, render the outer transparent shell before the inner.
+      mesh.scale.setScalar(shellRadius);
+      // Default launch ordering: render the farther outer wisps first.
       mesh.renderOrder = name === 'wisps' ? 30 : 31;
       if (name === 'weather' && quality !== 'low') {
         mesh.customDepthMaterial = createCloudShadowMaterial(cloudTexture, textureScale);
@@ -62,7 +72,7 @@ export class TerrestrialCloudDeck {
           body: body.id,
           quality,
           shell: name,
-          radius: body.radius + altitude,
+          radius: shellRadius,
           shellAltitude: altitude,
           geometryType: geometry.type,
           widthSegments: segments[0],
@@ -85,8 +95,8 @@ export class TerrestrialCloudDeck {
     };
     const segments: readonly [number, number] = quality === 'low' ? [48, 30] : quality === 'medium' ? [72, 44] : [96, 60];
     this.shells = Object.freeze([
-      makeShell('weather', 0.11, 9e-6, 1, 0.46, segments),
-      makeShell('wisps', 0.22, -3.5e-6, 3, 0.2, segments),
+      makeShell('weather', 0.11, 9e-6, 1, 0.58, 0.009, segments),
+      makeShell('wisps', 0.22, -3.5e-6, 2.4, 0.14, 0.004, segments),
     ]) as unknown as readonly [TerrestrialCloudShell, TerrestrialCloudShell];
     this.group.name = `terrestrial-cloud-deck:${body.id}`;
     this.group.add(this.shells[0].mesh, this.shells[1].mesh);
@@ -103,13 +113,17 @@ export class TerrestrialCloudDeck {
     this.shells[1].mesh.castShadow = false;
   }
 
-  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'>): void {
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'>): void {
     if (this.disposed) return;
     const origin = frame.cameraRelativeOrigin;
     this.group.position.set(origin.x, origin.y, origin.z);
     const diagnosticNow = performance.now();
     const diagnosticDue = this.diagnostics !== undefined
       && (this.diagnostics.detailed || diagnosticNow - this.lastDiagnosticObservationAt >= 100);
+    const outsideDeck = frame.altitude >= this.shells[1].altitude;
+    // Back-to-front ordering reverses when the camera moves outside both shells.
+    this.shells[0].mesh.renderOrder = outsideDeck ? 30 : 31;
+    this.shells[1].mesh.renderOrder = outsideDeck ? 31 : 30;
     for (const shell of this.shells) {
       DRIFT_QUATERNION.setFromAxisAngle(DRIFT_AXIS, frame.time * shell.driftRate);
       shell.mesh.quaternion
@@ -120,6 +134,13 @@ export class TerrestrialCloudDeck {
         frame.bodySunDirection.y,
         frame.bodySunDirection.z,
       ).normalize();
+      INVERSE_DRIFT_QUATERNION.copy(DRIFT_QUATERNION).invert();
+      CAMERA_CLOUD_FIXED.set(
+        frame.cameraBodyFixed.x,
+        frame.cameraBodyFixed.y,
+        frame.cameraBodyFixed.z,
+      ).applyQuaternion(INVERSE_DRIFT_QUATERNION);
+      (shell.mesh.material.uniforms.uCameraCloudFixed.value as THREE.Vector3).copy(CAMERA_CLOUD_FIXED);
       shell.mesh.material.uniforms.uTime.value = frame.time;
       const distanceFromShell = Math.abs(frame.altitude - shell.altitude);
       const crossingFade = Math.max(0, Math.min(1, (distanceFromShell - 1_200) / 4_000));

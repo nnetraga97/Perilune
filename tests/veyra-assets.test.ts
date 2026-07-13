@@ -1,10 +1,80 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
 import { solidHeight } from '../src/sim/terrain';
 import * as veyraMaps from '../scripts/lib/veyra-global-maps';
+import { expandLogicalRgToRgb, resizeLogicalRg } from '../scripts/lib/rg-image';
 
 describe('Veyra authored asset contracts', () => {
+  it('resizes logical RG channels independently and expands a true RGB fallback', async () => {
+    const width = 8;
+    const height = 4;
+    const logicalRg = new Uint8Array(width * height * 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const pixel = y * width + x;
+        logicalRg[pixel * 2] = y * 60;
+        logicalRg[pixel * 2 + 1] = x * 30;
+      }
+    }
+    const resized = await resizeLogicalRg(logicalRg, width, height, 13, 7);
+    for (let y = 0; y < 7; y++) {
+      const rowRed = resized[(y * 13) * 2];
+      for (let x = 0; x < 13; x++) expect(resized[(y * 13 + x) * 2]).toBe(rowRed);
+    }
+    for (let x = 0; x < 13; x++) {
+      const columnGreen = resized[x * 2 + 1];
+      for (let y = 0; y < 7; y++) expect(resized[(y * 13 + x) * 2 + 1]).toBe(columnGreen);
+    }
+    expect(resized[(6 * 13) * 2]).toBeGreaterThan(resized[0]);
+    expect(resized[(13 - 1) * 2 + 1]).toBeGreaterThan(resized[1]);
+    const rgb = expandLogicalRgToRgb(resized, 13, 7);
+    for (let pixel = 0; pixel < 13 * 7; pixel++) {
+      expect(rgb[pixel * 3]).toBe(resized[pixel * 2]);
+      expect(rgb[pixel * 3 + 1]).toBe(resized[pixel * 2 + 1]);
+      expect(rgb[pixel * 3 + 2]).toBe(0);
+    }
+  });
+
+  it('ships the cloud fallback as truecolor logical RG data', async () => {
+    const cloudPath = resolve('assets/planets/generated/veyra/low/clouds.png');
+    const metadata = await sharp(cloudPath).metadata();
+    expect(metadata.channels).toBe(3);
+    expect(metadata.isPalette).toBe(false);
+    const sample = await sharp(readFileSync(cloudPath)).extract({ left: 0, top: 0, width: 64, height: 32 }).raw().toBuffer();
+    for (let pixel = 0; pixel < 64 * 32; pixel++) expect(sample[pixel * 3 + 2]).toBe(0);
+  });
+
+  it('ships cloud fields without scanline-biased channel corruption', async () => {
+    const { data, info } = await sharp(resolve('assets/planets/generated/veyra/low/clouds.png'))
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    for (const channel of [0, 1]) {
+      let horizontalVariation = 0;
+      let verticalVariation = 0;
+      let horizontalSamples = 0;
+      let verticalSamples = 0;
+      for (let y = 0; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+          const offset = (y * info.width + x) * info.channels + channel;
+          if (x > 0) {
+            horizontalVariation += Math.abs(data[offset] - data[offset - info.channels]);
+            horizontalSamples++;
+          }
+          if (y > 0) {
+            verticalVariation += Math.abs(data[offset] - data[offset - info.width * info.channels]);
+            verticalSamples++;
+          }
+        }
+      }
+      const axisVariationRatio = (verticalVariation / verticalSamples) / (horizontalVariation / horizontalSamples);
+      expect(axisVariationRatio).toBeLessThan(4);
+    }
+  });
+
   it('uses a direction-space source sampler with exact seam and pole identity', () => {
     const sampler = (veyraMaps as typeof veyraMaps & {
       sampleVeyraSourceDetail?: (

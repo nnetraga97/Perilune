@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "compilerVersion": "2.1.0",
+  "compilerVersion": "2.2.0",
   "fingerprint": {
     "width": 64,
     "height": 32,
@@ -102,7 +102,7 @@
       "material": "ddedcc35548125de7da3d7f4c5fe867777350df91846e06b5b4088ed49b05afb",
       "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
     },
-    "identitySha256": "7f37c74e91578884b919070fe209c1f15708fe03573bad8df006860a8cfea524",
+    "identitySha256": "04f2625d2aaf7655ab695c0975ee92abd19fd2dc476bfb02f00b0f613006148d",
     "heightArtifact": {
       "path": "generated/veyra/canonical/height.s16le",
       "checksumSha256": "7ca283b3c5d91290d7050915030193d13bb78917207a1c1819ccd6a0a1f71488",

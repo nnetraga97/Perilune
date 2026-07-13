@@ -15,6 +15,7 @@ function cloudTexture(): THREE.DataTexture {
 
 const frame = {
   cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
+  cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 },
   orientation: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.37),
   bodySunDirection: { x: 0, y: 3, z: 0 },
   time: 12_345,
@@ -51,7 +52,13 @@ describe('Veyra two-scale clouds', () => {
     expect(deck.shells[0].altitude).not.toBe(deck.shells[1].altitude);
     expect(deck.shells[0].driftRate).not.toBe(deck.shells[1].driftRate);
     expect(deck.shells[0].mesh.material.uniforms.uTextureScale.value).toBe(1);
-    expect(deck.shells[1].mesh.material.uniforms.uTextureScale.value).toBe(3);
+    expect(deck.shells[1].mesh.material.uniforms.uTextureScale.value).toBe(2.4);
+    expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec3 direction = normalize(vBodyDirection)');
+    expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec2 field3 = sampleCloud');
+    expect(deck.shells[0].mesh.material.fragmentShader)
+      .toContain('dot(normalize(vViewDirection), -viewSunDirection)');
+    expect((deck.shells[0].mesh.customDepthMaterial as THREE.ShaderMaterial).fragmentShader)
+      .toContain('vec3 direction = normalize(vBodyDirection)');
     deck.dispose();
   });
 
@@ -69,6 +76,8 @@ describe('Veyra two-scale clouds', () => {
     expect(low.shells[0].mesh.quaternion.angleTo(high.shells[0].mesh.quaternion)).toBeLessThan(1e-12);
     expect(low.group.position.toArray()).toEqual([10, 20, 30]);
     expect((low.shells[0].mesh.material.uniforms.uSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
+    expect((low.shells[0].mesh.material.uniforms.uCameraCloudFixed.value as THREE.Vector3).length())
+      .toBeCloseTo(veyra.radius + 1_000, 6);
     low.dispose();
     high.dispose();
   });
@@ -95,8 +104,8 @@ describe('Veyra two-scale clouds', () => {
     const weather = deck.shells[0];
     const wisps = deck.shells[1];
     expect(wisps.mesh.renderOrder).toBeLessThan(weather.mesh.renderOrder);
-    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.5);
-    expect(wisps.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.25);
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.6);
+    expect(wisps.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.15);
 
     deck.update({ ...frame, altitude: weather.altitude - 5_000 });
     expect(weather.mesh.material.side).toBe(THREE.BackSide);
@@ -105,6 +114,16 @@ describe('Veyra two-scale clouds', () => {
     deck.update({ ...frame, altitude: weather.altitude + 5_000 });
     expect(weather.mesh.material.side).toBe(THREE.FrontSide);
     expect(weather.mesh.material.uniforms.uOpacity.value).toBeGreaterThan(0);
+    deck.update({ ...frame, altitude: wisps.altitude + 6_000 });
+    expect(weather.mesh.renderOrder).toBeLessThan(wisps.mesh.renderOrder);
+    deck.dispose();
+  });
+
+  it('caps texture anisotropy by quality and renderer capability', () => {
+    const texture = cloudTexture();
+    const deck = new TerrestrialCloudDeck(veyra, 'medium', texture, undefined, 'test-clouds', 16);
+    expect(texture.anisotropy).toBe(4);
+    expect(deck.shells[0].mesh.material.uniforms.uCloudMap.value).toBe(texture);
     deck.dispose();
   });
 

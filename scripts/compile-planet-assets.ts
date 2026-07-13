@@ -10,6 +10,7 @@ import { solidHeight } from '../src/sim/terrain';
 import { Universe } from '../src/sim/universe';
 import { generateVeyraCanonicalMaps, type VeyraCanonicalMaps } from './lib/veyra-global-maps';
 import { generateVeyraScatter } from './lib/veyra-scatter';
+import { expandLogicalRgToRgb, resizeLogicalRg } from './lib/rg-image';
 
 const root = resolve(import.meta.dirname, '..');
 const assetsRoot = resolve(root, 'assets/planets');
@@ -26,7 +27,7 @@ const canonicalHeight = 4096;
 const fingerprintWidth = 64;
 const fingerprintHeight = 32;
 const quantizationMeters = 0.5;
-const compilerVersion = '2.1.0';
+const compilerVersion = '2.2.0';
 const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
 const writeGlobal = write && !process.argv.includes('--fingerprints-only');
@@ -131,10 +132,12 @@ async function writeTier(
   ];
   const channels: ChannelOutput[] = [];
   for (const definition of definitions) {
-    const resized = await sharp(Buffer.from(definition.data), {
-      raw: { width: canonicalWidth, height: canonicalHeight, channels: definition.channels },
-      sequentialRead: true,
-    }).resize(width, height, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
+    const resized = definition.channels === 2
+      ? await resizeLogicalRg(definition.data, canonicalWidth, canonicalHeight, width, height)
+      : await sharp(Buffer.from(definition.data), {
+        raw: { width: canonicalWidth, height: canonicalHeight, channels: definition.channels },
+        sequentialRead: true,
+      }).resize(width, height, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
     const image = sharp(resized, { raw: { width, height, channels: definition.channels } });
     const fallbackPath = resolve(tierDir, `${definition.name}.${definition.fallback}`);
     const encoderInput = resolve(tierDir, `${definition.name}.encoder.png`);
@@ -142,15 +145,10 @@ async function writeTier(
       await image.clone().webp({ quality: 92, effort: 6, smartSubsample: true }).toFile(fallbackPath);
       await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     } else if (definition.channels === 2) {
-      const rgb = Buffer.allocUnsafe(width * height * 3);
-      for (let pixel = 0; pixel < width * height; pixel++) {
-        rgb[pixel * 3] = resized[pixel * 2];
-        rgb[pixel * 3 + 1] = resized[pixel * 2 + 1];
-        rgb[pixel * 3 + 2] = 0;
-      }
+      const rgb = expandLogicalRgToRgb(resized, width, height);
       await sharp(rgb, { raw: { width, height, channels: 3 } })
-        .png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
-      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+        .png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
+      await image.clone().png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     } else {
       await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
       await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
@@ -332,7 +330,7 @@ if (writeGlobal) {
     localPath: 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.zip',
     authoringOnly: true,
     sourceDimensions: [16200, 8100],
-    transformations: ['body-fixed reprojection', 'deterministic geographic warp and recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'Lanczos3 tier resampling', 'BasisLZ and UASTC KTX2 encoding'],
+    transformations: ['body-fixed reprojection', 'deterministic geographic warp and recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'independent logical RG Lanczos3 tier resampling', 'truecolor fallback encoding', 'BasisLZ and UASTC KTX2 encoding'],
     bodies: ['veyra'], channels: ['albedo'],
   }];
   manifest.canonicalArtifacts = [heightArtifact, scatterArtifact];
