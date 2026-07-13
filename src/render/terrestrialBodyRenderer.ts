@@ -25,6 +25,7 @@ import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import { TerrestrialScatter, type SurfaceSampler } from './terrestrial/scatter';
 import { TerrestrialSurfaceEffects } from './terrestrial/surfaceEffects';
 import { evaluateRecipeHeight, recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
+import type { RenderDiagnosticsPort } from './renderDiagnostics';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
@@ -95,6 +96,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     private readonly descriptor: Readonly<BodyMaterialDescriptor>,
     private readonly caps: Readonly<RenderCaps>,
     readonly quality: QualityTier,
+    private readonly diagnostics?: RenderDiagnosticsPort,
   ) {
     this.bodyId = body.id;
     if (body.def.surfaceKind !== 'solid') throw new Error(`${body.id} is not a solid terrestrial body`);
@@ -137,6 +139,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       material: terrainMaterial,
       oceanEnabled: false,
       workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
+      diagnostics: this.diagnostics,
     });
     this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
     this.terrain.setShadowReceiver(this.quality !== 'low');
@@ -195,6 +198,11 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         frame.orientation,
         origin,
         frame.cameraBodyFixedVelocity,
+        {
+          simulationTime: frame.time,
+          altitudeMeters: frame.altitude,
+          terrainRequested: visibleBand,
+        },
       );
     } else {
       this.terrain.group.visible = false;
@@ -208,6 +216,24 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       frame.framePressure,
     );
     this.applyCoverage(snapshot.progress, prewarm);
+    this.diagnostics?.observeTransition?.({
+      simulationTime: frame.time,
+      bodyId: this.bodyId,
+      altitudeMeters: frame.altitude,
+      requestedPresentation: visibleBand ? 'terrain' : 'compact',
+      state: snapshot.state,
+      progress: snapshot.progress,
+      compactCoverage: snapshot.compactCoverage,
+      terrainCoverage: snapshot.terrainCoverage,
+      coverageReady: prewarm && this.terrain.coverageReady(),
+      gapCount: this.terrain.stats.coverageGaps,
+      prewarm,
+      visibleBand,
+      framePressure: frame.framePressure,
+      compactVisible: this.compact.visible,
+      terrainVisible: this.terrain.group.visible && this.terrainActive,
+      terrainVisibleChunks: this.terrainActive ? this.terrain.stats.visible : 0,
+    });
     this.updateSurfaceDetail(frame, prewarm && snapshot.progress > 0);
   }
 

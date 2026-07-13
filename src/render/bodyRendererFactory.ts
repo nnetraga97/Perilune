@@ -7,12 +7,14 @@ import type { BodyRenderer, QualityTier } from './bodyRenderer';
 import { LegacyBodyRenderer, type LegacyBodyRendererDependencies } from './legacyBodyRenderer';
 import { StarBodyRenderer } from './starBodyRenderer';
 import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
+import type { RenderDiagnosticsPort } from './renderDiagnostics';
 
 export interface BodyRendererCandidateOptions {
   readonly body: Body;
   readonly caps: Readonly<RenderCaps>;
   readonly quality: QualityTier;
   readonly legacyDependencies?: LegacyBodyRendererDependencies;
+  readonly diagnostics?: RenderDiagnosticsPort;
 }
 
 export function createBodyRendererCandidate(options: BodyRendererCandidateOptions): BodyRenderer {
@@ -25,7 +27,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
     case 'legacy':
       return new LegacyBodyRenderer(options.body, descriptor, options.caps, options.quality, options.legacyDependencies);
     case 'terrestrial':
-      return new TerrestrialBodyRenderer(options.body, descriptor, options.caps, options.quality);
+      return new TerrestrialBodyRenderer(options.body, descriptor, options.caps, options.quality, options.diagnostics);
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);
   }

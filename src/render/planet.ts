@@ -23,6 +23,7 @@ import {
   type TerrainChunkGeometryResult,
 } from './terrain/chunkGeometry';
 import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
 
 export { terrainGridIndices } from './terrain/chunkGeometry';
 
@@ -123,6 +124,54 @@ export interface PlanetRendererOptions {
   readonly oceanEnabled?: boolean;
   /** Ownership transfers to PlanetRenderer and is released by dispose(). */
   readonly workerPool?: TerrainChunkWorkerPool;
+  readonly diagnostics?: RenderDiagnosticsPort;
+  readonly now?: () => number;
+}
+
+export interface TerrainChunkKeyInfo {
+  readonly key: string;
+  readonly face: number;
+  readonly depth: number;
+  readonly u0: number;
+  readonly v0: number;
+  readonly parentKey: string | null;
+  readonly childKeys: readonly [string, string, string, string];
+}
+
+function formatChunkKey(face: number, depth: number, u0: number, v0: number): string {
+  return `${face}:${depth}:${u0.toFixed(6)}:${v0.toFixed(6)}`;
+}
+
+export function terrainChunkKeyInfo(key: string): TerrainChunkKeyInfo {
+  const [faceText, depthText, uText, vText] = key.split(':');
+  const face = Number(faceText);
+  const depth = Number(depthText);
+  const u0 = Number(uText);
+  const v0 = Number(vText);
+  if (!Number.isInteger(face) || !Number.isInteger(depth) || depth < 0 || !Number.isFinite(u0) || !Number.isFinite(v0)) {
+    throw new Error(`Invalid terrain chunk key: ${key}`);
+  }
+  const size = 2 / 2 ** depth;
+  const half = size / 2;
+  const childKeys = Object.freeze([
+    formatChunkKey(face, depth + 1, u0, v0),
+    formatChunkKey(face, depth + 1, u0 + half, v0),
+    formatChunkKey(face, depth + 1, u0, v0 + half),
+    formatChunkKey(face, depth + 1, u0 + half, v0 + half),
+  ]) as unknown as readonly [string, string, string, string];
+  let parentKey: string | null = null;
+  if (depth > 0) {
+    const parentDepth = depth - 1;
+    const parentSize = size * 2;
+    const parentU = -1 + Math.floor((u0 + 1 + 1e-7) / parentSize) * parentSize;
+    const parentV = -1 + Math.floor((v0 + 1 + 1e-7) / parentSize) * parentSize;
+    parentKey = formatChunkKey(face, parentDepth, parentU, parentV);
+  }
+  return Object.freeze({ key, face, depth, u0, v0, parentKey, childKeys });
+}
+
+export interface PlanetDiagnosticContext extends RenderDiagnosticContext {
+  readonly terrainRequested: boolean;
 }
 
 /**
@@ -191,6 +240,12 @@ export class PlanetRenderer {
   private readonly recipeSnapshot: TerrainChunkGeometryRequest['recipe'];
   private readonly paletteSnapshot: TerrainChunkGeometryRequest['palette'];
   private lastOverlapCount = 0;
+  private readonly diagnostics: RenderDiagnosticsPort | undefined;
+  private readonly now: () => number;
+  private readonly pendingStartedAt = new Map<string, number>();
+  private readonly installedGenerations = new Map<string, number>();
+  private lastWantedKeys = new Set<string>();
+  private diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: false };
   /** Stats for the perf overlay. */
   stats = {
     chunks: 0,
@@ -214,6 +269,8 @@ export class PlanetRenderer {
     this.maxDepth = Math.max(6, Math.min(16, Math.ceil(Math.log2(body.radius / 30))));
     this.material = options.material ?? new THREE.MeshLambertMaterial({ vertexColors: true });
     this.workerPool = options.workerPool ?? null;
+    this.diagnostics = options.diagnostics;
+    this.now = options.now ?? (() => performance.now());
     this.palette = {
       low: new THREE.Color(body.def.terrain.colorLow),
       mid: new THREE.Color(body.def.terrain.colorMid),
@@ -257,11 +314,19 @@ export class PlanetRenderer {
 
   setQuality(q: PlanetQuality): void {
     if (q === this.quality) return;
+    for (const [key, generation] of this.pendingChunks) this.terrainEvent('cancelled', key, generation, { reason: 'quality-change' });
     this.workerPool?.cancelGeneration(this.generation);
     if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
     this.generation++;
     this.pendingChunks.clear();
+    this.pendingStartedAt.clear();
+    this.installedGenerations.clear();
+    this.lastWantedKeys.clear();
     this.replacementChunks = new Map();
+    this.diagnostics?.recordDetailed({
+      subsystem: 'terrain', event: 'replacement-root-staging', severity: 'state',
+      data: { generation: this.generation },
+    }, { ...this.diagnosticContext, bodyId: this.body.id });
     this.quality = q;
   }
 
@@ -318,7 +383,9 @@ export class PlanetRenderer {
     orientation: QuaternionCoordinates,
     originWorld: VectorCoordinates,
     cameraBodyFixedVelocity: VectorCoordinates = { x: 0, y: 0, z: 0 },
+    diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: true },
   ): void {
+    this.diagnosticContext = diagnosticContext;
     this.frame++;
     this.buildsThisUpdate = 0;
     this.stats.visible = 0;
@@ -332,12 +399,16 @@ export class PlanetRenderer {
     if (this.workerPool) {
       const installStart = performance.now();
       for (const result of this.workerPool.drainCompleted()) {
+        this.terrainEvent('completed', result.jobKey, result.generation, { buildMs: result.buildMs });
         if (this.pendingChunks.get(result.jobKey) === result.generation) {
           this.pendingChunks.delete(result.jobKey);
+          this.pendingStartedAt.delete(result.jobKey);
         }
         if (result.generation === this.generation) {
           const target = this.replacementChunks ?? this.chunks;
           if (!target.has(result.jobKey)) this.installChunk(result, target);
+        } else {
+          this.terrainEvent('stale-completion', result.jobKey, result.generation, { currentGeneration: this.generation });
         }
       }
       this.commitReplacementIfReady();
@@ -419,6 +490,8 @@ export class PlanetRenderer {
     }
     this.stats.overlapChunks = this.lastOverlapCount;
 
+    this.observeWantedChanges(wanted);
+
     // Hide unneeded chunks, show wanted ones, place camera-relative.
     for (const chunk of this.chunks.values()) {
       const inUse = wanted.has(chunk.key);
@@ -457,6 +530,7 @@ export class PlanetRenderer {
     this.evictStale();
     this.stats.chunks = this.chunks.size;
     this.stats.geometryBytes = this.geometryBytes;
+    this.observeTerrainSample(wanted);
   }
 
   private selectNode(
@@ -540,16 +614,24 @@ export class PlanetRenderer {
 
   private requestChunk(key: string, node: QuadNode): void {
     const request = this.chunkRequest(key, node);
+    this.terrainEvent('request', key, request.generation);
+    this.pendingStartedAt.set(key, this.now());
     if (!this.workerPool) {
       const installStart = performance.now();
       this.installChunk(buildTerrainChunkGeometry(request), this.replacementChunks ?? this.chunks);
+      this.pendingStartedAt.delete(key);
       this.stats.installMs += performance.now() - installStart;
       return;
     }
     const requestGeneration = request.generation;
     this.pendingChunks.set(key, requestGeneration);
+    this.terrainEvent('queued', key, requestGeneration, this.workerCounts());
     void this.workerPool.submit(request).catch(() => {
-      if (this.pendingChunks.get(key) === requestGeneration) this.pendingChunks.delete(key);
+      if (this.pendingChunks.get(key) === requestGeneration) {
+        this.pendingChunks.delete(key);
+        this.pendingStartedAt.delete(key);
+        this.terrainEvent('failed', key, requestGeneration);
+      }
     });
   }
 
@@ -592,6 +674,11 @@ export class PlanetRenderer {
     const origin = new Vec3(...result.origin);
     target.set(result.jobKey, { key: result.jobKey, mesh, origin, lastUsed: this.frame });
     this.geometryBytes += geometryByteLength(geo);
+    this.installedGenerations.set(result.jobKey, result.generation);
+    this.terrainEvent('installed', result.jobKey, result.generation, {
+      geometryBytes: geometryByteLength(geo),
+      replacement: target === this.replacementChunks,
+    });
   }
 
   private commitReplacementIfReady(): void {
@@ -603,6 +690,10 @@ export class PlanetRenderer {
     this.disposeChunks(this.chunks);
     this.chunks = replacement;
     this.replacementChunks = null;
+    this.diagnostics?.recordDetailed({
+      subsystem: 'terrain', event: 'replacement-root-commit', severity: 'state',
+      data: { generation: this.generation, rootCount: FACES.length },
+    }, { ...this.diagnosticContext, bodyId: this.body.id });
   }
 
   private disposeChunks(chunks: Map<string, Chunk>): void {
@@ -610,6 +701,8 @@ export class PlanetRenderer {
       this.group.remove(chunk.mesh);
       this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
       chunk.mesh.geometry.dispose();
+      this.terrainEvent('evicted', chunk.key, this.installedGenerations.get(chunk.key) ?? this.generation, { reason: 'dispose-set' });
+      this.installedGenerations.delete(chunk.key);
     }
     chunks.clear();
   }
@@ -625,13 +718,19 @@ export class PlanetRenderer {
       this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
       chunk.mesh.geometry.dispose();
       this.chunks.delete(chunk.key);
+      this.terrainEvent('evicted', chunk.key, this.installedGenerations.get(chunk.key) ?? this.generation, { reason: 'cache' });
+      this.installedGenerations.delete(chunk.key);
     }
   }
 
   dispose(): void {
+    for (const [key, generation] of this.pendingChunks) this.terrainEvent('cancelled', key, generation, { reason: 'renderer-dispose' });
     this.workerPool?.cancelGeneration(this.generation);
     this.workerPool?.dispose();
     this.pendingChunks.clear();
+    this.pendingStartedAt.clear();
+    this.installedGenerations.clear();
+    this.lastWantedKeys.clear();
     this.disposeChunks(this.chunks);
     if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
     this.replacementChunks = null;
@@ -639,5 +738,107 @@ export class PlanetRenderer {
     this.material.dispose();
     this.oceanMaterial?.dispose();
     if (this.ocean) this.ocean.geometry.dispose();
+  }
+
+  private terrainEvent(
+    event: string,
+    key: string,
+    generation: number,
+    data: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    if (!this.diagnostics) return;
+    let info: TerrainChunkKeyInfo | null = null;
+    try { info = terrainChunkKeyInfo(key); } catch { /* Preserve renderer behavior for diagnostic parsing failures. */ }
+    this.diagnostics.observeTerrainEvent?.({
+      ...this.diagnosticContext,
+      bodyId: this.body.id,
+      event,
+      key,
+      face: info?.face,
+      depth: info?.depth,
+      parentKey: info?.parentKey,
+      generation,
+      data,
+    });
+  }
+
+  private workerCounts(): Readonly<Record<string, number>> {
+    const timings = this.workerPool?.timings();
+    return {
+      workers: timings?.workers ?? 0,
+      activeWorkers: timings?.active ?? 0,
+      queuedWorkers: timings?.pending ?? 0,
+    };
+  }
+
+  private observeWantedChanges(wanted: ReadonlySet<string>): void {
+    if (!this.diagnostics?.detailed) {
+      this.lastWantedKeys = new Set(wanted);
+      return;
+    }
+    for (const key of wanted) {
+      if (!this.lastWantedKeys.has(key)) this.terrainEvent('visibility-on', key, this.generation);
+    }
+    for (const key of this.lastWantedKeys) {
+      if (wanted.has(key)) continue;
+      this.terrainEvent('visibility-off', key, this.generation);
+      const info = terrainChunkKeyInfo(key);
+      const appearingChildren = info.childKeys.filter((child) => wanted.has(child));
+      if (appearingChildren.length === 0) continue;
+      const installedChildren = info.childKeys.filter((child) => this.chunks.has(child));
+      this.diagnostics.recordDetailed({
+        subsystem: 'terrain', event: 'parent-children-replacement', severity: 'state',
+        data: {
+          parentKey: key,
+          child0: info.childKeys[0], child1: info.childKeys[1],
+          child2: info.childKeys[2], child3: info.childKeys[3],
+          appearingChildren: appearingChildren.length,
+          installedChildren: installedChildren.length,
+          generation: this.generation,
+        },
+      }, { ...this.diagnosticContext, bodyId: this.body.id });
+      if (installedChildren.length !== 4) {
+        this.diagnostics.anomaly('terrain-parent-hidden-before-four-children-installed', 'terrain', {
+          parentKey: key,
+          installedChildren: installedChildren.length,
+          generation: this.generation,
+        }, { ...this.diagnosticContext, bodyId: this.body.id });
+      }
+    }
+    this.lastWantedKeys = new Set(wanted);
+  }
+
+  private observeTerrainSample(wanted: ReadonlySet<string>): void {
+    if (!this.diagnostics) return;
+    const now = this.now();
+    let oldestPendingAgeMs = 0;
+    for (const started of this.pendingStartedAt.values()) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, now - started);
+    const visibleByDepth: Record<string, number> = {};
+    for (const key of wanted) {
+      const depth = terrainChunkKeyInfo(key).depth;
+      visibleByDepth[String(depth)] = (visibleByDepth[String(depth)] ?? 0) + 1;
+    }
+    const timings = this.workerPool?.timings();
+    this.diagnostics.observeTerrainSample?.({
+      ...this.diagnosticContext,
+      bodyId: this.body.id,
+      generation: this.generation,
+      visible: this.stats.visible,
+      chunks: this.chunks.size,
+      triangles: this.stats.triangles,
+      geometryBytes: this.geometryBytes,
+      pending: this.pendingChunks.size,
+      oldestPendingAgeMs,
+      coverageGaps: this.stats.coverageGaps,
+      coverageReady: this.coverageReady(),
+      replacementRoots: this.replacementChunks?.size ?? 0,
+      workers: timings?.workers ?? 0,
+      activeWorkers: timings?.active ?? 0,
+      queuedWorkers: timings?.pending ?? 0,
+      scheduleMs: this.stats.scheduleMs,
+      installMs: this.stats.installMs,
+      buildP99Ms: timings?.buildP99Ms ?? 0,
+      visibleByDepth,
+    });
   }
 }

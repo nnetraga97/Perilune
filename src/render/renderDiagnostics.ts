@@ -64,6 +64,10 @@ export interface RenderDiagnosticsPort {
     context?: Readonly<RenderDiagnosticContext>,
   ): void;
   noteRendererBoundary(data?: RenderDiagnosticData, context?: Readonly<RenderDiagnosticContext>): void;
+  observeTransition?(observation: Readonly<TransitionDiagnosticObservation>): void;
+  observeTerrainEvent?(observation: Readonly<TerrainDiagnosticEvent>): void;
+  observeTerrainSample?(observation: Readonly<TerrainDiagnosticSample>): void;
+  observeCloudShell?(observation: Readonly<CloudShellDiagnosticObservation>): void;
 }
 
 export interface TransitionDiagnosticObservation extends RenderDiagnosticContext {

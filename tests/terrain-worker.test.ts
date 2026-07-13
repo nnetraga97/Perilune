@@ -15,9 +15,24 @@ import {
   type WorkerLike,
 } from '../src/render/terrain/chunkWorkerPool';
 import { handleTerrainChunkWorkerRequest } from '../src/render/terrain/chunkWorker';
-import { PLANET_QUALITY, PlanetRenderer, type PlanetQuality } from '../src/render/planet';
+import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo, type PlanetQuality } from '../src/render/planet';
 
 const veyra = new GameState().universe.get('veyra');
+
+describe('terrain chunk diagnostic keys', () => {
+  it('derives stable parent and four immediate-child keys for roots and deeper chunks', () => {
+    const root = terrainChunkKeyInfo('0:0:-1.000000:-1.000000');
+    expect(root.parentKey).toBeNull();
+    expect(root.childKeys).toEqual([
+      '0:1:-1.000000:-1.000000', '0:1:0.000000:-1.000000',
+      '0:1:-1.000000:0.000000', '0:1:0.000000:0.000000',
+    ]);
+    const deeper = terrainChunkKeyInfo('5:3:-0.500000:0.250000');
+    expect(deeper.parentKey).toBe('5:2:-0.500000:0.000000');
+    expect(deeper.childKeys).toHaveLength(4);
+    expect(() => terrainChunkKeyInfo('invalid')).toThrow(/invalid terrain chunk key/i);
+  });
+});
 
 function request(overrides: Partial<TerrainChunkGeometryRequest> = {}): TerrainChunkGeometryRequest {
   return {

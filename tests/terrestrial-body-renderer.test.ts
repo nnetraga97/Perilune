@@ -7,6 +7,7 @@ import type { RenderCaps } from '../src/render/context';
 import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
+import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 
 const caps: RenderCaps = {
   backend: 'webgl2',
@@ -58,6 +59,23 @@ function frame(radius: number, overrides: Partial<BodyRenderFrame> = {}): BodyRe
 }
 
 describe('TerrestrialBodyRenderer integration', () => {
+  it('reports the existing compact-to-terrain presentation without changing its result', () => {
+    let now = 0;
+    const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => now++ });
+    const veyra = body('veyra');
+    const renderer = createBodyRendererCandidate({
+      body: veyra, caps, quality: 'medium', diagnostics,
+    }) as TerrestrialBodyRenderer;
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
+    const states = diagnostics.snapshot().entries
+      .filter((entry) => entry.event === 'presentation-state')
+      .map((entry) => entry.data.state);
+    expect(states).toEqual(['fading', 'terrain']);
+    expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 1 });
+    renderer.dispose();
+  });
+
   it('selects only Veyra explicitly while retaining legacy relatives', () => {
     const veyraRenderer = createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' });
     const vessRenderer = createBodyRendererCandidate({ body: body('vess'), caps, quality: 'medium' });
