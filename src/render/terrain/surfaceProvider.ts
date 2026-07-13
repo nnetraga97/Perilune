@@ -43,6 +43,7 @@ export interface PlanetSurfaceProvider {
   readonly displacementBounds: TerrainRecipeBounds;
   readonly buildSnapshot: TerrainBuildSnapshot;
 
+  tile(id: Readonly<TerrainTileId>): TerrainTileDescriptor;
   rootTile(face: CubeFace): TerrainTileDescriptor;
   children(tile: Readonly<TerrainTileDescriptor>): readonly [
     TerrainTileDescriptor,
@@ -180,6 +181,7 @@ export function createBodySurfaceProvider(
     generation: options.generation,
     displacementBounds,
     buildSnapshot,
+    tile: descriptor,
     rootTile: (face: CubeFace) => descriptor(createTerrainTileId(face, 0, 0, 0)),
     children: (tile: Readonly<TerrainTileDescriptor>) => {
       if (tile.id.depth >= maximumDepth) {
