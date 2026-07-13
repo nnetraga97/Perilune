@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { Body } from '../sim/universe';
 import type { BodyRenderer, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 import { renderFailureKey, RenderFailureTracker, type RenderFailurePhase, type RenderFailureStats } from './renderFailures';
+import { normalizeDiagnosticError, type RenderDiagnosticsPort } from './renderDiagnostics';
 
 export interface LoadedRendererAssets {
   /** Owns the lifetime of the borrowed textures exposed through pack. */
@@ -96,6 +97,7 @@ export interface BodyRendererManagerOptions extends TransactionBoundaries {
   readonly ledger: RendererResourceLedger;
   readonly failures?: RenderFailureTracker;
   readonly now?: () => number;
+  readonly diagnostics?: RenderDiagnosticsPort;
 }
 
 interface CommittedRenderer {
@@ -105,6 +107,7 @@ interface CommittedRenderer {
 }
 
 export class BodyRendererManager {
+  private static nextIdentity = 1;
   private quality: QualityTier;
   private committed: CommittedRenderer | null = null;
   private candidate: BodyRenderer | null = null;
@@ -117,6 +120,7 @@ export class BodyRendererManager {
   private readonly now: () => number;
   private transactionStartedAt: number | null = null;
   private lastTransitionMs = 0;
+  private readonly identity = BodyRendererManager.nextIdentity++;
 
   constructor(private readonly options: BodyRendererManagerOptions) {
     this.quality = options.quality;
@@ -151,6 +155,16 @@ export class BodyRendererManager {
     renderer.root.visible = true;
     this.options.scene.add(renderer.root);
     this.committed = { body, renderer, assets };
+    this.record('renderer-initial-adopted', 'state', body, renderer.quality, renderer, {
+      activeRendererRoots: 1,
+      generation: this.generation,
+    });
+    this.options.diagnostics?.noteRendererBoundary({
+      managerIdentity: this.identity,
+      rendererIdentity: renderer.root.uuid,
+      quality: renderer.quality,
+      reason: 'initial-adoption',
+    }, { bodyId: body.id });
     replaced?.dispose();
   }
 
@@ -188,10 +202,14 @@ export class BodyRendererManager {
     this.disposed = true;
     this.generation++;
     this.finishTransition();
-    if (this.candidate) this.candidate.dispose();
+    if (this.candidate) {
+      this.record('candidate-disposed', 'state', this.committed?.body ?? null, this.candidate.quality, this.candidate, { reason: 'manager-dispose' });
+      this.candidate.dispose();
+    }
     this.candidate = null;
     if (!this.committed) return;
     this.options.scene.remove(this.committed.renderer.root);
+    this.record('renderer-disposed', 'state', this.committed.body, this.committed.renderer.quality, this.committed.renderer, { reason: 'manager-dispose' });
     this.committed.renderer.dispose();
     this.options.ledger.release(this.ledgerOwner, this.committed.assets);
     this.committed.assets.dispose();
@@ -214,24 +232,41 @@ export class BodyRendererManager {
     renderer.root.visible = false;
     this.candidate = renderer;
     this.transactionStartedAt = this.now();
+    this.record('candidate-created', 'state', body, tier, renderer, { generation });
     let loaded: LoadedRendererAssets | null = null;
     let phase: RenderFailurePhase = 'load';
     try {
+      this.record('asset-load-start', 'state', body, tier, renderer, { generation });
       loaded = await this.boundaries.loadAssets(body, tier);
       assertCurrent();
       renderer.stageAssets(loaded.pack);
+      this.record('assets-staged', 'state', body, tier, renderer, {
+        generation,
+        assetPack: loaded.pack !== null,
+        gpuBytes: loaded.gpuBytes,
+        transientBytes: loaded.transientBytes,
+      });
       assertCurrent();
       phase = 'coverage';
       await this.boundaries.prepareCandidate(renderer, body, tier);
+      this.record('candidate-prepared', 'state', body, tier, renderer, { generation });
       assertCurrent();
       phase = 'compile';
+      this.record('compile-start', 'state', body, tier, renderer, { generation });
       await this.boundaries.compileCandidate(renderer, body, tier);
+      this.record('compile-success', 'state', body, tier, renderer, { generation });
       assertCurrent();
       phase = 'coverage';
       await this.boundaries.awaitCoverage(renderer, body, tier);
+      this.record('coverage-ready', 'state', body, tier, renderer, { generation });
       assertCurrent();
       phase = 'budget';
       this.options.ledger.assertCanStage(tier, loaded);
+      this.record('budget-accepted', 'state', body, tier, renderer, {
+        generation,
+        gpuBytes: loaded.gpuBytes,
+        transientBytes: loaded.transientBytes,
+      });
 
       const previous = this.committed;
       const replacedAssets = this.options.ledger.commit(this.ledgerOwner, body.id, tier, loaded);
@@ -244,15 +279,41 @@ export class BodyRendererManager {
       renderer.root.visible = true;
       this.committed = { body, renderer, assets: loaded };
       this.candidate = null;
+      this.record('renderer-committed', 'state', body, tier, renderer, {
+        generation,
+        previousRendererIdentity: previous?.renderer.root.uuid ?? null,
+        activeRendererRoots: previous ? 2 : 1,
+        transactionDurationMs: this.transactionStartedAt === null ? 0 : Math.max(0, this.now() - this.transactionStartedAt),
+      });
+      this.options.diagnostics?.noteRendererBoundary({
+        managerIdentity: this.identity,
+        rendererIdentity: renderer.root.uuid,
+        quality: tier,
+        reason: 'transaction-commit',
+      }, { bodyId: body.id });
       if (previous) {
         this.options.scene.remove(previous.renderer.root);
         previous.renderer.dispose();
         if (!loaded.flightScale) this.options.ledger.release(this.ledgerOwner, previous.assets);
         if (previous.assets !== replacedAssets) previous.assets.dispose();
+        this.record('previous-disposed', 'state', body, tier, renderer, {
+          generation,
+          previousRendererIdentity: previous.renderer.root.uuid,
+          activeRendererRoots: 1,
+        });
       }
       if (replacedAssets) replacedAssets.dispose();
       return renderer;
     } catch (error) {
+      const normalized = normalizeDiagnosticError(error);
+      const failureKey = renderFailureKey(error);
+      this.record('renderer-transaction-failed', 'failure', body, tier, renderer, {
+        generation,
+        phase: failureKey?.phase ?? phase,
+        channel: failureKey?.channel ?? 'renderer',
+        errorName: normalized.name,
+        errorMessage: normalized.message,
+      });
       this.failures.record(renderFailureKey(error) ?? { body: body.id, tier, channel: 'renderer', phase }, error);
       if (this.candidate === renderer) renderer.dispose();
       loaded?.dispose();
@@ -267,5 +328,28 @@ export class BodyRendererManager {
     if (this.transactionStartedAt === null) return;
     this.lastTransitionMs = Math.max(0, this.now() - this.transactionStartedAt);
     this.transactionStartedAt = null;
+  }
+
+  private record(
+    event: string,
+    severity: 'state' | 'failure',
+    body: Body | null,
+    tier: QualityTier,
+    renderer: BodyRenderer,
+    data: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    this.options.diagnostics?.record({
+      subsystem: 'renderer',
+      event,
+      severity,
+      data: {
+        managerIdentity: this.identity,
+        body: body?.id ?? renderer.bodyId,
+        tier,
+        candidateIdentity: renderer.root.uuid,
+        committedIdentity: this.committed?.renderer.root.uuid ?? null,
+        ...data,
+      },
+    }, { bodyId: body?.id ?? renderer.bodyId });
   }
 }

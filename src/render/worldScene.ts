@@ -163,6 +163,7 @@ export class WorldScene {
       transcoderPath: `${baseUrl}basis/`,
       resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,
       loadConventional: (path) => textureLoader.loadAsync(path),
+      diagnostics: this.diagnostics,
     });
     this.camera = new THREE.PerspectiveCamera(
       62,
@@ -322,6 +323,7 @@ export class WorldScene {
         if (!candidate.ready) throw new Error(`${candidate.bodyId} renderer coverage is not ready`);
       },
       ledger: this.rendererLedger,
+      diagnostics: this.diagnostics,
     });
     this.bodyRendererManagers.set(body.id, manager);
     const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality });

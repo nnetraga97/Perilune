@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { QualityTier } from './bodyRenderer';
 import { RenderBoundaryError } from './renderFailures';
 import { canonicalJson, sha256Utf8 } from './checkedManifestDigest';
+import { normalizeDiagnosticError, type RenderDiagnosticsPort } from './renderDiagnostics';
 
 export interface PlanetAssetChannel {
   readonly name: string;
@@ -153,6 +154,7 @@ export interface PlanetAssetLoaderOptions {
   readonly transcoderPath: string;
   readonly resolveAssetUrl: (manifestPath: string) => string;
   readonly loadConventional: (path: string) => Promise<THREE.Texture>;
+  readonly diagnostics?: RenderDiagnosticsPort;
 }
 
 export interface LoadedPlanetPack {
@@ -179,24 +181,57 @@ export class PlanetAssetLoader {
     if (this.disposed) throw new Error('PlanetAssetLoader is disposed');
     const pack = this.options.manifest.packs.find((entry) => entry.bodyId === bodyId && entry.tier === tier);
     if (!pack) throw new Error(`No validator-approved planet pack for ${bodyId}/${tier}`);
+    this.options.diagnostics?.record({
+      subsystem: 'assets', event: 'asset-pack-load-start', severity: 'state',
+      data: { body: bodyId, tier, manifestDigest: this.options.manifest.digest, width: pack.width, height: pack.height },
+    }, { bodyId });
     let compressed = this.options.compressedSupported;
     try {
       this.options.ktx2.detectSupport(this.options.renderer);
     } catch {
       compressed = false;
+      this.options.diagnostics?.record({
+        subsystem: 'assets', event: 'compressed-capability-fallback', severity: 'state',
+        data: { body: bodyId, tier, reason: 'detect-support-failed' },
+      }, { bodyId });
     }
     const textures = new Map<string, THREE.Texture>();
     let selectedGpuBytes = 0;
     try {
       for (const channel of pack.channels) {
         try {
+          const selectedPath = compressed ? channel.packagePath : channel.fallbackPath;
+          this.options.diagnostics?.record({
+            subsystem: 'assets', event: 'asset-channel-selected', severity: 'state',
+            data: {
+              body: bodyId, tier, channel: channel.name, selectedPath,
+              selectedType: compressed ? 'ktx2' : 'conventional',
+              fallback: !compressed, width: pack.width, height: pack.height,
+              selectedGpuBytes: compressed ? channel.gpuBytes : channel.fallbackGpuBytes,
+            },
+          }, { bodyId });
           const texture = compressed
             ? await this.options.ktx2.loadAsync(this.options.resolveAssetUrl(channel.packagePath))
             : await this.options.loadConventional(this.options.resolveAssetUrl(channel.fallbackPath));
           texture.colorSpace = channel.name === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
           textures.set(channel.name, texture);
           selectedGpuBytes += compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
+          this.options.diagnostics?.record({
+            subsystem: 'assets', event: 'asset-channel-loaded', severity: 'state',
+            data: {
+              body: bodyId, tier, channel: channel.name, selectedPath,
+              selectedType: compressed ? 'ktx2' : 'conventional',
+              textureIdentity: texture.uuid, colorSpace: texture.colorSpace,
+              width: pack.width, height: pack.height,
+              selectedGpuBytes: compressed ? channel.gpuBytes : channel.fallbackGpuBytes,
+            },
+          }, { bodyId });
         } catch (error) {
+          const normalized = normalizeDiagnosticError(error);
+          this.options.diagnostics?.record({
+            subsystem: 'assets', event: 'asset-channel-failed', severity: 'failure',
+            data: { body: bodyId, tier, channel: channel.name, errorName: normalized.name, errorMessage: normalized.message },
+          }, { bodyId });
           throw new RenderBoundaryError(
             { body: bodyId, tier, channel: channel.name, phase: 'load' },
             `${bodyId}/${tier}/${channel.name} asset load failed`,
@@ -208,11 +243,24 @@ export class PlanetAssetLoader {
       for (const texture of textures.values()) texture.dispose();
       throw error;
     }
+    this.options.diagnostics?.record({
+      subsystem: 'assets', event: 'asset-pack-loaded', severity: 'state',
+      data: { body: bodyId, tier, manifestDigest: this.options.manifest.digest, gpuBytes: selectedGpuBytes },
+    }, { bodyId });
+    let packDisposed = false;
     return {
       pack,
       gpuBytes: selectedGpuBytes,
       textures,
-      dispose: () => { for (const texture of textures.values()) texture.dispose(); },
+      dispose: () => {
+        if (packDisposed) return;
+        packDisposed = true;
+        this.options.diagnostics?.record({
+          subsystem: 'assets', event: 'asset-pack-disposed', severity: 'state',
+          data: { body: bodyId, tier, manifestDigest: this.options.manifest.digest, gpuBytes: selectedGpuBytes },
+        }, { bodyId });
+        for (const texture of textures.values()) texture.dispose();
+      },
     };
   }
 

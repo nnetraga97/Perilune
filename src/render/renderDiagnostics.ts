@@ -63,6 +63,7 @@ export interface RenderDiagnosticsPort {
     data?: RenderDiagnosticData,
     context?: Readonly<RenderDiagnosticContext>,
   ): void;
+  noteRendererBoundary(data?: RenderDiagnosticData, context?: Readonly<RenderDiagnosticContext>): void;
 }
 
 export interface TransitionDiagnosticObservation extends RenderDiagnosticContext {

@@ -15,6 +15,7 @@ import { RenderBoundaryError, RenderFailureTracker } from '../src/render/renderF
 import { canonicalJson, sha256Utf8 } from '../src/render/checkedManifestDigest';
 import { WorldScene } from '../src/render/worldScene';
 import checkedPlanetArtifact from '../src/generated/checked-planet-manifest.json';
+import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 
 function candidate(bodyId: string, quality: QualityTier = 'medium') {
   const root = new THREE.Group();
@@ -101,6 +102,30 @@ function managerHarness(overrides: Partial<ConstructorParameters<typeof BodyRend
 }
 
 describe('transactional body renderer replacement', () => {
+  test('records the successful transaction phases in causal order', async () => {
+    let now = 0;
+    const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => now++ });
+    const { manager } = managerHarness({ diagnostics });
+
+    await manager.ensure(body('veyra'));
+
+    const events = diagnostics.snapshot().entries
+      .filter((entry) => entry.subsystem === 'renderer')
+      .map((entry) => entry.event);
+    expect(events).toEqual([
+      'candidate-created',
+      'asset-load-start',
+      'assets-staged',
+      'candidate-prepared',
+      'compile-start',
+      'compile-success',
+      'coverage-ready',
+      'budget-accepted',
+      'renderer-committed',
+      'renderer-boundary',
+    ]);
+  });
+
   test('stages the typed runtime pack before preparation and compilation', async () => {
     const order: string[] = [];
     const pack = runtimePack('veyra', 'medium');
@@ -511,6 +536,7 @@ describe('planet asset loading boundary', () => {
 
   test('detects KTX support before loading and uses the declared conventional fallback when unavailable', async () => {
     const order: string[] = [];
+    const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => 1 });
     const ktx2 = {
       setTranscoderPath: vi.fn().mockReturnThis(),
       detectSupport: vi.fn(() => { order.push('detect'); return ktx2; }),
@@ -529,6 +555,7 @@ describe('planet asset loading boundary', () => {
       resolveAssetUrl: (path) => `./planets/${path}`,
       ktx2,
       loadConventional,
+      diagnostics,
     });
 
     const loaded = await loader.load('veyra', 'medium');
@@ -543,6 +570,12 @@ describe('planet asset loading boundary', () => {
     expect(loaded.gpuBytes).toBe(120);
     expect(loaded.textures.get('albedo')?.colorSpace).toBe(THREE.SRGBColorSpace);
     expect(loaded.textures.get('normal')?.colorSpace).toBe(THREE.NoColorSpace);
+    expect(diagnostics.snapshot().entries
+      .filter((entry) => entry.event === 'asset-channel-selected')
+      .map((entry) => entry.data)).toEqual([
+      expect.objectContaining({ channel: 'albedo', selectedType: 'conventional', fallback: true }),
+      expect.objectContaining({ channel: 'normal', selectedType: 'conventional', fallback: true }),
+    ]);
     loader.dispose();
     loader.dispose();
     expect(ktx2.dispose).toHaveBeenCalledOnce();
