@@ -51,6 +51,9 @@ export class CoverageTransition {
     const delta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
     if (!this.requested) return this.requestCompact();
     if (!coverageReady) {
+      // Once the committed terrain presentation owns coverage, ordinary
+      // streaming churn cannot re-expose the compact sphere underneath it.
+      if (this.state === 'terrain') return this.snapshot();
       this.state = 'prewarming';
       this.fadeElapsed = 0;
       this.fadeDuration = this.normalDurationSeconds;

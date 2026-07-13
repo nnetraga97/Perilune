@@ -69,11 +69,13 @@ describe('TerrestrialBodyRenderer integration', () => {
       body: veyra, caps, quality: 'medium', diagnostics,
     }) as TerrestrialBodyRenderer;
     renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
     renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
     const states = diagnostics.snapshot().entries
       .filter((entry) => entry.event === 'presentation-state')
       .map((entry) => entry.data.state);
-    expect(states).toEqual(['fading', 'terrain']);
+    expect(states).toEqual(['prewarming', 'fading', 'terrain']);
     expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 1 });
     renderer.dispose();
   });
@@ -113,6 +115,8 @@ describe('TerrestrialBodyRenderer integration', () => {
     renderer.stageAssets(pack('low'));
     renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
     renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 1 });
     const compact = renderer.root.getObjectByName('terrestrial-compact:veyra')!;

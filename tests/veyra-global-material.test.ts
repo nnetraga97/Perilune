@@ -22,6 +22,21 @@ function texture(): THREE.DataTexture {
 }
 
 describe('Veyra global coordinates and material', () => {
+  const warmTerrain = (renderer: PlanetRenderer): THREE.Mesh[] => {
+    for (let frame = 0; frame < 4; frame++) {
+      renderer.update(
+        { x: veyra.radius * 100, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0, w: 1 },
+        { x: 0, y: 0, z: 0 },
+      );
+    }
+    const meshes: THREE.Mesh[] = [];
+    renderer.engine.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) meshes.push(child);
+    });
+    return meshes;
+  };
+
   it('uses north-at-row-zero coordinates and remains adjacent at the longitude seam', () => {
     expect(bodyFixedUv({ x: 0, y: 0, z: 1 })).toEqual({ u: 0, v: 0 });
     expect(bodyFixedUv({ x: 0, y: 0, z: -1 })).toEqual({ u: 0, v: 1 });
@@ -85,13 +100,8 @@ describe('Veyra global coordinates and material', () => {
     const material = createTerrestrialGlobalMaterial(null, descriptor);
     const dispose = vi.spyOn(material, 'dispose');
     const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, { material, oceanEnabled: false });
-    const requestChunk = (renderer as unknown as { requestChunk(key: string, node: unknown): void }).requestChunk.bind(renderer);
-    requestChunk('test', {
-      face: 0, depth: 0, u0: -1, v0: -1, size: 2,
-      centerDir: new Vec3(1, 0, 0), worldSize: veyra.radius * 2,
-    });
-    const meshes = renderer.group.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
-    expect(meshes).toHaveLength(1);
+    const meshes = warmTerrain(renderer);
+    expect(meshes.length).toBeGreaterThanOrEqual(6);
     expect(meshes[0].material).toBe(material);
     expect(meshes[0].geometry.getAttribute('bodyDirection').count)
       .toBe(meshes[0].geometry.getAttribute('position').count);
@@ -103,14 +113,7 @@ describe('Veyra global coordinates and material', () => {
 
   it('installs a per-vertex surface altitude attribute matching the evaluator', () => {
     const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, { oceanEnabled: false });
-    const requestChunk = (renderer as unknown as { requestChunk(key: string, node: unknown): void }).requestChunk.bind(renderer);
-    // A deep, small chunk keeps chunk-local f32 positions precise, so the
-    // reconstructed altitude can be checked tightly against the evaluator.
-    requestChunk('alt', {
-      face: 2, depth: 6, u0: 0, v0: 0, size: 2 / 64,
-      centerDir: new Vec3(0, 1, 0), worldSize: veyra.radius / 64,
-    });
-    const mesh = renderer.group.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh)!;
+    const mesh = warmTerrain(renderer)[0];
     const altitude = mesh.geometry.getAttribute('surfaceAltitude');
     const direction = mesh.geometry.getAttribute('bodyDirection');
     expect(altitude.count).toBe(direction.count);

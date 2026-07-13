@@ -160,18 +160,24 @@ export function createBodySurfaceProvider(
       return curvatureError + heightError;
     }),
   );
+  const descriptorCache = new Map<string, TerrainTileDescriptor>();
 
   const descriptor = (id: Readonly<TerrainTileId>): TerrainTileDescriptor => {
     const validatedId = createTerrainTileId(id.face, id.depth, id.x, id.y);
     if (validatedId.depth > maximumDepth) {
       throw new Error(`Terrain tile depth ${validatedId.depth} exceeds provider maximum ${maximumDepth}`);
     }
-    return Object.freeze({
+    const key = terrainTileKey(validatedId);
+    const cached = descriptorCache.get(key);
+    if (cached) return cached;
+    const created = Object.freeze({
       id: validatedId,
-      key: terrainTileKey(validatedId),
+      key,
       uvBounds: terrainTileUvBounds(validatedId),
       geometricErrorMeters: errors[validatedId.depth],
     });
+    descriptorCache.set(key, created);
+    return created;
   };
 
   return Object.freeze({

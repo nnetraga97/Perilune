@@ -278,7 +278,11 @@ export class WorldScene {
       scene: this.scene,
       quality: this.quality,
       createCandidate: (candidate, tier) => createBodyRendererCandidate({
-        body: candidate, caps: this.context.caps, quality: tier, diagnostics: this.diagnostics,
+        body: candidate,
+        caps: this.context.caps,
+        quality: tier,
+        diagnostics: this.diagnostics,
+        activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(tier),
       }),
       loadAssets: async (candidateBody, tier) => {
         if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
@@ -327,7 +331,13 @@ export class WorldScene {
       diagnostics: this.diagnostics,
     });
     this.bodyRendererManagers.set(body.id, manager);
-    const renderer = createBodyRendererCandidate({ body, caps: this.context.caps, quality: this.quality, diagnostics: this.diagnostics });
+    const renderer = createBodyRendererCandidate({
+      body,
+      caps: this.context.caps,
+      quality: this.quality,
+      diagnostics: this.diagnostics,
+      activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(this.quality),
+    });
     const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
       pack: null,

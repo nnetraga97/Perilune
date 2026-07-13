@@ -31,14 +31,14 @@ describe('coverage-safe compact-to-terrain transition', () => {
     expect(run([0.1, 0.099], true).state).toBe('fading');
   });
 
-  it('never exceeds the hard maximum and restores compact coverage on a coverage failure', () => {
+  it('never exceeds the hard maximum and does not roll back committed terrain for streaming churn', () => {
     const transition = new CoverageTransition({ normalDurationSeconds: 10, pressureDurationSeconds: 5 });
     transition.requestTerrain();
     transition.update(0, true, false);
     expect(transition.update(1.49, true, false).state).toBe('fading');
     expect(transition.update(0.01, true, false).state).toBe('terrain');
     expect(transition.update(0, false, false)).toEqual({
-      state: 'prewarming', compactCoverage: 1, terrainCoverage: 0, progress: 0,
+      state: 'terrain', compactCoverage: 0, terrainCoverage: 1, progress: 1,
     });
   });
 
@@ -71,10 +71,14 @@ describe('coverage-safe compact-to-terrain transition', () => {
 
   it('does not declare terrain ready while any visible coverage gap remains', () => {
     const renderer = new PlanetRenderer(new GameState().universe.get('veyra'));
-    renderer.stats.visible = 4;
-    renderer.stats.coverageGaps = 1;
     expect(renderer.coverageReady()).toBe(false);
-    renderer.stats.coverageGaps = 0;
+    for (let frame = 0; frame < 4; frame++) {
+      renderer.update(
+        { x: renderer.body.radius * 2, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0, w: 1 },
+        { x: 0, y: 0, z: 0 },
+      );
+    }
     expect(renderer.coverageReady()).toBe(true);
     renderer.dispose();
   });

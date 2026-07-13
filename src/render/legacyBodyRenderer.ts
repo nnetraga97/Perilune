@@ -4,13 +4,20 @@ import type { Quat } from '../core/quat';
 import type { RenderCaps } from './context';
 import type { BodyMaterialDescriptor } from './bodyMaterial';
 import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
-import { PLANET_QUALITY, PlanetRenderer } from './planet';
+import { PLANET_QUALITY, PlanetRenderer, type PlanetDiagnosticContext, type PlanetRenderProjection } from './planet';
 import { CloudLayer } from './clouds';
 
 interface TerrainAdapter {
   readonly group: THREE.Group;
   readonly stats: { readonly chunks: number; readonly visible: number };
-  update(cameraBodyFixed: BodyRenderFrame['cameraBodyFixed'], orientation: Readonly<Quat>, origin: BodyRenderFrame['cameraRelativeOrigin']): void;
+  update(
+    cameraBodyFixed: BodyRenderFrame['cameraBodyFixed'],
+    orientation: Readonly<Quat>,
+    origin: BodyRenderFrame['cameraRelativeOrigin'],
+    velocity?: BodyRenderFrame['cameraBodyFixedVelocity'],
+    diagnosticContext?: Readonly<PlanetDiagnosticContext>,
+    projection?: Readonly<PlanetRenderProjection>,
+  ): void;
   dispose(): void;
 }
 
@@ -98,7 +105,19 @@ export class LegacyBodyRenderer implements BodyRenderer {
     if (this.terrain) {
       this.terrain.group.visible = this.terrainActive;
       if (this.terrainActive) {
-        this.terrain.update(frame.cameraBodyFixed, frame.orientation as Readonly<Quat>, frame.cameraRelativeOrigin);
+        this.terrain.update(
+          frame.cameraBodyFixed,
+          frame.orientation as Readonly<Quat>,
+          frame.cameraRelativeOrigin,
+          frame.cameraBodyFixedVelocity,
+          { terrainRequested: true, simulationTime: frame.time, altitudeMeters: frame.altitude },
+          {
+            verticalFovRadians: frame.verticalFovRadians,
+            drawingBufferHeight: frame.drawingBufferHeight,
+            deltaSeconds: frame.deltaSeconds,
+            framePressure: frame.framePressure,
+          },
+        );
       }
     }
     if (this.cloud) {

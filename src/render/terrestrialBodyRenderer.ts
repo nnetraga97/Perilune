@@ -26,10 +26,28 @@ import { TerrestrialScatter, type SurfaceSampler } from './terrestrial/scatter';
 import { TerrestrialSurfaceEffects } from './terrestrial/surfaceEffects';
 import { evaluateRecipeHeight, recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
+import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
 const SCATTER_ALTITUDE_MULTIPLIER = 0.02;
+const DEFAULT_ACTIVE_BODY_BUDGET: Readonly<Record<QualityTier, number>> = Object.freeze({
+  low: 64 * 1024 * 1024,
+  medium: 128 * 1024 * 1024,
+  high: 256 * 1024 * 1024,
+});
+
+function uniqueGeometryBytes(objects: readonly THREE.Object3D[]): number {
+  const geometries = new Set<THREE.BufferGeometry>();
+  for (const root of objects) {
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Points) geometries.add(object.geometry);
+    });
+  }
+  let bytes = 0;
+  for (const geometry of geometries) bytes += geometryByteLength(geometry);
+  return bytes;
+}
 
 /**
  * Body-fixed terrain sampler for surface scatter and effects: the raw evaluator
@@ -98,6 +116,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     private readonly caps: Readonly<RenderCaps>,
     readonly quality: QualityTier,
     private readonly diagnostics?: RenderDiagnosticsPort,
+    private readonly activeBodyBudgetBytes = DEFAULT_ACTIVE_BODY_BUDGET[quality],
   ) {
     this.bodyId = body.id;
     if (body.def.surfaceKind !== 'solid') throw new Error(`${body.id} is not a solid terrestrial body`);
@@ -134,18 +153,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.compact.name = `terrestrial-compact:${this.bodyId}`;
     this.compact.scale.setScalar(this.body.radius);
 
-    const terrainMaterial = createTerrestrialSurfaceMaterial(pack, this.descriptor, this.quality);
-    this.terrainDither = installCoverageDither(terrainMaterial, 'terrain');
-    this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
-      material: terrainMaterial,
-      oceanEnabled: false,
-      workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
-      diagnostics: this.diagnostics,
-      diagnosticSource: this.root.uuid,
-    });
-    this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
-    this.terrain.setShadowReceiver(this.quality !== 'low');
-
     const visual = BODY_VISUALS[this.body.id as BodyId].atmosphereVisual!;
     this.atmosphere = new TerrestrialAtmosphere(this.body, this.caps, visual);
     const materialMap = pack?.textures.get('material') ?? null;
@@ -166,6 +173,32 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const seed = this.body.def.terrain.seed;
     this.scatter = new TerrestrialScatter(this.body.radius, seed, this.surfaceSampler, this.quality);
     this.effects = new TerrestrialSurfaceEffects(this.body.radius, seed, this.surfaceSampler, this.quality);
+
+    const fixedPassBytes = uniqueGeometryBytes([
+      this.compact,
+      this.ocean.mesh,
+      this.atmosphere.mesh,
+      this.clouds.group,
+    ]) + (this.fallbackCloudTexture ? 4 : 0);
+    const allocation = terrainGeometryAllocation({
+      activeBodyBudgetBytes: this.activeBodyBudgetBytes,
+      committedTextureBytes: pack?.gpuBytes ?? 0,
+      fixedPassBytes,
+      scatterBytes: this.scatter.stats().bufferBytes,
+      effectBytes: this.effects.stats().bufferBytes,
+    });
+    const terrainMaterial = createTerrestrialSurfaceMaterial(pack, this.descriptor, this.quality);
+    this.terrainDither = installCoverageDither(terrainMaterial, 'terrain');
+    this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
+      material: terrainMaterial,
+      oceanEnabled: false,
+      workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
+      terrainAllocationBytes: allocation.allocationBytes,
+      diagnostics: this.diagnostics,
+      diagnosticSource: this.root.uuid,
+    });
+    this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
+    this.terrain.setShadowReceiver(this.quality !== 'low');
 
     this.root.add(
       this.compact,
@@ -204,6 +237,12 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
           simulationTime: frame.time,
           altitudeMeters: frame.altitude,
           terrainRequested: visibleBand,
+        },
+        {
+          verticalFovRadians: frame.verticalFovRadians,
+          drawingBufferHeight: frame.drawingBufferHeight,
+          deltaSeconds: frame.deltaSeconds,
+          framePressure: frame.framePressure,
         },
       );
     } else {

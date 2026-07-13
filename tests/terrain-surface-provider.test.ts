@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
@@ -163,11 +163,11 @@ describe('Body-backed planetary surface provider', () => {
     expect(() => validateGeometricErrorTable([10, 11])).toThrow(/monotonic/i);
     expect(() => validateGeometricErrorTable([10, Number.NaN])).toThrow(/finite/i);
     expect(() => validateGeometricErrorTable([10, -1])).toThrow(/nonnegative/i);
-    const source = readFileSync(
-      new URL('../src/render/terrain/surfaceProvider.ts', import.meta.url),
-      'utf8',
-    );
-    expect(source.toLowerCase()).not.toContain("'veyra'");
-    expect(source.toLowerCase()).not.toContain('"veyra"');
+    const terrainDirectory = new URL('../src/render/terrain/', import.meta.url);
+    for (const entry of readdirSync(terrainDirectory).filter((name) => name.endsWith('.ts'))) {
+      const source = readFileSync(new URL(entry, terrainDirectory), 'utf8').toLowerCase();
+      expect(source, entry).not.toContain("'veyra'");
+      expect(source, entry).not.toContain('"veyra"');
+    }
   });
 });

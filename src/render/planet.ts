@@ -1,133 +1,82 @@
-/**
- * Planet surface renderer: cube-sphere quadtree LOD.
- *
- * - Six cube faces, each a quadtree of chunks; chunks split by distance.
- * - Chunk vertices are chunk-local f32; each chunk's origin is kept in f64
- *   body-fixed coordinates and converted to camera-relative world position
- *   every frame (floating origin — the GPU never sees planet-scale floats).
- * - Terrain height comes from src/sim/terrain.ts, the same function physics
- *   uses, so rendering and ground contact can never disagree.
- * - Skirts hide LOD cracks; horizon + frustum culling keep draw calls low.
- * - Chunk builds are budgeted per frame to avoid hitches.
- */
+/** Shared planetary terrain facade plus the legacy optional ocean pass. */
 import * as THREE from 'three';
-import { geometryByteLength } from './resourceAccounting';
 import { Vec3 } from '../core/vec3';
 import type { Body } from '../sim/universe';
-import { recipeForBody } from '../sim/terrainRecipe';
 import type { QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
-import {
-  buildTerrainChunkGeometry,
-  terrainFaceToDirection,
-  type TerrainChunkGeometryRequest,
-  type TerrainChunkGeometryResult,
-} from './terrain/chunkGeometry';
-import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
-import { createTerrainTileId } from './terrain/tile';
+import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
+import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import { PlanetTerrainEngine } from './terrain/planetTerrainEngine';
+import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from './terrain/terrainPolicy';
+import { createBodySurfaceProvider } from './terrain/surfaceProvider';
+import {
+  createTerrainTileId,
+  parseTerrainTileKey,
+  terrainTileChildren,
+  terrainTileKey,
+  terrainTileParent,
+  terrainTileUvBounds,
+  type TerrainTileId,
+} from './terrain/tile';
 
 export { terrainGridIndices } from './terrain/chunkGeometry';
 
-interface FaceBasis {
-  n: Vec3;
-  ua: Vec3;
-  va: Vec3;
-}
-
-const FACES: FaceBasis[] = [
-  { n: new Vec3(1, 0, 0), ua: new Vec3(0, 1, 0), va: new Vec3(0, 0, 1) },
-  { n: new Vec3(-1, 0, 0), ua: new Vec3(0, -1, 0), va: new Vec3(0, 0, 1) },
-  { n: new Vec3(0, 1, 0), ua: new Vec3(0, 0, 1), va: new Vec3(1, 0, 0) },
-  { n: new Vec3(0, -1, 0), ua: new Vec3(0, 0, -1), va: new Vec3(1, 0, 0) },
-  { n: new Vec3(0, 0, 1), ua: new Vec3(1, 0, 0), va: new Vec3(0, 1, 0) },
-  { n: new Vec3(0, 0, -1), ua: new Vec3(-1, 0, 0), va: new Vec3(0, 1, 0) },
-];
-
-export function planetFaceOrder(cameraDirection: Readonly<Vec3>): number[] {
-  return FACES.map((_, index) => index).sort(
-    (a, b) => Vec3.dot(FACES[b].n, cameraDirection) - Vec3.dot(FACES[a].n, cameraDirection),
-  );
-}
-
-const _p = new Vec3();
-const _dir = new Vec3();
-const _rotatedOrigin = new Vec3();
-
-function rotateCoordinates(
-  q: QuaternionCoordinates,
-  value: VectorCoordinates,
-  out: Vec3,
-): Vec3 {
-  const tx = 2 * (q.y * value.z - q.z * value.y);
-  const ty = 2 * (q.z * value.x - q.x * value.z);
-  const tz = 2 * (q.x * value.y - q.y * value.x);
-  return out.set(
-    value.x + q.w * tx + (q.y * tz - q.z * ty),
-    value.y + q.w * ty + (q.z * tx - q.x * tz),
-    value.z + q.w * tz + (q.x * ty - q.y * tx),
-  );
-}
-
-/** Map cube-face UV (with tan warp for even angular spacing) to unit sphere dir. */
-function faceToDir(faceIndex: number, u: number, v: number, out: Vec3): Vec3 {
-  return terrainFaceToDirection(faceIndex, u, v, out);
-}
-
-interface Chunk {
-  key: string;
-  mesh: THREE.Mesh;
-  /** Chunk origin in body-fixed f64 coordinates. */
-  origin: Vec3;
-  lastUsed: number;
-}
-
-interface QuadNode {
-  face: number;
-  depth: number;
-  u0: number;
-  v0: number;
-  size: number; // uv span
-  centerDir: Vec3; // unit, body-fixed
-  worldSize: number; // approx meters
-}
+const DEFAULT_TERRAIN_ALLOCATION_BYTES = 128 * 1024 * 1024;
 
 export interface PlanetQuality {
-  /** Grid resolution per chunk edge (vertices). */
-  gridRes: number;
-  /** Distance multiple that triggers subdivision. */
-  splitFactor: number;
-  /** Cap on cached chunk meshes. */
-  cacheSize: number;
-  /** Chunk builds allowed per update call. */
-  buildBudget: number;
+  /** Grid resolution per streamed tile edge. */
+  readonly gridRes: number;
+  /** Maximum worker submissions made by one frame. */
+  readonly buildBudget: number;
 }
 
-export const PLANET_QUALITY: Record<'low' | 'medium' | 'high', PlanetQuality> = {
-  low: { gridRes: 9, splitFactor: 2.0, cacheSize: 320, buildBudget: 3 },
-  medium: { gridRes: 17, splitFactor: 2.5, cacheSize: 480, buildBudget: 4 },
-  high: { gridRes: 33, splitFactor: 3.0, cacheSize: 640, buildBudget: 5 },
-};
+export const PLANET_QUALITY: Readonly<Record<'low' | 'medium' | 'high', PlanetQuality>> = Object.freeze({
+  low: Object.freeze({ gridRes: TERRAIN_QUALITY_POLICY.low.gridResolution, buildBudget: TERRAIN_QUALITY_POLICY.low.submissionsPerFrame }),
+  medium: Object.freeze({ gridRes: TERRAIN_QUALITY_POLICY.medium.gridResolution, buildBudget: TERRAIN_QUALITY_POLICY.medium.submissionsPerFrame }),
+  high: Object.freeze({ gridRes: TERRAIN_QUALITY_POLICY.high.gridResolution, buildBudget: TERRAIN_QUALITY_POLICY.high.submissionsPerFrame }),
+});
 
-/** Small overlap curtain for LOD seams; capped to avoid visible terrain walls. */
-export function terrainSkirtDepth(worldSize: number, gridRes: number): number {
-  return Math.min(20, Math.max(2, (worldSize / Math.max(1, gridRes - 1)) * 0.08));
+export interface PlanetRenderProjection {
+  readonly verticalFovRadians: number;
+  readonly drawingBufferHeight: number;
+  readonly deltaSeconds: number;
+  readonly framePressure: boolean;
 }
 
-export function renderedTerrainHeight(height: number, hasOcean: boolean): number {
-  void hasOcean;
-  return height;
-}
+const DEFAULT_PROJECTION: Readonly<PlanetRenderProjection> = Object.freeze({
+  verticalFovRadians: Math.PI / 3,
+  drawingBufferHeight: 1_080,
+  deltaSeconds: 1 / 60,
+  framePressure: false,
+});
 
 export interface PlanetRendererOptions {
   /** Ownership transfers to PlanetRenderer and is released by dispose(). */
   readonly material?: THREE.Material;
-  /** Disable the legacy datum sphere when a separate ocean pass owns water. */
+  /** Disable the compatibility ocean sphere when a separate ocean pass owns water. */
   readonly oceanEnabled?: boolean;
   /** Ownership transfers to PlanetRenderer and is released by dispose(). */
   readonly workerPool?: TerrainChunkWorkerPool;
+  readonly terrainAllocationBytes?: number;
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly now?: () => number;
   readonly diagnosticSource?: string;
+}
+
+export interface PlanetDiagnosticContext extends RenderDiagnosticContext {
+  readonly terrainRequested: boolean;
+}
+
+export interface PlanetRendererStats {
+  chunks: number;
+  visible: number;
+  built: number;
+  triangles: number;
+  coverageGaps: number;
+  overlapChunks: number;
+  scheduleMs: number;
+  installMs: number;
+  geometryBytes: number;
 }
 
 export interface TerrainChunkKeyInfo {
@@ -140,128 +89,111 @@ export interface TerrainChunkKeyInfo {
   readonly childKeys: readonly [string, string, string, string];
 }
 
-function formatChunkKey(face: number, depth: number, u0: number, v0: number): string {
-  return `${face}:${depth}:${u0.toFixed(6)}:${v0.toFixed(6)}`;
+function qualityTier(quality: Readonly<PlanetQuality>): 'low' | 'medium' | 'high' {
+  if (quality.gridRes <= TERRAIN_QUALITY_POLICY.low.gridResolution) return 'low';
+  if (quality.gridRes >= TERRAIN_QUALITY_POLICY.high.gridResolution) return 'high';
+  return 'medium';
 }
 
-export function terrainChunkKeyInfo(key: string): TerrainChunkKeyInfo {
+function enginePolicy(quality: Readonly<PlanetQuality>): TerrainQualityPolicy {
+  const base = TERRAIN_QUALITY_POLICY[qualityTier(quality)];
+  if (!Number.isInteger(quality.gridRes) || quality.gridRes < 2) {
+    throw new Error(`Invalid planet grid resolution ${quality.gridRes}`);
+  }
+  if (!Number.isInteger(quality.buildBudget) || quality.buildBudget < 0) {
+    throw new Error(`Invalid planet build budget ${quality.buildBudget}`);
+  }
+  return Object.freeze({
+    ...base,
+    gridResolution: quality.gridRes,
+    submissionsPerFrame: quality.buildBudget,
+  });
+}
+
+/** Retained for legacy diagnostics and recordings; production identity is integer based. */
+function legacyTerrainChunkKeyInfo(key: string): TerrainChunkKeyInfo {
   const [faceText, depthText, uText, vText] = key.split(':');
   const face = Number(faceText);
   const depth = Number(depthText);
   const u0 = Number(uText);
   const v0 = Number(vText);
-  if (!Number.isInteger(face) || !Number.isInteger(depth) || depth < 0 || !Number.isFinite(u0) || !Number.isFinite(v0)) {
-    throw new Error(`Invalid terrain chunk key: ${key}`);
-  }
+  if (
+    !Number.isInteger(face) || face < 0 || face > 5
+    || !Number.isInteger(depth) || depth < 0
+    || !Number.isFinite(u0) || !Number.isFinite(v0)
+  ) throw new Error(`Invalid terrain chunk key: ${key}`);
   const size = 2 / 2 ** depth;
-  const half = size / 2;
-  const childKeys = Object.freeze([
-    formatChunkKey(face, depth + 1, u0, v0),
-    formatChunkKey(face, depth + 1, u0 + half, v0),
-    formatChunkKey(face, depth + 1, u0, v0 + half),
-    formatChunkKey(face, depth + 1, u0 + half, v0 + half),
-  ]) as unknown as readonly [string, string, string, string];
-  let parentKey: string | null = null;
-  if (depth > 0) {
-    const parentDepth = depth - 1;
-    const parentSize = size * 2;
-    const parentU = -1 + Math.floor((u0 + 1 + 1e-7) / parentSize) * parentSize;
-    const parentV = -1 + Math.floor((v0 + 1 + 1e-7) / parentSize) * parentSize;
-    parentKey = formatChunkKey(face, parentDepth, parentU, parentV);
-  }
-  return Object.freeze({ key, face, depth, u0, v0, parentKey, childKeys });
+  const x = Math.round((u0 + 1) / size);
+  const y = Math.round((v0 + 1) / size);
+  const id = createTerrainTileId(face, depth, x, y);
+  const format = (tile: Readonly<TerrainTileId>): string => {
+    const bounds = terrainTileUvBounds(tile);
+    return `${tile.face}:${tile.depth}:${bounds.u0.toFixed(6)}:${bounds.v0.toFixed(6)}`;
+  };
+  const parent = terrainTileParent(id);
+  return Object.freeze({
+    key,
+    face,
+    depth,
+    u0,
+    v0,
+    parentKey: parent ? format(parent) : null,
+    childKeys: Object.freeze(terrainTileChildren(id).map(format)) as unknown as readonly [string, string, string, string],
+  });
 }
 
-export interface PlanetDiagnosticContext extends RenderDiagnosticContext {
-  readonly terrainRequested: boolean;
+export function terrainChunkKeyInfo(key: string): TerrainChunkKeyInfo {
+  if (key.includes(':')) return legacyTerrainChunkKeyInfo(key);
+  let id: TerrainTileId;
+  try { id = parseTerrainTileKey(key); } catch { throw new Error(`Invalid terrain chunk key: ${key}`); }
+  const bounds = terrainTileUvBounds(id);
+  const parent = terrainTileParent(id);
+  return Object.freeze({
+    key,
+    face: id.face,
+    depth: id.depth,
+    u0: bounds.u0,
+    v0: bounds.v0,
+    parentKey: parent ? terrainTileKey(parent) : null,
+    childKeys: Object.freeze(terrainTileChildren(id).map(terrainTileKey)) as unknown as readonly [string, string, string, string],
+  });
 }
 
-/**
- * Per-vertex evaluator altitude above sea level, reconstructed from the chunk's
- * body-fixed geometry so the surface material can classify without a second
- * terrain sample. Derived at install time; the worker geometry buffers (and
- * their determinism tests) are unchanged.
- */
-function surfaceAltitudes(result: TerrainChunkGeometryResult, radius: number): Float32Array {
-  const count = result.bodyDirection.length / 3;
-  const altitude = new Float32Array(count);
-  const [ox, oy, oz] = result.origin;
-  for (let i = 0; i < count; i++) {
-    const px = result.position[i * 3] + ox;
-    const py = result.position[i * 3 + 1] + oy;
-    const pz = result.position[i * 3 + 2] + oz;
-    const dx = result.bodyDirection[i * 3];
-    const dy = result.bodyDirection[i * 3 + 1];
-    const dz = result.bodyDirection[i * 3 + 2];
-    altitude[i] = px * dx + py * dy + pz * dz - radius;
-  }
-  return altitude;
+/** Compatibility helper used by older tests and prototype UI. */
+export function planetFaceOrder(cameraDirection: Readonly<Vec3>): number[] {
+  const normals = [
+    new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 1, 0),
+    new Vec3(0, -1, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1),
+  ];
+  return normals.map((_, face) => face).sort(
+    (a, b) => Vec3.dot(normals[b], cameraDirection) - Vec3.dot(normals[a], cameraDirection),
+  );
 }
 
-function countLodOverlaps(keys: ReadonlySet<string>): number {
-  let overlaps = 0;
-  for (const key of keys) {
-    const [faceText, depthText, uText, vText] = key.split(':');
-    const depth = Number(depthText);
-    const u = Number(uText);
-    const v = Number(vText);
-    for (let ancestorDepth = depth - 1; ancestorDepth >= 0; ancestorDepth--) {
-      const size = 2 / 2 ** ancestorDepth;
-      const au = -1 + Math.floor((u + 1 + 1e-7) / size) * size;
-      const av = -1 + Math.floor((v + 1 + 1e-7) / size) * size;
-      if (keys.has(`${faceText}:${ancestorDepth}:${au.toFixed(6)}:${av.toFixed(6)}`)) {
-        overlaps++;
-        break;
-      }
-    }
-  }
-  return overlaps;
+export function terrainSkirtDepth(worldSize: number, gridRes: number): number {
+  return Math.min(20, Math.max(2, (worldSize / Math.max(1, gridRes - 1)) * 0.08));
+}
+
+export function renderedTerrainHeight(height: number, hasOcean: boolean): number {
+  void hasOcean;
+  return height;
 }
 
 export class PlanetRenderer {
   readonly body: Body;
   readonly group = new THREE.Group();
-  private chunks = new Map<string, Chunk>();
-  private replacementChunks: Map<string, Chunk> | null = null;
+  readonly engine: PlanetTerrainEngine;
   private readonly material: THREE.Material;
-  private readonly workerPool: TerrainChunkWorkerPool | null;
-  private readonly pendingChunks = new Map<string, number>();
-  private generation = 1;
-  private readonly oceanMaterial: THREE.MeshPhongMaterial | null = null;
-  private readonly maxDepth: number;
-  private quality: PlanetQuality;
-  private frame = 0;
-  private buildsThisUpdate = 0;
-  private readonly palette: { low: THREE.Color; mid: THREE.Color; high: THREE.Color; ocean: THREE.Color };
-  private ocean: THREE.Mesh | null = null;
-  private shadowReceiver = false;
+  private readonly oceanMaterial: THREE.MeshPhongMaterial | null;
+  private readonly ocean: THREE.Mesh | null;
   private terrainVisible = true;
   private oceanVisible = true;
-  private geometryBytes = 0;
-  /** Worker-safe frozen recipe clone, built once — never per chunk request. */
-  private readonly recipeSnapshot: TerrainChunkGeometryRequest['recipe'];
-  private readonly paletteSnapshot: TerrainChunkGeometryRequest['palette'];
-  private lastOverlapCount = 0;
+  private disposed = false;
   private readonly diagnostics: RenderDiagnosticsPort | undefined;
-  private readonly now: () => number;
-  private readonly diagnosticSource: string;
-  private readonly pendingStartedAt = new Map<string, number>();
-  private readonly installedGenerations = new Map<string, number>();
-  private lastWantedKeys = new Set<string>();
   private diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: false };
-  private diagnosticLifecycleBatch: string[] | null = null;
-  private lastAggregateObservationAt = Number.NEGATIVE_INFINITY;
-  /** Stats for the perf overlay. */
-  stats = {
-    chunks: 0,
-    visible: 0,
-    built: 0,
-    triangles: 0,
-    coverageGaps: 0,
-    overlapChunks: 0,
-    scheduleMs: 0,
-    installMs: 0,
-    geometryBytes: 0,
+  stats: PlanetRendererStats = {
+    chunks: 0, visible: 0, built: 0, triangles: 0, coverageGaps: 0,
+    overlapChunks: 0, scheduleMs: 0, installMs: 0, geometryBytes: 0,
   };
 
   constructor(
@@ -270,76 +202,42 @@ export class PlanetRenderer {
     options: Readonly<PlanetRendererOptions> = {},
   ) {
     this.body = body;
-    this.quality = quality;
-    this.maxDepth = Math.max(6, Math.min(16, Math.ceil(Math.log2(body.radius / 30))));
     this.material = options.material ?? new THREE.MeshLambertMaterial({ vertexColors: true });
-    this.workerPool = options.workerPool ?? null;
     this.diagnostics = options.diagnostics;
-    this.now = options.now ?? (() => performance.now());
-    this.diagnosticSource = options.diagnosticSource ?? `planet:${body.id}`;
-    this.palette = {
-      low: new THREE.Color(body.def.terrain.colorLow),
-      mid: new THREE.Color(body.def.terrain.colorMid),
-      high: new THREE.Color(body.def.terrain.colorHigh),
-      ocean: new THREE.Color(body.def.terrain.colorOcean ?? body.def.terrain.colorLow),
-    };
-    const recipe = recipeForBody(body);
-    this.recipeSnapshot = Object.freeze({
-      ...recipe,
-      terrain: Object.freeze({ ...recipe.terrain }),
-      craters: Object.freeze(recipe.craters.map((crater) => Object.freeze({
-        ...crater,
-        center: Object.freeze({ ...crater.center }),
-      }))),
+    const policy = enginePolicy(quality);
+    const provider = createBodySurfaceProvider(body, {
+      generation: 1,
+      gridResolution: policy.gridResolution,
     });
-    const tuple = (value: THREE.Color): [number, number, number] => [value.r, value.g, value.b];
-    this.paletteSnapshot = Object.freeze({
-      low: tuple(this.palette.low),
-      mid: tuple(this.palette.mid),
-      high: tuple(this.palette.high),
-      ocean: tuple(this.palette.ocean),
+    this.engine = new PlanetTerrainEngine({
+      provider,
+      quality: policy,
+      material: this.material,
+      terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_ALLOCATION_BYTES,
+      workerPool: options.workerPool,
+      now: options.now,
     });
+
+    let oceanMaterial: THREE.MeshPhongMaterial | null = null;
+    let ocean: THREE.Mesh | null = null;
     if (options.oceanEnabled !== false && body.def.terrain.oceanLevel > 0 && body.def.terrain.colorOcean) {
-      this.oceanMaterial = new THREE.MeshPhongMaterial({
+      oceanMaterial = new THREE.MeshPhongMaterial({
         color: new THREE.Color(body.def.terrain.colorOcean),
         shininess: 90,
         specular: new THREE.Color('#8fb8cc'),
         transparent: false,
         opacity: 1,
       });
-      // Ocean as a moderately tessellated sphere; near-ground the terrain
-      // shoreline detail carries the look. Positioned camera-relative with
-      // the group each frame.
-      const geo = new THREE.SphereGeometry(1, 96, 64);
-      this.ocean = new THREE.Mesh(geo, this.oceanMaterial);
-      this.ocean.scale.setScalar(body.radius);
-      this.group.add(this.ocean);
-      this.geometryBytes += geometryByteLength(geo);
+      ocean = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), oceanMaterial);
+      ocean.scale.setScalar(body.radius);
+      this.group.add(ocean);
     }
+    this.oceanMaterial = oceanMaterial;
+    this.ocean = ocean;
+    this.group.add(this.engine.group);
   }
 
-  setQuality(q: PlanetQuality): void {
-    if (q === this.quality) return;
-    for (const [key, generation] of this.pendingChunks) this.terrainEvent('cancelled', key, generation, { reason: 'quality-change' });
-    this.workerPool?.cancelGeneration(this.generation);
-    if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
-    this.generation++;
-    this.pendingChunks.clear();
-    this.pendingStartedAt.clear();
-    this.installedGenerations.clear();
-    this.lastWantedKeys.clear();
-    this.replacementChunks = new Map();
-    this.diagnostics?.recordDetailed({
-      subsystem: 'terrain', event: 'replacement-root-staging', severity: 'state',
-      data: { generation: this.generation },
-    }, { ...this.diagnosticContext, bodyId: this.body.id });
-    this.quality = q;
-  }
-
-  setShadowReceiver(enabled: boolean): void {
-    this.shadowReceiver = enabled;
-    for (const chunk of this.chunks.values()) chunk.mesh.receiveShadow = enabled;
-  }
+  setShadowReceiver(enabled: boolean): void { this.engine.setShadowReceiver(enabled); }
 
   setOceanGlitter(enabled: boolean): void {
     if (!this.oceanMaterial) return;
@@ -350,6 +248,7 @@ export class PlanetRenderer {
 
   setTerrainVisible(enabled: boolean): void {
     this.terrainVisible = enabled;
+    this.engine.group.visible = enabled;
   }
 
   setOceanVisible(enabled: boolean): void {
@@ -357,554 +256,70 @@ export class PlanetRenderer {
     if (this.ocean) this.ocean.visible = enabled;
   }
 
-  /** True only when the currently displayed terrain set covers the visible body without holes. */
-  coverageReady(): boolean {
-    return this.stats.visible > 0 && this.stats.coverageGaps === 0;
-  }
+  coverageReady(): boolean { return this.engine.coverageReady(); }
 
-  resourceGeometryBytes(): Readonly<{ terrainGeometryBytes: number; oceanGeometryBytes: number; geometryCount: number }> {
-    const terrainChunks = [
-      ...this.chunks.values(),
-      ...(this.replacementChunks?.values() ?? []),
-    ];
-    const terrainGeometryBytes = terrainChunks
-      .reduce((sum, chunk) => sum + geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry), 0);
-    const oceanGeometryBytes = this.ocean ? geometryByteLength(this.ocean.geometry) : 0;
+  resourceGeometryBytes(): Readonly<{
+    terrainGeometryBytes: number;
+    oceanGeometryBytes: number;
+    geometryCount: number;
+  }> {
     return Object.freeze({
-      terrainGeometryBytes,
-      oceanGeometryBytes,
-      geometryCount: terrainChunks.length + (this.ocean ? 1 : 0),
+      terrainGeometryBytes: this.engine.stats.geometryBytes,
+      oceanGeometryBytes: this.ocean ? geometryByteLength(this.ocean.geometry) : 0,
+      geometryCount: this.engine.stats.chunks + (this.ocean ? 1 : 0),
     });
   }
 
-  /**
-   * Update LOD selection and chunk placement.
-   * @param camBodyFixed camera position in body-fixed f64 coordinates
-   * @param orientation body-fixed to inertial orientation
-   * @param originWorld position of the BODY CENTER in camera-relative world
-   *        coordinates (f64 subtraction happens before this call)
-   */
   update(
-    camBodyFixed: VectorCoordinates,
+    cameraBodyFixed: VectorCoordinates,
     orientation: QuaternionCoordinates,
-    originWorld: VectorCoordinates,
+    cameraRelativeOrigin: VectorCoordinates,
     cameraBodyFixedVelocity: VectorCoordinates = { x: 0, y: 0, z: 0 },
     diagnosticContext: Readonly<PlanetDiagnosticContext> = { terrainRequested: true },
+    projection: Readonly<PlanetRenderProjection> = DEFAULT_PROJECTION,
   ): void {
+    if (this.disposed) return;
     this.diagnosticContext = diagnosticContext;
-    this.diagnosticLifecycleBatch = this.diagnostics?.detailed ? [] : null;
-    this.frame++;
-    this.buildsThisUpdate = 0;
-    this.stats.visible = 0;
-    this.stats.built = 0;
-    this.stats.triangles = 0;
-    this.stats.coverageGaps = 0;
-    this.stats.overlapChunks = 0;
-    this.stats.scheduleMs = 0;
-    this.stats.installMs = 0;
-
-    if (this.workerPool) {
-      const installStart = performance.now();
-      for (const result of this.workerPool.drainCompleted()) {
-        this.terrainEvent('completed', result.jobKey, result.generation, { buildMs: result.buildMs });
-        if (this.pendingChunks.get(result.jobKey) === result.generation) {
-          this.pendingChunks.delete(result.jobKey);
-          this.pendingStartedAt.delete(result.jobKey);
-        }
-        if (result.generation === this.generation) {
-          const target = this.replacementChunks ?? this.chunks;
-          if (!target.has(result.jobKey)) this.installChunk(result, target);
-        } else {
-          this.terrainEvent('stale-completion', result.jobKey, result.generation, { currentGeneration: this.generation });
-        }
-      }
-      this.commitReplacementIfReady();
-      this.stats.installMs = performance.now() - installStart;
-    }
-
-    const camDist = Math.hypot(camBodyFixed.x, camBodyFixed.y, camBodyFixed.z);
-    const camDir = _dir.set(camBodyFixed.x, camBodyFixed.y, camBodyFixed.z).normalize();
-    // Conservative horizon cull: chunks whose center is more than
-    // horizonAngle + margin away from the camera direction can't be seen.
-    const horizonCos =
-      camDist > this.body.radius * 1.01
-        ? Math.cos(Math.acos(Math.min(1, this.body.radius / camDist)) + 0.35)
-        : -0.2; // near/below surface: keep a generous hemisphere
-
-    const wanted = new Set<string>();
-    const scheduleStart = performance.now();
-    const orderedFaces = planetFaceOrder(camDir);
-    const buildTarget = this.replacementChunks ?? this.chunks;
-    // Establish the six root fallbacks before spending budget on refinement.
-    for (const f of orderedFaces) {
-      const key = `${f}:0:-1.000000:-1.000000`;
-      if (buildTarget.has(key) || this.pendingChunks.get(key) === this.generation) continue;
-      if (this.workerPool && this.buildsThisUpdate >= this.quality.buildBudget) break;
-      if (this.workerPool) this.buildsThisUpdate++;
-      this.stats.built++;
-      this.requestChunk(key, {
-        face: f,
-        depth: 0,
-        u0: -1,
-        v0: -1,
-        size: 2,
-        centerDir: faceToDir(f, 0, 0, new Vec3()),
-        worldSize: this.body.radius * 1.57,
-      });
-    }
-    this.commitReplacementIfReady();
-    // While replacement roots stage, committed terrain remains the only
-    // selectable coverage and refinement waits for the atomic swap.
-    if (this.replacementChunks) this.buildsThisUpdate = this.quality.buildBudget;
-    for (const f of orderedFaces) {
-      if (!this.selectNode(
-        { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(f, 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
-        camBodyFixed,
-        camDir,
-        horizonCos,
-        wanted,
-      )) this.stats.coverageGaps++;
-    }
-    if (this.workerPool && this.buildsThisUpdate < this.quality.buildBudget) {
-      const predictionSeconds = 0.5;
-      const predictedCamera = {
-        x: camBodyFixed.x + cameraBodyFixedVelocity.x * predictionSeconds,
-        y: camBodyFixed.y + cameraBodyFixedVelocity.y * predictionSeconds,
-        z: camBodyFixed.z + cameraBodyFixedVelocity.z * predictionSeconds,
-      };
-      const predictedDirection = new Vec3(
-        predictedCamera.x,
-        predictedCamera.y,
-        predictedCamera.z,
-      ).normalize();
-      const predictedWanted = new Set<string>();
-      for (const f of planetFaceOrder(predictedDirection)) {
-        this.selectNode(
-          { face: f, depth: 0, u0: -1, v0: -1, size: 2, centerDir: faceToDir(f, 0, 0, new Vec3()), worldSize: this.body.radius * 1.57 },
-          predictedCamera,
-          predictedDirection,
-          horizonCos,
-          predictedWanted,
-        );
-        if (this.buildsThisUpdate >= this.quality.buildBudget) break;
-      }
-    }
-    this.stats.scheduleMs = Math.max(0, performance.now() - scheduleStart);
-    // Overlay statistic only: the ancestor-key reconstruction walks every wanted
-    // chunk with string parsing, so refresh it periodically instead of per frame.
-    if (this.frame === 1 || this.frame % 15 === 0) {
-      this.lastOverlapCount = countLodOverlaps(wanted);
-    }
-    this.stats.overlapChunks = this.lastOverlapCount;
-
-    const observationNow = this.now();
-    if (this.diagnostics?.detailed || observationNow - this.lastAggregateObservationAt >= 100) {
-      this.observeWantedChanges(wanted);
-    }
-
-    // Hide unneeded chunks, show wanted ones, place camera-relative.
-    for (const chunk of this.chunks.values()) {
-      const inUse = wanted.has(chunk.key);
-      chunk.mesh.visible = inUse && this.terrainVisible;
-      if (inUse) {
-        chunk.lastUsed = this.frame;
-        rotateCoordinates(orientation, chunk.origin, _rotatedOrigin);
-        chunk.mesh.position.set(
-          _rotatedOrigin.x + originWorld.x,
-          _rotatedOrigin.y + originWorld.y,
-          _rotatedOrigin.z + originWorld.z,
-        );
-        chunk.mesh.quaternion.set(
-          orientation.x,
-          orientation.y,
-          orientation.z,
-          orientation.w,
-        );
-        if (this.terrainVisible) this.stats.visible++;
-        const geo = chunk.mesh.geometry as THREE.BufferGeometry;
-        const idx = geo.getIndex();
-        this.stats.triangles += idx ? idx.count / 3 : 0;
-      }
-    }
+    this.engine.update({
+      cameraBodyFixed,
+      cameraBodyFixedVelocity,
+      cameraRelativeOrigin,
+      orientation,
+      verticalFovRadians: projection.verticalFovRadians,
+      drawingBufferHeight: projection.drawingBufferHeight,
+      deltaSeconds: projection.deltaSeconds,
+      framePressure: projection.framePressure,
+      generation: this.engine.provider.generation,
+    });
+    this.engine.group.visible = this.terrainVisible;
     if (this.ocean) {
       this.ocean.visible = this.oceanVisible;
-      this.ocean.position.set(originWorld.x, originWorld.y, originWorld.z);
-      this.ocean.quaternion.set(
-        orientation.x,
-        orientation.y,
-        orientation.z,
-        orientation.w,
-      );
+      this.ocean.position.set(cameraRelativeOrigin.x, cameraRelativeOrigin.y, cameraRelativeOrigin.z);
+      this.ocean.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
     }
-
-    this.evictStale();
-    this.stats.chunks = this.chunks.size;
-    this.stats.geometryBytes = this.geometryBytes;
-    if (observationNow - this.lastAggregateObservationAt >= 100) {
-      this.lastAggregateObservationAt = observationNow;
-      this.observeTerrainSample(wanted, observationNow);
-    }
-    this.flushDiagnosticLifecycleBatch();
-  }
-
-  private selectNode(
-    node: QuadNode,
-    cam: VectorCoordinates,
-    camDir: Readonly<Vec3>,
-    horizonCos: number,
-    wanted: Set<string>,
-  ): boolean {
-    // Horizon cull (skip for shallow nodes which can wrap the horizon).
-    if (node.depth >= 3) {
-      const chunkAngular = node.worldSize / this.body.radius;
-      if (Vec3.dot(node.centerDir, camDir) < horizonCos - chunkAngular) return true;
-    }
-
-    const key = `${node.face}:${node.depth}:${node.u0.toFixed(6)}:${node.v0.toFixed(6)}`;
-    if (!this.chunks.has(key) && this.pendingChunks.get(key) !== this.generation && this.buildsThisUpdate < this.quality.buildBudget) {
-      this.buildsThisUpdate++;
-      this.stats.built++;
-      this.requestChunk(key, node);
-    }
-    const hasFallback = this.chunks.has(key);
-
-    const center = _p.copy(node.centerDir).scale(this.body.radius);
-    const dist = Math.max(1, Math.hypot(center.x - cam.x, center.y - cam.y, center.z - cam.z) - node.worldSize * 0.5);
-    if (node.depth < this.maxDepth && dist < node.worldSize * this.quality.splitFactor) {
-      const half = node.size / 2;
-      const children: QuadNode[] = [];
-      for (let q = 0; q < 4; q++) {
-        const cu = node.u0 + (q & 1 ? half : 0);
-        const cv = node.v0 + (q & 2 ? half : 0);
-        children.push({
-          face: node.face,
-          depth: node.depth + 1,
-          u0: cu,
-          v0: cv,
-          size: half,
-          centerDir: faceToDir(node.face, cu + half / 2, cv + half / 2, new Vec3()),
-          worldSize: node.worldSize / 2,
-        });
-      }
-
-      // Build all four immediate child fallbacks before descending. This lets
-      // each quadrant refine independently without ever drawing a parent over
-      // only part of its child set.
-      for (const child of children) {
-        const childKey = `${child.face}:${child.depth}:${child.u0.toFixed(6)}:${child.v0.toFixed(6)}`;
-        if (!this.chunks.has(childKey) && this.pendingChunks.get(childKey) !== this.generation && this.buildsThisUpdate < this.quality.buildBudget) {
-          this.buildsThisUpdate++;
-          this.stats.built++;
-          this.requestChunk(childKey, child);
-        }
-      }
-      if (children.some((child) => !this.chunks.has(`${child.face}:${child.depth}:${child.u0.toFixed(6)}:${child.v0.toFixed(6)}`))) {
-        if (hasFallback) wanted.add(key);
-        return hasFallback;
-      }
-
-      let childrenReady = true;
-      const childWanted = new Set<string>();
-      for (const child of children) {
-        childrenReady = this.selectNode(
-          child,
-          cam,
-          camDir,
-          horizonCos,
-          childWanted,
-        ) && childrenReady;
-      }
-      if (childrenReady) {
-        for (const childKey of childWanted) wanted.add(childKey);
-        return true;
-      }
-      if (hasFallback) wanted.add(key);
-      return hasFallback;
-    }
-
-    if (hasFallback) wanted.add(key);
-    return hasFallback;
-  }
-
-  private requestChunk(key: string, node: QuadNode): void {
-    const request = this.chunkRequest(key, node);
-    this.terrainEvent('request', key, request.generation);
-    this.pendingStartedAt.set(key, this.now());
-    if (!this.workerPool) {
-      const installStart = performance.now();
-      this.installChunk(buildTerrainChunkGeometry(request), this.replacementChunks ?? this.chunks);
-      this.pendingStartedAt.delete(key);
-      this.stats.installMs += performance.now() - installStart;
-      return;
-    }
-    const requestGeneration = request.generation;
-    this.pendingChunks.set(key, requestGeneration);
-    this.terrainEvent('queued', key, requestGeneration, this.workerCounts());
-    void this.workerPool.submit(request).catch(() => {
-      if (this.pendingChunks.get(key) === requestGeneration) {
-        this.pendingChunks.delete(key);
-        this.pendingStartedAt.delete(key);
-        this.terrainEvent('failed', key, requestGeneration);
-      }
+    const current = this.engine.stats;
+    this.stats = Object.freeze({
+      chunks: current.chunks,
+      visible: this.terrainVisible ? current.visible : 0,
+      built: current.building,
+      triangles: current.triangles,
+      coverageGaps: current.coverageGaps,
+      overlapChunks: 0,
+      scheduleMs: current.scheduleMs,
+      installMs: current.installMs,
+      geometryBytes: current.geometryBytes,
     });
-  }
-
-  private chunkRequest(key: string, node: QuadNode): TerrainChunkGeometryRequest {
-    return {
-      jobKey: key,
-      generation: this.generation,
-      tile: createTerrainTileId(
-        node.face,
-        node.depth,
-        Math.round((node.u0 + 1) / node.size),
-        Math.round((node.v0 + 1) / node.size),
-      ),
-      recipe: this.recipeSnapshot,
-      radius: this.body.radius,
-      resolution: this.quality.gridRes,
-      skirtDepth: terrainSkirtDepth(node.worldSize, this.quality.gridRes),
-      palette: this.paletteSnapshot,
-    };
-  }
-
-  private installChunk(result: TerrainChunkGeometryResult, target = this.chunks): void {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(result.position, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(result.normal, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(result.color, 3));
-    geo.setAttribute('bodyDirection', new THREE.BufferAttribute(result.bodyDirection, 3));
-    geo.setAttribute('bodyFixedDetailAnchor', new THREE.BufferAttribute(result.bodyFixedDetailAnchor, 3));
-    geo.setAttribute('surfaceAltitude', new THREE.BufferAttribute(surfaceAltitudes(result, this.body.radius), 1));
-    geo.setIndex(new THREE.BufferAttribute(result.index, 1));
-    geo.boundingSphere = new THREE.Sphere(
-      new THREE.Vector3(...result.bounds.center),
-      result.bounds.radius,
-    );
-
-    const mesh = new THREE.Mesh(geo, this.material);
-    mesh.frustumCulled = true;
-    mesh.matrixAutoUpdate = true;
-    mesh.receiveShadow = this.shadowReceiver;
-    mesh.visible = false;
-    this.group.add(mesh);
-    const origin = new Vec3(...result.origin);
-    target.set(result.jobKey, { key: result.jobKey, mesh, origin, lastUsed: this.frame });
-    this.geometryBytes += geometryByteLength(geo);
-    this.installedGenerations.set(result.jobKey, result.generation);
-    this.terrainEvent('installed', result.jobKey, result.generation, {
-      geometryBytes: geometryByteLength(geo),
-      replacement: target === this.replacementChunks,
-    });
-  }
-
-  private commitReplacementIfReady(): void {
-    const replacement = this.replacementChunks;
-    if (!replacement) return;
-    for (let face = 0; face < FACES.length; face++) {
-      if (!replacement.has(`${face}:0:-1.000000:-1.000000`)) return;
-    }
-    this.disposeChunks(this.chunks);
-    this.chunks = replacement;
-    this.replacementChunks = null;
-    this.diagnostics?.recordDetailed({
-      subsystem: 'terrain', event: 'replacement-root-commit', severity: 'state',
-      data: { generation: this.generation, rootCount: FACES.length },
-    }, { ...this.diagnosticContext, bodyId: this.body.id });
-  }
-
-  private disposeChunks(chunks: Map<string, Chunk>): void {
-    for (const chunk of chunks.values()) {
-      this.group.remove(chunk.mesh);
-      this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
-      chunk.mesh.geometry.dispose();
-      this.terrainEvent('evicted', chunk.key, this.installedGenerations.get(chunk.key) ?? this.generation, { reason: 'dispose-set' });
-      this.installedGenerations.delete(chunk.key);
-    }
-    chunks.clear();
-  }
-
-  private evictStale(): void {
-    if (this.chunks.size <= this.quality.cacheSize) return;
-    const entries = [...this.chunks.values()].sort((a, b) => a.lastUsed - b.lastUsed);
-    const toRemove = this.chunks.size - this.quality.cacheSize;
-    for (let i = 0; i < toRemove; i++) {
-      const chunk = entries[i];
-      if (chunk.lastUsed === this.frame) break; // never evict in-use chunks
-      this.group.remove(chunk.mesh);
-      this.geometryBytes -= geometryByteLength(chunk.mesh.geometry as THREE.BufferGeometry);
-      chunk.mesh.geometry.dispose();
-      this.chunks.delete(chunk.key);
-      this.terrainEvent('evicted', chunk.key, this.installedGenerations.get(chunk.key) ?? this.generation, { reason: 'cache' });
-      this.installedGenerations.delete(chunk.key);
-    }
+    void this.diagnostics;
+    void this.diagnosticContext;
   }
 
   dispose(): void {
-    for (const [key, generation] of this.pendingChunks) this.terrainEvent('cancelled', key, generation, { reason: 'renderer-dispose' });
-    this.workerPool?.cancelGeneration(this.generation);
-    this.workerPool?.dispose();
-    this.pendingChunks.clear();
-    this.pendingStartedAt.clear();
-    this.installedGenerations.clear();
-    this.lastWantedKeys.clear();
-    this.disposeChunks(this.chunks);
-    if (this.replacementChunks) this.disposeChunks(this.replacementChunks);
-    this.replacementChunks = null;
-    this.geometryBytes = 0;
+    if (this.disposed) return;
+    this.disposed = true;
+    this.engine.dispose();
     this.material.dispose();
+    this.ocean?.geometry.dispose();
     this.oceanMaterial?.dispose();
-    if (this.ocean) this.ocean.geometry.dispose();
-  }
-
-  private terrainEvent(
-    event: string,
-    key: string,
-    generation: number,
-    data: Readonly<Record<string, string | number | boolean | null>> = {},
-  ): void {
-    if (!this.diagnostics) return;
-    let info: TerrainChunkKeyInfo | null = null;
-    try { info = terrainChunkKeyInfo(key); } catch { /* Preserve renderer behavior for diagnostic parsing failures. */ }
-    this.diagnostics.observeTerrainEvent?.({
-      ...this.diagnosticContext,
-      bodyId: this.body.id,
-      rendererIdentity: this.diagnosticSource,
-      event,
-      key,
-      face: info?.face,
-      depth: info?.depth,
-      parentKey: info?.parentKey,
-      generation,
-      data,
-      batched: this.diagnosticLifecycleBatch !== null,
-    });
-    if (this.diagnosticLifecycleBatch) {
-      this.diagnosticLifecycleBatch.push(JSON.stringify({ event, key, generation, ...data }));
-    }
-  }
-
-  private workerCounts(): Readonly<Record<string, number>> {
-    const timings = this.workerPool?.timings();
-    return {
-      workers: timings?.workers ?? 0,
-      activeWorkers: timings?.active ?? 0,
-      queuedWorkers: timings?.pending ?? 0,
-    };
-  }
-
-  private observeWantedChanges(wanted: ReadonlySet<string>): void {
-    if (!this.diagnostics?.detailed) {
-      this.lastWantedKeys = new Set(wanted);
-      return;
-    }
-    if (this.diagnostics.detailed) {
-      for (const key of wanted) {
-        if (!this.lastWantedKeys.has(key)) this.terrainEvent('visibility-on', key, this.generation);
-      }
-    }
-    for (const key of this.lastWantedKeys) {
-      if (wanted.has(key)) continue;
-      if (this.diagnostics.detailed) this.terrainEvent('visibility-off', key, this.generation);
-      const info = terrainChunkKeyInfo(key);
-      const coveredQuadrants = info.childKeys.filter((child) => this.wantedContainsSubtree(wanted, child));
-      if (coveredQuadrants.length !== 4) continue;
-      const installedChildren = info.childKeys.filter((child) => this.chunks.has(child));
-      this.diagnostics.recordDetailed({
-        subsystem: 'terrain', event: 'parent-children-replacement', severity: 'state',
-        data: {
-          parentKey: key,
-          child0: info.childKeys[0], child1: info.childKeys[1],
-          child2: info.childKeys[2], child3: info.childKeys[3],
-          appearingChildren: info.childKeys.filter((child) => wanted.has(child)).length,
-          coveredQuadrants: coveredQuadrants.length,
-          installedChildren: installedChildren.length,
-          generation: this.generation,
-        },
-      }, { ...this.diagnosticContext, bodyId: this.body.id });
-      if (installedChildren.length !== 4) {
-        this.diagnostics.anomaly('terrain-parent-hidden-before-four-children-installed', 'terrain', {
-          parentKey: key,
-          installedChildren: installedChildren.length,
-          generation: this.generation,
-        }, { ...this.diagnosticContext, bodyId: this.body.id });
-      }
-    }
-    this.lastWantedKeys = new Set(wanted);
-  }
-
-  private observeTerrainSample(wanted: ReadonlySet<string>, now: number): void {
-    if (!this.diagnostics) return;
-    let oldestPendingAgeMs = 0;
-    for (const started of this.pendingStartedAt.values()) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, now - started);
-    const visibleByDepth: Record<string, number> = {};
-    for (const key of wanted) {
-      const depth = terrainChunkKeyInfo(key).depth;
-      visibleByDepth[String(depth)] = (visibleByDepth[String(depth)] ?? 0) + 1;
-    }
-    const timings = this.workerPool?.timings();
-    this.diagnostics.observeTerrainSample?.({
-      ...this.diagnosticContext,
-      bodyId: this.body.id,
-      rendererIdentity: this.diagnosticSource,
-      generation: this.generation,
-      visible: this.stats.visible,
-      chunks: this.chunks.size,
-      triangles: this.stats.triangles,
-      geometryBytes: this.geometryBytes,
-      pending: this.pendingChunks.size,
-      oldestPendingAgeMs,
-      coverageGaps: this.stats.coverageGaps,
-      coverageReady: this.coverageReady(),
-      replacementRoots: this.replacementChunks?.size ?? 0,
-      workers: timings?.workers ?? 0,
-      activeWorkers: timings?.active ?? 0,
-      queuedWorkers: timings?.pending ?? 0,
-      scheduleMs: this.stats.scheduleMs,
-      installMs: this.stats.installMs,
-      buildP99Ms: timings?.buildP99Ms ?? 0,
-      visibleByDepth,
-    });
-  }
-
-  private wantedContainsSubtree(wanted: ReadonlySet<string>, rootKey: string): boolean {
-    if (wanted.has(rootKey)) return true;
-    const root = terrainChunkKeyInfo(rootKey);
-    for (const key of wanted) {
-      let info = terrainChunkKeyInfo(key);
-      while (info.depth > root.depth && info.parentKey) info = terrainChunkKeyInfo(info.parentKey);
-      if (info.key === rootKey) return true;
-    }
-    return false;
-  }
-
-  private flushDiagnosticLifecycleBatch(): void {
-    const events = this.diagnosticLifecycleBatch;
-    this.diagnosticLifecycleBatch = null;
-    if (!events || events.length === 0 || !this.diagnostics) return;
-    const batches: string[] = [];
-    let current = '';
-    for (const event of events) {
-      const next = current ? `${current}\n${event}` : event;
-      if (next.length > 8_000 && current) {
-        batches.push(current);
-        current = event;
-      } else {
-        current = next;
-      }
-    }
-    if (current) batches.push(current);
-    for (let index = 0; index < batches.length; index++) {
-      this.diagnostics.recordDetailed({
-        subsystem: 'terrain', event: 'terrain-lifecycle-batch', severity: 'state',
-        data: {
-          frame: this.frame,
-          generation: this.generation,
-          batchIndex: index,
-          batchCount: batches.length,
-          eventCount: events.length,
-          events: batches[index],
-        },
-      }, { ...this.diagnosticContext, bodyId: this.body.id });
-    }
+    this.group.clear();
   }
 }

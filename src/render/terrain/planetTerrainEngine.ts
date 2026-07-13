@@ -141,6 +141,7 @@ export class PlanetTerrainEngine {
   private requestedThisFrame = new Set<string>();
   private frame = 0;
   private disposed = false;
+  private shadowReceiver = false;
   stats: PlanetTerrainEngineStats = Object.freeze({
     frame: 0, chunks: 0, visible: 0, triangles: 0, coverageGaps: 0,
     rootsReady: false, coverageReady: false, scheduleMs: 0, installMs: 0,
@@ -274,6 +275,11 @@ export class PlanetTerrainEngine {
 
   coverageReady(): boolean { return this.stats.coverageReady; }
 
+  setShadowReceiver(enabled: boolean): void {
+    this.shadowReceiver = enabled;
+    for (const chunk of this.chunks.values()) chunk.mesh.receiveShadow = enabled;
+  }
+
   private queue(
     tile: TerrainTileDescriptor,
     requestClass: TerrainRequestClass,
@@ -359,7 +365,7 @@ export class PlanetTerrainEngine {
     mesh.userData.terrainTileKey = tile.key;
     mesh.userData.terrainTileId = tile.id;
     mesh.visible = false;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = this.shadowReceiver;
     this.dither.bindMesh(mesh);
     this.group.add(mesh);
     this.chunks.set(tile.key, { tile, mesh, origin: result.origin });

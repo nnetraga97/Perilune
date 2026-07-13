@@ -37,6 +37,7 @@ export type TerrainVisibilityPredicate = (
 ) => boolean;
 
 const EDGES = ['west', 'east', 'south', 'north'] as const;
+const BOUNDING_SPHERE_CACHE = new WeakMap<object, Map<string, TerrainTileBoundingSphere>>();
 
 function dot(a: Readonly<VectorCoordinates>, b: Readonly<VectorCoordinates>): number {
   return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -50,6 +51,13 @@ export function terrainTileBoundingSphere(
   provider: Readonly<PlanetSurfaceProvider>,
   tile: Readonly<TerrainTileDescriptor>,
 ): TerrainTileBoundingSphere {
+  let providerCache = BOUNDING_SPHERE_CACHE.get(provider);
+  if (!providerCache) {
+    providerCache = new Map();
+    BOUNDING_SPHERE_CACHE.set(provider, providerCache);
+  }
+  const cached = providerCache.get(tile.key);
+  if (cached) return cached;
   const { u0, v0, size } = tile.uvBounds;
   const centerDirection = terrainFaceToDirection(tile.id.face, u0 + size / 2, v0 + size / 2);
   const minimumRadius = provider.radiusMeters + provider.displacementBounds.minimumHeightMeters;
@@ -78,7 +86,9 @@ export function terrainTileBoundingSphere(
       }
     }
   }
-  return Object.freeze({ center, radius, angularRadius });
+  const result = Object.freeze({ center, radius, angularRadius });
+  providerCache.set(tile.key, result);
+  return result;
 }
 
 function horizonCulled(
@@ -211,16 +221,18 @@ export function balanceTerrainLeaves(
     if (++passes > provider.maximumDepth * 8 + 8) {
       throw new Error('Terrain neighbor balancing did not converge');
     }
+    const splitNeighbors = new Map<string, TerrainTileDescriptor>();
     for (const tile of [...leaves.values()].sort((a, b) => b.id.depth - a.id.depth || a.key.localeCompare(b.key))) {
       for (const edge of EDGES) {
         const neighbor = coarserLeafForNeighbor(edgeNeighbor(tile.id, edge), leaves);
         if (!neighbor || tile.id.depth - neighbor.id.depth <= 1) continue;
-        leaves.delete(neighbor.key);
-        for (const child of provider.children(neighbor)) leaves.set(child.key, child);
-        changed = true;
-        break;
+        splitNeighbors.set(neighbor.key, neighbor);
       }
-      if (changed) break;
+    }
+    for (const neighbor of [...splitNeighbors.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+      if (!leaves.delete(neighbor.key)) continue;
+      for (const child of provider.children(neighbor)) leaves.set(child.key, child);
+      changed = true;
     }
   }
   return Object.freeze([...leaves.values()].sort((a, b) => a.key.localeCompare(b.key)));

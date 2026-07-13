@@ -16,7 +16,7 @@ import {
 } from '../src/render/terrain/chunkWorkerPool';
 import { handleTerrainChunkWorkerRequest } from '../src/render/terrain/chunkWorker';
 import { createTerrainTileId } from '../src/render/terrain/tile';
-import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo, type PlanetQuality } from '../src/render/planet';
+import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo } from '../src/render/planet';
 
 const veyra = new GameState().universe.get('veyra');
 
@@ -366,11 +366,15 @@ function updateRenderer(renderer: PlanetRenderer): void {
 }
 
 function terrainMeshes(renderer: PlanetRenderer): THREE.Mesh[] {
-  return renderer.group.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+  const meshes: THREE.Mesh[] = [];
+  renderer.engine.group.traverse((child) => {
+    if (child instanceof THREE.Mesh) meshes.push(child);
+  });
+  return meshes;
 }
 
-describe('PlanetRenderer worker generations', () => {
-  it('keeps old-quality coverage until all replacement roots commit, then swaps and disposes atomically', () => {
+describe('PlanetRenderer shared-engine facade', () => {
+  it('streams all roots through the owned worker pool before reporting coverage', () => {
     const workers: ControlledWorker[] = [];
     const pool = new TerrainChunkWorkerPool({
       size: 6,
@@ -380,106 +384,49 @@ describe('PlanetRenderer worker generations', () => {
         return worker;
       },
     });
-    const low: PlanetQuality = { ...PLANET_QUALITY.low, buildBudget: 6 };
-    const high: PlanetQuality = { ...PLANET_QUALITY.high, buildBudget: 6 };
-    const renderer = new PlanetRenderer(veyra, low, { workerPool: pool, oceanEnabled: false });
+    const renderer = new PlanetRenderer(
+      veyra,
+      { ...PLANET_QUALITY.low, buildBudget: 6 },
+      { workerPool: pool, oceanEnabled: false },
+    );
     updateRenderer(renderer);
+    expect(renderer.coverageReady()).toBe(false);
     for (const worker of workers) worker.complete();
     updateRenderer(renderer);
-    const oldMeshes = terrainMeshes(renderer);
-    expect(oldMeshes).toHaveLength(6);
-    expect(oldMeshes.every((mesh) => mesh.geometry.getAttribute('position').count === 117)).toBe(true);
-    const oldDisposals = oldMeshes.map((mesh) => vi.spyOn(mesh.geometry, 'dispose'));
-
-    renderer.setQuality(high);
-    updateRenderer(renderer);
-    expect(terrainMeshes(renderer)).toEqual(oldMeshes);
-    for (const dispose of oldDisposals) expect(dispose).not.toHaveBeenCalled();
-    for (const worker of workers) worker.complete();
-    expect(terrainMeshes(renderer)).toEqual(oldMeshes);
-
-    updateRenderer(renderer);
-    const replacementMeshes = terrainMeshes(renderer);
-    expect(replacementMeshes).toHaveLength(6);
-    expect(replacementMeshes.every((mesh) => mesh.geometry.getAttribute('position').count === 1221)).toBe(true);
-    for (const dispose of oldDisposals) expect(dispose).toHaveBeenCalledOnce();
+    const roots = terrainMeshes(renderer).filter((mesh) => mesh.userData.terrainTileId.depth === 0);
+    expect(roots).toHaveLength(6);
+    expect(roots.every((mesh) => mesh.geometry.getAttribute('position').count === 117)).toBe(true);
+    expect(renderer.coverageReady()).toBe(true);
     renderer.dispose();
+    expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 
-  it('keeps a same-key new-generation pending marker when cancellation rejects the old submit', async () => {
+  it('uses renderer replacement rather than mutating quality in place', () => {
+    const low = new PlanetRenderer(veyra, PLANET_QUALITY.low, { oceanEnabled: false });
+    updateRenderer(low);
+    updateRenderer(low);
+    const lowRoots = terrainMeshes(low).filter((mesh) => mesh.userData.terrainTileId.depth === 0);
+    const high = new PlanetRenderer(veyra, PLANET_QUALITY.high, { oceanEnabled: false });
+    updateRenderer(high);
+    updateRenderer(high);
+    const highRoots = terrainMeshes(high).filter((mesh) => mesh.userData.terrainTileId.depth === 0);
+    expect(lowRoots.every((mesh) => mesh.geometry.getAttribute('position').count === 117)).toBe(true);
+    expect(highRoots.every((mesh) => mesh.geometry.getAttribute('position').count === 1221)).toBe(true);
+    expect(low.group.children.length).toBeGreaterThan(0);
+    low.dispose();
+    high.dispose();
+  });
+
+  it('discards late work after facade disposal', () => {
     const worker = new ControlledWorker();
-    const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
-    const firstQuality: PlanetQuality = { ...PLANET_QUALITY.low, buildBudget: 1 };
-    const nextQuality: PlanetQuality = { ...PLANET_QUALITY.medium, buildBudget: 1 };
-    const renderer = new PlanetRenderer(veyra, firstQuality, { workerPool: pool, oceanEnabled: false });
+    const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, {
+      workerPool: new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker }),
+      oceanEnabled: false,
+    });
     updateRenderer(renderer);
-    renderer.setQuality(nextQuality);
-    updateRenderer(renderer);
-    await Promise.resolve();
-    const firstKey = worker.posted[0].jobKey;
-    const pending = (renderer as unknown as { pendingChunks: Map<string, number> }).pendingChunks;
-    expect(pending.get(firstKey)).toBe(2);
-
+    renderer.dispose();
     worker.complete();
-    expect(worker.posted.at(-1)?.generation).toBe(2);
-    updateRenderer(renderer);
+    expect(renderer.group.children).toHaveLength(0);
     expect(terrainMeshes(renderer)).toHaveLength(0);
-    worker.complete();
-    updateRenderer(renderer);
-    expect(terrainMeshes(renderer)[0]?.geometry.getAttribute('position').count).toBe(357);
-    renderer.dispose();
-  });
-
-  it('does not install stale-generation results returned by a pool', () => {
-    const completed: TerrainChunkGeometryResult[] = [];
-    const submitted: TerrainChunkGeometryRequest[] = [];
-    const manualPool = {
-      submit(value: TerrainChunkGeometryRequest) {
-        submitted.push(value);
-        return new Promise<TerrainChunkGeometryResult>(() => undefined);
-      },
-      cancelGeneration() {},
-      drainCompleted() { return completed.splice(0); },
-      timings() { return { workers: 1, pending: 0, active: 0, buildP99Ms: 0 }; },
-      dispose() {},
-    } as unknown as TerrainChunkWorkerPool;
-    const renderer = new PlanetRenderer(
-      veyra,
-      { ...PLANET_QUALITY.low, buildBudget: 1 },
-      { workerPool: manualPool, oceanEnabled: false },
-    );
-    updateRenderer(renderer);
-    const stale = buildTerrainChunkGeometry({ ...submitted[0], jobKey: 'stale-only' });
-    renderer.setQuality(PLANET_QUALITY.medium);
-    completed.push(stale);
-    updateRenderer(renderer);
-    expect(terrainMeshes(renderer)).toHaveLength(0);
-    renderer.dispose();
-  });
-
-  it('measures scheduling independently from completed-result installation', () => {
-    const completed = [buildTerrainChunkGeometry(request({ jobKey: 'timed-root', generation: 1 }))];
-    const manualPool = {
-      submit() { return new Promise<TerrainChunkGeometryResult>(() => undefined); },
-      cancelGeneration() {},
-      drainCompleted() { return completed.splice(0); },
-      timings() { return { workers: 1, pending: 0, active: 0, buildP99Ms: 0 }; },
-      dispose() {},
-    } as unknown as TerrainChunkWorkerPool;
-    const renderer = new PlanetRenderer(
-      veyra,
-      { ...PLANET_QUALITY.low, buildBudget: 0 },
-      { workerPool: manualPool, oceanEnabled: false },
-    );
-    const now = vi.spyOn(performance, 'now')
-      .mockReturnValueOnce(10)
-      .mockReturnValueOnce(15)
-      .mockReturnValueOnce(20)
-      .mockReturnValueOnce(27);
-    updateRenderer(renderer);
-    expect(renderer.stats.installMs).toBe(5);
-    expect(renderer.stats.scheduleMs).toBe(7);
-    now.mockRestore();
-    renderer.dispose();
   });
 });

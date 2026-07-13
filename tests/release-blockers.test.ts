@@ -62,6 +62,13 @@ describe('M2 release blockers', () => {
       bodyOrientation(body, 0, new Quat()),
       new Vec3(),
     );
+    for (let frame = 0; frame < 8 && !renderer.coverageReady(); frame++) {
+      renderer.update(
+        new Vec3(body.radius + 100, 0, 0),
+        bodyOrientation(body, 0, new Quat()),
+        new Vec3(),
+      );
+    }
     expect(renderer.stats.coverageGaps).toBe(0);
     expect(renderer.stats.overlapChunks).toBe(0);
     renderer.dispose();
