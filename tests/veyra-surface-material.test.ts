@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import { recipeForBody } from '../src/sim/terrainRecipe';
+import { createTerrainTileId } from '../src/render/terrain/tile';
 import { buildTerrainChunkGeometry } from '../src/render/terrain/chunkGeometry';
 import type { RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import {
@@ -184,12 +185,12 @@ describe('analytic surface detail', () => {
     const recipe = recipeForBody(veyra);
     const res = 9;
     const common = {
-      generation: 1, recipe, radius: veyra.radius, face: 0,
-      v0: 0, size: 0.25, resolution: res, skirtDepth: 6,
+      generation: 1, recipe, radius: veyra.radius,
+      resolution: res, skirtDepth: 6,
       palette: { low: [0.2, 0.3, 0.1] as const, mid: [0.4, 0.4, 0.2] as const, high: [0.7, 0.7, 0.7] as const, ocean: [0.1, 0.2, 0.4] as const },
     };
-    const left = buildTerrainChunkGeometry({ ...common, jobKey: 'L', u0: 0 });
-    const right = buildTerrainChunkGeometry({ ...common, jobKey: 'R', u0: 0.25 });
+    const left = buildTerrainChunkGeometry({ ...common, jobKey: 'L', tile: createTerrainTileId(0, 3, 4, 4) });
+    const right = buildTerrainChunkGeometry({ ...common, jobKey: 'R', tile: createTerrainTileId(0, 3, 5, 4) });
     // Left column i = res-1 (u = 0.25) and right column i = 0 (u = 0.25) are the
     // same body-fixed points reached through different chunk origins.
     for (const tier of ['low', 'medium', 'high'] as const) {

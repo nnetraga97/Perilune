@@ -23,6 +23,7 @@ import {
   type TerrainChunkGeometryResult,
 } from './terrain/chunkGeometry';
 import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import { createTerrainTileId } from './terrain/tile';
 import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
 
 export { terrainGridIndices } from './terrain/chunkGeometry';
@@ -652,12 +653,14 @@ export class PlanetRenderer {
     return {
       jobKey: key,
       generation: this.generation,
+      tile: createTerrainTileId(
+        node.face,
+        node.depth,
+        Math.round((node.u0 + 1) / node.size),
+        Math.round((node.v0 + 1) / node.size),
+      ),
       recipe: this.recipeSnapshot,
       radius: this.body.radius,
-      face: node.face,
-      u0: node.u0,
-      v0: node.v0,
-      size: node.size,
       resolution: this.quality.gridRes,
       skirtDepth: terrainSkirtDepth(node.worldSize, this.quality.gridRes),
       palette: this.paletteSnapshot,

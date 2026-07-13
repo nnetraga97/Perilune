@@ -15,6 +15,7 @@ import {
   type WorkerLike,
 } from '../src/render/terrain/chunkWorkerPool';
 import { handleTerrainChunkWorkerRequest } from '../src/render/terrain/chunkWorker';
+import { createTerrainTileId } from '../src/render/terrain/tile';
 import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo, type PlanetQuality } from '../src/render/planet';
 
 const veyra = new GameState().universe.get('veyra');
@@ -38,12 +39,9 @@ function request(overrides: Partial<TerrainChunkGeometryRequest> = {}): TerrainC
   return {
     jobKey: '0:1:-1.000000:-1.000000',
     generation: 7,
+    tile: createTerrainTileId(0, 1, 0, 0),
     recipe: structuredClone(recipeForBody(veyra)),
     radius: veyra.radius,
-    face: 0,
-    u0: -1,
-    v0: -1,
-    size: 1,
     resolution: 9,
     skirtDepth: 12,
     palette: {
@@ -71,7 +69,7 @@ function absolutePosition(result: TerrainChunkGeometryResult, vertex: number): [
 describe('terrain chunk geometry builder', () => {
   it('is deterministic, floating-origin independent, and agrees across a shared edge', () => {
     const leftRequest = request();
-    const rightRequest = request({ jobKey: 'right', u0: 0 });
+    const rightRequest = request({ jobKey: 'right', tile: createTerrainTileId(0, 1, 1, 0) });
     const left = buildTerrainChunkGeometry(leftRequest);
     // A camera floating-origin change is deliberately absent from the serializable request.
     const rebuiltAfterFloatingOriginChange = buildTerrainChunkGeometry(structuredClone(leftRequest));

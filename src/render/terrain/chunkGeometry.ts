@@ -1,5 +1,12 @@
 import { Vec3 } from '../../core/vec3';
 import { evaluateRecipeHeight, type BodyFeatureRecipe } from '../../sim/terrainRecipe';
+import {
+  CUBE_FACE_BASES,
+  createTerrainTileId,
+  terrainTileUvBounds,
+  type CubeFace,
+  type TerrainTileId,
+} from './tile';
 
 export type TerrainColor = readonly [number, number, number];
 
@@ -13,12 +20,9 @@ export interface TerrainChunkPalette {
 export interface TerrainChunkGeometryRequest {
   readonly jobKey: string;
   readonly generation: number;
+  readonly tile: TerrainTileId;
   readonly recipe: BodyFeatureRecipe;
   readonly radius: number;
-  readonly face: number;
-  readonly u0: number;
-  readonly v0: number;
-  readonly size: number;
   readonly resolution: number;
   readonly skirtDepth: number;
   readonly palette: TerrainChunkPalette;
@@ -32,6 +36,7 @@ export interface TerrainChunkBounds {
 export interface TerrainChunkGeometryResult {
   readonly jobKey: string;
   readonly generation: number;
+  readonly tile: TerrainTileId;
   readonly position: Float32Array;
   readonly normal: Float32Array;
   readonly color: Float32Array;
@@ -54,26 +59,13 @@ export function terrainGeometryTransferables(result: TerrainChunkGeometryResult)
   ];
 }
 
-interface FaceBasis {
-  readonly n: readonly [number, number, number];
-  readonly u: readonly [number, number, number];
-  readonly v: readonly [number, number, number];
-}
-
-const FACES: readonly FaceBasis[] = [
-  { n: [1, 0, 0], u: [0, 1, 0], v: [0, 0, 1] },
-  { n: [-1, 0, 0], u: [0, -1, 0], v: [0, 0, 1] },
-  { n: [0, 1, 0], u: [0, 0, 1], v: [1, 0, 0] },
-  { n: [0, -1, 0], u: [0, 0, -1], v: [1, 0, 0] },
-  { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] },
-  { n: [0, 0, -1], u: [-1, 0, 0], v: [0, 1, 0] },
-];
-
 const DETAIL_PERIOD_METERS = 8192;
 
 export function terrainFaceToDirection(faceIndex: number, u: number, v: number, out = new Vec3()): Vec3 {
-  const face = FACES[faceIndex];
-  if (!face) throw new RangeError(`Invalid cube face ${faceIndex}`);
+  if (!Number.isInteger(faceIndex) || faceIndex < 0 || faceIndex > 5) {
+    throw new RangeError(`Invalid cube face ${faceIndex}`);
+  }
+  const face = CUBE_FACE_BASES[faceIndex as CubeFace];
   const su = Math.tan(u * (Math.PI / 4));
   const sv = Math.tan(v * (Math.PI / 4));
   return out.set(
@@ -114,8 +106,13 @@ export function buildTerrainChunkGeometry(
   request: Readonly<TerrainChunkGeometryRequest>,
 ): TerrainChunkGeometryResult {
   const started = performance.now();
-  const face = FACES[request.face];
-  if (!face) throw new RangeError(`Invalid cube face ${request.face}`);
+  const tile = createTerrainTileId(
+    request.tile.face,
+    request.tile.depth,
+    request.tile.x,
+    request.tile.y,
+  );
+  const { u0, v0, size } = terrainTileUvBounds(tile);
   if (!Number.isInteger(request.resolution) || request.resolution < 2) {
     throw new RangeError(`Invalid terrain resolution ${request.resolution}`);
   }
@@ -128,9 +125,9 @@ export function buildTerrainChunkGeometry(
   const bodyDirection = new Float32Array(vertexCount * 3);
   const bodyFixedDetailAnchor = new Float32Array(vertexCount * 3);
   const centerDirection = terrainFaceToDirection(
-    request.face,
-    request.u0 + request.size / 2,
-    request.v0 + request.size / 2,
+    tile.face,
+    u0 + size / 2,
+    v0 + size / 2,
     new Vec3(),
   );
   const originHeight = request.radius + evaluateRecipeHeight(request.recipe, centerDirection);
@@ -144,7 +141,7 @@ export function buildTerrainChunkGeometry(
     periodicOffset(origin[1]),
     periodicOffset(origin[2]),
   ];
-  const eps = Math.max(1e-5, request.size / (res * 8));
+  const eps = Math.max(1e-5, size / (res * 8));
   const point = new Vec3();
   const sampleU = new Vec3();
   const sampleV = new Vec3();
@@ -152,7 +149,7 @@ export function buildTerrainChunkGeometry(
   let boundsRadius = 0;
 
   const writeVertex = (u: number, v: number, sink: number): void => {
-    const direction = terrainFaceToDirection(request.face, u, v, point);
+    const direction = terrainFaceToDirection(tile.face, u, v, point);
     const rawHeight = evaluateRecipeHeight(request.recipe, direction);
     const surfaceRadius = request.radius + rawHeight;
     const radius = surfaceRadius - sink;
@@ -167,9 +164,9 @@ export function buildTerrainChunkGeometry(
     bodyFixedDetailAnchor[offset + 1] = position[offset + 1] + detailOffset[1];
     bodyFixedDetailAnchor[offset + 2] = position[offset + 2] + detailOffset[2];
 
-    terrainFaceToDirection(request.face, u + eps, v, sampleU);
+    terrainFaceToDirection(tile.face, u + eps, v, sampleU);
     sampleU.scale(request.radius + evaluateRecipeHeight(request.recipe, sampleU));
-    terrainFaceToDirection(request.face, u, v + eps, sampleV);
+    terrainFaceToDirection(tile.face, u, v + eps, sampleV);
     sampleV.scale(request.radius + evaluateRecipeHeight(request.recipe, sampleV));
     const px = direction.x * surfaceRadius;
     const py = direction.y * surfaceRadius;
@@ -202,8 +199,8 @@ export function buildTerrainChunkGeometry(
   for (let j = 0; j < res; j++) {
     for (let i = 0; i < res; i++) {
       writeVertex(
-        request.u0 + request.size * i / (res - 1),
-        request.v0 + request.size * j / (res - 1),
+        u0 + size * i / (res - 1),
+        v0 + size * j / (res - 1),
         0,
       );
     }
@@ -215,8 +212,8 @@ export function buildTerrainChunkGeometry(
   for (let j = 0; j < res; j++) border.push([res - 1, j]);
   for (const [i, j] of border) {
     writeVertex(
-      request.u0 + request.size * i / (res - 1),
-      request.v0 + request.size * j / (res - 1),
+      u0 + size * i / (res - 1),
+      v0 + size * j / (res - 1),
       request.skirtDepth,
     );
   }
@@ -244,6 +241,7 @@ export function buildTerrainChunkGeometry(
   return {
     jobKey: request.jobKey,
     generation: request.generation,
+    tile,
     position,
     normal,
     color,

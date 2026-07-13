@@ -13,6 +13,19 @@ const GRAD = new Float64Array([
   0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1,
 ]);
 
+/**
+ * Conservative analytical bounds for this implementation, not observed
+ * sample maxima. Corner dot products are bounded by 2; quintic interpolation
+ * is convex, then the implementation's 1.9 normalization is applied.
+ */
+export const NOISE3_VALUE_BOUND = 3.8;
+
+/**
+ * Conservative Euclidean input-gradient bound. Per-axis derivative is at
+ * most `1.9 * (1 + 2 * max(fade') * 2) = 16.15`; 28 bounds three axes.
+ */
+export const NOISE3_GRADIENT_BOUND = 28;
+
 /** Cheap integer hash (xorshift-style avalanche). */
 function hash(ix: number, iy: number, iz: number, seed: number): number {
   let h = (ix * 374761393 + iy * 668265263 + iz * 2147483647 + seed * 144665) | 0;
