@@ -14,6 +14,7 @@ import {
   type TerrainChunkGeometryRequest,
   type TerrainChunkGeometryResult,
 } from '../src/render/terrain/chunkGeometry';
+import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 
 function policy(overrides: Partial<TerrainQualityPolicy> = {}): TerrainQualityPolicy {
   return Object.freeze({
@@ -95,11 +96,16 @@ class ManualWorker implements WorkerLike {
 describe('PlanetTerrainEngine', () => {
   it('establishes and permanently retains all six roots before reporting readiness', () => {
     const surface = provider(1, 2);
+    const diagnostics = new RenderDiagnostics({
+      quality: 'medium', detailed: true, sampleIntervalMs: 0, now: () => performance.now(),
+    });
     const engine = new PlanetTerrainEngine({
       provider: surface,
       quality: policy(),
       material: new THREE.MeshBasicMaterial(),
       terrainAllocationBytes: 250_000,
+      diagnostics,
+      diagnosticSource: 'engine-test',
     });
 
     expect(engine.coverageReady()).toBe(false);
@@ -108,6 +114,26 @@ describe('PlanetTerrainEngine', () => {
     expect(engine.stats.rootsReady).toBe(true);
     expect(engine.stats.coverageGaps).toBe(0);
     expect(Object.isFrozen(engine.stats)).toBe(true);
+    const snapshot = diagnostics.snapshot();
+    const samples = snapshot.entries.filter((entry) => entry.event === 'terrain-sample');
+    expect(samples.at(-1)?.data).toMatchObject({
+      rootsReady: true,
+      coverageGaps: 0,
+      balanceViolations: 0,
+      allocationBytes: 250_000,
+    });
+    expect(snapshot.entries.some((entry) => (
+      entry.event === 'terrain-lifecycle-batch'
+      && String(entry.data.events).includes('0/0/0/0')
+    ))).toBe(true);
+    expect(snapshot.anomalyCodes).not.toEqual(expect.arrayContaining([
+      'terrain-incomplete-root-coverage',
+      'terrain-incomplete-branch-coverage',
+      'terrain-protected-eviction',
+      'terrain-reservation-violation',
+      'terrain-neighbor-depth-violation',
+      'terrain-transition-incomplete',
+    ]));
     for (let face = 0; face < 6; face++) {
       expect(engine.group.getObjectByName(`terrain:${surface.rootTile(face as 0 | 1 | 2 | 3 | 4 | 5).key}`))
         .toBeDefined();

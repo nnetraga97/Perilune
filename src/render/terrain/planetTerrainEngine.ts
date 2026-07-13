@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { QuaternionCoordinates, VectorCoordinates } from '../bodyRenderer';
 import { geometryByteLength } from '../resourceAccounting';
+import type { RenderDiagnosticContext, RenderDiagnosticsPort } from '../renderDiagnostics';
 import { resolveTerrainCoverage, type TerrainTileRecord } from './coverageResolver';
 import { type TerrainChunkGeometryRequest, type TerrainChunkGeometryResult } from './chunkGeometry';
 import type { TerrainChunkWorkerPool } from './chunkWorkerPool';
@@ -18,6 +19,7 @@ import {
   selectPredictedTerrainDetail,
   selectTerrainDetail,
   terrainTileBoundingSphere,
+  terrainNeighborDepthViolations,
   type TerrainSelectionFrame,
   type TerrainVisibilityPredicate,
 } from './terrainSelection';
@@ -31,6 +33,7 @@ export interface PlanetTerrainFrame extends TerrainSelectionFrame {
   readonly framePressure: boolean;
   readonly generation: number;
   readonly visible?: TerrainVisibilityPredicate;
+  readonly diagnosticContext?: RenderDiagnosticContext & { readonly terrainRequested: boolean };
 }
 
 export interface PlanetTerrainEngineOptions {
@@ -40,6 +43,8 @@ export interface PlanetTerrainEngineOptions {
   readonly terrainAllocationBytes: number;
   readonly workerPool?: TerrainChunkWorkerPool;
   readonly now?: () => number;
+  readonly diagnostics?: RenderDiagnosticsPort;
+  readonly diagnosticSource?: string;
 }
 
 export interface PlanetTerrainEngineStats {
@@ -58,6 +63,13 @@ export interface PlanetTerrainEngineStats {
   readonly building: number;
   readonly ready: number;
   readonly failed: number;
+  readonly allocationBytes: number;
+  readonly protectedBytes: number;
+  readonly desiredLeaves: number;
+  readonly renderedLeaves: number;
+  readonly fallbackTiles: number;
+  readonly balanceViolations: number;
+  readonly activeTransitions: number;
 }
 
 interface InstalledChunk {
@@ -135,10 +147,16 @@ export class PlanetTerrainEngine {
   private readonly dither: TerrainLodDitherBinding;
   private readonly workerPool?: TerrainChunkWorkerPool;
   private readonly now: () => number;
+  private readonly diagnostics?: RenderDiagnosticsPort;
+  private readonly diagnosticSource: string;
   private installationQueue: ReturnType<TerrainRequestScheduler['drainCompleted']> = [];
   private previousSplitKeys = new Set<string>();
   private previousRenderedKeys = new Set<string>();
   private requestedThisFrame = new Set<string>();
+  private readonly requestedAt = new Map<string, number>();
+  private previousTransitionStates = new Map<string, string>();
+  private diagnosticContext: Readonly<RenderDiagnosticContext & { terrainRequested?: boolean }> = {};
+  private diagnosticLifecycleBatch: string[] = [];
   private frame = 0;
   private disposed = false;
   private shadowReceiver = false;
@@ -147,6 +165,8 @@ export class PlanetTerrainEngine {
     rootsReady: false, coverageReady: false, scheduleMs: 0, installMs: 0,
     geometryBytes: 0, reservedBytes: 0,
     queued: 0, building: 0, ready: 0, failed: 0,
+    allocationBytes: 0, protectedBytes: 0, desiredLeaves: 0, renderedLeaves: 0,
+    fallbackTiles: 0, balanceViolations: 0, activeTransitions: 0,
   });
 
   constructor(options: Readonly<PlanetTerrainEngineOptions>) {
@@ -155,6 +175,8 @@ export class PlanetTerrainEngine {
     this.material = options.material;
     this.workerPool = options.workerPool;
     this.now = options.now ?? (() => performance.now());
+    this.diagnostics = options.diagnostics;
+    this.diagnosticSource = options.diagnosticSource ?? `terrain:${options.provider.bodyId}`;
     this.residency = new TerrainResidencyManager(options.terrainAllocationBytes, options.quality.softResidencyRatio);
     const executor = options.workerPool ?? new InlineTerrainExecutor(options.provider);
     this.scheduler = new TerrainRequestScheduler(executor, this.residency);
@@ -164,6 +186,8 @@ export class PlanetTerrainEngine {
   update(frame: Readonly<PlanetTerrainFrame>): void {
     if (this.disposed) return;
     if (frame.generation !== this.provider.generation) return;
+    this.diagnosticContext = frame.diagnosticContext ?? {};
+    this.diagnosticLifecycleBatch = [];
     this.frame++;
     const installStarted = this.now();
     const completed = this.scheduler.drainCompleted();
@@ -171,6 +195,7 @@ export class PlanetTerrainEngine {
       const record = this.records.get(completion.result.jobKey);
       if (record && record.generation === completion.result.generation) {
         this.records.set(record.tile.key, { ...record, state: 'ready' });
+        this.terrainEvent('ready', record.tile, { requestClass: completion.requestClass });
       }
     }
     this.installationQueue.push(...completed);
@@ -179,10 +204,14 @@ export class PlanetTerrainEngine {
       const completion = this.installationQueue.shift()!;
       try {
         this.install(completion.result, completion.reservationKey, completion.requestClass);
-      } catch {
+      } catch (cause) {
         const record = this.records.get(completion.result.jobKey);
         if (record && record.generation === completion.result.generation) {
           this.records.set(record.tile.key, { ...record, state: 'failed', gpuValid: false });
+          this.terrainEvent('failed', record.tile, {
+            phase: 'install',
+            message: cause instanceof Error ? cause.message : String(cause),
+          });
         }
       } finally {
         this.scheduler.releaseCompleted(completion.result.jobKey, completion.result.generation);
@@ -194,6 +223,14 @@ export class PlanetTerrainEngine {
       this.provider, this.quality, frame, this.previousSplitKeys, frame.visible,
     );
     const balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    const balanceViolations = terrainNeighborDepthViolations(balanced);
+    if (balanceViolations.length > 0) {
+      this.diagnostics?.anomaly('terrain-neighbor-depth-violation', 'terrain', {
+        count: balanceViolations.length,
+        first: balanceViolations[0],
+      }, this.diagnosticContext);
+    }
+    const previousRenderedForFrame = this.previousRenderedKeys;
     const coverage = resolveTerrainCoverage({
       provider: this.provider,
       desiredLeaves: balanced,
@@ -207,6 +244,17 @@ export class PlanetTerrainEngine {
     const transitionSnapshots = this.transitions.advance(
       frame.deltaSeconds, frame.framePressure, this.frame,
     );
+    const incompleteTransitions = this.observeTransitions(transitionSnapshots);
+    const immediateReplacements = this.countImmediateReplacements(
+      this.previousRenderedKeys,
+      coverage.renderedKeys,
+      transitionSnapshots,
+    );
+    if (immediateReplacements > 0) {
+      this.diagnostics?.anomaly('terrain-immediate-replacement', 'terrain', {
+        count: immediateReplacements,
+      }, this.diagnosticContext);
+    }
     const renderKeys = new Set(coverage.renderedKeys);
     for (const transition of transitionSnapshots) {
       renderKeys.add(transition.parentKey);
@@ -243,7 +291,16 @@ export class PlanetTerrainEngine {
       for (let face = 0; face < 6; face++) this.residency.protectPermanently(this.provider.rootTile(face as 0 | 1 | 2 | 3 | 4 | 5).key);
     }
     for (const key of protection) this.residency.markUsed(key);
-    for (const key of this.residency.trimToSoftTarget()) this.disposeChunk(key);
+    let protectedEvictions = 0;
+    for (const key of this.residency.trimToSoftTarget()) {
+      if (protection.has(key)) protectedEvictions++;
+      this.disposeChunk(key, false, 'soft-target');
+    }
+    if (protectedEvictions > 0) {
+      this.diagnostics?.anomaly('terrain-protected-eviction', 'terrain', {
+        count: protectedEvictions,
+      }, this.diagnosticContext);
+    }
 
     this.previousSplitKeys = new Set(selected.splitKeys);
     this.previousRenderedKeys = new Set(coverage.renderedKeys);
@@ -270,7 +327,25 @@ export class PlanetTerrainEngine {
       building: scheduler.building,
       ready: this.installationQueue.length,
       failed: scheduler.failed,
+      allocationBytes: residency.allocationBytes,
+      protectedBytes: residency.protectedBytes,
+      desiredLeaves: balanced.length,
+      renderedLeaves: coverage.renderedKeys.size,
+      fallbackTiles: coverage.fallbackKeys.size,
+      balanceViolations: balanceViolations.length,
+      activeTransitions: transitionSnapshots.length,
     });
+    this.observeFrame(
+      coverage,
+      balanced,
+      renderKeys,
+      previousRenderedForFrame,
+      transitionSnapshots.length,
+      incompleteTransitions,
+      protectedEvictions,
+      immediateReplacements,
+    );
+    this.flushDiagnosticLifecycleBatch();
   }
 
   coverageReady(): boolean { return this.stats.coverageReady; }
@@ -289,15 +364,17 @@ export class PlanetTerrainEngine {
     const existing = this.records.get(tile.key);
     if (existing?.state === 'installed' || existing?.state === 'ready') return;
     this.requestedThisFrame.add(tile.key);
+    const newRequest = !existing || existing.state === 'unloaded' || existing.state === 'failed';
     const request = this.provider.buildRequest(
       tile.id,
       skirtDepth(this.provider, tile, this.quality.gridResolution),
     );
-    if (!existing || existing.state === 'unloaded' || existing.state === 'failed') {
+    if (newRequest) {
       this.records.set(tile.key, {
         tile, state: 'queued', generation: request.generation,
         materialGeneration: this.provider.generation, gpuValid: false,
       });
+      this.requestedAt.set(tile.key, this.now());
     }
     const bounds = terrainTileBoundingSphere(this.provider, tile);
     const distanceToBounds = Math.max(0, Math.hypot(
@@ -322,16 +399,24 @@ export class PlanetTerrainEngine {
       + frame.cameraBodyFixed.y * bounds.center.y
       + frame.cameraBodyFixed.z * bounds.center.z
     ) / (cameraLength * centerLength);
+    const estimatedBytes = estimatedGeometryBytes(this.quality.gridResolution);
+    const distanceToViewCenter = Math.acos(Math.max(-1, Math.min(1, viewDot)));
     this.scheduler.request({
       request,
       requestClass,
       visible: requestClass !== 'predicted-refinement' && requestClass !== 'background',
       screenSpaceError: sse,
-      distanceToViewCenter: Math.acos(Math.max(-1, Math.min(1, viewDot))),
+      distanceToViewCenter,
       depth: tile.id.depth,
-      estimatedBytes: estimatedGeometryBytes(this.quality.gridResolution),
+      estimatedBytes,
       root: tile.id.depth === 0,
     }, this.now());
+    if (newRequest) this.terrainEvent('queued', tile, {
+      requestClass,
+      screenSpaceError: sse,
+      distanceToViewCenter,
+      estimatedBytes,
+    });
   }
 
   private install(result: TerrainChunkGeometryResult, reservationKey: string, requestClass: TerrainRequestClass): void {
@@ -357,6 +442,7 @@ export class PlanetTerrainEngine {
         tile, state: 'unloaded', generation: result.generation,
         materialGeneration: this.provider.generation, gpuValid: false,
       });
+      this.terrainEvent('installation-discarded', tile, { reason: decision.reason, bytes });
       return;
     }
     this.disposeChunk(tile.key, true);
@@ -373,6 +459,8 @@ export class PlanetTerrainEngine {
       tile, state: 'installed', generation: result.generation,
       materialGeneration: this.provider.generation, gpuValid: true,
     });
+    this.requestedAt.delete(tile.key);
+    this.terrainEvent('installed', tile, { bytes, requestClass, reservationKey });
     if (tile.id.depth === 0) this.residency.protectPermanently(tile.key);
   }
 
@@ -403,6 +491,7 @@ export class PlanetTerrainEngine {
       if (record.state === 'installed' || record.state === 'ready') continue;
       const state = this.scheduler.state(key, record.generation);
       if (state === 'queued' || state === 'building' || state === 'failed') {
+        if (state !== record.state) this.terrainEvent(state, record.tile);
         this.records.set(key, { ...record, state });
       }
     }
@@ -415,6 +504,8 @@ export class PlanetTerrainEngine {
         || (record.state !== 'queued' && record.state !== 'building' && record.state !== 'failed')
       ) continue;
       this.scheduler.cancel(key, record.generation);
+      this.requestedAt.delete(key);
+      this.terrainEvent('cancelled', record.tile, { reason: 'demand-changed' });
       this.records.set(key, { ...record, state: 'unloaded', gpuValid: false });
     }
   }
@@ -448,7 +539,7 @@ export class PlanetTerrainEngine {
     }
   }
 
-  private disposeChunk(key: string, keepResidency = false): void {
+  private disposeChunk(key: string, keepResidency = false, reason = 'replacement'): void {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
     this.group.remove(chunk.mesh);
@@ -457,6 +548,206 @@ export class PlanetTerrainEngine {
     if (!keepResidency) this.residency.removeInstalled(key, true);
     const record = this.records.get(key);
     if (record) this.records.set(key, { ...record, state: 'unloaded', gpuValid: false });
+    if (record) this.terrainEvent('evicted', record.tile, { reason });
+  }
+
+  private terrainEvent(
+    event: string,
+    tile?: Readonly<TerrainTileDescriptor>,
+    data: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    if (!this.diagnostics) return;
+    const observation = {
+      ...this.diagnosticContext,
+      bodyId: this.provider.bodyId,
+      rendererIdentity: this.diagnosticSource,
+      event,
+      key: tile?.key,
+      face: tile?.id.face,
+      depth: tile?.id.depth,
+      generation: this.provider.generation,
+      data,
+      batched: this.diagnostics.detailed,
+    } as const;
+    this.diagnostics.observeTerrainEvent?.(observation);
+    if (this.diagnostics.detailed) this.diagnosticLifecycleBatch.push(JSON.stringify({
+      event,
+      key: tile?.key ?? null,
+      depth: tile?.id.depth ?? null,
+      generation: this.provider.generation,
+      ...data,
+    }));
+  }
+
+  private observeTransitions(
+    snapshots: ReturnType<TerrainLodTransitionManager['snapshots']>,
+  ): number {
+    const next = new Map<string, string>();
+    let incomplete = 0;
+    for (const snapshot of snapshots) {
+      const state = `${snapshot.direction}:${snapshot.state}`;
+      next.set(snapshot.id, state);
+      if (this.previousTransitionStates.get(snapshot.id) !== state) {
+        this.terrainEvent(snapshot.state === 'active' ? 'transition-start' : 'transition-complete', undefined, {
+          transitionId: snapshot.id,
+          parentKey: snapshot.parentKey,
+          direction: snapshot.direction,
+          progress: snapshot.progress,
+        });
+      }
+      const completeSet = this.chunks.has(snapshot.parentKey)
+        && snapshot.childKeys.every((key) => this.chunks.has(key));
+      if (!completeSet) {
+        incomplete++;
+        this.diagnostics?.anomaly('terrain-transition-incomplete', 'terrain', {
+          transitionId: snapshot.id,
+          parentKey: snapshot.parentKey,
+        }, this.diagnosticContext);
+      }
+    }
+    for (const [id] of this.previousTransitionStates) {
+      if (!next.has(id)) this.terrainEvent('transition-release', undefined, { transitionId: id });
+    }
+    this.previousTransitionStates = next;
+    return incomplete;
+  }
+
+  private countImmediateReplacements(
+    previous: ReadonlySet<string>,
+    next: ReadonlySet<string>,
+    transitions: ReturnType<TerrainLodTransitionManager['snapshots']>,
+  ): number {
+    const transitioningParents = new Set(transitions.map((transition) => transition.parentKey));
+    const isDescendant = (candidateKey: string, ancestor: Readonly<TerrainTileDescriptor>): boolean => {
+      const candidate = this.records.get(candidateKey)?.tile;
+      if (!candidate || candidate.id.face !== ancestor.id.face || candidate.id.depth <= ancestor.id.depth) return false;
+      const scale = 2 ** (candidate.id.depth - ancestor.id.depth);
+      return Math.floor(candidate.id.x / scale) === ancestor.id.x
+        && Math.floor(candidate.id.y / scale) === ancestor.id.y;
+    };
+    let count = 0;
+    for (const key of previous) {
+      if (next.has(key) || transitioningParents.has(key)) continue;
+      const record = this.records.get(key);
+      if (!record || record.tile.id.depth >= this.provider.maximumDepth) continue;
+      if ([...next].some((candidate) => isDescendant(candidate, record.tile))) count++;
+    }
+    for (const key of next) {
+      if (previous.has(key) || transitioningParents.has(key)) continue;
+      const record = this.records.get(key);
+      if (!record || record.tile.id.depth >= this.provider.maximumDepth) continue;
+      if ([...previous].some((candidate) => isDescendant(candidate, record.tile))) count++;
+    }
+    return count;
+  }
+
+  private observeFrame(
+    coverage: ReturnType<typeof resolveTerrainCoverage>,
+    balanced: readonly TerrainTileDescriptor[],
+    renderKeys: ReadonlySet<string>,
+    previousRenderedKeys: ReadonlySet<string>,
+    activeTransitions: number,
+    incompleteTransitions: number,
+    protectedEvictions: number,
+    immediateReplacements: number,
+  ): void {
+    if (!this.diagnostics?.observeTerrainSample) return;
+    const now = this.now();
+    let oldestPendingAgeMs = 0;
+    for (const started of this.requestedAt.values()) {
+      oldestPendingAgeMs = Math.max(oldestPendingAgeMs, now - started);
+    }
+    const visibleByDepth: Record<string, number> = {};
+    for (const key of coverage.renderedKeys) {
+      const depth = this.records.get(key)?.tile.id.depth;
+      if (depth !== undefined) visibleByDepth[String(depth)] = (visibleByDepth[String(depth)] ?? 0) + 1;
+    }
+    const desiredDepths = balanced.map((tile) => tile.id.depth);
+    const resolvedDepths = [...coverage.renderedKeys]
+      .map((key) => this.records.get(key)?.tile.id.depth)
+      .filter((depth): depth is number => depth !== undefined);
+    const renderedDepths = [...renderKeys]
+      .map((key) => this.records.get(key)?.tile.id.depth)
+      .filter((depth): depth is number => depth !== undefined);
+    const previousDepths = [...previousRenderedKeys]
+      .map((key) => this.records.get(key)?.tile.id.depth)
+      .filter((depth): depth is number => depth !== undefined);
+    const residency = this.residency.stats();
+    const scheduler = this.scheduler.stats();
+    const workers = this.workerPool?.timings();
+    this.diagnostics.observeTerrainSample({
+      ...this.diagnosticContext,
+      bodyId: this.provider.bodyId,
+      rendererIdentity: this.diagnosticSource,
+      terrainRequested: this.diagnosticContext.terrainRequested ?? true,
+      generation: this.provider.generation,
+      visible: this.stats.visible,
+      chunks: this.stats.chunks,
+      triangles: this.stats.triangles,
+      geometryBytes: residency.installedBytes,
+      pending: scheduler.queued + scheduler.building + this.installationQueue.length,
+      oldestPendingAgeMs,
+      coverageGaps: this.stats.coverageGaps,
+      coverageReady: this.stats.coverageReady,
+      replacementRoots: 0,
+      workers: workers?.workers ?? 1,
+      activeWorkers: workers?.active ?? scheduler.building,
+      queuedWorkers: workers?.pending ?? scheduler.queued,
+      scheduleMs: this.stats.scheduleMs,
+      installMs: this.stats.installMs,
+      buildP99Ms: workers?.buildP99Ms ?? 0,
+      visibleByDepth,
+      rootsReady: coverage.rootsReady,
+      reservedBytes: residency.reservedBytes,
+      allocationBytes: residency.allocationBytes,
+      protectedBytes: residency.protectedBytes,
+      desiredLeaves: balanced.length,
+      renderedLeaves: coverage.renderedKeys.size,
+      fallbackTiles: coverage.fallbackKeys.size,
+      stagingTiles: coverage.stagingKeys.size,
+      desiredMinimumDepth: desiredDepths.length ? Math.min(...desiredDepths) : -1,
+      desiredMaximumDepth: desiredDepths.length ? Math.max(...desiredDepths) : -1,
+      resolvedMinimumDepth: resolvedDepths.length ? Math.min(...resolvedDepths) : -1,
+      resolvedMaximumDepth: resolvedDepths.length ? Math.max(...resolvedDepths) : -1,
+      renderedMinimumDepth: renderedDepths.length ? Math.min(...renderedDepths) : -1,
+      renderedMaximumDepth: renderedDepths.length ? Math.max(...renderedDepths) : -1,
+      previousMinimumDepth: previousDepths.length ? Math.min(...previousDepths) : -1,
+      previousMaximumDepth: previousDepths.length ? Math.max(...previousDepths) : -1,
+      balanceViolations: this.stats.balanceViolations,
+      activeTransitions,
+      incompleteTransitions,
+      protectedEvictions,
+      immediateReplacements,
+    });
+  }
+
+  private flushDiagnosticLifecycleBatch(): void {
+    if (!this.diagnostics?.detailed || this.diagnosticLifecycleBatch.length === 0) return;
+    let batch = '';
+    const batches: string[] = [];
+    for (const event of this.diagnosticLifecycleBatch) {
+      const next = batch ? `${batch}\n${event}` : event;
+      if (next.length > 8_000 && batch) {
+        batches.push(batch);
+        batch = event;
+      } else batch = next;
+    }
+    if (batch) batches.push(batch);
+    for (let index = 0; index < batches.length; index++) {
+      this.diagnostics.recordDetailed({
+        subsystem: 'terrain',
+        event: 'terrain-lifecycle-batch',
+        severity: 'state',
+        data: {
+          frame: this.frame,
+          generation: this.provider.generation,
+          batchIndex: index,
+          batchCount: batches.length,
+          eventCount: this.diagnosticLifecycleBatch.length,
+          events: batches[index],
+        },
+      }, this.diagnosticContext);
+    }
   }
 
   dispose(): void {
@@ -464,7 +755,7 @@ export class PlanetTerrainEngine {
     this.disposed = true;
     this.scheduler.cancelGeneration(this.provider.generation);
     this.workerPool?.dispose();
-    for (const key of [...this.chunks.keys()]) this.disposeChunk(key, true);
+    for (const key of [...this.chunks.keys()]) this.disposeChunk(key, true, 'engine-dispose');
     this.records.clear();
     this.residency.clear();
     this.transitions.clear();

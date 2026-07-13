@@ -130,6 +130,44 @@ describe('RenderDiagnostics', () => {
     ]));
   });
 
+  it('detects every machine-checkable terrain streaming invariant', () => {
+    let now = 0;
+    const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, sampleIntervalMs: 0, now: () => now++ });
+    const baseline = {
+      bodyId: 'veyra', terrainRequested: true, generation: 1, visible: 6, chunks: 6,
+      triangles: 10, geometryBytes: 90, reservedBytes: 10, allocationBytes: 100,
+      pending: 0, oldestPendingAgeMs: 0, coverageGaps: 0, coverageReady: true,
+      rootsReady: true, replacementRoots: 0, workers: 2, activeWorkers: 0,
+      queuedWorkers: 0, scheduleMs: 1, installMs: 1, buildP99Ms: 2,
+      balanceViolations: 0, incompleteTransitions: 0, protectedEvictions: 0,
+      immediateReplacements: 0,
+    };
+    diagnostics.observeTerrainSample(baseline);
+    diagnostics.observeTerrainSample({
+      ...baseline,
+      rootsReady: false,
+      coverageGaps: 1,
+      coverageReady: false,
+      geometryBytes: 101,
+      reservedBytes: 1,
+      balanceViolations: 1,
+      incompleteTransitions: 1,
+      protectedEvictions: 1,
+      immediateReplacements: 1,
+    });
+    expect(diagnostics.snapshot().anomalyCodes).toEqual(expect.arrayContaining([
+      'terrain-incomplete-root-coverage',
+      'terrain-protected-eviction',
+      'terrain-reservation-violation',
+      'terrain-neighbor-depth-violation',
+      'terrain-transition-incomplete',
+      'terrain-immediate-replacement',
+      'terrain-coverage-readiness-lost',
+    ]));
+    diagnostics.observeTerrainSample({ ...baseline, coverageGaps: 1 });
+    expect(diagnostics.snapshot().anomalyCodes).toContain('terrain-incomplete-branch-coverage');
+  });
+
   it('preserves lifecycle batches beyond the ordinary diagnostic text limit', () => {
     const diagnostics = new RenderDiagnostics({ quality: 'high', detailed: true, now: () => 1 });
     const events = Array.from({ length: 20 }, (_, index) => JSON.stringify({

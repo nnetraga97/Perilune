@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   captureCheckpoint,
   latestCloudClassification,
+  readTerrainAcceptance,
   readFlight,
   seedDiagnosticCraft,
   waitForAltitude,
@@ -183,9 +184,18 @@ for (const tier of ['medium', 'high'] as const) {
     }
 
     const finalSnapshot = await page.evaluate(() => window.__RENDER_DIAGNOSTICS__?.snapshot());
+    const terrainAcceptance = await readTerrainAcceptance(page);
     expect(finalSnapshot).toBeTruthy();
     expect(finalSnapshot!.entries.length).toBeGreaterThan(0);
     expect(finalSnapshot!.entries.length).toBeLessThanOrEqual(4_096);
+    expect(terrainAcceptance.samples).toBeGreaterThan(0);
+    expect(terrainAcceptance.postReadySamples).toBeGreaterThan(0);
+    expect(terrainAcceptance.maximumCoverageGaps).toBe(0);
+    expect(terrainAcceptance.readinessLosses).toBe(0);
+    expect(terrainAcceptance.reservationViolations).toBe(0);
+    expect(terrainAcceptance.forbiddenAnomalies).toEqual([]);
+    expect(terrainAcceptance.scheduleP95Ms).toBeLessThanOrEqual(2);
+    expect(terrainAcceptance.installP95Ms).toBeLessThanOrEqual(2);
     expect(errors, `application errors:\n${errors.join('\n')}`).toEqual([]);
   });
 }

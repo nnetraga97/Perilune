@@ -392,7 +392,7 @@ describe('PlanetRenderer shared-engine facade', () => {
     updateRenderer(renderer);
     expect(renderer.coverageReady()).toBe(false);
     for (const worker of workers) worker.complete();
-    updateRenderer(renderer);
+    for (let frame = 0; frame < 12 && !renderer.coverageReady(); frame++) updateRenderer(renderer);
     const roots = terrainMeshes(renderer).filter((mesh) => mesh.userData.terrainTileId.depth === 0);
     expect(roots).toHaveLength(6);
     expect(roots.every((mesh) => mesh.geometry.getAttribute('position').count === 117)).toBe(true);

@@ -216,6 +216,8 @@ export class PlanetRenderer {
       terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_ALLOCATION_BYTES,
       workerPool: options.workerPool,
       now: options.now,
+      diagnostics: options.diagnostics,
+      diagnosticSource: options.diagnosticSource,
     });
 
     let oceanMaterial: THREE.MeshPhongMaterial | null = null;
@@ -290,6 +292,7 @@ export class PlanetRenderer {
       deltaSeconds: projection.deltaSeconds,
       framePressure: projection.framePressure,
       generation: this.engine.provider.generation,
+      diagnosticContext,
     });
     this.engine.group.visible = this.terrainVisible;
     if (this.ocean) {

@@ -124,6 +124,61 @@ export async function latestCloudClassification(
   }, shell);
 }
 
+export interface TerrainAcceptanceSummary {
+  readonly samples: number;
+  readonly postReadySamples: number;
+  readonly maximumCoverageGaps: number;
+  readonly readinessLosses: number;
+  readonly reservationViolations: number;
+  readonly scheduleP95Ms: number;
+  readonly installP95Ms: number;
+  readonly forbiddenAnomalies: readonly string[];
+}
+
+export async function readTerrainAcceptance(page: Page): Promise<TerrainAcceptanceSummary> {
+  return page.evaluate(() => {
+    const snapshot = window.__RENDER_DIAGNOSTICS__?.snapshot();
+    const samples = (snapshot?.entries ?? []).filter((entry) => entry.event === 'terrain-sample');
+    const number = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    const p95 = (values: number[]): number => {
+      if (values.length === 0) return 0;
+      const ordered = [...values].sort((a, b) => a - b);
+      return ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)];
+    };
+    const firstReady = samples.findIndex((entry) => entry.data.terrainRequested === true && entry.data.coverageReady === true);
+    const postReady = firstReady < 0
+      ? []
+      : samples.slice(firstReady).filter((entry) => entry.data.terrainRequested === true);
+    const forbiddenCodes = new Set([
+      'terrain-incomplete-root-coverage',
+      'terrain-incomplete-branch-coverage',
+      'terrain-protected-eviction',
+      'terrain-reservation-violation',
+      'terrain-neighbor-depth-violation',
+      'terrain-transition-incomplete',
+      'terrain-immediate-replacement',
+      'terrain-coverage-readiness-lost',
+      'transition-rollback-without-request-change',
+      'transition-coverage-readiness-lost',
+      'transition-combined-coverage-gap',
+      'transition-zero-visible-coverage',
+    ]);
+    return {
+      samples: samples.length,
+      postReadySamples: postReady.length,
+      maximumCoverageGaps: Math.max(0, ...postReady.map((entry) => number(entry.data.coverageGaps))),
+      readinessLosses: postReady.filter((entry) => entry.data.coverageReady !== true).length,
+      reservationViolations: samples.filter((entry) => (
+        number(entry.data.allocationBytes) > 0
+        && number(entry.data.geometryBytes) + number(entry.data.reservedBytes) > number(entry.data.allocationBytes)
+      )).length,
+      scheduleP95Ms: p95(samples.map((entry) => number(entry.data.scheduleMs))),
+      installP95Ms: p95(samples.map((entry) => number(entry.data.installMs))),
+      forbiddenAnomalies: (snapshot?.anomalyCodes ?? []).filter((code) => forbiddenCodes.has(code)),
+    };
+  });
+}
+
 export async function captureCheckpoint(
   page: Page,
   browser: Browser,

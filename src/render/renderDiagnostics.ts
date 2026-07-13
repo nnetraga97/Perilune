@@ -120,6 +120,27 @@ export interface TerrainDiagnosticSample extends RenderDiagnosticContext {
   readonly installMs: number;
   readonly buildP99Ms: number;
   readonly visibleByDepth?: Readonly<Record<string, number>>;
+  readonly rootsReady?: boolean;
+  readonly reservedBytes?: number;
+  readonly allocationBytes?: number;
+  readonly protectedBytes?: number;
+  readonly desiredLeaves?: number;
+  readonly renderedLeaves?: number;
+  readonly fallbackTiles?: number;
+  readonly stagingTiles?: number;
+  readonly desiredMinimumDepth?: number;
+  readonly desiredMaximumDepth?: number;
+  readonly renderedMinimumDepth?: number;
+  readonly renderedMaximumDepth?: number;
+  readonly resolvedMinimumDepth?: number;
+  readonly resolvedMaximumDepth?: number;
+  readonly previousMinimumDepth?: number;
+  readonly previousMaximumDepth?: number;
+  readonly balanceViolations?: number;
+  readonly activeTransitions?: number;
+  readonly incompleteTransitions?: number;
+  readonly protectedEvictions?: number;
+  readonly immediateReplacements?: number;
 }
 
 export interface CloudShellDiagnosticObservation extends RenderDiagnosticContext {
@@ -377,7 +398,7 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         parentKey: observation.parentKey ?? null,
         ...(observation.data ?? {}),
       };
-      if (observation.event === 'request' && observation.key && observation.generation !== undefined) {
+      if ((observation.event === 'request' || observation.event === 'queued') && observation.key && observation.generation !== undefined) {
         if (this.installedTerrainKeys.get(terrainKey) === observation.generation) {
           this.anomaly('terrain-repeat-request-after-install', 'terrain', data, context);
         }
@@ -428,6 +449,27 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         scheduleMs: observation.scheduleMs,
         installMs: observation.installMs,
         buildP99Ms: observation.buildP99Ms,
+        rootsReady: observation.rootsReady ?? false,
+        reservedBytes: observation.reservedBytes ?? 0,
+        allocationBytes: observation.allocationBytes ?? 0,
+        protectedBytes: observation.protectedBytes ?? 0,
+        desiredLeaves: observation.desiredLeaves ?? 0,
+        renderedLeaves: observation.renderedLeaves ?? 0,
+        fallbackTiles: observation.fallbackTiles ?? 0,
+        stagingTiles: observation.stagingTiles ?? 0,
+        desiredMinimumDepth: observation.desiredMinimumDepth ?? -1,
+        desiredMaximumDepth: observation.desiredMaximumDepth ?? -1,
+        renderedMinimumDepth: observation.renderedMinimumDepth ?? -1,
+        renderedMaximumDepth: observation.renderedMaximumDepth ?? -1,
+        resolvedMinimumDepth: observation.resolvedMinimumDepth ?? -1,
+        resolvedMaximumDepth: observation.resolvedMaximumDepth ?? -1,
+        previousMinimumDepth: observation.previousMinimumDepth ?? -1,
+        previousMaximumDepth: observation.previousMaximumDepth ?? -1,
+        balanceViolations: observation.balanceViolations ?? 0,
+        activeTransitions: observation.activeTransitions ?? 0,
+        incompleteTransitions: observation.incompleteTransitions ?? 0,
+        protectedEvictions: observation.protectedEvictions ?? 0,
+        immediateReplacements: observation.immediateReplacements ?? 0,
         ...depths,
       };
       this.sample(`terrain:${stateKey}`, {
@@ -435,6 +477,30 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
       }, context);
       if (observation.oldestPendingAgeMs > 2_000) {
         this.anomaly('terrain-job-pending-over-two-seconds', 'terrain', data, context);
+      }
+      if (previous?.rootsReady && observation.rootsReady === false) {
+        this.anomaly('terrain-incomplete-root-coverage', 'terrain', data, context);
+      }
+      if (observation.rootsReady && observation.coverageGaps > 0) {
+        this.anomaly('terrain-incomplete-branch-coverage', 'terrain', data, context);
+      }
+      if ((observation.protectedEvictions ?? 0) > 0) {
+        this.anomaly('terrain-protected-eviction', 'terrain', data, context);
+      }
+      if (
+        (observation.allocationBytes ?? 0) > 0
+        && observation.geometryBytes + (observation.reservedBytes ?? 0) > (observation.allocationBytes ?? 0)
+      ) {
+        this.anomaly('terrain-reservation-violation', 'terrain', data, context);
+      }
+      if ((observation.balanceViolations ?? 0) > 0) {
+        this.anomaly('terrain-neighbor-depth-violation', 'terrain', data, context);
+      }
+      if ((observation.incompleteTransitions ?? 0) > 0) {
+        this.anomaly('terrain-transition-incomplete', 'terrain', data, context);
+      }
+      if ((observation.immediateReplacements ?? 0) > 0) {
+        this.anomaly('terrain-immediate-replacement', 'terrain', data, context);
       }
       if (previous && previous.generation === observation.generation && previous.terrainRequested && observation.terrainRequested) {
         if (previous.coverageReady && !observation.coverageReady) {
