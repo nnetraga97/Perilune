@@ -85,6 +85,9 @@ export interface TransitionDiagnosticObservation extends RenderDiagnosticContext
   readonly compactVisible: boolean;
   readonly terrainVisible: boolean;
   readonly terrainVisibleChunks: number;
+  readonly compactRadiusMeters?: number;
+  readonly compactAnchorHeightMeters?: number;
+  readonly compactAnchorSource?: 'surface' | 'camera' | 'datum';
 }
 
 export interface TerrainDiagnosticEvent extends RenderDiagnosticContext {
@@ -354,6 +357,9 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         compactVisible: observation.compactVisible,
         terrainVisible: observation.terrainVisible,
         terrainVisibleChunks: observation.terrainVisibleChunks,
+        compactRadiusMeters: observation.compactRadiusMeters ?? null,
+        compactAnchorHeightMeters: observation.compactAnchorHeightMeters ?? null,
+        compactAnchorSource: observation.compactAnchorSource ?? null,
       };
       if (!previous || previous.state !== observation.state || previous.requestedPresentation !== observation.requestedPresentation) {
         this.record({ subsystem: 'transition', event: 'presentation-state', severity: 'state', data }, context);

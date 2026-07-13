@@ -9,8 +9,14 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
-import { GameState, GameVessel, LAUNCH_PAD_DECK_HEIGHT, launchSiteDirection } from '../sim/state';
-import { groundRadiusInertial } from '../sim/terrain';
+import {
+  GameState,
+  GameVessel,
+  LAUNCH_PAD_CONTACT_RADIUS,
+  LAUNCH_PAD_FOOTPRINT_RADIUS,
+  launchSiteDirection,
+} from '../sim/state';
+import { launchPadTerrainEnvelope } from '../sim/terrain';
 import type { Body } from '../sim/universe';
 import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
@@ -34,6 +40,7 @@ const _bodyAbs = new Vec3();
 const _vesselAbs = new Vec3();
 const _rel = new Vec3();
 const _camBF = new Vec3();
+const _surfaceAnchorBF = new Vec3();
 const _sunDir = new Vec3();
 const _tmp = new Vec3();
 const _bodyQ = new Quat();
@@ -193,24 +200,17 @@ export class WorldScene {
     const group = new THREE.Group();
     const concrete = new THREE.MeshStandardMaterial({ color: '#68717a', roughness: 0.92, metalness: 0.05 });
     const structure = new THREE.MeshStandardMaterial({ color: '#c7d0d5', roughness: 0.65, metalness: 0.35 });
-    const accent = new THREE.MeshStandardMaterial({ color: '#c96a3b', roughness: 0.7, metalness: 0.2 });
     const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(9, 9.8, LAUNCH_PAD_DECK_HEIGHT, 32),
+      new THREE.CylinderGeometry(LAUNCH_PAD_CONTACT_RADIUS, LAUNCH_PAD_FOOTPRINT_RADIUS, 1, 32),
       concrete,
     );
-    pad.position.y = LAUNCH_PAD_DECK_HEIGHT / 2;
+    pad.name = 'launch-pad-foundation';
+    // The final depth is set from the complete terrain footprint each frame.
+    pad.position.y = -0.5;
     group.add(pad);
     const deck = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.12, 32), structure);
-    deck.position.y = LAUNCH_PAD_DECK_HEIGHT + 0.06;
+    deck.position.y = 0.06;
     group.add(deck);
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(1.1, 13, 1.1), structure);
-    tower.position.set(6.2, LAUNCH_PAD_DECK_HEIGHT + 6.5, 0);
-    group.add(tower);
-    for (let y = 2; y <= 11; y += 3) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.3, 0.35), accent);
-      arm.position.set(3.8, LAUNCH_PAD_DECK_HEIGHT + y, 0);
-      group.add(arm);
-    }
     group.visible = false;
     return group;
   }
@@ -545,6 +545,9 @@ export class WorldScene {
       renderSet.add(b.id);
       _tmp.copy(_camAbs).sub(_bodyAbs);
       inertialToBodyFixed(b, t, _tmp, _camBF);
+      const surfaceAnchorBodyFixed = b.id === body.id
+        ? inertialToBodyFixed(b, t, v.pos, _surfaceAnchorBF)
+        : undefined;
       bodyOrientation(b, t, _bodyQ);
       _bodySunDir.copy(_starAbs).sub(_bodyAbs);
       if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
@@ -556,6 +559,7 @@ export class WorldScene {
       const frame: BodyRenderFrame = {
         cameraRelativeOrigin: _rel,
         cameraBodyFixed: _camBF,
+        surfaceAnchorBodyFixed,
         cameraBodyFixedVelocity,
         verticalFovRadians,
         drawingBufferHeight,
@@ -572,6 +576,9 @@ export class WorldScene {
         ...frame,
         cameraRelativeOrigin: { ...frame.cameraRelativeOrigin },
         cameraBodyFixed: { ...frame.cameraBodyFixed },
+        surfaceAnchorBodyFixed: frame.surfaceAnchorBodyFixed
+          ? { ...frame.surfaceAnchorBodyFixed }
+          : undefined,
         cameraBodyFixedVelocity: { ...frame.cameraBodyFixedVelocity },
         orientation: { ...frame.orientation },
         cameraSunDirection: { ...frame.cameraSunDirection },
@@ -591,7 +598,17 @@ export class WorldScene {
     // same transform used by spawnOnPad. It never accumulates across launches.
     if (body.id === 'veyra') {
       const siteDir = launchSiteDirection(body, t, _tmp);
-      const siteRadius = groundRadiusInertial(body, siteDir, t);
+      const padEnvelope = launchPadTerrainEnvelope(body);
+      // Model origin and physics both own the deck top. The foundation extends
+      // below the lowest sampled terrain so the hillside cannot clip or expose
+      // a floating underside anywhere across the footprint.
+      const siteRadius = body.radius + padEnvelope.deckHeight;
+      const foundationDepth = padEnvelope.deckHeight - padEnvelope.minimumHeight + 0.5;
+      const foundation = this.launchSite.getObjectByName('launch-pad-foundation');
+      if (foundation) {
+        foundation.scale.y = foundationDepth;
+        foundation.position.y = -foundationDepth / 2;
+      }
       game.universe.absolutePosition(body, t, _bodyAbs);
       _rel.copy(_bodyAbs).addScaled(siteDir, siteRadius).sub(_camAbs);
       this.launchSite.visible = _rel.length() < 250_000;

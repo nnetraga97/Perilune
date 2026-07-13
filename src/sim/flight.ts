@@ -23,7 +23,11 @@ import { AeroModel, buildAeroModel, evaluateAero, newAeroForces, AeroForces } fr
 import type { Body } from './universe';
 import { groundRadiusInertial } from './terrain';
 import { RESOURCE_DENSITY } from '../content/parts';
-import { surfaceVelocity } from './bodyOrientation';
+import {
+  bodyFixedToInertial,
+  inertialToBodyFixed,
+  surfaceVelocity,
+} from './bodyOrientation';
 
 export type SasMode =
   | 'off'
@@ -246,6 +250,16 @@ export function maxThrust(v: VesselRuntime, pressure: number): number {
   return total;
 }
 
+/** A prelaunch craft releases only when an ignited engine can actually thrust. */
+function releasesPrelaunchClamp(v: VesselRuntime): boolean {
+  for (const part of v.craft.parts) {
+    const engine = defOf(part).engine;
+    if (!engine || !part.activated || !engineHasFuel(v.craft, part)) continue;
+    if (engine.propellant === 'solidFuel' || v.controls.throttle > 0.001) return true;
+  }
+  return false;
+}
+
 /**
  * Advance the vessel by dt. Mutates vessel state in place.
  */
@@ -267,6 +281,25 @@ export function stepVessel(
   }
   const mass = v.massProps.mass;
   const com = v.massProps.com;
+
+  // The simplified single-point stack contact cannot statically balance tall
+  // rockets. While a vessel is explicitly prelaunch, hold its authored pad
+  // pose in the rotating frame until an ignited engine produces thrust.
+  if (v.situation === 'prelaunch' && !releasesPrelaunchClamp(v)) {
+    if (!v.landedBodyFixed) {
+      v.landedBodyFixed = inertialToBodyFixed(body, time, v.pos, new Vec3());
+    }
+    bodyFixedToInertial(body, time, v.landedBodyFixed, v.pos);
+    surfaceVelocity(body, v.pos, v.vel);
+    _up.copy(v.pos).normalize();
+    _tmp.set(-_up.y, _up.x, 0);
+    if (_tmp.lengthSq() < 1e-9) _tmp.set(1, 0, 0);
+    v.att.setLookRotation(_tmp.normalize(), _up);
+    v.angVel.set(0, 0, 0);
+    v.properAccel = 0;
+    return stepResult;
+  }
+  if (v.situation === 'prelaunch') v.landedBodyFixed = null;
 
   const r = v.pos.length();
   const altitude = r - body.radius;

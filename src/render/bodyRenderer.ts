@@ -20,6 +20,12 @@ export interface QuaternionCoordinates extends VectorCoordinates { readonly w: n
 export interface BodyRenderFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
   readonly cameraBodyFixed: VectorCoordinates;
+  /**
+   * Active surface focus in rotating body-fixed coordinates. Near-surface
+   * fallbacks use this authority instead of assuming the reference radius is
+   * the visible ground. Absent for bodies that are not the flight focus.
+   */
+  readonly surfaceAnchorBodyFixed?: VectorCoordinates;
   /** Camera velocity in rotating body-fixed meters per wall-clock second. */
   readonly cameraBodyFixedVelocity: VectorCoordinates;
   /** Perspective camera vertical field of view in radians. */

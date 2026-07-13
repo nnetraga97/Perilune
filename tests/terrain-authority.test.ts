@@ -3,9 +3,17 @@ import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
 import {
   contactSurface,
+  launchPadContactSurface,
+  launchPadTerrainEnvelope,
+  naturalContactSurface,
   solidHeight,
   waterSurfaceHeight,
 } from '../src/sim/terrain';
+import {
+  LAUNCH_PAD_CONTACT_RADIUS,
+  LAUNCH_PAD_DECK_HEIGHT,
+  launchSiteBodyFixedDirection,
+} from '../src/sim/launchSite';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import { renderedTerrainHeight } from '../src/render/planet';
 import {
@@ -31,6 +39,33 @@ function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
 }
 
 describe('planet surface authority', () => {
+  it('places a flat physical launchpad deck on natural Veyra terrain only inside its footprint', () => {
+    const veyra = new GameState().universe.get('veyra');
+    const site = launchSiteBodyFixedDirection(new Vec3());
+    const east = new Vec3(-site.y, site.x, 0).normalize();
+    const directionAtDistance = (distance: number): Vec3 => {
+      const angle = distance / veyra.radius;
+      return site.clone().scale(Math.cos(angle)).addScaled(east, Math.sin(angle)).normalize();
+    };
+
+    const naturalCenter = naturalContactSurface(veyra, site);
+    const padCenter = launchPadContactSurface(veyra, site);
+    expect(naturalCenter.kind).not.toBe('none');
+    expect(padCenter.kind).toBe('solid');
+    if (naturalCenter.kind === 'none' || padCenter.kind === 'none') throw new Error('Expected launchpad contact');
+    const envelope = launchPadTerrainEnvelope(veyra);
+    expect(padCenter.height).toBeCloseTo(envelope.deckHeight, 6);
+    expect(padCenter.height - naturalCenter.height).toBeGreaterThanOrEqual(LAUNCH_PAD_DECK_HEIGHT);
+    expect(envelope.deckHeight - envelope.maximumHeight).toBeGreaterThanOrEqual(0.249);
+    expect(contactSurface(veyra, site)).toEqual(padCenter);
+
+    const inside = directionAtDistance(LAUNCH_PAD_CONTACT_RADIUS * 0.75);
+    expect(launchPadContactSurface(veyra, inside).kind).toBe('solid');
+    const outside = directionAtDistance(LAUNCH_PAD_CONTACT_RADIUS * 1.5);
+    expect(launchPadContactSurface(veyra, outside)).toEqual({ kind: 'none' });
+    expect(contactSurface(veyra, outside)).toEqual(naturalContactSurface(veyra, outside));
+  });
+
   it('derives deterministic Veyra masks and normals from the shared height evaluator', () => {
     const veyra = new GameState().universe.get('veyra');
     const source = new Uint8Array(32 * 16 * 3);

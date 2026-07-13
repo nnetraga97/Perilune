@@ -20,17 +20,13 @@ import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial'
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
 import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
-import { installCoverageDither, type CoverageDitherBinding } from './terrestrial/coverageDither';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
-import { TerrestrialScatter, type SurfaceSampler } from './terrestrial/scatter';
-import { TerrestrialSurfaceEffects } from './terrestrial/surfaceEffects';
-import { evaluateRecipeHeight, recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
+import { naturalContactSurface } from '../sim/terrain';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
-const SCATTER_ALTITUDE_MULTIPLIER = 0.02;
 const DEFAULT_ACTIVE_BODY_BUDGET: Readonly<Record<QualityTier, number>> = Object.freeze({
   low: 64 * 1024 * 1024,
   medium: 128 * 1024 * 1024,
@@ -49,44 +45,6 @@ function uniqueGeometryBytes(objects: readonly THREE.Object3D[]): number {
   return bytes;
 }
 
-/**
- * Body-fixed terrain sampler for surface scatter and effects: the raw evaluator
- * height and a finite-difference surface normal. It reads the same authority as
- * physics and never modifies it.
- */
-function createSurfaceSampler(recipe: BodyFeatureRecipe): SurfaceSampler {
-  const probe = new Vec3();
-  return (x, y, z) => {
-    const len = Math.hypot(x, y, z) || 1;
-    const dx = x / len;
-    const dy = y / len;
-    const dz = z / len;
-    const height = evaluateRecipeHeight(recipe, probe.set(dx, dy, dz));
-    // Tangent basis for a finite-difference normal.
-    let ex = -dy;
-    let ey = dx;
-    let ez = 0;
-    if (ex * ex + ey * ey + ez * ez < 1e-9) { ex = 1; ey = 0; ez = 0; }
-    const el = Math.hypot(ex, ey, ez);
-    ex /= el; ey /= el; ez /= el;
-    const fx = dy * ez - dz * ey;
-    const fy = dz * ex - dx * ez;
-    const fz = dx * ey - dy * ex;
-    const eps = 1e-4;
-    const he = evaluateRecipeHeight(recipe, probe.set(dx + ex * eps, dy + ey * eps, dz + ez * eps));
-    const hf = evaluateRecipeHeight(recipe, probe.set(dx + fx * eps, dy + fy * eps, dz + fz * eps));
-    // Slope gradients: dHeight per unit tangent direction.
-    const gu = (he - height) / eps;
-    const gv = (hf - height) / eps;
-    let nx = dx - (ex * gu + fx * gv);
-    let ny = dy - (ey * gu + fy * gv);
-    let nz = dz - (ez * gu + fz * gv);
-    const nl = Math.hypot(nx, ny, nz) || 1;
-    nx /= nl; ny /= nl; nz /= nl;
-    return { height, normalX: nx, normalY: ny, normalZ: nz };
-  };
-}
-
 export class TerrestrialBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
   readonly kind = 'terrestrial' as const;
@@ -97,18 +55,16 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private atmosphere!: TerrestrialAtmosphere;
   private ocean!: TerrestrialOcean;
   private clouds!: TerrestrialCloudDeck;
-  private scatter!: TerrestrialScatter;
-  private effects!: TerrestrialSurfaceEffects;
-  private readonly surfaceSampler: SurfaceSampler;
-  private compactDither!: CoverageDitherBinding;
-  private terrainDither!: CoverageDitherBinding;
-  private oceanDither!: CoverageDitherBinding;
   private fallbackCloudTexture: THREE.DataTexture | null = null;
   private disposed = false;
   private initialized = false;
   private lastDiagnosticObservationAt = Number.NEGATIVE_INFINITY;
   private terrainActive = false;
   private coverageProgress = 0;
+  private compactRadius: number;
+  private compactAnchorHeight = 0;
+  private compactAnchorSource: 'surface' | 'camera' | 'datum' = 'datum';
+  private readonly compactAnchorDirection = new Vec3();
 
   constructor(
     private readonly body: Body,
@@ -119,12 +75,12 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     private readonly activeBodyBudgetBytes = DEFAULT_ACTIVE_BODY_BUDGET[quality],
   ) {
     this.bodyId = body.id;
+    this.compactRadius = body.radius;
     if (body.def.surfaceKind !== 'solid') throw new Error(`${body.id} is not a solid terrestrial body`);
     if (!BODY_VISUALS[body.id as BodyId]?.atmosphereVisual || !body.def.atmosphere) {
       throw new Error(`${body.id} terrestrial renderer requires physical and visual atmosphere data`);
     }
     this.root.name = `terrestrial-renderer:${body.id}`;
-    this.surfaceSampler = createSurfaceSampler(recipeForBody(body));
     this.buildStack(null);
   }
 
@@ -148,7 +104,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const compactMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor);
     const compactGeometry = new THREE.SphereGeometry(1, 48, 32);
     installBodyFixedDirectionAttribute(compactGeometry);
-    this.compactDither = installCoverageDither(compactMaterial, 'compact');
     this.compact = new THREE.Mesh(compactGeometry, compactMaterial);
     this.compact.name = `terrestrial-compact:${this.bodyId}`;
     this.compact.scale.setScalar(this.body.radius);
@@ -157,7 +112,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.atmosphere = new TerrestrialAtmosphere(this.body, this.caps, visual);
     const materialMap = pack?.textures.get('material') ?? null;
     this.ocean = new TerrestrialOcean(this.body, this.quality, materialMap);
-    this.oceanDither = installCoverageDither(this.ocean.material, 'terrain');
 
     let cloudMap = pack?.textures.get('clouds') ?? null;
     if (!cloudMap) {
@@ -177,10 +131,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.caps.maxAnisotropy,
     );
 
-    const seed = this.body.def.terrain.seed;
-    this.scatter = new TerrestrialScatter(this.body.radius, seed, this.surfaceSampler, this.quality);
-    this.effects = new TerrestrialSurfaceEffects(this.body.radius, seed, this.surfaceSampler, this.quality);
-
     const fixedPassBytes = uniqueGeometryBytes([
       this.compact,
       this.ocean.mesh,
@@ -191,11 +141,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       activeBodyBudgetBytes: this.activeBodyBudgetBytes,
       committedTextureBytes: pack?.gpuBytes ?? 0,
       fixedPassBytes,
-      scatterBytes: this.scatter.stats().bufferBytes,
-      effectBytes: this.effects.stats().bufferBytes,
+      scatterBytes: 0,
+      effectBytes: 0,
     });
     const terrainMaterial = createTerrestrialSurfaceMaterial(pack, this.descriptor, this.quality);
-    this.terrainDither = installCoverageDither(terrainMaterial, 'terrain');
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
@@ -213,8 +162,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.ocean.mesh,
       this.atmosphere.mesh,
       this.clouds.group,
-      this.scatter.group,
-      this.effects.group,
     );
     this.transition.requestCompact();
     this.applyCoverage(0, false);
@@ -223,6 +170,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (!this.ready) return;
+    const cameraDistance = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z);
+    const prewarm = frame.allowFlightTerrain && cameraDistance < this.body.radius * PREWARM_RADIUS_MULTIPLIER;
+    const visibleBand = frame.allowFlightTerrain && cameraDistance < this.body.radius * VISIBLE_RADIUS_MULTIPLIER;
+    this.updateCompactSurface(frame, prewarm);
     const origin = frame.cameraRelativeOrigin;
     this.compact.position.set(origin.x, origin.y, origin.z);
     this.compact.quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
@@ -230,9 +181,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.ocean.update(frame);
     this.clouds.update(frame);
 
-    const cameraDistance = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z);
-    const prewarm = frame.allowFlightTerrain && cameraDistance < this.body.radius * PREWARM_RADIUS_MULTIPLIER;
-    const visibleBand = frame.allowFlightTerrain && cameraDistance < this.body.radius * VISIBLE_RADIUS_MULTIPLIER;
     if (prewarm) {
       this.terrain.group.visible = true;
       this.terrain.update(
@@ -285,62 +233,77 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         compactVisible: this.compact.visible,
         terrainVisible: this.terrain.group.visible && this.terrainActive,
         terrainVisibleChunks: this.terrainActive ? this.terrain.stats.visible : 0,
+        compactRadiusMeters: this.compactRadius,
+        compactAnchorHeightMeters: this.compactAnchorHeight,
+        compactAnchorSource: this.compactAnchorSource,
       });
     }
-    this.updateSurfaceDetail(frame, prewarm && snapshot.progress > 0);
   }
 
-  private updateSurfaceDetail(frame: Readonly<BodyRenderFrame>, terrainVisible: boolean): void {
-    const nearSurface = terrainVisible && frame.altitude < this.body.radius * SCATTER_ALTITUDE_MULTIPLIER;
-    this.scatter.group.visible = nearSurface;
-    this.effects.group.visible = nearSurface;
-    if (!nearSurface) return;
-    this.scatter.update({
-      cameraBodyFixed: frame.cameraBodyFixed,
-      orientation: frame.orientation,
-      cameraRelativeOrigin: frame.cameraRelativeOrigin,
-    });
-    this.effects.update({
-      cameraBodyFixed: frame.cameraBodyFixed,
-      cameraBodyFixedVelocity: frame.cameraBodyFixedVelocity,
-      orientation: frame.orientation,
-      cameraRelativeOrigin: frame.cameraRelativeOrigin,
-      altitude: frame.altitude,
-      deltaSeconds: frame.deltaSeconds,
-      time: frame.time,
-    });
+  /**
+   * During near-surface prewarm the compact mesh is an emergency cover, not a
+   * second ground authority. Anchor it to the shared terrain recipe beneath
+   * the active vessel so the temporary sphere cannot sit kilometres below a
+   * launch site. Distant compact presentation remains at the reference datum.
+   */
+  private updateCompactSurface(frame: Readonly<BodyRenderFrame>, prewarm: boolean): void {
+    if (!prewarm) {
+      this.compactRadius = this.body.radius;
+      this.compactAnchorHeight = 0;
+      this.compactAnchorSource = 'datum';
+      this.compact.scale.setScalar(this.compactRadius);
+      return;
+    }
+    const anchor = frame.surfaceAnchorBodyFixed ?? frame.cameraBodyFixed;
+    const length = Math.hypot(anchor.x, anchor.y, anchor.z);
+    if (!(length > 0) || !Number.isFinite(length)) {
+      this.compactRadius = this.body.radius;
+      this.compactAnchorHeight = 0;
+      this.compactAnchorSource = 'datum';
+      this.compact.scale.setScalar(this.compactRadius);
+      return;
+    }
+    this.compactAnchorDirection.set(anchor.x / length, anchor.y / length, anchor.z / length);
+    const surface = naturalContactSurface(this.body, this.compactAnchorDirection);
+    this.compactAnchorHeight = surface.kind === 'none' ? 0 : surface.height;
+    this.compactRadius = this.body.radius + this.compactAnchorHeight;
+    this.compactAnchorSource = frame.surfaceAnchorBodyFixed ? 'surface' : 'camera';
+    this.compact.scale.setScalar(this.compactRadius);
   }
 
   private applyCoverage(progress: number, prewarm: boolean): void {
     this.coverageProgress = progress;
-    this.compactDither.setProgress(progress);
-    this.terrainDither.setProgress(progress);
-    this.oceanDither.setProgress(progress);
+    const fading = progress > 0 && progress < 1;
+    // Streamed terrain is opaque and owns depth once complete coverage exists.
+    // The compact emergency cover then fades over it. Screen-door discard
+    // cannot safely bridge geometries with different silhouettes: it exposes
+    // stars/clouds through pixels covered by only one of the two surfaces.
+    this.compact.material.opacity = 1 - progress;
+    this.compact.material.transparent = fading;
+    this.compact.material.depthWrite = !fading;
     this.compact.visible = progress < 1;
     this.ocean.mesh.visible = prewarm && progress > 0;
     this.terrainActive = prewarm && progress > 0;
+    this.terrain.group.visible = this.terrainActive;
   }
 
   stats(): Readonly<BodyRendererStats> {
     if (!this.ready) return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 });
-    const scatter = this.scatter.stats();
-    const effects = this.effects.stats();
-    const active = this.scatter.group.visible;
     return Object.freeze({
       chunks: this.terrain.stats.chunks,
       visible: this.terrainActive ? this.terrain.stats.visible : 0,
       terrainActive: this.terrainActive,
       exposure: 0,
       coverageProgress: this.coverageProgress,
-      visualScatter: active ? scatter.grass + scatter.shrub + scatter.rock : 0,
-      decals: active ? effects.decals : 0,
-      dust: active ? effects.dust : 0,
+      visualScatter: 0,
+      decals: 0,
+      dust: 0,
       physicalProxies: 0,
       collisions: 0,
       terrainScheduleMs: this.terrain.stats.scheduleMs,
       terrainInstallMs: this.terrain.stats.installMs,
-      scatterBytes: scatter.bufferBytes,
-      effectBytes: effects.bufferBytes,
+      scatterBytes: 0,
+      effectBytes: 0,
     });
   }
 
@@ -353,8 +316,6 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.atmosphere.dispose();
     this.ocean.dispose();
     this.clouds.dispose();
-    this.scatter.dispose();
-    this.effects.dispose();
     this.fallbackCloudTexture?.dispose();
     this.fallbackCloudTexture = null;
     this.initialized = false;

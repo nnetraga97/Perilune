@@ -1,9 +1,7 @@
-import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { CoverageTransition } from '../src/render/coverageTransition';
 import { PlanetRenderer } from '../src/render/planet';
-import { installCoverageDither } from '../src/render/terrestrial/coverageDither';
 
 describe('coverage-safe compact-to-terrain transition', () => {
   it('does not count load time and starts only after complete coverage is observed', () => {
@@ -40,33 +38,6 @@ describe('coverage-safe compact-to-terrain transition', () => {
     expect(transition.update(0, false, false)).toEqual({
       state: 'terrain', compactCoverage: 0, terrainCoverage: 1, progress: 1,
     });
-  });
-
-  it('installs mathematically complementary dither predicates', () => {
-    const compact = new THREE.MeshBasicMaterial();
-    const terrain = new THREE.MeshBasicMaterial();
-    const compactBinding = installCoverageDither(compact, 'compact');
-    const terrainBinding = installCoverageDither(terrain, 'terrain');
-    compactBinding.setProgress(0.42);
-    terrainBinding.setProgress(0.42);
-    expect(compactBinding.progress.value).toBe(0.42);
-    expect(terrainBinding.progress.value).toBe(0.42);
-
-    const compile = (material: THREE.Material) => {
-      const shader = {
-        uniforms: {} as Record<string, { value: number }>,
-        vertexShader: '',
-        fragmentShader: '#include <clipping_planes_fragment>',
-      };
-      material.onBeforeCompile(shader as never, {} as THREE.WebGLRenderer);
-      return shader;
-    };
-    const compactShader = compile(compact).fragmentShader;
-    const terrainShader = compile(terrain).fragmentShader;
-    expect(compactShader).toContain('uniform float uCoverageProgress;');
-    expect(terrainShader).toContain('uniform float uCoverageProgress;');
-    expect(compactShader).toContain('coverageNoise < uCoverageProgress');
-    expect(terrainShader).toContain('coverageNoise >= uCoverageProgress');
   });
 
   it('does not declare terrain ready while any visible coverage gap remains', () => {

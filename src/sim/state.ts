@@ -35,6 +35,18 @@ import {
   inertialToBodyFixed,
   surfaceVelocity,
 } from './bodyOrientation';
+import { launchSiteDirection } from './launchSite';
+
+export {
+  LAUNCH_PAD_CONTACT_RADIUS,
+  LAUNCH_PAD_DECK_HEIGHT,
+  LAUNCH_PAD_FOOTPRINT_RADIUS,
+  LAUNCH_PAD_TERRAIN_CLEARANCE,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
+  launchSiteBodyFixedDirection,
+  launchSiteDirection,
+} from './launchSite';
 
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
@@ -67,20 +79,6 @@ const _v = new Vec3();
 const _br = new Vec3();
 const _bv = new Vec3();
 const _sun = new Vec3();
-
-// Broad highland selected from the deterministic terrain field so the pad is
-// never clipped by the ocean or a steep procedural coastline.
-export const LAUNCH_SITE_LAT = 0.3;
-export const LAUNCH_SITE_LON = 2.4584073464102096;
-export const LAUNCH_PAD_DECK_HEIGHT = 2;
-
-/** Cape Skyward surface normal in the inertial frame at a given time. */
-export function launchSiteDirection(body: Body, time: number, out: Vec3): Vec3 {
-  const x = Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON);
-  const y = Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON);
-  const z = Math.sin(LAUNCH_SITE_LAT);
-  return bodyFixedToInertial(body, time, out.set(x, y, z), out).normalize();
-}
 
 export class GameState {
   readonly universe = new Universe(AUREN_SYSTEM);
@@ -208,9 +206,11 @@ export class GameState {
       minY = Math.min(minY, bottom);
     }
     const comY = runtime.massProps.com.y;
-    const standHeight = comY - minY + LAUNCH_PAD_DECK_HEIGHT + 0.4;
+    // groundRadiusInertial includes the pad's physical deck at Cape Skyward.
+    const standHeight = comY - minY + 0.4;
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
+    runtime.landedBodyFixed = inertialToBodyFixed(veyra, this.time, runtime.pos, new Vec3());
     // Surface rotation velocity.
     surfaceVelocity(veyra, runtime.pos, runtime.vel);
     // Point up.

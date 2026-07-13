@@ -8,6 +8,9 @@ import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
 import { RenderDiagnostics } from '../src/render/renderDiagnostics';
+import { Vec3 } from '../src/core/vec3';
+import { launchSiteBodyFixedDirection } from '../src/sim/launchSite';
+import { solidHeight } from '../src/sim/terrain';
 
 const caps: RenderCaps = {
   backend: 'webgl2',
@@ -89,7 +92,7 @@ describe('TerrestrialBodyRenderer integration', () => {
     vessRenderer.dispose();
   });
 
-  it('composes one compact, terrain, ocean, atmosphere, and two-shell cloud stack', () => {
+  it('composes Veyra without a decorative near-surface scatter layer', () => {
     const renderer = createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' }) as TerrestrialBodyRenderer;
     renderer.stageAssets(pack());
     expect(renderer.root.children.map((child) => child.name)).toEqual([
@@ -98,8 +101,6 @@ describe('TerrestrialBodyRenderer integration', () => {
       'terrestrial-ocean:veyra',
       'terrestrial-atmosphere:veyra',
       'terrestrial-cloud-deck:veyra',
-      'terrestrial-scatter',
-      'terrestrial-surface-effects',
     ]);
     expect(renderer.root.getObjectByName('terrestrial-cloud:veyra:weather')).toBeDefined();
     expect(renderer.root.getObjectByName('terrestrial-cloud:veyra:wisps')).toBeDefined();
@@ -117,9 +118,15 @@ describe('TerrestrialBodyRenderer integration', () => {
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
     renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
     renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { deltaSeconds: 0.175 }));
+    const compact = renderer.root.getObjectByName('terrestrial-compact:veyra') as THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
+    const terrain = renderer.root.getObjectByName('terrestrial-terrain:veyra')!;
+    expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 0.5 });
+    expect(terrain.visible).toBe(true);
+    expect(compact.visible).toBe(true);
+    expect(compact.material).toMatchObject({ transparent: true, depthWrite: false, opacity: 0.5 });
     renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 1 });
-    const compact = renderer.root.getObjectByName('terrestrial-compact:veyra')!;
     expect(compact.visible).toBe(false);
     renderer.update(frame(veyra.radius, { allowFlightTerrain: false }));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
@@ -127,7 +134,37 @@ describe('TerrestrialBodyRenderer integration', () => {
     renderer.dispose();
   });
 
-  it('streams visual scatter and surface effects only near the surface', () => {
+  it('anchors the near-surface compact fallback to authoritative terrain height', () => {
+    const veyra = body('veyra');
+    const renderer = createBodyRendererCandidate({ body: veyra, caps, quality: 'low' }) as TerrestrialBodyRenderer;
+    const direction = launchSiteBodyFixedDirection(new Vec3());
+    const surface = solidHeight(veyra, direction);
+    expect(surface.kind).toBe('solid');
+    const height = surface.kind === 'solid' ? surface.height : 0;
+    const anchor = new Vec3().copy(direction).scale(veyra.radius + height);
+    const camera = new Vec3().copy(direction).scale(veyra.radius + height + 18);
+
+    renderer.update(frame(veyra.radius, {
+      cameraBodyFixed: camera,
+      surfaceAnchorBodyFixed: anchor,
+      altitude: height + 18,
+    }));
+    const compact = renderer.root.getObjectByName('terrestrial-compact:veyra') as THREE.Mesh;
+    expect(compact.scale.x).toBeCloseTo(veyra.radius + height, 6);
+    expect(compact.scale.y).toBe(compact.scale.x);
+    expect(compact.scale.z).toBe(compact.scale.x);
+
+    renderer.update(frame(veyra.radius, {
+      cameraBodyFixed: { x: veyra.radius * 80, y: 0, z: 0 },
+      surfaceAnchorBodyFixed: anchor,
+      altitude: veyra.radius * 79,
+      allowFlightTerrain: false,
+    }));
+    expect(compact.scale.x).toBe(veyra.radius);
+    renderer.dispose();
+  });
+
+  it('keeps generated rocks, vegetation, decals, and dust disabled at every distance', () => {
     const veyra = body('veyra');
     const renderer = createBodyRendererCandidate({ body: veyra, caps, quality: 'medium' }) as TerrestrialBodyRenderer;
     renderer.stageAssets(pack('medium'));
@@ -135,15 +172,17 @@ describe('TerrestrialBodyRenderer integration', () => {
     for (let i = 0; i < 4; i++) renderer.update(frame(veyra.radius, { ...near, deltaSeconds: 0.35 }));
     const surfaceStats = renderer.stats();
     expect(surfaceStats.terrainActive).toBe(true);
-    expect(surfaceStats.scatterBytes).toBeGreaterThan(0);
-    expect(surfaceStats.effectBytes).toBeGreaterThan(0);
-    expect(surfaceStats.visualScatter).toBeGreaterThanOrEqual(0);
-    const scatterGroup = renderer.root.getObjectByName('terrestrial-scatter')!;
-    expect(scatterGroup.visible).toBe(true);
-    // High above the surface the decorative layers switch off entirely.
+    expect(surfaceStats).toMatchObject({
+      visualScatter: 0,
+      decals: 0,
+      dust: 0,
+      scatterBytes: 0,
+      effectBytes: 0,
+    });
+    expect(renderer.root.getObjectByName('terrestrial-scatter')).toBeUndefined();
+    expect(renderer.root.getObjectByName('terrestrial-surface-effects')).toBeUndefined();
     renderer.update(frame(veyra.radius, { cameraBodyFixed: { x: veyra.radius * 3, y: 0, z: 0 }, altitude: veyra.radius, allowFlightTerrain: false }));
     expect(renderer.stats().visualScatter).toBe(0);
-    expect(scatterGroup.visible).toBe(false);
     renderer.dispose();
   });
 

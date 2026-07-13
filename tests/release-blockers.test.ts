@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { GameState } from '../src/sim/state';
+import { GameState, PHYSICS_DT } from '../src/sim/state';
 import * as state from '../src/sim/state';
 import * as vessel from '../src/sim/vessel';
 import { addPart, createCraft, defOf } from '../src/sim/vessel';
 import { buildVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import { PlanetRenderer, PLANET_QUALITY } from '../src/render/planet';
 import * as planet from '../src/render/planet';
-import { groundRadiusInertial, terrainHeight } from '../src/sim/terrain';
+import { groundRadiusInertial, naturalGroundRadiusInertial, terrainHeight } from '../src/sim/terrain';
 import { bodyOrientation } from '../src/sim/bodyOrientation';
 import { Quat } from '../src/core/quat';
 import * as worldScene from '../src/render/worldScene';
 import * as THREE from 'three';
 import { Vec3 } from '../src/core/vec3';
 import * as navball from '../src/ui/navball';
+import diagnosticCraft from '../e2e/fixtures/veyra-diagnostic-craft.json';
+import { validateCraftFile } from '../src/save/persistence';
 
 describe('M2 release blockers', () => {
   it('follows the controllable pod when staging detaches it from a booster root', () => {
@@ -133,7 +135,35 @@ describe('M2 release blockers', () => {
     expect(terrainHeight(game.universe.get('veyra'), expected)).toBeGreaterThan(1_000);
     const pod = spawned.runtime.craft.parts[0];
     const bottomRadius = spawned.runtime.pos.length() - defOf(pod).shape.height / 2;
-    expect(bottomRadius - groundRadiusInertial(game.universe.get('veyra'), expected, game.time)).toBeGreaterThanOrEqual(2);
+    const contactRadius = groundRadiusInertial(game.universe.get('veyra'), expected, game.time);
+    const naturalRadius = naturalGroundRadiusInertial(game.universe.get('veyra'), expected, game.time);
+    expect(contactRadius - naturalRadius).toBeGreaterThanOrEqual(state.LAUNCH_PAD_DECK_HEIGHT);
+    expect(bottomRadius - contactRadius).toBeCloseTo(0.4, 6);
+  });
+
+  it('holds a tall rocket upright on the physical pad until powered ignition', () => {
+    const craft = validateCraftFile(diagnosticCraft);
+    expect(craft).not.toBeNull();
+    if (!craft) return;
+    const game = new GameState();
+    const gv = game.spawnOnPad(craft, craft.name);
+    const body = game.bodyOf(gv);
+    for (let step = 0; step < 1_000; step++) game.update(PHYSICS_DT);
+
+    expect(game.active).toBe(gv);
+    expect(gv.runtime.situation).toBe('prelaunch');
+    const up = gv.runtime.pos.clone().normalize();
+    const nose = gv.runtime.att.rotate(new Vec3(0, 1, 0), new Vec3());
+    expect(nose.dot(up)).toBeGreaterThan(0.999999);
+    expect(gv.runtime.angVel.length()).toBe(0);
+
+    gv.runtime.controls.throttle = 1;
+    expect(game.fireStage(gv)).toBe(true);
+    for (let step = 0; step < 250; step++) game.update(PHYSICS_DT);
+    expect(game.active).toBe(gv);
+    expect(gv.runtime.situation).not.toBe('prelaunch');
+    expect(gv.runtime.landedBodyFixed).toBeNull();
+    expect(gv.runtime.pos.length()).toBeGreaterThan(body.radius + 5_600);
   });
 
   it('caps terrain skirts so coarse fallbacks cannot form kilometer walls', () => {
