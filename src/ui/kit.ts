@@ -416,7 +416,7 @@ export function injectUiStyles(): void {
       .perilune-menu-tagline { margin-top:14px; max-width:420px; color:#c0ccd2; font-size:12px; letter-spacing:.7px; }
       .perilune-menu-build { position:absolute; top:28px; right:34px; color:#8da3af; font:9px var(--ui-mono); letter-spacing:1.5px; }
       .perilune-command-deck { position:absolute; left:3.5vw; right:3.5vw; bottom:4vh; display:grid;
-        grid-template-columns:minmax(250px,1.5fr) minmax(190px,1fr) minmax(190px,1fr) auto; gap:8px;
+        grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) auto; gap:8px;
         padding:10px; background:linear-gradient(180deg,rgba(9,18,26,.86),rgba(5,11,17,.95));
         border:1px solid rgba(100,163,193,.5); border-top-color:#73bfdf; backdrop-filter:blur(12px);
         box-shadow:0 18px 50px rgba(0,0,0,.42); animation:menuDeckIn .45s ease-out both; }

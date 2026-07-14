@@ -55,6 +55,39 @@ export interface MainMenuCallbacks {
   onSettings(): void;
 }
 
+export interface ContinueSaveSource {
+  read(slot: 'auto'): Promise<SaveGame | null>;
+  subscribe(listener: () => void): () => void;
+}
+
+export interface ContinueSaveTarget {
+  setContinueSave(save: SaveGame | null): void;
+}
+
+export function bindMenuContinueSave(
+  source: ContinueSaveSource,
+  target: ContinueSaveTarget,
+): () => void {
+  let disposed = false;
+  let generation = 0;
+  const refresh = (): void => {
+    const requestGeneration = ++generation;
+    void source.read('auto').then((save) => {
+      if (!disposed && requestGeneration === generation) target.setContinueSave(save);
+    }, () => {
+      // Preserve the last known menu state; a later source event will retry the read.
+    });
+  };
+  const unsubscribe = source.subscribe(refresh);
+  refresh();
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    generation++;
+    unsubscribe();
+  };
+}
+
 const actionLabels: Record<MissionEntry, string> = {
   continue: 'Continue Mission',
   'first-light': 'First Light tutorial',

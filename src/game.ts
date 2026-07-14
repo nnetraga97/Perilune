@@ -45,7 +45,7 @@ import { SaveSyncService } from './cloud/saveSync';
 import { SyncStore } from './cloud/syncStore';
 import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
-import { MainMenu } from './ui/mainMenu';
+import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -93,6 +93,7 @@ class PeriluneGame {
   private utilityTools!: UtilityTools;
   private auth!: AuthService;
   private saveSync!: SaveSyncService;
+  private unsubscribeMenuSave: (() => void) | null = null;
   private account!: AccountWindow;
   private uiSettings: UiSettings | null = null;
   private readonly diagnostics: RenderDiagnostics;
@@ -118,6 +119,8 @@ class PeriluneGame {
     window.removeEventListener('pagehide', this.onPageHide);
     this.unsubscribeGpuRestoration?.();
     this.unsubscribeGpuRestoration = null;
+    this.unsubscribeMenuSave?.();
+    this.unsubscribeMenuSave = null;
     this.gpuProfiler.dispose();
     this.saveSync.dispose();
     this.auth.dispose();
@@ -299,7 +302,7 @@ class PeriluneGame {
       onAccount: () => this.account.open(),
       onSettings: () => this.utilityTools.openSettings(),
     });
-    void this.refreshMenuSave();
+    this.unsubscribeMenuSave = bindMenuContinueSave(this.saveSync, this.menu);
     void this.auth.start();
     this.windows.addAction('keyboard', 'Keyboard reference (?)', () => {
       if (this.screen === 'flight' || this.screen === 'editor') {
@@ -422,10 +425,6 @@ class PeriluneGame {
     else this.toEditor();
   }
 
-  private async refreshMenuSave(): Promise<void> {
-    this.menu.setContinueSave(await this.saveSync.read('auto'));
-  }
-
   private newGame(): void {
     this.game = new GameState();
     telemetry.track('game_started', { mode: this.auth.state.kind === 'signed-in' ? 'account' : 'guest' });
@@ -440,7 +439,6 @@ class PeriluneGame {
     this.perf.setMiniVisible(false);
     this.windows.setLauncherHost(null);
     this.windows.setScreen('menu');
-    void this.refreshMenuSave();
   }
 
   private toEditor(): void {
