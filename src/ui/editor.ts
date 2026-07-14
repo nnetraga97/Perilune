@@ -8,7 +8,9 @@
  */
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
+import { Quat } from '../core/quat';
 import {
+  ACTION_GROUP_IDS,
   addPart,
   analyzeCraft,
   Craft,
@@ -16,6 +18,7 @@ import {
   craftPart,
   defOf,
   PartInstance,
+  type PartAction,
   removeSubtree,
   buildAutoStages,
 } from '../sim/vessel';
@@ -24,7 +27,7 @@ import { buildAeroModel } from '../sim/aero';
 import { computeMassProperties } from '../sim/vessel';
 import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisualSource } from '../render/vesselMesh';
 import type { PartModelLibrary } from '../render/partModelLibrary';
-import { listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
+import { deleteCraftFile, listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 import { el, injectUiStyles } from './kit';
 
 interface StackNodeSpot {
@@ -46,6 +49,38 @@ const CATEGORIES: Array<{ id: PartDef['category']; label: string }> = [
   { id: 'ground', label: 'Ground' },
 ];
 
+const SNAP_ANGLES = [0, 5, 15, 45, 90] as const;
+
+function partThumbnail(def: PartDef): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 56;
+  canvas.height = 56;
+  canvas.className = 'ed-part-thumb';
+  const context = canvas.getContext('2d')!;
+  context.translate(28, 28);
+  context.fillStyle = def.color ?? '#b9c4ca';
+  context.strokeStyle = def.accent ?? '#4f7186';
+  context.lineWidth = 3;
+  const height = Math.min(42, Math.max(16, def.shape.height * 18));
+  const width = Math.min(38, Math.max(10, (def.shape.width ?? (def.shape.radiusBottom ?? 0.4) * 2) * 15));
+  context.beginPath();
+  if (def.shape.kind === 'cone') {
+    const top = Math.max(3, (def.shape.radiusTop ?? 0.1) * 15);
+    context.moveTo(-top, -height / 2);
+    context.lineTo(top, -height / 2);
+    context.lineTo(width / 2, height / 2);
+    context.lineTo(-width / 2, height / 2);
+    context.closePath();
+  } else if (def.shape.kind === 'capsule' || def.shape.kind === 'dome') {
+    context.ellipse(0, 0, width / 2, height / 2, 0, 0, Math.PI * 2);
+  } else {
+    context.rect(-width / 2, -height / 2, width, height);
+  }
+  context.fill();
+  context.stroke();
+  return canvas;
+}
+
 export interface EditorCallbacks {
   onLaunch(craft: Craft): void;
   onExit(): void;
@@ -63,6 +98,7 @@ export class Editor {
   private ghostVisual: VesselVisual | null = null;
   private ghostMaterials: THREE.Material[] = [];
   private holdingDef: PartDef | null = null;
+  private holdingRotation = new Quat();
   private selectedKey: number | null = null;
   private selectionHelper: THREE.BoxHelper | null = null;
   private movingKeys: Set<number> | null = null;
@@ -75,6 +111,7 @@ export class Editor {
   private camPitch = 0.25;
   private camDist = 16;
   private camHeight = 4;
+  private camFocusOffset = new Vec3();
   private cb: EditorCallbacks;
 
   private partListEl!: HTMLElement;
@@ -84,9 +121,18 @@ export class Editor {
   private nameInput!: HTMLInputElement;
   private envSelect!: HTMLSelectElement;
   private symmetryBtn!: HTMLElement;
+  private snapBtn!: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  private sortSelect!: HTMLSelectElement;
   private craftListEl!: HTMLElement;
   private statsDirty = true;
   private activeCategory: PartDef['category'] = 'pods';
+  private snapIndex = 2;
+  private symmetryMode: 'radial' | 'mirror' = 'radial';
+  private history: Craft[] = [];
+  private redoHistory: Craft[] = [];
+  private moveSnapshot: Craft | null = null;
+  private partContextEl: HTMLElement | null = null;
   /** Ghost attach candidate this frame. */
   private candidate:
     | { kind: 'stack'; spot: StackNodeSpot; pos: Vec3 }
@@ -145,6 +191,18 @@ export class Editor {
       };
       if (c.id === this.activeCategory) b.classList.add('active');
     }
+    const paletteTools = el('div', 'ed-palette-tools', left);
+    this.searchInput = el('input', 'ed-search', paletteTools) as HTMLInputElement;
+    this.searchInput.placeholder = 'Search parts';
+    this.searchInput.oninput = () => this.renderPartList();
+    this.sortSelect = el('select', 'ed-sort', paletteTools) as HTMLSelectElement;
+    for (const [value, label] of [['category', 'Catalog'], ['mass', 'Mass'], ['thrust', 'Thrust'], ['name', 'Name']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      this.sortSelect.appendChild(option);
+    }
+    this.sortSelect.onchange = () => this.renderPartList();
     this.partListEl = el('div', 'ed-parts', left);
     this.renderPartList();
 
@@ -158,8 +216,12 @@ export class Editor {
     this.symmetryBtn = el('button', 'hud-btn', top, 'SYM ×1');
     this.symmetryBtn.title = 'Radial symmetry (X)';
     this.symmetryBtn.onclick = () => this.cycleSymmetry();
+    this.snapBtn = el('button', 'hud-btn', top, `SNAP ${SNAP_ANGLES[this.snapIndex]}°`);
+    this.snapBtn.title = 'Cycle angle snap (C)';
+    this.snapBtn.onclick = () => this.cycleSnap();
     const clear = el('button', 'hud-btn', top, 'New');
     clear.onclick = () => {
+      this.pushHistory();
       this.craft = createCraft('Untitled Craft');
       this.nameInput.value = this.craft.name;
       this.selectedKey = null;
@@ -211,6 +273,7 @@ export class Editor {
     };
     const addStage = el('button', 'hud-btn', stageBtns, '+ Stage');
     addStage.onclick = () => {
+      this.pushHistory();
       this.craft.stages.push({ partKeys: [] });
       this.statsDirty = true;
     };
@@ -229,7 +292,7 @@ export class Editor {
       'div',
       'ed-hint',
       this.root,
-      'drag from palette to place · click a placed part to highlight · drag it again to move freely · Del removes · X symmetry · drag empty space to orbit · wheel zooms',
+      'drag parts to build · drag stage chips to reorder · Ctrl+Z/Y history · C angle snap · X symmetry · ? controls',
     );
   }
 
@@ -237,12 +300,20 @@ export class Editor {
     const names = await listCraftFiles();
     this.craftListEl.innerHTML = '';
     for (const name of names.slice(0, 12)) {
+      const saved = await readCraftFile(name);
+      if (!saved) continue;
       const row = el('div', 'ed-craft-item', this.craftListEl);
-      const loadBtn = el('button', 'hud-btn', row, name);
-      loadBtn.style.flex = '1';
+      const copy = el('div', 'ed-craft-copy', row);
+      el('strong', '', copy, name);
+      const analysis = analyzeCraft(saved, 9.42, 101_325);
+      el('span', '', copy, `${saved.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
+      const loadBtn = el('button', 'hud-btn', row, 'Load');
+      loadBtn.setAttribute('aria-label', name);
+      loadBtn.title = `Load ${name}`;
       loadBtn.onclick = async () => {
         const c = await readCraftFile(name);
         if (c) {
+          this.pushHistory();
           this.craft = c;
           this.nameInput.value = c.name;
           this.selectedKey = null;
@@ -250,17 +321,65 @@ export class Editor {
           this.rebuildVisual();
         }
       };
+      const duplicate = el('button', 'k-window-btn', row, '⧉');
+      duplicate.title = 'Duplicate';
+      duplicate.onclick = async () => {
+        const nextName = `${name} Copy`;
+        await writeCraftFile(nextName, { ...structuredClone(saved), name: nextName });
+        await this.refreshCraftList();
+      };
+      const rename = el('button', 'k-window-btn', row, '✎');
+      rename.title = 'Rename';
+      rename.onclick = async () => {
+        const nextName = window.prompt('Rename saved craft', name)?.trim();
+        if (!nextName || nextName === name) return;
+        await writeCraftFile(nextName, { ...structuredClone(saved), name: nextName });
+        await deleteCraftFile(name);
+        await this.refreshCraftList();
+      };
+      const remove = el('button', 'k-window-btn', row, '×');
+      remove.title = 'Delete';
+      remove.onclick = async () => {
+        if (!window.confirm(`Delete saved craft “${name}”?`)) return;
+        await deleteCraftFile(name);
+        await this.refreshCraftList();
+      };
     }
     if (!names.length) el('div', 'ed-part-info', this.craftListEl, 'none yet');
   }
 
   private renderPartList(): void {
     this.partListEl.innerHTML = '';
-    for (const def of PARTS.filter((p) => p.category === this.activeCategory)) {
+    const query = this.searchInput?.value.trim().toLowerCase() ?? '';
+    const parts = PARTS.filter((part) => (
+      (!query && part.category === this.activeCategory)
+      || (query && `${part.name} ${part.blurb} ${part.category}`.toLowerCase().includes(query))
+    ));
+    if (this.sortSelect?.value === 'mass') parts.sort((a, b) => a.massDry - b.massDry);
+    else if (this.sortSelect?.value === 'thrust') parts.sort((a, b) => (b.engine?.thrustVac ?? 0) - (a.engine?.thrustVac ?? 0));
+    else if (this.sortSelect?.value === 'name') parts.sort((a, b) => a.name.localeCompare(b.name));
+    for (const def of parts) {
       const card = el('div', 'ed-part', this.partListEl);
       card.draggable = true;
-      el('div', 'ed-part-name', card, def.name);
-      el('div', 'ed-part-info', card, `${def.massDry} kg · ${def.blurb}`);
+      card.appendChild(partThumbnail(def));
+      const copy = el('div', 'ed-part-copy', card);
+      el('div', 'ed-part-name', copy, def.name);
+      const stats = [
+        `${def.massDry} kg`,
+        `${def.cost} funds`,
+        def.engine ? `${(def.engine.thrustVac / 1000).toFixed(0)} kN` : '',
+      ].filter(Boolean).join(' · ');
+      el('div', 'ed-part-info', copy, stats);
+      el('div', 'ed-part-blurb', copy, def.blurb);
+      card.title = [
+        def.name,
+        def.blurb,
+        `Dry mass: ${def.massDry} kg`,
+        `Max temperature: ${def.maxTemp} K`,
+        `Crash tolerance: ${def.crashTolerance} m/s`,
+        def.engine ? `Thrust: ${(def.engine.thrustVac / 1000).toFixed(1)} kN · Isp ${def.engine.ispSea}/${def.engine.ispVac} s` : '',
+        def.resources ? `Resources: ${Object.entries(def.resources).map(([key, value]) => `${key} ${value}`).join(', ')}` : '',
+      ].filter(Boolean).join('\n');
       card.onclick = () => this.pickUp(def);
       card.ondragstart = (event) => {
         this.pickUp(def);
@@ -268,16 +387,28 @@ export class Editor {
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
       };
     }
+    if (!parts.length) el('div', 'mission-empty', this.partListEl, 'No matching parts');
   }
 
-  cycleSymmetry(): void {
+  cycleSymmetry(direction = 1): void {
     const order = [1, 2, 3, 4, 6, 8];
-    this.symmetry = order[(order.indexOf(this.symmetry) + 1) % order.length];
-    this.symmetryBtn.textContent = `SYM ×${this.symmetry}`;
+    this.symmetry = order[(order.indexOf(this.symmetry) + direction + order.length) % order.length];
+    this.symmetryBtn.textContent = `${this.symmetryMode === 'radial' ? 'RAD' : 'MIR'} ×${this.symmetry}`;
+  }
+
+  cycleSnap(): void {
+    this.snapIndex = (this.snapIndex + 1) % SNAP_ANGLES.length;
+    this.snapBtn.textContent = `SNAP ${SNAP_ANGLES[this.snapIndex] ? `${SNAP_ANGLES[this.snapIndex]}°` : 'OFF'}`;
+  }
+
+  toggleSymmetryMode(): void {
+    this.symmetryMode = this.symmetryMode === 'radial' ? 'mirror' : 'radial';
+    this.symmetryBtn.textContent = `${this.symmetryMode === 'radial' ? 'RAD' : 'MIR'} ×${this.symmetry}`;
   }
 
   private pickUp(def: PartDef): void {
     this.holdingDef = def;
+    this.holdingRotation.set(0, 0, 0, 1);
     if (this.ghost) this.scene.remove(this.ghost);
     const tmpCraft = createCraft('ghost');
     addPart(tmpCraft, def.id, null, 'root', { x: 0, y: 0, z: 0 });
@@ -305,6 +436,7 @@ export class Editor {
 
   private dropHolding(): void {
     this.holdingDef = null;
+    this.holdingRotation.set(0, 0, 0, 1);
     if (this.ghost) {
       this.scene.remove(this.ghost);
       this.ghost = null;
@@ -319,6 +451,58 @@ export class Editor {
 
   get selectedPartKey(): number | null {
     return this.selectedKey;
+  }
+
+  get hasPartSelection(): boolean {
+    return this.selectedKey !== null || this.holdingDef !== null;
+  }
+
+  private pushHistory(snapshot: Craft = this.craft): void {
+    this.history.push(structuredClone(snapshot));
+    if (this.history.length > 50) this.history.shift();
+    this.redoHistory = [];
+  }
+
+  undo(): void {
+    const previous = this.history.pop();
+    if (!previous) return;
+    this.redoHistory.push(structuredClone(this.craft));
+    this.restoreCraftSnapshot(previous);
+  }
+
+  redo(): void {
+    const next = this.redoHistory.pop();
+    if (!next) return;
+    this.history.push(structuredClone(this.craft));
+    this.restoreCraftSnapshot(next);
+  }
+
+  private restoreCraftSnapshot(snapshot: Craft): void {
+    this.dropHolding();
+    this.craft = structuredClone(snapshot);
+    this.nameInput.value = this.craft.name;
+    this.setSelected(null);
+    this.statsDirty = true;
+    this.rebuildVisual();
+  }
+
+  focusSearch(): void {
+    this.searchInput.focus();
+    this.searchInput.select();
+  }
+
+  cycleCategory(direction: number): void {
+    const index = CATEGORIES.findIndex((category) => category.id === this.activeCategory);
+    this.activeCategory = CATEGORIES[(index + direction + CATEGORIES.length) % CATEGORIES.length].id;
+    this.searchInput.value = '';
+    for (const button of this.root.querySelectorAll<HTMLElement>('.ed-cat')) {
+      button.classList.toggle('active', button.dataset.cat === this.activeCategory);
+    }
+    this.renderPartList();
+  }
+
+  cancelHolding(): void {
+    this.dropHolding();
   }
 
   /**
@@ -356,6 +540,170 @@ export class Editor {
       }
     }
     this.statsDirty = true;
+    this.refreshPartContext();
+  }
+
+  private refreshPartContext(): void {
+    this.partContextEl?.remove();
+    this.partContextEl = null;
+    if (this.selectedKey === null) return;
+    const part = craftPart(this.craft, this.selectedKey);
+    if (!part) return;
+    const definition = defOf(part);
+    const panel = el('div', 'ed-part-context', this.root);
+    this.partContextEl = panel;
+    const heading = el('div', 'hud-part-heading', panel);
+    el('strong', '', heading, definition.name);
+    const close = el('button', 'k-window-btn', heading, '×');
+    close.onclick = () => this.setSelected(null);
+    el('div', 'ed-part-context-meta', panel, `${part.attach} · symmetry ${part.symmetry || 'none'} · ${definition.crossfeed ? 'crossfeed' : 'isolated'}`);
+    const actions = el('div', 'ed-part-context-actions', panel);
+    const remove = el('button', 'hud-btn', actions, 'Remove');
+    remove.onclick = () => this.deleteSelected();
+    const frame = el('button', 'hud-btn', actions, 'Frame');
+    frame.onclick = () => this.frameSelected();
+    const reroot = el('button', 'hud-btn', actions, 'Re-root');
+    reroot.onclick = () => this.rerootSelected();
+    if (part.attach === 'surface') {
+      const align = el('button', 'hud-btn', actions, 'Center Y');
+      align.onclick = () => this.verticalAlignSelected();
+    }
+    const actionRow = el('div', 'mission-section-title', panel, 'ACTION GROUP');
+    const actionSelect = document.createElement('select');
+    actionSelect.className = 'ed-action-select';
+    for (const action of ['toggle', 'activate', 'deactivate'] as const) {
+      const option = document.createElement('option');
+      option.value = action;
+      option.textContent = action.toUpperCase();
+      actionSelect.appendChild(option);
+    }
+    actionRow.appendChild(actionSelect);
+    const groups = el('div', 'ed-action-groups', panel);
+    for (const group of ACTION_GROUP_IDS) {
+      const assignment = this.craft.actionGroups[group]?.find((candidate) => candidate.partKey === part.key);
+      const assigned = Boolean(assignment);
+      const button = el('button', 'hud-btn', groups, String(group === 10 ? 0 : group));
+      button.classList.toggle('active', assigned);
+      button.title = assignment ? `Assigned: ${assignment.action}` : 'Not assigned';
+      button.onclick = () => {
+        this.pushHistory();
+        const assignments = this.craft.actionGroups[group] ?? [];
+        this.craft.actionGroups[group] = assigned
+          ? assignments.filter((assignment) => assignment.partKey !== part.key)
+          : [...assignments, { partKey: part.key, action: actionSelect.value as PartAction }];
+        if (!this.craft.actionGroups[group]?.length) delete this.craft.actionGroups[group];
+        this.refreshPartContext();
+      };
+    }
+  }
+
+  rotateSelected(axis: 'x' | 'y' | 'z', direction: number, fine = false): void {
+    const snap = SNAP_ANGLES[this.snapIndex] || 1;
+    const angle = snap * (fine ? 0.2 : 1) * direction * Math.PI / 180;
+    const axisVector = axis === 'x' ? new Vec3(1, 0, 0) : axis === 'y' ? new Vec3(0, 1, 0) : new Vec3(0, 0, 1);
+    if (this.holdingDef) {
+      this.holdingRotation.multiply(new Quat().setFromAxisAngle(axisVector, angle)).normalize();
+      this.applyGhostRotation();
+      return;
+    }
+    if (this.selectedKey === null) return;
+    const part = craftPart(this.craft, this.selectedKey);
+    if (!part || part.attach !== 'surface') return;
+    this.pushHistory();
+    const rotation = new Quat(part.rotation.x, part.rotation.y, part.rotation.z, part.rotation.w);
+    rotation.multiply(new Quat().setFromAxisAngle(axisVector, angle)).normalize();
+    part.rotation = { ...rotation };
+    this.statsDirty = true;
+    this.rebuildVisual();
+  }
+
+  resetSelectedRotation(): void {
+    if (this.holdingDef) {
+      this.holdingRotation.set(0, 0, 0, 1);
+      this.applyGhostRotation();
+      return;
+    }
+    if (this.selectedKey === null) return;
+    const part = craftPart(this.craft, this.selectedKey);
+    if (!part || part.attach !== 'surface') return;
+    this.pushHistory();
+    part.rotation = { x: 0, y: 0, z: 0, w: 1 };
+    this.rebuildVisual();
+  }
+
+  private applyGhostRotation(baseYaw = 0): void {
+    if (!this.ghost) return;
+    const base = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), baseYaw);
+    base.multiply(this.holdingRotation).normalize();
+    this.ghost.quaternion.set(base.x, base.y, base.z, base.w);
+  }
+
+  verticalAlignSelected(): void {
+    if (this.selectedKey === null) return;
+    const part = craftPart(this.craft, this.selectedKey);
+    const parent = part?.parentKey !== null && part?.parentKey !== undefined
+      ? craftPart(this.craft, part.parentKey)
+      : null;
+    if (!part || part.attach !== 'surface' || !parent) return;
+    this.pushHistory();
+    part.position.y = parent.position.y;
+    this.statsDirty = true;
+    this.rebuildVisual();
+  }
+
+  rerootSelected(): void {
+    if (this.selectedKey === null) return;
+    const selected = craftPart(this.craft, this.selectedKey);
+    if (!selected || selected.parentKey === null) return;
+    const path: PartInstance[] = [];
+    let current: PartInstance | undefined = selected;
+    while (current) {
+      path.push(current);
+      current = current.parentKey === null ? undefined : craftPart(this.craft, current.parentKey);
+    }
+    this.pushHistory();
+    const oldAttach = path.map((part) => part.attach);
+    path[0].parentKey = null;
+    path[0].attach = 'root';
+    for (let index = 1; index < path.length; index++) {
+      path[index].parentKey = path[index - 1].key;
+      const previousAttach = oldAttach[index - 1];
+      path[index].attach = previousAttach === 'stack-top'
+        ? 'stack-bottom'
+        : previousAttach === 'stack-bottom'
+          ? 'stack-top'
+          : 'surface';
+    }
+    this.statsDirty = true;
+    this.rebuildVisual();
+  }
+
+  fitCamera(): void {
+    this.camFocusOffset.set(0, 0, 0);
+    if (!this.craft.parts.length) {
+      this.camDist = 16;
+      return;
+    }
+    const ys = this.craft.parts.map((part) => part.position.y);
+    const span = Math.max(4, Math.max(...ys) - Math.min(...ys) + 4);
+    this.camDist = Math.max(8, Math.min(80, span * 1.4));
+  }
+
+  frameSelected(): void {
+    if (this.selectedKey === null) return;
+    const part = craftPart(this.craft, this.selectedKey);
+    if (!part) return;
+    const mid = this.craft.parts.length
+      ? (Math.min(...this.craft.parts.map((candidate) => candidate.position.y)) + Math.max(...this.craft.parts.map((candidate) => candidate.position.y))) / 2
+      : 3;
+    this.camFocusOffset.set(part.position.x, part.position.y - mid, part.position.z);
+    this.camDist = Math.max(5, Math.min(this.camDist, 12));
+  }
+
+  panCameraLocal(x: number, y: number, z: number): void {
+    this.camFocusOffset.x += x;
+    this.camFocusOffset.y += y;
+    this.camFocusOffset.z += z;
   }
 
   private partKeyForObject(object: THREE.Object3D): number | null {
@@ -370,7 +718,7 @@ export class Editor {
   }
 
   /** Select a placed part and begin free movement on a camera-facing plane. */
-  beginPartDrag(nx: number, ny: number): boolean {
+  beginPartDrag(nx: number, ny: number, duplicate = false): boolean {
     if (this.holdingDef || !this.visual) return false;
     this.pointer.set(nx, ny);
     this.raycaster.setFromCamera(this.pointer, this.camera);
@@ -378,9 +726,13 @@ export class Editor {
     if (!hit) return false;
     const key = this.partKeyForObject(hit.object);
     if (key === null) return false;
-    this.setSelected(key);
+    this.moveSnapshot = structuredClone(this.craft);
 
-    const moving = new Set<number>([key]);
+    let movingRoot = key;
+    if (duplicate) movingRoot = this.duplicateSubtree(key);
+    this.setSelected(movingRoot);
+
+    const moving = new Set<number>([movingRoot]);
     let grew = true;
     while (grew) {
       grew = false;
@@ -392,12 +744,40 @@ export class Editor {
       }
     }
     this.movingKeys = moving;
-    const part = craftPart(this.craft, key)!;
+    const part = craftPart(this.craft, movingRoot)!;
     const point = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
     const normal = this.camera.getWorldDirection(new THREE.Vector3());
     this.movePlane.setFromNormalAndCoplanarPoint(normal, point);
     this.raycaster.ray.intersectPlane(this.movePlane, this.lastMovePoint);
     return true;
+  }
+
+  private duplicateSubtree(rootKey: number): number {
+    const sourceKeys = new Set<number>([rootKey]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const part of this.craft.parts) {
+        if (part.parentKey !== null && sourceKeys.has(part.parentKey) && !sourceKeys.has(part.key)) {
+          sourceKeys.add(part.key);
+          grew = true;
+        }
+      }
+    }
+    const keyMap = new Map<number, number>();
+    for (const source of this.craft.parts.filter((part) => sourceKeys.has(part.key))) {
+      const copy = structuredClone(source);
+      copy.key = this.craft.nextKey++;
+      keyMap.set(source.key, copy.key);
+      copy.parentKey = source.parentKey !== null && sourceKeys.has(source.parentKey)
+        ? keyMap.get(source.parentKey) ?? source.parentKey
+        : source.parentKey;
+      copy.symmetry = 0;
+      this.craft.parts.push(copy);
+    }
+    this.statsDirty = true;
+    this.rebuildVisual();
+    return keyMap.get(rootKey)!;
   }
 
   dragSelectedPart(nx: number, ny: number): void {
@@ -421,6 +801,8 @@ export class Editor {
   }
 
   endPartDrag(): void {
+    if (this.moveSnapshot) this.pushHistory(this.moveSnapshot);
+    this.moveSnapshot = null;
     this.movingKeys = null;
   }
 
@@ -488,7 +870,7 @@ export class Editor {
       const pos = new Vec3(spot.pos.x, y, spot.pos.z);
       this.candidate = { kind: 'stack', spot, pos };
       this.ghost.position.set(pos.x, pos.y, pos.z);
-      this.ghost.rotation.set(0, 0, 0);
+      this.applyGhostRotation();
       return;
     }
 
@@ -527,7 +909,7 @@ export class Editor {
           this.ghost.position.set(pos.x, pos.y, pos.z);
           // Face outward.
           const yaw = Math.atan2(n.x, n.z);
-          this.ghost.rotation.set(0, yaw, 0);
+          this.applyGhostRotation(yaw);
           return;
         }
       }
@@ -563,6 +945,7 @@ export class Editor {
 
   private placeHeld(): void {
     if (!this.holdingDef || !this.candidate) return;
+    this.pushHistory();
     const def = this.holdingDef;
     if (this.candidate.kind === 'root') {
       addPart(this.craft, def.id, null, 'root', this.candidate.pos);
@@ -580,8 +963,13 @@ export class Editor {
       const baseAngle = Math.atan2(relX, relZ);
       const radius = Math.hypot(relX, relZ);
       for (let i = 0; i < this.symmetry; i++) {
-        const a = baseAngle + (i / this.symmetry) * Math.PI * 2;
-        const rot = { x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) };
+        const radialAngle = baseAngle + (i / this.symmetry) * Math.PI * 2;
+        const a = this.symmetryMode === 'mirror' && i % 2 === 1
+          ? -baseAngle + (Math.floor(i / 2) / Math.max(1, Math.ceil(this.symmetry / 2))) * Math.PI * 2
+          : radialAngle;
+        const rotQuat = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), a);
+        rotQuat.multiply(this.holdingRotation).normalize();
+        const rot = { x: rotQuat.x, y: rotQuat.y, z: rotQuat.z, w: rotQuat.w };
         addPart(
           this.craft,
           def.id,
@@ -613,6 +1001,7 @@ export class Editor {
       return;
     }
     if (this.selectedKey !== null) {
+      this.pushHistory();
       removeSubtree(this.craft, this.selectedKey);
       this.setSelected(null);
       this.statsDirty = true;
@@ -622,6 +1011,7 @@ export class Editor {
 
   /** Generate a sensible staging sequence from the craft layout. */
   autoStage(): void {
+    this.pushHistory();
     this.craft.stages = buildAutoStages(this.craft);
   }
 
@@ -664,12 +1054,12 @@ export class Editor {
       }
       midY = (lo + hi) / 2;
     }
-    this.camHeight = midY;
+    this.camHeight = midY + this.camFocusOffset.y;
     const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
     const cz = Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cy = midY + Math.sin(this.camPitch) * this.camDist;
-    this.camera.position.set(cx, cy, cz);
-    this.camera.lookAt(0, midY, 0);
+    const cy = this.camHeight + Math.sin(this.camPitch) * this.camDist;
+    this.camera.position.set(cx + this.camFocusOffset.x, cy, cz + this.camFocusOffset.z);
+    this.camera.lookAt(this.camFocusOffset.x, this.camHeight, this.camFocusOffset.z);
 
     if (this.statsDirty) {
       this.statsDirty = false;
@@ -686,19 +1076,28 @@ export class Editor {
     const props = computeMassProperties(this.craft);
     const aero = buildAeroModel(this.craft);
 
-    let text = `parts   ${a.partCount}\nmass    ${(a.mass / 1000).toFixed(2)} t (dry ${(a.dryMass / 1000).toFixed(2)})\ncrew    ${a.crewCapacity}\n`;
-    text += `Δv tot  ${a.totalDeltaV.toFixed(0)} m/s\n`;
     const stability = aero.copY - props.com.y;
-    text += `CoM y   ${props.com.y.toFixed(2)} m\nCoP−CoM ${stability >= 0 ? '+' : ''}${stability.toFixed(2)} m ${stability < -0.15 ? '(stable)' : stability > 0.15 ? '(UNSTABLE)' : '(neutral)'}\n`;
-    text += `───────────────\n`;
-    for (const s of [...a.stages].reverse()) {
-      if (s.thrust === 0 && s.deltaV === 0) {
-        text += `S${s.stageIndex}  —\n`;
-        continue;
-      }
-      text += `S${s.stageIndex}  Δv ${s.deltaV.toFixed(0)}  TWR ${s.twrStart.toFixed(2)}  ${s.burnTime === 0 ? '' : `${s.burnTime.toFixed(0)}s`}\n`;
+    this.statsEl.innerHTML = '';
+    const totals = el('div', 'ed-engineering-grid', this.statsEl);
+    const stat = (label: string, value: string) => {
+      el('span', 'ed-engineering-key', totals, label);
+      el('span', 'ed-engineering-value', totals, value);
+    };
+    stat('Parts', String(a.partCount));
+    stat('Wet mass', `${(a.mass / 1000).toFixed(2)} t`);
+    stat('Dry mass', `${(a.dryMass / 1000).toFixed(2)} t`);
+    stat('Crew', String(a.crewCapacity));
+    stat('Total Δv', `${a.totalDeltaV.toFixed(0)} m/s`);
+    stat('CoM height', `${props.com.y.toFixed(2)} m`);
+    stat('Stability', `${stability >= 0 ? '+' : ''}${stability.toFixed(2)} m · ${stability < -0.15 ? 'stable' : stability > 0.15 ? 'unstable' : 'neutral'}`);
+    const stageTable = el('div', 'ed-engineering-stages', this.statsEl);
+    for (const stage of [...a.stages].reverse()) {
+      const row = el('div', 'ed-engineering-stage', stageTable);
+      el('strong', '', row, `S${stage.stageIndex}`);
+      el('span', '', row, stage.thrust || stage.deltaV
+        ? `Δv ${stage.deltaV.toFixed(0)} · TWR ${stage.twrStart.toFixed(2)} · ${stage.burnTime.toFixed(0)}s`
+        : '—');
     }
-    this.statsEl.textContent = text;
 
     this.warningsEl.innerHTML = '';
     const warnings = [...a.warnings];
@@ -712,38 +1111,103 @@ export class Editor {
     if (!this.craft.parts.some((p) => defOf(p).parachute)) {
       warnings.push('No parachute: returning crew will have a very firm arrival.');
     }
-    for (const w of warnings) el('div', 'ed-warn', this.warningsEl, `⚠ ${w}`);
+    for (const w of warnings) {
+      const warning = el('div', 'ed-warn', this.warningsEl, `⚠ ${w}`);
+      const suspect = w.toLowerCase().includes('twr') || w.toLowerCase().includes('staging')
+        ? this.craft.parts.find((part) => defOf(part).engine || defOf(part).decoupler)
+        : w.toLowerCase().includes('pressure') || w.toLowerCase().includes('stability')
+          ? this.craft.parts.find((part) => defOf(part).wing)
+          : undefined;
+      if (suspect) {
+        warning.classList.add('linked');
+        warning.title = `Select ${defOf(suspect).name}`;
+        warning.onclick = () => this.setSelected(suspect.key);
+      }
+    }
     if (!warnings.length) el('div', 'ed-part-info', this.warningsEl, 'no complaints — impressive');
   }
 
   private refreshStages(): void {
     this.stagesEl.innerHTML = '';
-    this.craft.stages.forEach((stage, i) => {
+    const env = this.envSelect.value;
+    const analysis = analyzeCraft(this.craft, env === 'palla' ? 1.51 : 9.42, env === 'veyra-sl' ? 101_325 : 0);
+    const assigned = new Set(this.craft.stages.flatMap((stage) => stage.partKeys));
+    const unstaged = el('div', 'ed-stage ed-unstaged', this.stagesEl);
+    el('div', 'ed-stage-title', unstaged, 'UNSTAGED');
+    const unstagedParts = el('div', 'ed-stage-parts', unstaged);
+    this.addStageDropTarget(unstaged, null);
+    for (const part of this.craft.parts.filter((candidate) => !assigned.has(candidate.key))) {
+      this.renderStagePart(unstagedParts, part);
+    }
+    [...this.craft.stages].map((stage, index) => ({ stage, index })).reverse().forEach(({ stage, index: i }) => {
       const div = el('div', 'ed-stage', this.stagesEl);
+      div.draggable = true;
+      div.ondragstart = (event) => event.dataTransfer?.setData('application/x-perilune-stage', String(i));
+      this.addStageDropTarget(div, i);
       const head = el('div', 'ed-stage-head', div);
       el('span', '', head, `STAGE ${i}`);
+      const metrics = analysis.stages[i];
+      el('span', 'ed-stage-metrics', head, metrics
+        ? `Δv ${metrics.deltaV.toFixed(0)} · TWR ${metrics.twrStart.toFixed(2)} · ${metrics.burnTime.toFixed(0)}s`
+        : '—');
       const del = el('button', 'hud-btn', head, '×');
       del.onclick = () => {
+        this.pushHistory();
         this.craft.stages.splice(i, 1);
         this.statsDirty = true;
       };
-      const assign = el('button', 'hud-btn', head, '+sel');
-      assign.title = 'Add selected part to this stage';
-      assign.onclick = () => {
-        if (this.selectedKey !== null && !stage.partKeys.includes(this.selectedKey)) {
-          for (const s of this.craft.stages) {
-            s.partKeys = s.partKeys.filter((k) => k !== this.selectedKey);
-          }
-          stage.partKeys.push(this.selectedKey);
-          this.statsDirty = true;
-        }
-      };
-      const names = stage.partKeys
-        .map((k) => craftPart(this.craft, k))
-        .filter(Boolean)
-        .map((p) => defOf(p!).name)
-        .join(', ');
-      el('div', '', div, names || '(empty)');
+      const parts = el('div', 'ed-stage-parts', div);
+      for (const key of stage.partKeys) {
+        const part = craftPart(this.craft, key);
+        if (part) this.renderStagePart(parts, part);
+      }
+      if (!stage.partKeys.length) el('span', 'ed-part-info', parts, 'drop staged parts here');
     });
+  }
+
+  private renderStagePart(parent: HTMLElement, part: PartInstance): void {
+    const definition = defOf(part);
+    const icon = definition.engine ? '▲' : definition.decoupler ? '║' : definition.parachute ? '▽' : '◆';
+    const chip = el('div', 'ed-stage-part', parent, `${icon} ${definition.name}`);
+    chip.draggable = true;
+    chip.dataset.partKey = String(part.key);
+    chip.ondragstart = (event) => {
+      event.stopPropagation();
+      event.dataTransfer?.setData('application/x-perilune-part', String(part.key));
+    };
+    chip.onclick = () => this.setSelected(part.key);
+  }
+
+  private addStageDropTarget(element: HTMLElement, targetIndex: number | null): void {
+    element.ondragover = (event) => {
+      if (
+        event.dataTransfer?.types.includes('application/x-perilune-part')
+        || event.dataTransfer?.types.includes('application/x-perilune-stage')
+      ) event.preventDefault();
+    };
+    element.ondrop = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rawPart = event.dataTransfer?.getData('application/x-perilune-part');
+      if (rawPart) {
+        const key = Number(rawPart);
+        if (!Number.isInteger(key)) return;
+        this.pushHistory();
+        for (const stage of this.craft.stages) stage.partKeys = stage.partKeys.filter((candidate) => candidate !== key);
+        if (targetIndex !== null) this.craft.stages[targetIndex].partKeys.push(key);
+        this.statsDirty = true;
+        return;
+      }
+      const rawStage = event.dataTransfer?.getData('application/x-perilune-stage');
+      if (rawStage && targetIndex !== null) {
+        const sourceIndex = Number(rawStage);
+        if (!Number.isInteger(sourceIndex) || sourceIndex === targetIndex) return;
+        this.pushHistory();
+        const [stage] = this.craft.stages.splice(sourceIndex, 1);
+        const insertion = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        this.craft.stages.splice(insertion, 0, stage);
+        this.statsDirty = true;
+      }
+    };
   }
 }

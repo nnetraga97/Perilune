@@ -16,7 +16,7 @@ import {
   LAUNCH_PAD_FOOTPRINT_RADIUS,
   launchSiteDirection,
 } from '../sim/state';
-import { launchPadTerrainEnvelope } from '../sim/terrain';
+import { groundRadiusInertial, launchPadTerrainEnvelope } from '../sim/terrain';
 import type { Body } from '../sim/universe';
 import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
@@ -78,6 +78,9 @@ export interface WorldSceneOptions {
   readonly quality: 'medium' | 'high';
   readonly diagnostics: RenderDiagnosticsPort;
 }
+
+export const FLIGHT_CAMERA_MODES = ['orbit', 'chase', 'locked', 'free'] as const;
+export type FlightCameraMode = (typeof FLIGHT_CAMERA_MODES)[number];
 
 export function bodyFixedCameraVelocity(
   current: VectorCoordinates,
@@ -141,6 +144,49 @@ export class WorldScene {
   camYaw = 0.6;
   camPitch = 0.35;
   camDist = 18;
+  cameraMode: FlightCameraMode = 'orbit';
+  cameraSmoothing = true;
+
+  cycleCameraMode(): FlightCameraMode {
+    const index = FLIGHT_CAMERA_MODES.indexOf(this.cameraMode);
+    this.cameraMode = FLIGHT_CAMERA_MODES[(index + 1) % FLIGHT_CAMERA_MODES.length];
+    this.resetCamera(false);
+    return this.cameraMode;
+  }
+
+  resetCamera(resetMode = false): void {
+    if (resetMode) this.cameraMode = 'orbit';
+    this.camYaw = this.cameraMode === 'orbit' || this.cameraMode === 'free' ? 0.6 : 0;
+    this.camPitch = 0.28;
+    this.camDist = 18;
+    this.camera.fov = 62;
+    this.camera.updateProjectionMatrix();
+  }
+
+  zoomFov(delta: number): void {
+    this.camera.fov = Math.max(20, Math.min(82, this.camera.fov + delta));
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** Pick a rendered part on the active vessel from a screen-space point. */
+  pickActivePart(clientX: number, clientY: number): number | null {
+    if (!this.activeVesselId) return null;
+    const visual = this.vesselVisuals.get(this.activeVesselId);
+    if (!visual) return null;
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(
+      (clientX / window.innerWidth) * 2 - 1,
+      -(clientY / window.innerHeight) * 2 + 1,
+    ), this.camera);
+    for (const intersection of raycaster.intersectObject(visual.group, true)) {
+      let object: THREE.Object3D | null = intersection.object;
+      while (object && object !== visual.group) {
+        if (Number.isInteger(object.userData.partKey)) return object.userData.partKey as number;
+        object = object.parent;
+      }
+    }
+    return null;
+  }
 
   constructor(
     private readonly context: RenderContext,
@@ -508,10 +554,47 @@ export class WorldScene {
     const cp = Math.cos(this.camPitch);
     const sp = Math.sin(this.camPitch);
     // Camera offset from vessel (in the local horizon frame).
-    const camOffset = new Vec3()
-      .addScaled(east, cy * cp * this.camDist)
-      .addScaled(north, sy * cp * this.camDist)
-      .addScaled(up, sp * this.camDist);
+    const camOffset = new Vec3();
+    const craftRight = v.att.rotate(new Vec3(1, 0, 0), new Vec3());
+    const craftNose = v.att.rotate(new Vec3(0, 1, 0), new Vec3());
+    const craftUp = v.att.rotate(new Vec3(0, 0, 1), new Vec3());
+    let cameraUp = up;
+    if (this.cameraMode === 'orbit') {
+      camOffset
+        .addScaled(east, cy * cp * this.camDist)
+        .addScaled(north, sy * cp * this.camDist)
+        .addScaled(up, sp * this.camDist);
+    } else if (this.cameraMode === 'chase') {
+      const chaseForward = craftNose.clone().addScaled(up, -craftNose.dot(up));
+      if (chaseForward.lengthSq() < 1e-8) chaseForward.copy(north);
+      chaseForward.normalize();
+      const chaseRight = Vec3.cross(chaseForward, up, new Vec3()).normalize();
+      camOffset
+        .addScaled(chaseForward, -cy * cp * this.camDist)
+        .addScaled(chaseRight, sy * cp * this.camDist)
+        .addScaled(up, sp * this.camDist);
+    } else if (this.cameraMode === 'locked') {
+      camOffset
+        .addScaled(craftNose, -cy * cp * this.camDist)
+        .addScaled(craftRight, sy * cp * this.camDist)
+        .addScaled(craftUp, sp * this.camDist);
+      cameraUp = craftUp;
+    } else {
+      camOffset.set(cy * cp * this.camDist, sy * cp * this.camDist, sp * this.camDist);
+      cameraUp = new Vec3(0, 0, 1);
+    }
+
+    // Keep the camera above authoritative terrain on solid bodies.
+    if (body.def.surfaceKind === 'solid') {
+      const cameraFromBody = v.pos.clone().add(camOffset);
+      if (cameraFromBody.lengthSq() > 0) {
+        const ground = groundRadiusInertial(body, cameraFromBody, t) + 1.5;
+        if (cameraFromBody.length() < ground) {
+          cameraFromBody.normalize().scale(ground);
+          camOffset.copy(cameraFromBody).sub(v.pos);
+        }
+      }
+    }
 
     // Absolute camera position: vessel absolute + offset.
     game.universe.absolutePosition(body, t, _bodyAbs);
@@ -661,9 +744,14 @@ export class WorldScene {
     }
 
     // ---- camera orientation: look at the active vessel.
+    const previousCameraRotation = this.camera.quaternion.clone();
     this.camera.position.set(0, 0, 0);
-    this.camera.up.set(up.x, up.y, up.z);
+    this.camera.up.set(cameraUp.x, cameraUp.y, cameraUp.z);
     this.camera.lookAt(-camOffset.x, -camOffset.y, -camOffset.z);
+    if (this.cameraSmoothing && dt > 0) {
+      const targetCameraRotation = this.camera.quaternion.clone();
+      this.camera.quaternion.copy(previousCameraRotation).slerp(targetCameraRotation, 1 - Math.exp(-dt * 12));
+    }
 
     // ---- atmosphere tint: fade background + fog by altitude.
     const alt = v.pos.length() - body.radius;

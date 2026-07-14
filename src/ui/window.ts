@@ -9,7 +9,7 @@
 import { el, injectUiStyles } from './kit';
 import { ProfileStore } from './profileStore';
 
-export type WindowScreen = 'flight' | 'editor' | 'any';
+export type WindowScreen = 'flight' | 'editor' | 'menu' | 'any';
 
 export interface WindowDef {
   id: string;
@@ -195,7 +195,7 @@ export class WindowManager {
   }
 
   setScreen(screen: 'flight' | 'editor' | 'menu'): void {
-    this.screen = screen === 'menu' ? 'any' : screen;
+    this.screen = screen;
     this.launcher.style.display = screen === 'menu' ? 'none' : '';
     this.applyScreen();
   }
@@ -214,8 +214,7 @@ export class WindowManager {
 
   private applyScreen(): void {
     for (const win of this.windows.values()) {
-      const visible =
-        this.screen !== 'any' && (win.def.screen === 'any' || win.def.screen === this.screen);
+      const visible = win.def.screen === 'any' || win.def.screen === this.screen;
       win.setScreenVisible(visible);
       const btn = this.buttons.get(win.def.id);
       if (btn) btn.style.display = visible ? '' : 'none';

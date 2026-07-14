@@ -140,6 +140,7 @@ function buildPartMesh(
   }
   holder.position.set(part.position.x, part.position.y, part.position.z);
   holder.quaternion.set(part.rotation.x, part.rotation.y, part.rotation.z, part.rotation.w);
+  holder.userData.partKey = part.key;
   return { holder, plumeAnchors: imported?.plumeAnchors ?? null };
 }
 

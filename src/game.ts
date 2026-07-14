@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { Vec3 } from './core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
-import { Craft, defOf } from './sim/vessel';
+import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
 import { createRenderContext, RenderContext } from './render/context';
 import { WorldScene } from './render/worldScene';
 import { checkPartModelManifest } from './render/partModelManifest';
@@ -27,7 +27,7 @@ import {
 } from './content/science';
 import { logEvent } from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
-import { nodeBurnDirection, nodeDeltaV } from './sim/maneuver';
+import { estimateBurnTime, nodeBurnDirection, nodeDeltaV, type ManeuverNode } from './sim/maneuver';
 import { apoapsisOf, periapsisOf, stateToElements } from './core/orbit';
 import { RenderDiagnostics } from './render/renderDiagnostics';
 import type { RenderStartupOptions } from './render/renderStartupOptions';
@@ -36,6 +36,9 @@ import { InputService, type BindingScreen } from './ui/input';
 import { CheatSheet } from './ui/cheatSheet';
 import { WindowManager } from './ui/window';
 import { browserProfileStore } from './ui/profileStore';
+import { FlightInstruments } from './ui/flightInstruments';
+import { MissionTools } from './ui/missionTools';
+import { UtilityTools, type UiSettings } from './ui/utilityTools';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -57,13 +60,18 @@ class PeriluneGame {
   private keys = new Set<string>();
   private dragging = false;
   private draggingPart = false;
+  private draggingMapControl = false;
   private dragMoved = 0;
+  private dragButton = 0;
   private lastX = 0;
   private lastY = 0;
   private lastFrame = performance.now();
   private launchedCraft: Craft | null = null;
   private missionStart = 0;
   private nodeRemainingDv = 0;
+  private precisionControl = false;
+  private paused = false;
+  private uiHidden = false;
   private lastAutosave = 0;
   private comms: CommsStatus = { connected: true, path: [], strength: 1 };
   private lastCommsCheck = 0;
@@ -73,6 +81,10 @@ class PeriluneGame {
   private input = new InputService();
   private cheatSheet!: CheatSheet;
   private windows!: WindowManager;
+  private instruments!: FlightInstruments;
+  private missionTools!: MissionTools;
+  private utilityTools!: UtilityTools;
+  private uiSettings: UiSettings | null = null;
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
 
@@ -189,13 +201,63 @@ class PeriluneGame {
     });
     this.hud.root.style.display = 'none';
     this.map = new MapView(this.uiRoot, {
-      onWarpToNode: (t) => this.warpToNode(t),
+      onWarpToNode: (node) => this.warpToNode(node),
+      onCreateAlarm: (time, label, kind) => {
+        this.missionTools.addAlarm(time, label, kind);
+      },
+      onSetTarget: (bodyId) => {
+        if (this.game.active) this.game.active.target = bodyId;
+      },
+      onWarpToTime: (time, margin) => this.warpToTime(time, margin),
     });
     this.tutorial = new Tutorial(this.uiRoot);
     window.addEventListener('pagehide', this.onPageHide);
     this.buildMenu();
     this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
-    this.windows = new WindowManager(this.uiRoot, browserProfileStore());
+    const profile = browserProfileStore();
+    this.windows = new WindowManager(this.uiRoot, profile);
+    this.instruments = new FlightInstruments(this.windows, () => this.game);
+    this.missionTools = new MissionTools(this.windows, () => this.game, {
+      onSwitchVessel: (vesselId) => this.activateVessel(vesselId),
+      onSketchNode: (plan) => {
+        this.map.setNode({
+          time: plan.windowTime,
+          prograde: plan.departureDv,
+          normal: 0,
+          radial: 0,
+        });
+        if (!this.map.visible) this.toggleMap();
+      },
+      onSetTarget: (bodyId) => {
+        if (this.game.active) this.game.active.target = bodyId;
+      },
+      onFocusBody: (bodyId) => {
+        this.map.focusBody(bodyId);
+        if (!this.map.visible) this.toggleMap();
+      },
+      onRenameVessel: (vesselId, name) => {
+        const vessel = this.game.vessels.find((candidate) => candidate.runtime.id === vesselId);
+        if (vessel) vessel.runtime.name = name;
+      },
+      onTerminateVessel: (vesselId) => {
+        const vessel = this.game.vessels.find((candidate) => candidate.runtime.id === vesselId);
+        if (!vessel?.runtime.isDebris) return;
+        this.game.vessels = this.game.vessels.filter((candidate) => candidate.runtime.id !== vesselId);
+        this.world.invalidateVessel(vesselId);
+        if (this.game.activeVesselId === vesselId) {
+          this.game.activeVesselId = this.game.vessels.find((candidate) => !candidate.runtime.isDebris)?.runtime.id ?? null;
+        }
+      },
+      onRecoverVessel: (vesselId) => {
+        this.activateVessel(vesselId);
+        this.recover();
+      },
+    }, this.uiRoot);
+    this.utilityTools = new UtilityTools(this.windows, profile, this.input, () => this.game, {
+      onSave: (slot, label) => writeSave(this.game, slot, label),
+      onLoad: (slot) => this.loadSlot(slot),
+      onSettings: (settings) => this.applySettings(settings),
+    });
     this.windows.addAction('⌨ Keys', 'Keyboard reference (?)', () => {
       if (this.screen === 'flight' || this.screen === 'editor') {
         this.cheatSheet.toggle(this.screen as BindingScreen);
@@ -286,6 +348,9 @@ class PeriluneGame {
       time: () => this.game.time,
       sciencePoints: () => this.game.sciencePoints,
       warpRate: () => this.game.warpRate,
+      target: () => this.game.active?.target ?? null,
+      maneuverNode: () => this.map.node ? { ...this.map.node } : null,
+      alarmCount: () => this.game.alarms.length,
       fuel: () => {
         const gv = this.game.active;
         if (!gv) return 0;
@@ -309,7 +374,7 @@ class PeriluneGame {
       position: absolute; inset: 0; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 14px;
       background: radial-gradient(ellipse at 50% 65%, #0a1826 0%, #04070a 75%);
-      pointer-events: auto; z-index: 60;
+      pointer-events: auto; z-index: 40;
     `;
     this.menuEl.innerHTML = `
       <div style="font-size:54px;letter-spacing:16px;color:#6db3d6;font-weight:300">PERILUNE</div>
@@ -333,6 +398,8 @@ class PeriluneGame {
       this.newGame();
       this.toEditor();
     });
+    mkBtn('Save & Load', () => this.utilityTools.openSaves());
+    mkBtn('Settings', () => this.utilityTools.openSettings());
     const cont = mkBtn('Continue from last save', async () => {
       const save = await readSave('auto');
       if (save) {
@@ -362,6 +429,7 @@ class PeriluneGame {
   }
 
   private toEditor(): void {
+    this.paused = false;
     this.screen = 'editor';
     this.menuEl.style.display = 'none';
     this.editor.setVisible(true);
@@ -373,6 +441,7 @@ class PeriluneGame {
   }
 
   private toFlight(spawn = true): void {
+    this.paused = false;
     this.screen = 'flight';
     this.menuEl.style.display = 'none';
     this.editor.setVisible(false);
@@ -419,7 +488,11 @@ class PeriluneGame {
   }
 
   private async quickLoad(): Promise<void> {
-    const save = await readSave('quick');
+    await this.loadSlot('quick');
+  }
+
+  private async loadSlot(slot: string): Promise<void> {
+    const save = await readSave(slot);
     if (!save) return;
     this.game = restoreGame(save);
     this.world.dispose();
@@ -429,6 +502,25 @@ class PeriluneGame {
     });
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
+  }
+
+  private applySettings(settings: UiSettings): void {
+    this.uiSettings = settings;
+    this.uiRoot.style.setProperty('zoom', String(settings.uiScale));
+    document.documentElement.classList.toggle('k-reduced-motion', settings.reducedMotion);
+    document.documentElement.classList.toggle('k-simple-terms', settings.simplifiedTerms);
+    const accents = {
+      cyan: ['#6db3d6', '#e2b13c'],
+      amber: ['#e2b13c', '#6db3d6'],
+      violet: ['#a993e8', '#e2b13c'],
+    } as const;
+    document.documentElement.style.setProperty('--ui-accent', accents[settings.accent][0]);
+    document.documentElement.style.setProperty('--ui-warn', accents[settings.accent][1]);
+    this.world.camera.fov = settings.fov;
+    this.world.cameraSmoothing = settings.cameraSmoothing && !settings.reducedMotion;
+    this.world.camera.updateProjectionMatrix();
+    this.editor.camera.fov = settings.fov;
+    this.editor.camera.updateProjectionMatrix();
   }
 
   private revert(): void {
@@ -491,19 +583,73 @@ class PeriluneGame {
     void writeSave(this.game, 'auto', 'autosave');
   }
 
-  private warpToNode(nodeTime: number): void {
-    const eta = nodeTime - this.game.time;
+  private warpToNode(node: ManeuverNode): void {
+    const gv = this.game.active;
+    if (!gv) return;
+    const body = this.game.bodyOf(gv);
+    const v = gv.runtime;
+    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
+    const candidates = analysis.stages.filter((stage) => stage.thrust > 0);
+    const stage = candidates.find((candidate) => candidate.stageIndex >= v.currentStage)
+      ?? [...candidates].reverse().find((candidate) => candidate.stageIndex < v.currentStage);
+    const burnDuration = stage
+      ? estimateBurnTime(nodeDeltaV(node), stage.thrust, v.massProps.mass, stage.isp)
+      : 0;
+    const stopTime = node.time - burnDuration / 2 - 30;
+    this.warpToTime(stopTime, 0);
+  }
+
+  private warpToTime(eventTime: number, margin = 30): void {
+    const stopTime = eventTime - margin;
+    const eta = stopTime - this.game.time;
     if (eta < 45) return;
-    // Pick the highest rails rate that stops ~30s before the node.
+    // Pick the highest rails rate that stops 30 s before finite-burn ignition.
     for (let i = RAILS_WARP_RATES.length - 1; i >= 1; i--) {
       if (eta / RAILS_WARP_RATES[i] > 3) {
         this.game.setWarp(i, true);
-        this.pendingWarpStop = nodeTime - 30;
+        this.pendingWarpStop = stopTime;
         return;
       }
     }
   }
   private pendingWarpStop: number | null = null;
+
+  private executeActionGroup(group: ActionGroupId): void {
+    const gv = this.game.active;
+    if (!gv) return;
+    if (this.controlBlocked) {
+      logEvent(gv.runtime, this.game.time, `No signal: action group ${group} blocked.`, 'warning');
+      this.hud.showActionGroup(group, 0);
+      return;
+    }
+    const executed = this.game.executeActionGroup(gv, group);
+    this.hud.showActionGroup(group, executed);
+  }
+
+  private togglePause(): void {
+    if (this.paused) {
+      this.dialogEl?.remove();
+      this.dialogEl = null;
+      this.paused = false;
+      return;
+    }
+    if (this.dialogEl) return;
+    this.paused = true;
+    this.game.setWarp(0, false);
+    this.showDialog('Flight paused', 'Simulation time is stopped.', [
+      { label: 'Resume', fn: () => { this.paused = false; } },
+      { label: 'Settings', fn: () => { this.utilityTools.openSettings(); } },
+      { label: 'Save & Load', fn: () => { this.utilityTools.openSaves(); } },
+      { label: 'Quicksave & resume', fn: () => { this.quickSave(); this.paused = false; } },
+      { label: 'Quickload', fn: () => { this.paused = false; void this.quickLoad(); } },
+      { label: 'Back to Workshop', fn: () => { this.paused = false; this.toEditor(); } },
+    ]);
+  }
+
+  private toggleUi(): void {
+    this.uiHidden = !this.uiHidden;
+    this.uiRoot.classList.toggle('k-ui-hidden', this.uiHidden);
+  }
 
   private showDialog(title: string, text: string, actions: Array<{ label: string; fn: () => void }>): void {
     this.dialogEl?.remove();
@@ -554,10 +700,18 @@ class PeriluneGame {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     canvas.addEventListener('pointerdown', (e) => {
-      if (this.screen === 'editor') {
+      if (this.screen === 'flight' && this.map.visible && e.button === 0 && this.map.beginPointer(e.clientX, e.clientY)) {
+        this.draggingMapControl = true;
+        this.dragging = false;
+        this.lastX = e.clientX;
+        this.lastY = e.clientY;
+        e.preventDefault();
+        return;
+      }
+      if (this.screen === 'editor' && e.button === 0) {
         const nx = (e.clientX / window.innerWidth) * 2 - 1;
         const ny = -(e.clientY / window.innerHeight) * 2 + 1;
-        if (this.editor.beginPartDrag(nx, ny)) {
+        if (this.editor.beginPartDrag(nx, ny, e.altKey)) {
           this.draggingPart = true;
           this.dragging = false;
           e.preventDefault();
@@ -565,6 +719,7 @@ class PeriluneGame {
         }
       }
       this.dragging = true;
+      this.dragButton = e.button;
       this.dragMoved = 0;
       this.lastX = e.clientX;
       this.lastY = e.clientY;
@@ -585,6 +740,9 @@ class PeriluneGame {
       this.editor.updatePointer(nx, ny);
       this.editor.click();
     });
+    canvas.addEventListener('contextmenu', (e) => {
+      if (this.screen === 'flight' && this.map.visible) e.preventDefault();
+    });
     window.addEventListener('pointermove', (e) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1;
       const ny = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -593,20 +751,40 @@ class PeriluneGame {
         this.editor.dragSelectedPart(nx, ny);
         return;
       }
+      if (this.draggingMapControl) {
+        const dx = e.clientX - this.lastX;
+        const dy = e.clientY - this.lastY;
+        this.lastX = e.clientX;
+        this.lastY = e.clientY;
+        this.map.dragPointer(dx, dy);
+        return;
+      }
       if (!this.dragging) return;
-      const dx = e.clientX - this.lastX;
-      const dy = e.clientY - this.lastY;
+      const sensitivity = this.uiSettings?.dragSensitivity ?? 1;
+      const dx = (e.clientX - this.lastX) * sensitivity * (this.uiSettings?.invertX ? -1 : 1);
+      const dy = (e.clientY - this.lastY) * sensitivity * (this.uiSettings?.invertY ? -1 : 1);
       this.dragMoved += Math.abs(dx) + Math.abs(dy);
       this.lastX = e.clientX;
       this.lastY = e.clientY;
-      if (this.screen === 'editor') this.editor.orbitCamera(dx, dy);
-      else if (this.screen === 'flight' && this.map.visible) this.map.orbitCamera(dx, dy);
+      if (this.screen === 'editor') {
+        if (this.dragButton === 1) this.editor.panCameraLocal(-dx * 0.012, dy * 0.012, 0);
+        else this.editor.orbitCamera(dx, dy);
+      }
+      else if (this.screen === 'flight' && this.map.visible) {
+        if (this.dragButton === 1 || this.dragButton === 2) this.map.panCamera(dx, dy);
+        else this.map.orbitCamera(dx, dy);
+      }
       else if (this.screen === 'flight') {
         this.world.camYaw -= dx * 0.005;
         this.world.camPitch = Math.max(-1.4, Math.min(1.4, this.world.camPitch + dy * 0.005));
       }
     });
-    window.addEventListener('pointerup', () => {
+    window.addEventListener('pointerup', (e) => {
+      if (this.draggingMapControl) {
+        this.map.endPointer();
+        this.draggingMapControl = false;
+        return;
+      }
       if (this.draggingPart) {
         this.editor.endPartDrag();
         this.draggingPart = false;
@@ -616,12 +794,17 @@ class PeriluneGame {
       if (this.dragging && this.dragMoved < 6 && this.screen === 'editor') {
         this.editor.click();
       }
+      if (this.dragging && this.dragMoved < 6 && this.screen === 'flight' && !this.map.visible) {
+        const partKey = this.world.pickActivePart(e.clientX, e.clientY);
+        if (partKey !== null) this.hud.showPartActions(this.game, partKey, e.clientX, e.clientY);
+      }
       this.dragging = false;
     });
     canvas.addEventListener('wheel', (e) => {
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
       if (this.screen === 'editor') this.editor.zoomCamera(factor);
-      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
+      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor, e.clientX, e.clientY);
+      else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
         this.world.camDist = Math.max(4, Math.min(2000, this.world.camDist * factor));
       }
@@ -643,17 +826,31 @@ class PeriluneGame {
     };
     this.input.add(
       // ---- flight: mission
+      { code: 'Escape', screen: flight, group: 'Mission', label: 'Pause / resume', keyLabel: 'Esc', preventDefault: true, handler: () => this.togglePause() },
       { code: 'Space', screen: flight, group: 'Mission', label: 'Fire next stage', keyLabel: 'Space', handler: act(() => this.stage()) },
       { code: 'KeyM', screen: flight, group: 'Mission', label: 'Toggle map view', handler: act(() => this.toggleMap()) },
       { code: 'F5', screen: flight, group: 'Mission', label: 'Quicksave', preventDefault: true, handler: act(() => this.quickSave()) },
       { code: 'F9', screen: flight, group: 'Mission', label: 'Quickload', preventDefault: true, handler: act(() => void this.quickLoad()) },
       { code: 'BracketLeft', screen: flight, group: 'Mission', label: 'Previous vessel', handler: act(() => this.cycleVessel(-1)) },
       { code: 'BracketRight', screen: flight, group: 'Mission', label: 'Next vessel', handler: act(() => this.cycleVessel(1)) },
+      { code: 'Backspace', screen: flight, group: 'Mission', label: 'Abort group (reserved)', keyLabel: 'Bksp', handler: act(() => {
+        const gv = this.game.active!;
+        logEvent(gv.runtime, this.game.time, 'Abort action group is not assigned.', 'warning');
+      }) },
       // ---- flight: control
       { code: 'KeyT', screen: flight, group: 'Control', label: 'Toggle SAS', handler: vessel((v) => (v.sas = v.sas === 'off' ? 'stability' : 'off')) },
       { code: 'KeyR', screen: flight, group: 'Control', label: 'Toggle RCS', handler: vessel((v) => (v.controls.rcs = !v.controls.rcs)) },
       { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => (v.controls.throttle = 1)) },
       { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => (v.controls.throttle = 0)) },
+      { code: 'CapsLock', screen: flight, group: 'Control', label: 'Precision control', keyLabel: 'CapsLock', handler: (e) => {
+        this.precisionControl = e.getModifierState('CapsLock');
+      } },
+      { code: 'KeyV', screen: flight, group: 'Camera', label: 'Cycle camera mode', handler: act(() => this.world.cycleCameraMode()) },
+      { code: 'Home', screen: flight, group: 'Camera', label: 'Reset/recenter camera', handler: act(() => {
+        if (this.map.visible) this.map.resetCamera();
+        else this.world.resetCamera();
+      }) },
+      { code: 'F2', screen: flight, group: 'Camera', label: 'Hide screenshot UI', preventDefault: true, handler: () => this.toggleUi() },
       // ---- flight: held keys (polled in the frame loop; listed for the cheat sheet)
       { code: '', screen: flight, group: 'Control', label: 'Pitch', keyLabel: 'W / S' },
       { code: '', screen: flight, group: 'Control', label: 'Yaw', keyLabel: 'A / D' },
@@ -663,17 +860,63 @@ class PeriluneGame {
       // ---- flight: time
       { code: 'Comma', screen: flight, group: 'Time', label: 'Warp slower', handler: act(() => this.stepWarp(-1)) },
       { code: 'Period', screen: flight, group: 'Time', label: 'Warp faster', handler: act(() => this.stepWarp(1)) },
+      { code: 'Period', alt: true, screen: flight, group: 'Time', label: 'Force physics warp', handler: act(() => {
+        const index = this.game.railsWarp ? 1 : Math.min(PHYSICS_WARP_RATES.length - 1, this.game.warpIndex + 1);
+        this.game.setWarp(index, false);
+      }) },
+      { code: 'Slash', screen: flight, group: 'Time', label: 'Cancel warp', keyLabel: '/', handler: act(() => {
+        this.pendingWarpStop = null;
+        this.game.setWarp(0, false);
+      }) },
       // ---- editor
       { code: 'Delete', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Del', handler: () => this.editor.deleteSelected() },
       { code: 'Backspace', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Bksp', handler: () => this.editor.deleteSelected() },
+      { code: 'Escape', screen: editor, group: 'Workshop', label: 'Drop held part', keyLabel: 'Esc', handler: () => this.editor.cancelHolding() },
+      { code: 'KeyZ', ctrl: true, screen: editor, group: 'Workshop', label: 'Undo craft edit', handler: () => this.editor.undo() },
+      { code: 'KeyY', ctrl: true, screen: editor, group: 'Workshop', label: 'Redo craft edit', handler: () => this.editor.redo() },
       { code: 'KeyX', screen: editor, group: 'Workshop', label: 'Cycle radial symmetry', handler: () => this.editor.cycleSymmetry() },
+      { code: 'KeyX', shift: true, screen: editor, group: 'Workshop', label: 'Cycle symmetry backward', handler: () => this.editor.cycleSymmetry(-1) },
+      { code: 'KeyR', screen: editor, group: 'Workshop', label: 'Toggle radial / mirror symmetry', handler: () => this.editor.toggleSymmetryMode() },
+      { code: 'KeyC', screen: editor, group: 'Workshop', label: 'Cycle angle snap', handler: () => this.editor.cycleSnap() },
+      { code: 'KeyV', screen: editor, group: 'Workshop', label: 'Align selected part vertically', handler: () => this.editor.verticalAlignSelected() },
+      { code: 'Digit4', screen: editor, group: 'Workshop', label: 'Re-root at selected part', handler: () => this.editor.rerootSelected() },
+      { code: 'Space', screen: editor, group: 'Workshop', label: 'Reset part rotation', handler: () => this.editor.resetSelectedRotation() },
+      { code: 'Home', screen: editor, group: 'Camera', label: 'Fit craft in view', handler: () => this.editor.fitCamera() },
+      { code: 'KeyF', screen: editor, group: 'Camera', label: 'Frame selected part', handler: () => this.editor.frameSelected() },
+      { code: 'KeyF', ctrl: true, screen: editor, group: 'Palette', label: 'Focus part search', handler: () => this.editor.focusSearch() },
+      { code: 'Slash', screen: editor, group: 'Palette', label: 'Focus part search', keyLabel: '/', handler: () => this.editor.focusSearch() },
+      { code: 'BracketLeft', screen: editor, group: 'Palette', label: 'Previous part category', handler: () => this.editor.cycleCategory(-1) },
+      { code: 'BracketRight', screen: editor, group: 'Palette', label: 'Next part category', handler: () => this.editor.cycleCategory(1) },
+      { code: 'KeyW', screen: editor, group: 'Part / camera', label: 'Pitch part / raise camera', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('x', 1, e.shiftKey) : this.editor.panCameraLocal(0, 0.25, 0) },
+      { code: 'KeyS', screen: editor, group: 'Part / camera', label: 'Pitch part / lower camera', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('x', -1, e.shiftKey) : this.editor.panCameraLocal(0, -0.25, 0) },
+      { code: 'KeyA', screen: editor, group: 'Part / camera', label: 'Yaw part / pan left', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('y', -1, e.shiftKey) : this.editor.panCameraLocal(-0.25, 0, 0) },
+      { code: 'KeyD', screen: editor, group: 'Part / camera', label: 'Yaw part / pan right', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('y', 1, e.shiftKey) : this.editor.panCameraLocal(0.25, 0, 0) },
+      { code: 'KeyQ', screen: editor, group: 'Part / camera', label: 'Roll part / pan inward', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('z', -1, e.shiftKey) : this.editor.panCameraLocal(0, 0, -0.25) },
+      { code: 'KeyE', screen: editor, group: 'Part / camera', label: 'Roll part / pan outward', handler: (e) => this.editor.hasPartSelection ? this.editor.rotateSelected('z', 1, e.shiftKey) : this.editor.panCameraLocal(0, 0, 0.25) },
+      { code: 'KeyW', shift: true, screen: editor, group: 'Part / camera', label: 'Fine pitch part', handler: () => this.editor.rotateSelected('x', 1, true) },
+      { code: 'KeyS', shift: true, screen: editor, group: 'Part / camera', label: 'Fine pitch part backward', handler: () => this.editor.rotateSelected('x', -1, true) },
+      { code: 'KeyA', shift: true, screen: editor, group: 'Part / camera', label: 'Fine yaw part left', handler: () => this.editor.rotateSelected('y', -1, true) },
+      { code: 'KeyD', shift: true, screen: editor, group: 'Part / camera', label: 'Fine yaw part right', handler: () => this.editor.rotateSelected('y', 1, true) },
+      { code: 'KeyQ', shift: true, screen: editor, group: 'Part / camera', label: 'Fine roll part left', handler: () => this.editor.rotateSelected('z', -1, true) },
+      { code: 'KeyE', shift: true, screen: editor, group: 'Part / camera', label: 'Fine roll part right', handler: () => this.editor.rotateSelected('z', 1, true) },
       { code: '', screen: editor, group: 'Workshop', label: 'Orbit camera', keyLabel: 'Drag' },
+      { code: '', screen: editor, group: 'Workshop', label: 'Pan camera', keyLabel: 'Middle-drag' },
+      { code: '', screen: editor, group: 'Workshop', label: 'Duplicate subtree', keyLabel: 'Alt+click' },
       { code: '', screen: editor, group: 'Workshop', label: 'Zoom', keyLabel: 'Wheel' },
       // ---- help (both screens)
       { code: 'Slash', shift: true, screen: 'any', group: 'Help', label: 'Show this cheat sheet', keyLabel: '?', handler: () => {
         if (this.screen === 'flight' || this.screen === 'editor') this.cheatSheet.toggle(this.screen as BindingScreen);
       } },
     );
+    for (const group of ACTION_GROUP_IDS) {
+      this.input.add({
+        code: group === 10 ? 'Digit0' : `Digit${group}`,
+        screen: flight,
+        group: 'Action groups',
+        label: `Execute action group ${group === 10 ? 0 : group}`,
+        handler: act(() => this.executeActionGroup(group)),
+      });
+    }
   }
 
   private cycleVessel(dir: number): void {
@@ -681,7 +924,12 @@ class PeriluneGame {
     if (list.length < 2) return;
     const idx = list.findIndex((gv) => gv.runtime.id === this.game.activeVesselId);
     const next = list[(idx + dir + list.length) % list.length];
-    this.game.setActive(next.runtime.id);
+    this.activateVessel(next.runtime.id);
+  }
+
+  private activateVessel(id: string): void {
+    if (!this.game.vessels.some((vessel) => vessel.runtime.id === id)) return;
+    this.game.setActive(id);
     this.hud.setMissionStart(this.game.time);
   }
 
@@ -706,13 +954,14 @@ class PeriluneGame {
     const t = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? 1 : 0;
     const b = this.keys.has('ControlLeft') || this.keys.has('ControlRight') ? 1 : 0;
     c.throttle = Math.max(0, Math.min(1, c.throttle + (t - b) * dt * 0.6));
-    c.pitch = (this.keys.has('KeyS') ? 1 : 0) - (this.keys.has('KeyW') ? 1 : 0);
-    c.yaw = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
-    c.roll = (this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0);
+    const authority = this.precisionControl ? 0.35 : 1;
+    c.pitch = ((this.keys.has('KeyS') ? 1 : 0) - (this.keys.has('KeyW') ? 1 : 0)) * authority;
+    c.yaw = ((this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0)) * authority;
+    c.roll = ((this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0)) * authority;
     c.translate.set(
-      (this.keys.has('KeyL') ? 1 : 0) - (this.keys.has('KeyJ') ? 1 : 0),
-      (this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0),
-      (this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0),
+      ((this.keys.has('KeyL') ? 1 : 0) - (this.keys.has('KeyJ') ? 1 : 0)) * authority,
+      ((this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0)) * authority,
+      ((this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0)) * authority,
     );
   }
 
@@ -735,18 +984,27 @@ class PeriluneGame {
           this.hud.setComms(this.comms, this.controlBlocked);
         }
       }
-      if (!this.controlBlocked) this.applyContinuousInput(dt);
-      this.updateNodeAssist(dt);
-      this.game.update(dt);
+      if (!this.paused) {
+        if (!this.controlBlocked) this.applyContinuousInput(dt);
+        this.updateNodeAssist(dt);
+        this.game.update(dt);
+        for (const alarm of this.game.consumeFiredAlarms()) {
+          const vessel = (alarm.vesselId
+            ? this.game.vessels.find((candidate) => candidate.runtime.id === alarm.vesselId)
+            : this.game.active)?.runtime;
+          if (vessel) logEvent(vessel, this.game.time, `Alarm: ${alarm.label}`, 'warning');
+          this.missionTools.showFiredAlarm(alarm);
+        }
+      }
 
       // Auto warp stop at node.
-      if (this.pendingWarpStop !== null && this.game.time >= this.pendingWarpStop) {
+      if (!this.paused && this.pendingWarpStop !== null && this.game.time >= this.pendingWarpStop) {
         this.game.setWarp(0, false);
         this.pendingWarpStop = null;
       }
 
       // Periodic autosave (wall-clock; skips high warp to avoid stutter).
-      if (now - this.lastAutosave > 120_000 && this.game.warpRate <= 5) {
+      if (!this.paused && now - this.lastAutosave > 120_000 && this.game.warpRate <= 5) {
         this.lastAutosave = now;
         void writeSave(this.game, 'auto', 'autosave');
       }
@@ -775,7 +1033,13 @@ class PeriluneGame {
           this.gpuProfiler.submit('flight', () => this.ctx.renderer.render(this.world.scene, this.world.camera));
         }
       }
-      this.hud.update(this.game, this.map.node);
+      this.hud.update(this.game, this.map.node, {
+        nodeRemainingDv: this.nodeRemainingDv,
+        cameraMode: this.world.cameraMode,
+        precision: this.precisionControl,
+        entryPrediction: this.map.entryPrediction,
+        landingTargetDirBF: this.map.landingTargetDirBF,
+      });
       if (this.hud.pendingWarpStep !== 0) {
         this.stepWarp(this.hud.pendingWarpStep);
         this.hud.pendingWarpStep = 0;

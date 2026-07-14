@@ -7,15 +7,16 @@
  */
 import { Vec3 } from '../core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from '../sim/state';
-import { defOf, analyzeCraft } from '../sim/vessel';
+import { G0, defOf, analyzeCraft } from '../sim/vessel';
 import { oreConcentration, oreCapacityOf } from '../sim/resources';
 import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
-import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
+import { estimateBurnTime, nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading, projectNavDirection } from './navball';
 import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 import { el, injectUiStyles } from './kit';
+import type { EntryPrediction } from '../sim/entry';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -32,6 +33,14 @@ export interface HudCallbacks {
   onToggleSystem(partKey: number): void;
   /** Run an orbital resource survey. */
   onSurvey(): void;
+}
+
+export interface HudTelemetry {
+  nodeRemainingDv: number;
+  cameraMode: string;
+  precision: boolean;
+  entryPrediction: EntryPrediction | null;
+  landingTargetDirBF: Vec3 | null;
 }
 
 const SAS_MODES: Array<{ mode: SasMode; label: string; title: string }> = [
@@ -80,8 +89,21 @@ export class FlightHud {
   private peTimeEl: HTMLElement;
   private situationEl: HTMLElement;
   private metEl: HTMLElement;
+  private utEl: HTMLElement;
+  private nextAlarmEl: HTMLElement;
   private warpEl: HTMLElement;
   private throttleFill: HTMLElement;
+  private gFill: HTMLElement;
+  private qFill: HTMLElement;
+  private atmosphereFill: HTMLElement;
+  private gText: HTMLElement;
+  private qText: HTMLElement;
+  private atmosphereText: HTMLElement;
+  private crewEl: HTMLElement;
+  private cameraModeEl: HTMLElement;
+  private precisionEl: HTMLElement;
+  private actionGroupEl: HTMLElement;
+  private entryCard: HTMLElement;
   private gaugeFills = new Map<string, HTMLElement>();
   private gaugeTexts = new Map<string, HTMLElement>();
   private stageListEl: HTMLElement;
@@ -98,6 +120,9 @@ export class FlightHud {
   private sysPanel!: HTMLElement;
   private lastSysRender = '';
   private oreHereEl: HTMLElement | null = null;
+  private peakQ = 0;
+  private peakQVesselId: string | null = null;
+  private partPopup: HTMLElement | null = null;
 
   constructor(uiRoot: HTMLElement, cb: HudCallbacks) {
     this.cb = cb;
@@ -108,9 +133,12 @@ export class FlightHud {
 
     // ---- top bar: MET, situation, warp
     const top = el('div', 'hud-top', this.root);
+    this.utEl = el('div', 'hud-ut', top, 'UT 0s');
     this.metEl = el('div', 'hud-met', top, 'T+ 0s');
     this.situationEl = el('div', 'hud-situation', top, 'PRELAUNCH');
+    this.crewEl = el('div', 'hud-crew', top, 'CREW —');
     this.warpEl = el('div', 'hud-warp', top);
+    this.nextAlarmEl = el('div', 'hud-next-alarm', top, 'ALM —');
     const warpBtns = el('div', 'hud-warp-btns', top);
     const slower = el('button', 'hud-btn', warpBtns, '◀◀');
     slower.title = 'Warp slower (,)';
@@ -148,8 +176,8 @@ export class FlightHud {
     }
     const navWrap = el('div', 'hud-navwrap', left);
     this.navCanvas = document.createElement('canvas');
-    this.navCanvas.width = 220;
-    this.navCanvas.height = 220;
+    this.navCanvas.width = 260;
+    this.navCanvas.height = 260;
     this.navCanvas.className = 'hud-navball';
     navWrap.appendChild(this.navCanvas);
     this.navCtx = this.navCanvas.getContext('2d')!;
@@ -157,6 +185,24 @@ export class FlightHud {
     el('div', 'hud-throttle-label', thrWrap, 'THR');
     const thrTrack = el('div', 'hud-throttle-track', thrWrap);
     this.throttleFill = el('div', 'hud-throttle-fill', thrTrack);
+
+    const status = el('div', 'hud-status-strip', left);
+    const statusGauge = (label: string) => {
+      const row = el('div', 'hud-status-row', status);
+      el('span', 'hud-status-key', row, label);
+      const track = el('div', 'hud-status-track', row);
+      const fill = el('div', 'hud-status-fill', track);
+      const text = el('span', 'hud-status-text', row, '—');
+      return { fill, text };
+    };
+    ({ fill: this.gFill, text: this.gText } = statusGauge('G'));
+    ({ fill: this.qFill, text: this.qText } = statusGauge('Q'));
+    ({ fill: this.atmosphereFill, text: this.atmosphereText } = statusGauge('ATM'));
+    this.cameraModeEl = el('div', 'hud-mode-badge', status, 'CAM ORBIT');
+    this.precisionEl = el('div', 'hud-mode-badge precision', status, 'PRECISION');
+    this.precisionEl.style.display = 'none';
+    this.actionGroupEl = el('div', 'hud-action-group', status, '');
+    this.actionGroupEl.style.display = 'none';
 
     // ---- speed/alt readouts above navball
     const readouts = el('div', 'hud-readouts', left);
@@ -174,14 +220,17 @@ export class FlightHud {
     const right = el('div', 'hud-right', this.root);
     const orbitBox = el('div', 'hud-panel', right);
     const apRow = el('div', 'hud-row', orbitBox);
-    el('span', 'hud-key', apRow, 'Ap');
+    el('span', 'hud-key hud-key-ap', apRow, 'Ap');
     this.apEl = el('span', 'hud-val', apRow, '—');
     this.apTimeEl = el('span', 'hud-eta', apRow, '');
     const peRow = el('div', 'hud-row', orbitBox);
-    el('span', 'hud-key', peRow, 'Pe');
+    el('span', 'hud-key hud-key-pe', peRow, 'Pe');
     this.peEl = el('span', 'hud-val', peRow, '—');
     this.peTimeEl = el('span', 'hud-eta', peRow, '');
     this.nodeInfoEl = el('div', 'hud-node-info', orbitBox);
+
+    this.entryCard = el('div', 'hud-panel hud-entry-card', right);
+    this.entryCard.style.display = 'none';
 
     const resBox = el('div', 'hud-panel', right);
     for (const res of ['propellant', 'monoprop', 'charge', 'ore'] as const) {
@@ -242,7 +291,7 @@ export class FlightHud {
   }
 
   /** Per-frame update; all DOM mutation is direct and cheap. */
-  update(game: GameState, node: ManeuverNode | null): void {
+  update(game: GameState, node: ManeuverNode | null, telemetry: HudTelemetry): void {
     const gv = game.active;
     if (!gv) return;
     const v = gv.runtime;
@@ -263,8 +312,16 @@ export class FlightHud {
     this.vsEl.textContent = `${vs > 0 ? '+' : ''}${vs.toFixed(1)} m/s`;
 
     this.metEl.textContent = `T+ ${fmtTime(game.time - this.missionStart)}`;
+    this.utEl.textContent = `UT ${fmtTime(game.time)}`;
+    const nextAlarm = game.alarms[0];
+    this.nextAlarmEl.textContent = nextAlarm ? `ALM T−${fmtTime(nextAlarm.time - game.time)}` : 'ALM —';
+    this.nextAlarmEl.title = nextAlarm?.label ?? 'No scheduled alarms';
     this.situationEl.textContent = v.situation.toUpperCase();
     this.warpEl.textContent = `${game.warpRate}×`;
+    this.crewEl.textContent = v.crew.length ? `CREW ${v.crew.length} · ${v.crew.join(', ')}` : 'CREW —';
+    this.crewEl.title = v.crew.length ? v.crew.join(', ') : 'Uncrewed vessel';
+    this.cameraModeEl.textContent = `CAM ${telemetry.cameraMode.toUpperCase()}`;
+    this.precisionEl.style.display = telemetry.precision ? '' : 'none';
 
     // Orbit readouts with time-to-apsis ETAs.
     const el0 = stateToElements(body.mu, v.pos, v.vel, game.time);
@@ -286,13 +343,28 @@ export class FlightHud {
     // Node info.
     if (node) {
       const eta = node.time - game.time;
-      this.nodeInfoEl.textContent = `node Δv ${nodeDeltaV(node).toFixed(1)} m/s\nT−${fmtTime(eta)}`;
+      const burnDuration = this.estimateNodeBurn(game, telemetry.nodeRemainingDv || nodeDeltaV(node));
+      const burnStartEta = eta - burnDuration / 2;
+      const cue = burnStartEta <= 0 && eta > -burnDuration / 2 ? 'START BURN' : `burn T−${fmtTime(burnStartEta)}`;
+      this.nodeInfoEl.textContent = `NODE  ${telemetry.nodeRemainingDv.toFixed(1)} m/s REM\n${cue} · ${burnDuration.toFixed(1)} s`;
     } else {
       this.nodeInfoEl.textContent = '';
     }
+    this.updateEntryCard(body.radius, game.time, telemetry.entryPrediction, telemetry.landingTargetDirBF);
 
     // Throttle + gauges.
     this.throttleFill.style.height = `${(v.controls.throttle * 100).toFixed(0)}%`;
+    if (this.peakQVesselId !== v.id) {
+      this.peakQVesselId = v.id;
+      this.peakQ = 0;
+    }
+    this.peakQ = Math.max(this.peakQ, v.aero.dynamicPressure);
+    const atmosphereHeight = body.def.atmosphere?.height ?? 0;
+    const atmosphereDepth = atmosphereHeight > 0 ? Math.max(0, Math.min(1, 1 - alt / atmosphereHeight)) : 0;
+    this.setStatus(this.gFill, this.gText, v.properAccel / G0 / 5, `${(v.properAccel / G0).toFixed(2)} g`);
+    this.setStatus(this.qFill, this.qText, v.aero.dynamicPressure / 40_000, `${(v.aero.dynamicPressure / 1000).toFixed(1)} kPa`);
+    this.setStatus(this.atmosphereFill, this.atmosphereText, atmosphereDepth, `${(atmosphereDepth * 100).toFixed(0)}%`);
+    this.qText.title = `Peak Q ${(this.peakQ / 1000).toFixed(1)} kPa`;
     let fuel = 0,
       fuelMax = 0,
       mono = 0,
@@ -322,10 +394,11 @@ export class FlightHud {
     }
 
     // Staging list (re-render only when it changes).
-    const stageSig = `${v.currentStage}:${v.craft.stages.map((s) => s.partKeys.join('.')).join('|')}`;
+    const stageSig = `${v.id}:${v.currentStage}:${Math.floor(game.time * 2)}:${v.craft.stages.map((s) => s.partKeys.join('.')).join('|')}`;
     if (stageSig !== this.lastStageRender) {
       this.lastStageRender = stageSig;
       this.stageListEl.innerHTML = '';
+      const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(alt));
       v.craft.stages.forEach((stage, i) => {
         const div = document.createElement('div');
         div.className = `hud-stage ${i < v.currentStage ? 'spent' : i === v.currentStage ? 'next' : ''}`;
@@ -336,7 +409,14 @@ export class FlightHud {
         const stageTitle = document.createElement('div');
         stageTitle.className = 'hud-stage-title';
         stageTitle.textContent = `STAGE ${i}`;
-        div.append(stageTitle, names.join(', ') || '(empty)');
+        const metrics = analysis.stages[i];
+        const figures = document.createElement('div');
+        figures.className = 'hud-stage-metrics';
+        figures.textContent = metrics
+          ? `Δv ${metrics.deltaV.toFixed(0)}  ·  TWR ${metrics.twrStart.toFixed(2)}  ·  ${metrics.burnTime.toFixed(0)}s`
+          : 'Δv —  ·  TWR —';
+        div.title = names.join(', ') || '(empty stage)';
+        div.append(stageTitle, figures);
         this.stageListEl.appendChild(div);
       });
     }
@@ -361,7 +441,112 @@ export class FlightHud {
       this.lastEventCount = v.events.length;
     }
 
-    this.drawNavball(game, node);
+    this.drawNavball(game, node, telemetry.nodeRemainingDv);
+  }
+
+  showActionGroup(group: number, executed: number): void {
+    this.actionGroupEl.textContent = `AG ${group === 10 ? 0 : group} · ${executed || 'NO'} ACTION${executed === 1 ? '' : 'S'}`;
+    this.actionGroupEl.style.display = '';
+    window.setTimeout(() => {
+      this.actionGroupEl.style.display = 'none';
+    }, 1400);
+  }
+
+  showPartActions(game: GameState, partKey: number, clientX: number, clientY: number): void {
+    this.partPopup?.remove();
+    const gv = game.active;
+    const part = gv?.runtime.craft.parts.find((candidate) => candidate.key === partKey);
+    if (!gv || !part) return;
+    const definition = defOf(part);
+    const popup = el('div', 'hud-part-popup', this.root);
+    this.partPopup = popup;
+    popup.style.left = `${Math.min(window.innerWidth - 250, Math.max(10, clientX + 12))}px`;
+    popup.style.top = `${Math.min(window.innerHeight - 260, Math.max(54, clientY - 20))}px`;
+    const heading = el('div', 'hud-part-heading', popup);
+    el('strong', '', heading, definition.name);
+    const close = el('button', 'k-window-btn', heading, '×');
+    close.onclick = () => {
+      popup.remove();
+      this.partPopup = null;
+    };
+    el('div', 'hud-part-meta', popup, `${definition.massDry.toFixed(0)} kg dry · ${part.temperature?.toFixed(0) ?? '—'} K`);
+    const resourceEntries = Object.entries(part.resources).filter(([, amount]) => (amount ?? 0) > 0);
+    if (resourceEntries.length) {
+      el('div', 'hud-part-meta', popup, resourceEntries.map(([resource, amount]) => `${resource} ${(amount ?? 0).toFixed(1)}`).join(' · '));
+    }
+    const actionable = definition.engine || definition.drill || definition.converter || definition.parachute;
+    if (actionable) {
+      const toggle = el('button', 'hud-btn hud-part-action', popup, part.activated ? 'Deactivate' : 'Activate');
+      toggle.onclick = () => {
+        this.cb.onToggleSystem(part.key);
+        this.showPartActions(game, partKey, clientX, clientY);
+      };
+    }
+    if (definition.science) {
+      const science = el('button', 'hud-btn hud-part-action', popup, 'Run experiment');
+      science.onclick = () => this.cb.onRunScience();
+    }
+    if (definition.resourceScanner) {
+      const survey = el('button', 'hud-btn hud-part-action', popup, 'Survey resources');
+      survey.onclick = () => this.cb.onSurvey();
+    }
+  }
+
+  private setStatus(fill: HTMLElement, text: HTMLElement, fraction: number, label: string): void {
+    const clamped = Math.max(0, Math.min(1, fraction));
+    fill.style.width = `${(clamped * 100).toFixed(1)}%`;
+    fill.classList.toggle('warning', clamped >= 0.7);
+    fill.classList.toggle('danger', clamped >= 0.92);
+    text.textContent = label;
+  }
+
+  private estimateNodeBurn(game: GameState, deltaV: number): number {
+    const gv = game.active;
+    if (!gv) return 0;
+    const v = gv.runtime;
+    const body = game.bodyOf(gv);
+    const altitude = v.pos.length() - body.radius;
+    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(altitude));
+    const candidates = analysis.stages.filter((stage) => stage.thrust > 0);
+    const stage = candidates.find((candidate) => candidate.stageIndex >= v.currentStage)
+      ?? [...candidates].reverse().find((candidate) => candidate.stageIndex < v.currentStage);
+    if (!stage) return 0;
+    return estimateBurnTime(deltaV, stage.thrust, v.massProps.mass, stage.isp);
+  }
+
+  private updateEntryCard(
+    bodyRadius: number,
+    time: number,
+    prediction: EntryPrediction | null,
+    landingTarget: Vec3 | null,
+  ): void {
+    if (!prediction?.willEnter) {
+      this.entryCard.style.display = 'none';
+      return;
+    }
+    this.entryCard.style.display = '';
+    this.entryCard.innerHTML = '';
+    el('div', 'hud-stage-title', this.entryCard, 'ENTRY PREDICTION');
+    const row = (label: string, value: string) => {
+      const line = el('div', 'hud-row', this.entryCard);
+      el('span', 'hud-key', line, label);
+      el('span', 'hud-val', line, value);
+    };
+    row('IFACE', prediction.entryTime > 0 ? `T−${fmtTime(prediction.entryTime - time)}` : 'inside');
+    row('LAND', prediction.landingTime > 0 ? `T−${fmtTime(prediction.landingTime - time)}` : '—');
+    row('HEAT', `${(prediction.peakHeatFlux / 1e6).toFixed(2)} MW/m²`);
+    row('PEAK G', `${prediction.peakG.toFixed(2)} g`);
+    row('IMPACT', prediction.lands ? `${prediction.impactSpeed.toFixed(1)} m/s` : 'skip / no intercept');
+    if (prediction.landingDirBF) {
+      const latitude = Math.asin(prediction.landingDirBF.z) * 180 / Math.PI;
+      const longitude = Math.atan2(prediction.landingDirBF.y, prediction.landingDirBF.x) * 180 / Math.PI;
+      row('SITE', `${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°`);
+      if (landingTarget) {
+        const dot = Math.max(-1, Math.min(1, prediction.landingDirBF.dot(landingTarget)));
+        row('MISS', fmtDistance(Math.acos(dot) * bodyRadius));
+      }
+    }
+    this.entryCard.classList.toggle('warning', !prediction.lands);
   }
 
   /** ISRU systems panel: drill/converter toggles, survey, local ore. */
@@ -440,7 +625,7 @@ export class FlightHud {
   }
 
   // ------------------------------------------------------------- navball
-  private drawNavball(game: GameState, node: ManeuverNode | null): void {
+  private drawNavball(game: GameState, node: ManeuverNode | null, remainingDv: number): void {
     const gv = game.active!;
     const v = gv.runtime;
     const ctx = this.navCtx;
@@ -511,7 +696,7 @@ export class FlightHud {
     }
     ctx.restore();
 
-    // Markers: prograde/retrograde/node projected into view space.
+    // Full flight marker set projected into view space.
     const drawMarker = (dir: Vec3, color: string, glyph: string) => {
       const marker = projectNavDirection(dir, nose, right, screenUp);
       const px = cx + marker.x * R * 0.92;
@@ -536,11 +721,34 @@ export class FlightHud {
       drawMarker(pro, '#c8e86b', '⊕');
       drawMarker(new Vec3().copy(pro).negate(), '#e8a06b', '⊖');
     }
+    const radial = v.pos.clone().normalize();
+    const normal = Vec3.cross(v.pos, v.vel, new Vec3()).normalize();
+    drawMarker(radial, '#e8c76b', 'R+');
+    drawMarker(radial.clone().negate(), '#d79253', 'R−');
+    if (normal.lengthSq() > 0) {
+      drawMarker(normal, '#b98ce8', 'N+');
+      drawMarker(normal.clone().negate(), '#8f70c2', 'N−');
+    }
     if (node) {
       const body = game.bodyOf(gv);
       const els = stateToElements(body.mu, v.pos, v.vel, game.time);
       const burnDir = nodeBurnDirection(els, node, new Vec3());
       drawMarker(burnDir, '#6bd0e8', '✦');
+      const burnDuration = this.estimateNodeBurn(game, remainingDv || nodeDeltaV(node));
+      const eta = node.time - game.time;
+      const progress = burnDuration > 0 ? Math.max(0, Math.min(1, 1 - (eta - burnDuration / 2) / Math.max(1, burnDuration))) : 0;
+      ctx.strokeStyle = eta <= burnDuration / 2 ? '#e2b13c' : '#6bd0e8';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R - 4, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      ctx.stroke();
+    }
+    if (gv.target) {
+      const targetBody = game.universe.get(gv.target);
+      const targetDirection = new Vec3();
+      game.universe.relativePosition(targetBody, game.bodyOf(gv), game.time, targetDirection);
+      targetDirection.sub(v.pos);
+      if (targetDirection.lengthSq() > 1) drawMarker(targetDirection.normalize(), '#ef7dc2', 'T');
     }
 
     // Bezel + heading.
@@ -562,6 +770,26 @@ export class FlightHud {
     ctx.fillStyle = '#d8e2ea';
     ctx.font = '11px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`${((heading * 180) / Math.PI).toFixed(0).padStart(3, '0')}°`, cx, 14);
+    const headingDeg = ((heading * 180) / Math.PI + 360) % 360;
+    ctx.fillStyle = 'rgba(6,12,18,0.88)';
+    ctx.fillRect(cx - 58, 2, 116, 24);
+    ctx.strokeStyle = '#6f8798';
+    ctx.lineWidth = 1;
+    for (let offset = -40; offset <= 40; offset += 10) {
+      const x = cx + offset * 1.15;
+      ctx.beginPath();
+      ctx.moveTo(x, 18);
+      ctx.lineTo(x, offset % 20 === 0 ? 23 : 21);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#d8e2ea';
+    ctx.fillText(`${headingDeg.toFixed(0).padStart(3, '0')}°`, cx, 14);
+    // Fixed roll/level cue above the reticle.
+    ctx.strokeStyle = '#ffd75e';
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy - 25);
+    ctx.lineTo(cx, cy - 31);
+    ctx.lineTo(cx + 12, cy - 25);
+    ctx.stroke();
   }
 }

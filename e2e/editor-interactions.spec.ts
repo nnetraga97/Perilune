@@ -32,5 +32,5 @@ test('parts can be dragged from the palette onto the craft canvas', async ({ pag
   await page.getByRole('button', { name: '+ Node in 2 min' }).click();
   const prograde = page.locator('.map-axis', { hasText: 'Prograde' });
   await prograde.getByRole('button', { name: '+', exact: true }).click();
-  await expect(page.locator('.map-readout').filter({ hasText: 'Δv' })).toContainText('5.0 m/s');
+  await expect(page.locator('.map-readout').filter({ hasText: 'Δv' })).toContainText('1.0 m/s');
 });
