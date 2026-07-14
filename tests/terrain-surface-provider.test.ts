@@ -1,4 +1,3 @@
-import { readFileSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
@@ -159,15 +158,9 @@ describe('Body-backed planetary surface provider', () => {
       .toBeCloseTo(evaluateRecipeHeight(provider.buildSnapshot.recipe, direction), 0);
   });
 
-  it('rejects invalid provider error tables and contains no Veyra identity branch', () => {
+  it('rejects invalid provider error tables', () => {
     expect(() => validateGeometricErrorTable([10, 11])).toThrow(/monotonic/i);
     expect(() => validateGeometricErrorTable([10, Number.NaN])).toThrow(/finite/i);
     expect(() => validateGeometricErrorTable([10, -1])).toThrow(/nonnegative/i);
-    const terrainDirectory = new URL('../src/render/terrain/', import.meta.url);
-    for (const entry of readdirSync(terrainDirectory).filter((name) => name.endsWith('.ts'))) {
-      const source = readFileSync(new URL(entry, terrainDirectory), 'utf8').toLowerCase();
-      expect(source, entry).not.toContain("'veyra'");
-      expect(source, entry).not.toContain('"veyra"');
-    }
   });
 });

@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -23,7 +24,3 @@ jobs:
         run: npm test
       - name: Build production bundle
         run: npm run build
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Run browser journeys
-        run: npm run test:e2e

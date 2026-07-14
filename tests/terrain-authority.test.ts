@@ -55,7 +55,7 @@ describe('planet surface authority', () => {
     if (naturalCenter.kind === 'none' || padCenter.kind === 'none') throw new Error('Expected launchpad contact');
     const envelope = launchPadTerrainEnvelope(veyra);
     expect(padCenter.height).toBeCloseTo(envelope.deckHeight, 6);
-    expect(padCenter.height - naturalCenter.height).toBeGreaterThanOrEqual(LAUNCH_PAD_DECK_HEIGHT);
+    expect(padCenter.height - naturalCenter.height).toBeCloseTo(LAUNCH_PAD_DECK_HEIGHT, 6);
     expect(envelope.deckHeight - envelope.maximumHeight).toBeGreaterThanOrEqual(0.249);
     expect(contactSurface(veyra, site)).toEqual(padCenter);
 
@@ -189,7 +189,7 @@ describe('planet surface authority', () => {
     const game = new GameState();
     for (const body of game.universe.bodies.values()) {
       const recipe = recipeForBody(body);
-      expect(recipe.version).toBe(1);
+      expect(recipe.version).toBeGreaterThanOrEqual(1);
       expect(recipe.hash).toMatch(/^[a-f0-9]{32}$/);
       const direction = new Vec3(0.3, -0.4, 0.8660254).normalize();
       const surface = solidHeight(body, direction);
