@@ -305,8 +305,10 @@ export class GameState {
     // Advance before splitting so every resulting vessel inherits the next
     // stage rather than replaying the separation stage.
     v.currentStage++;
+    const consumedDecouplers = new Set(decouplersToFire.map((dec) => dec.key));
     for (const dec of decouplersToFire) {
-      this.detachSubtree(gv, dec, defOf(dec).decoupler!.ejection);
+      if (!v.craft.parts.some((part) => part.key === dec.key)) continue;
+      this.detachSubtree(gv, dec, defOf(dec).decoupler!.ejection, consumedDecouplers);
     }
     refreshDerived(v);
     return fired;
@@ -330,7 +332,12 @@ export class GameState {
   }
 
   /** Split parts at a decoupler/failed joint into a debris vessel. */
-  detachSubtree(gv: GameVessel, atPart: PartInstance, ejectionImpulse: number): void {
+  detachSubtree(
+    gv: GameVessel,
+    atPart: PartInstance,
+    ejectionImpulse: number,
+    consumedStageKeys: ReadonlySet<number> = new Set<number>(),
+  ): void {
     const v = gv.runtime;
     const wasActive = this.activeVesselId === v.id;
     const oldCom = v.massProps.com.clone();
@@ -341,7 +348,12 @@ export class GameState {
     const detachedKeys = new Set(keys);
     const detachedParts = v.craft.parts.filter((p) => detachedKeys.has(p.key));
     v.craft.parts = v.craft.parts.filter((p) => !detachedKeys.has(p.key));
-    const stagePartition = partitionStages(v.craft.stages, v.currentStage, detachedKeys);
+    const stagePartition = partitionStages(
+      v.craft.stages,
+      v.currentStage,
+      detachedKeys,
+      consumedStageKeys,
+    );
     const actionGroupPartition = partitionActionGroups(v.craft.actionGroups, detachedKeys);
     v.craft.stages = stagePartition.retained.stages;
     v.craft.actionGroups = actionGroupPartition.retained;

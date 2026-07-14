@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { restoreGame, serializeGame } from '../src/save/persistence';
 import { GameState } from '../src/sim/state';
-import { addPart, createCraft, defOf } from '../src/sim/vessel';
+import { addPart, analyzeCraft, createCraft, defOf } from '../src/sim/vessel';
 
 function stageKeys(gv: ReturnType<GameState['spawnInOrbit']>): number[][] {
   return gv.runtime.craft.stages.map((stage) => stage.partKeys);
@@ -26,15 +26,40 @@ describe('stage plans after vessel splits', () => {
     const detached = game.active!;
     expect(detached).not.toBe(retained);
     expect(retained.runtime.currentStage).toBe(0);
-    expect(detached.runtime.currentStage).toBe(1);
+    expect(detached.runtime.currentStage).toBe(0);
     expect(stageKeys(retained)).toEqual([[retainedEngine.key]]);
-    expect(stageKeys(detached)).toEqual([
-      [decoupler.key],
-      [chute.key],
-    ]);
+    expect(stageKeys(detached)).toEqual([[chute.key]]);
 
     expect(game.fireStage(detached)).toBe(true);
     expect(detached.runtime.craft.parts.find((part) => part.key === chute.key)?.activated).toBe(true);
+  });
+
+  it('does not replay a spent separator on the newly controlled top vessel', () => {
+    const craft = createCraft('bottom-up stack');
+    const lowerEngine = addPart(craft, 'eng-pike', null, 'root', { x: 0, y: 0, z: 0 });
+    const lowerTank = addPart(craft, 'tank-s1', lowerEngine.key, 'stack-top', { x: 0, y: 1, z: 0 });
+    const decoupler = addPart(craft, 'dec-s', lowerTank.key, 'stack-top', { x: 0, y: 2, z: 0 });
+    const upperEngine = addPart(craft, 'eng-ember', decoupler.key, 'stack-top', { x: 0, y: 3, z: 0 });
+    const upperTank = addPart(craft, 'tank-s1', upperEngine.key, 'stack-top', { x: 0, y: 4, z: 0 });
+    addPart(craft, 'pod-voyager', upperTank.key, 'stack-top', { x: 0, y: 5, z: 0 });
+    craft.stages = [
+      { partKeys: [lowerEngine.key] },
+      { partKeys: [decoupler.key] },
+      { partKeys: [upperEngine.key] },
+    ];
+
+    const game = new GameState();
+    const original = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
+    expect(game.fireStage(original)).toBe(true);
+    expect(game.fireStage(original)).toBe(true);
+
+    const upper = game.active!;
+    expect(upper).not.toBe(original);
+    expect(stageKeys(upper)).toEqual([[upperEngine.key]]);
+    expect(upper.runtime.currentStage).toBe(0);
+    expect(analyzeCraft(upper.runtime.craft, 9.42, 0).stages[0].deltaV).toBeGreaterThan(0);
+    expect(game.fireStage(upper)).toBe(true);
+    expect(upper.runtime.craft.parts.find((part) => part.key === upperEngine.key)?.activated).toBe(true);
   });
 
   it('keeps control and the next action below a fired decoupler', () => {
@@ -89,11 +114,8 @@ describe('stage plans after vessel splits', () => {
       [chute.key],
     ]);
     expect(retained.runtime.currentStage).toBe(1);
-    expect(stageKeys(lower)).toEqual([
-      [lowerEngine.key],
-      [lowerDec.key],
-    ]);
-    expect(lower.runtime.currentStage).toBe(2);
+    expect(stageKeys(lower)).toEqual([[lowerEngine.key]]);
+    expect(lower.runtime.currentStage).toBe(1);
   });
 
   it('round-trips compacted plans after a mid-flight separation', () => {

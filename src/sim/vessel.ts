@@ -65,16 +65,19 @@ export interface StagePartition {
   detached: StagePlan;
 }
 
-/** Split and compact a stage plan while preserving each side's progress. */
+/** Split and compact a stage plan, omitting consumed one-shot actions. */
 export function partitionStages(
   stages: readonly Stage[],
   currentStage: number,
   detachedKeys: ReadonlySet<number>,
+  consumedKeys: ReadonlySet<number> = new Set<number>(),
 ): StagePartition {
   const nextStage = Math.min(stages.length, Math.max(0, Math.trunc(currentStage)));
   const project = (detached: boolean): StagePlan => {
     const projected = stages.map((stage) => ({
-      partKeys: stage.partKeys.filter((key) => detachedKeys.has(key) === detached),
+      partKeys: stage.partKeys.filter(
+        (key) => !consumedKeys.has(key) && detachedKeys.has(key) === detached,
+      ),
     }));
     const compacted = projected.filter((stage) => stage.partKeys.length > 0);
     const firedStages = projected
@@ -416,22 +419,42 @@ export function analyzeCraft(
     return seen;
   };
 
-  const killSubtree = (rootKey: number) => {
-    const toKill = new Set<number>([rootKey]);
+  const subtreeKeys = (rootKey: number) => {
+    const subtree = new Set<number>([rootKey]);
     let grew = true;
     while (grew) {
       grew = false;
       for (const sp of sim.values()) {
-        if (sp.alive && sp.parentKey !== null && toKill.has(sp.parentKey) && !toKill.has(sp.key)) {
-          toKill.add(sp.key);
+        if (sp.alive && sp.parentKey !== null && subtree.has(sp.parentKey) && !subtree.has(sp.key)) {
+          subtree.add(sp.key);
           grew = true;
         }
       }
     }
-    for (const k of toKill) {
+    return subtree;
+  };
+
+  const killKeys = (keys: ReadonlySet<number>) => {
+    for (const k of keys) {
       const sp = sim.get(k);
       if (sp) sp.alive = false;
     }
+  };
+
+  // Match runtime separation ownership: the root-side vessel stays active
+  // unless it has no control and the detached subtree does. Craft analysis
+  // must not assume the original construction root always remains playable.
+  const separateAt = (rootKey: number) => {
+    const live = new Set([...sim.values()].filter((sp) => sp.alive).map((sp) => sp.key));
+    const detached = subtreeKeys(rootKey);
+    if (detached.size === live.size) return;
+    const retained = new Set([...live].filter((key) => !detached.has(key)));
+    const hasControl = (keys: ReadonlySet<number>) => [...keys].some((key) => {
+      const def = sim.get(key)?.def;
+      return Boolean(def?.pod || def?.probe);
+    });
+    const keepDetached = !hasControl(retained) && hasControl(detached);
+    killKeys(keepDetached ? retained : detached);
   };
 
   const ispAt = (eng: NonNullable<PartDef['engine']>): number => {
@@ -444,12 +467,11 @@ export function analyzeCraft(
 
   for (let si = 0; si < craft.stages.length; si++) {
     const stage = craft.stages[si];
-    // 1. Fire decouplers in this stage: detach the CHILD side subtree.
+    // 1. Fire decouplers in this stage and follow the runtime-controlled side.
     for (const key of stage.partKeys) {
       const sp = sim.get(key);
       if (!sp || !sp.alive || !sp.def.decoupler) continue;
-      // The decoupler drops everything on its child side (away from root).
-      killSubtree(sp.key);
+      separateAt(sp.key);
     }
     // 2. Light engines in this stage.
     for (const key of stage.partKeys) {

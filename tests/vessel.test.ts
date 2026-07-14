@@ -134,6 +134,26 @@ describe('craft graph', () => {
     expect(analysis.warnings).toEqual([]);
   });
 
+  it('follows control transfer when a bottom-up separator exposes an upper engine', () => {
+    const craft = createCraft('Bottom-up analysis');
+    const lowerEngine = addPart(craft, 'eng-pike', null, 'root', { x: 0, y: 0, z: 0 });
+    const lowerTank = addPart(craft, 'tank-s1', lowerEngine.key, 'stack-top', { x: 0, y: 1, z: 0 });
+    const decoupler = addPart(craft, 'dec-s', lowerTank.key, 'stack-top', { x: 0, y: 2, z: 0 });
+    const upperEngine = addPart(craft, 'eng-ember', decoupler.key, 'stack-top', { x: 0, y: 3, z: 0 });
+    const upperTank = addPart(craft, 'tank-s1', upperEngine.key, 'stack-top', { x: 0, y: 4, z: 0 });
+    addPart(craft, 'pod-voyager', upperTank.key, 'stack-top', { x: 0, y: 5, z: 0 });
+    craft.stages = [
+      { partKeys: [lowerEngine.key] },
+      { partKeys: [decoupler.key] },
+      { partKeys: [upperEngine.key] },
+    ];
+
+    const analysis = analyzeCraft(craft, 9.42, 0);
+
+    expect(analysis.stages[2].deltaV).toBeGreaterThan(0);
+    expect(analysis.stages[2].thrust).toBeGreaterThan(0);
+  });
+
   it('warns when no control source exists', () => {
     const craft = createCraft('Headless');
     const tank = addPart(craft, 'tank-s1', null, 'root', { x: 0, y: 0, z: 0 });
