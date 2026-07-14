@@ -28,6 +28,7 @@ test('landing page and utility launchers use the approved hierarchy', async ({ p
   await expect(page.getByRole('button', { name: 'Save & Load' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expectNoViewportOverflow(page);
   await page.screenshot({ path: 'test-results/perilune-menu-desktop.png', fullPage: true });
 
   await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
@@ -46,6 +47,8 @@ test('landing page and utility launchers use the approved hierarchy', async ({ p
   expect(tooltipBox).not.toBeNull();
   expect(tooltipBox!.x).toBeGreaterThanOrEqual(0);
   expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(1440);
+  expect(tooltipBox!.y).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(900);
   expect(errors, `console errors:\n${errors.join('\n')}`).toEqual([]);
 });
 
@@ -89,7 +92,11 @@ test('a live autosave appears in the catalog and enables Continue Mission', asyn
   await expect(page.locator('.utility-save', { hasText: 'AUTOSAVE' })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Continue Mission' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue Mission' })).toHaveClass(/perilune-mission-primary/);
+  const continueMission = page.getByRole('button', { name: 'Continue Mission' });
+  await expect(continueMission).toBeVisible();
+  await expect(continueMission).toBeEnabled();
+  await expect(continueMission).toHaveClass(/perilune-mission-primary/);
   await expect(page.getByRole('button', { name: 'First Light tutorial' })).not.toHaveClass(/perilune-mission-primary/);
+  await continueMission.click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
 });
