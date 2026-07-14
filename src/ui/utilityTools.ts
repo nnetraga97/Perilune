@@ -84,24 +84,24 @@ export class UtilityTools {
     callbacks.onSavesChanged(() => { if (this.savesEl) void this.renderSaves(); });
 
     windows.register({
-      id: 'science-archive', title: 'SCIENCE ARCHIVE', buttonLabel: 'Science', screen: 'any',
+      id: 'science-archive', title: 'SCIENCE ARCHIVE', launcherIcon: 'science', buttonLabel: 'Science', screen: 'any',
       defaultPos: { x: 36, y: 110 },
       build: (content) => { this.scienceEl = content; this.renderScience(); },
       update: () => this.renderScience(),
     });
     windows.register({
-      id: 'save-browser', title: 'SAVE & LOAD', buttonLabel: 'Saves', screen: 'any',
+      id: 'save-browser', title: 'SAVE & LOAD', launcherIcon: 'save', buttonLabel: 'Saves', screen: 'any',
       defaultPos: { x: 310, y: 100 },
       build: (content) => { this.savesEl = content; void this.renderSaves(); },
     });
     windows.register({
-      id: 'notification-log', title: 'MISSION LOG', buttonLabel: 'Log', screen: 'flight',
+      id: 'notification-log', title: 'MISSION LOG', launcherIcon: 'log', buttonLabel: 'Log', screen: 'flight',
       defaultPos: { x: 36, y: 330 },
       build: (content) => { this.logEl = content; this.renderLog(); },
       update: () => this.renderLog(),
     });
     windows.register({
-      id: 'settings', title: 'SETTINGS', buttonLabel: 'Settings', screen: 'any',
+      id: 'settings', title: 'SETTINGS', launcherIcon: 'settings', buttonLabel: 'Settings', screen: 'any',
       defaultPos: { x: 650, y: 90 },
       build: (content) => { this.settingsEl = content; this.renderSettings(); },
     });

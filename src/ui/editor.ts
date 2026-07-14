@@ -90,6 +90,7 @@ export class Editor {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly root: HTMLElement;
+  readonly utilityHost: HTMLElement;
   craft: Craft = createCraft('Untitled Craft');
 
   private visual: VesselVisual | null = null;
@@ -171,12 +172,12 @@ export class Editor {
     // class rule by specificity; inline always wins.
     this.root.style.pointerEvents = 'none';
     injectUiStyles();
-    this.buildDom();
+    this.utilityHost = this.buildDom();
     this.rebuildVisual();
     this.setVisible(false);
   }
 
-  private buildDom(): void {
+  private buildDom(): HTMLElement {
     // Left: palette
     const left = el('div', 'ed-left', this.root);
     el('div', 'ed-title', left, 'WORKSHOP');
@@ -237,6 +238,7 @@ export class Editor {
     launch.onclick = () => {
       if (this.craft.parts.length > 0) this.cb.onLaunch(structuredClone(this.craft));
     };
+    const utilityHost = el('div', 'ed-utility-host', top);
 
     // Right: stats, staging, warnings, craft files
     const right = el('div', 'ed-right', this.root);
@@ -294,6 +296,7 @@ export class Editor {
       this.root,
       'drag parts to build · drag stage chips to reorder · Ctrl+Z/Y history · C angle snap · X symmetry · ? controls',
     );
+    return utilityHost;
   }
 
   private async refreshCraftList(): Promise<void> {

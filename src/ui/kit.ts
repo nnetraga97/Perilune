@@ -73,10 +73,22 @@ export function injectUiStyles(): void {
       .k-key { font-family: var(--ui-mono); color: var(--ui-accent); min-width: 86px; }
       .k-key-label { color: #c4d2dd; }
       .k-sheet-hint { margin-top: 10px; font-size: 10.5px; color: #7d8b96; }
-      .k-launcher { position: absolute; top: 46px; left: 50%; transform: translateX(-50%);
-        display: flex; gap: 4px; z-index: 44; pointer-events: auto; }
-      .k-launcher-btn { font-size: 10px; padding: 2px 8px; opacity: 0.9; }
-      .k-launcher-btn.active { border-color: var(--ui-accent); background: #16303f; }
+      .k-launcher { display:flex; flex-wrap:wrap; gap:4px; pointer-events:auto; }
+      .ed-utility-host { display:flex; align-items:center; margin-left:2px; padding-left:7px; border-left:1px solid #2a3d4d; }
+      .hud-utility-host { position:absolute; top:10px; left:12px; width:208px; z-index:44; pointer-events:auto; }
+      .hud-utility-host .k-launcher { max-width:208px; }
+      .k-icon-btn { position:relative; width:30px; height:30px; padding:0; display:grid; place-items:center;
+        border:1px solid #2f4859; border-radius:5px; background:rgba(9,19,27,.9); color:#a9c2ce; cursor:pointer; }
+      .k-icon-btn:hover,.k-icon-btn:focus-visible { border-color:var(--ui-accent); color:#fff; outline:none; }
+      .k-icon-btn.active { border-color:var(--ui-accent); background:#16303f; color:#fff; }
+      .k-icon-svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7;
+        stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+      .k-icon-tooltip { position:absolute; left:50%; bottom:calc(100% + 7px); transform:translate(-50%,4px);
+        opacity:0; visibility:hidden; white-space:nowrap; pointer-events:none; padding:5px 7px;
+        border:1px solid #49677a; border-radius:4px; background:#08131b; color:#eaf3f7; font-size:10px;
+        transition:opacity .12s ease,transform .12s ease; z-index:70; }
+      .k-icon-btn:hover .k-icon-tooltip,.k-icon-btn:focus-visible .k-icon-tooltip {
+        opacity:1; visibility:visible; transform:translate(-50%,0); }
       .k-window { position: absolute; min-width: 190px; max-width: 340px;
         background: rgba(10,16,22,0.94); border: 1px solid #2a3d4d; border-radius: 8px;
         z-index: 45; pointer-events: auto; }
@@ -179,7 +191,7 @@ export function injectUiStyles(): void {
       .hud-entry-card.warning { border-color: var(--ui-warn); }
       .hud-entry-card .hud-key { min-width: 52px; }
       .hud-entry-card .hud-val { margin-left: auto; font-size: 10.5px; }
-      .hud-events { position: absolute; left: 12px; top: 56px; display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
+      .hud-events { position: absolute; left: 12px; top: 82px; display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
       .hud-event { background: var(--ui-bg); border-left: 3px solid var(--ui-accent); border-radius: 4px;
         padding: 5px 10px; font-size: 12px; animation: hudfade 6s forwards; }
       .hud-event.warning { border-left-color: var(--ui-warn); }

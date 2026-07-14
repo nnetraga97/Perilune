@@ -61,6 +61,7 @@ export class FlightInstruments {
     windows.register({
       id: 'flight-orbital',
       title: 'ORBITAL',
+      launcherIcon: 'orbit',
       buttonLabel: 'Orbit',
       screen: 'flight',
       defaultPos: { x: 18, y: 120 },
@@ -74,6 +75,7 @@ export class FlightInstruments {
     windows.register({
       id: 'flight-surface',
       title: 'SURFACE',
+      launcherIcon: 'surface',
       buttonLabel: 'Surface',
       screen: 'flight',
       defaultPos: { x: 18, y: 330 },
@@ -87,6 +89,7 @@ export class FlightInstruments {
     windows.register({
       id: 'flight-vessel',
       title: 'VESSEL',
+      launcherIcon: 'vessel',
       buttonLabel: 'Vessel',
       screen: 'flight',
       defaultPos: { x: window.innerWidth - 260, y: 350 },

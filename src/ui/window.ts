@@ -7,6 +7,7 @@
  * a definition; the manager owns lifecycle, z-order, and screen filtering.
  */
 import { el, injectUiStyles } from './kit';
+import { iconButton, type UtilityIcon } from './icons';
 import { ProfileStore } from './profileStore';
 
 export type WindowScreen = 'flight' | 'editor' | 'menu' | 'any';
@@ -14,6 +15,7 @@ export type WindowScreen = 'flight' | 'editor' | 'menu' | 'any';
 export interface WindowDef {
   id: string;
   title: string;
+  launcherIcon: UtilityIcon;
   /** Launcher button text; defaults to title. */
   buttonLabel?: string;
   screen: WindowScreen;
@@ -180,18 +182,25 @@ export class WindowManager {
     );
     this.windows.set(def.id, win);
 
-    const btn = el('button', 'hud-btn k-launcher-btn', this.launcher, def.buttonLabel ?? def.title);
-    btn.title = def.title;
-    btn.onclick = () => win.setOpen(!win.open);
+    const btn = iconButton(
+      this.launcher,
+      def.launcherIcon,
+      def.buttonLabel ?? def.title,
+      () => win.setOpen(!win.open),
+      'k-launcher-btn',
+    );
     this.buttons.set(def.id, btn);
     this.applyScreen();
   }
 
-  /** Add a plain action button to the launcher (e.g. the ? cheat sheet). */
-  addAction(label: string, title: string, fn: () => void): void {
-    const btn = el('button', 'hud-btn k-launcher-btn', this.launcher, label);
-    btn.title = title;
-    btn.onclick = fn;
+  /** Add an action button to the launcher (e.g. the keyboard cheat sheet). */
+  addAction(icon: UtilityIcon, label: string, fn: () => void): void {
+    iconButton(this.launcher, icon, label, fn, 'k-launcher-btn');
+  }
+
+  setLauncherHost(host: HTMLElement | null): void {
+    (host ?? this.uiRoot).appendChild(this.launcher);
+    this.launcher.classList.toggle('k-launcher-floating', host === null);
   }
 
   setScreen(screen: 'flight' | 'editor' | 'menu'): void {

@@ -285,7 +285,7 @@ class PeriluneGame {
     });
     this.buildMenu();
     void this.auth.start();
-    this.windows.addAction('⌨ Keys', 'Keyboard reference (?)', () => {
+    this.windows.addAction('keyboard', 'Keyboard reference (?)', () => {
       if (this.screen === 'flight' || this.screen === 'editor') {
         this.cheatSheet.toggle(this.screen as BindingScreen);
       }
@@ -454,6 +454,7 @@ class PeriluneGame {
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(null);
     this.windows.setScreen('menu');
   }
 
@@ -465,6 +466,7 @@ class PeriluneGame {
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(this.editor.utilityHost);
     this.windows.setScreen('editor');
     void this.saveSync.write(this.game, 'auto', 'autosave');
   }
@@ -478,6 +480,7 @@ class PeriluneGame {
     this.map.setVisible(false);
     this.map.visible = false;
     this.perf.setMiniVisible(true);
+    this.windows.setLauncherHost(this.hud.utilityHost);
     this.windows.setScreen('flight');
     this.missionStart = this.game.time;
     this.hud.setMissionStart(this.missionStart);

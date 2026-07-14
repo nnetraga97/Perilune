@@ -13,7 +13,7 @@ export class AccountWindow {
     private readonly auth: AuthService,
   ) {
     windows.register({
-      id: 'account', title: 'ACCOUNT', buttonLabel: 'Account', screen: 'any',
+      id: 'account', title: 'ACCOUNT', launcherIcon: 'account', buttonLabel: 'Account', screen: 'any',
       defaultPos: { x: 540, y: 110 },
       build: (content) => { this.content = content; this.render(auth.state); },
     });

@@ -61,6 +61,7 @@ export class MissionTools {
     windows.register({
       id: 'alarms',
       title: 'MISSION ALARMS',
+      launcherIcon: 'alarm',
       buttonLabel: 'Alarms',
       screen: 'flight',
       defaultPos: { x: 280, y: 92 },
@@ -70,6 +71,7 @@ export class MissionTools {
     windows.register({
       id: 'transfers',
       title: 'TRANSFER PLANNER',
+      launcherIcon: 'transfer',
       buttonLabel: 'Transfers',
       screen: 'flight',
       defaultPos: { x: 520, y: 92 },
@@ -79,6 +81,7 @@ export class MissionTools {
     windows.register({
       id: 'fleet',
       title: 'FLEET & TARGETS',
+      launcherIcon: 'fleet',
       buttonLabel: 'Fleet',
       screen: 'flight',
       defaultPos: { x: window.innerWidth - 350, y: 92 },

@@ -77,6 +77,7 @@ function fmtTime(s: number): string {
 
 export class FlightHud {
   readonly root: HTMLElement;
+  readonly utilityHost: HTMLElement;
   private navCanvas: HTMLCanvasElement;
   private navCtx: CanvasRenderingContext2D;
   private speedEl: HTMLElement;
@@ -130,6 +131,7 @@ export class FlightHud {
     this.root.style.pointerEvents = 'none'; // beat #ui-root > * specificity
     this.root.innerHTML = '';
     injectUiStyles();
+    this.utilityHost = el('div', 'hud-utility-host', this.root);
 
     // ---- top bar: MET, situation, warp
     const top = el('div', 'hud-top', this.root);
