@@ -35,6 +35,7 @@ import {
 } from '../render/bodyMaterial';
 import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
 import { createTerrestrialGlobalMaterial } from '../render/terrestrial/globalMaterial';
+import { el, injectUiStyles } from './kit';
 
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
@@ -142,14 +143,6 @@ function elementsToStateSafe(el: OrbitalElements, nu: number, outR: Vec3, outV: 
   if (!outR.isFinite()) outR.set(0, 0, 0);
 }
 
-function el(tag: string, cls: string, parent: HTMLElement, text = ''): HTMLElement {
-  const e = document.createElement(tag);
-  e.className = cls;
-  if (text) e.textContent = text;
-  parent.appendChild(e);
-  return e;
-}
-
 export interface MapCallbacks {
   onWarpToNode(nodeTime: number): void;
 }
@@ -174,7 +167,6 @@ export class MapView {
   private readonly starfield: THREE.Points;
   private readonly sun: THREE.DirectionalLight;
   private readonly resizeHandler: () => void;
-  private ownedStyle: HTMLStyleElement | null = null;
   private disposed = false;
 
   private camYaw = 0.8;
@@ -237,7 +229,7 @@ export class MapView {
 
     // ---- DOM panel
     this.panel = el('div', 'map-panel', uiRoot);
-    this.injectStyles();
+    injectUiStyles();
     const title = el('div', 'map-title', this.panel, 'MANEUVER PLANNER');
     const btnRow = el('div', 'map-row', this.panel);
     const addBtn = el('button', 'hud-btn', btnRow, '+ Node in 2 min') as HTMLButtonElement;
@@ -259,29 +251,6 @@ export class MapView {
     this.encounterInfo = el('div', 'map-encounter', this.panel);
     this.refreshNodePanel();
     this.setVisible(false);
-  }
-
-  private injectStyles(): void {
-    if (document.getElementById('map-style')) return;
-    const style = document.createElement('style');
-    style.id = 'map-style';
-    style.textContent = `
-      .map-panel { position: absolute; left: 12px; bottom: 12px; width: 300px;
-        background: var(--ui-bg); border: 1px solid #223240; border-radius: 8px;
-        padding: 10px 12px; pointer-events: auto; }
-      .map-title { font-size: 11px; letter-spacing: 2px; color: #9fb4c4; margin-bottom: 8px; }
-      .map-row { display: flex; gap: 6px; margin-bottom: 8px; }
-      .map-node-panel { display: flex; flex-direction: column; gap: 6px; }
-      .map-axis { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-      .map-axis label { width: 66px; color: #9fb4c4; font-size: 11px; }
-      .map-axis input[type=range] { flex: 1; }
-      .map-axis .val { font-family: var(--ui-mono); width: 64px; text-align: right; }
-      .map-axis button { width: 24px; padding: 2px; }
-      .map-readout { font-family: var(--ui-mono); font-size: 12px; color: var(--ui-accent); padding: 2px 0; }
-      .map-encounter { font-family: var(--ui-mono); font-size: 12px; color: #c88be8; white-space: pre-line; padding-top: 4px; }
-    `;
-    document.head.appendChild(style);
-    this.ownedStyle = style;
   }
 
   setVisible(vis: boolean): void {
@@ -563,8 +532,6 @@ export class MapView {
     this.depositCache.clear();
     this.scene.clear();
     this.panel.remove();
-    this.ownedStyle?.remove();
-    this.ownedStyle = null;
     this.gameRef = null;
   }
 }

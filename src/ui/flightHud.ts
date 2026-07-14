@@ -15,6 +15,7 @@ import { nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuve
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading, projectNavDirection } from './navball';
 import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
+import { el, injectUiStyles } from './kit';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -43,14 +44,6 @@ const SAS_MODES: Array<{ mode: SasMode; label: string; title: string }> = [
   { mode: 'radial-in', label: '⊗', title: 'Radial in' },
   { mode: 'node', label: '✦', title: 'Maneuver node' },
 ];
-
-function el(tag: string, cls: string, parent: HTMLElement, text = ''): HTMLElement {
-  const e = document.createElement(tag);
-  e.className = cls;
-  if (text) e.textContent = text;
-  parent.appendChild(e);
-  return e;
-}
 
 function fmtDistance(m: number): string {
   const abs = Math.abs(m);
@@ -111,7 +104,7 @@ export class FlightHud {
     this.root = el('div', 'hud', uiRoot);
     this.root.style.pointerEvents = 'none'; // beat #ui-root > * specificity
     this.root.innerHTML = '';
-    this.injectStyles();
+    injectUiStyles();
 
     // ---- top bar: MET, situation, warp
     const top = el('div', 'hud-top', this.root);
@@ -242,75 +235,6 @@ export class FlightHud {
     this.pendingWarpStep = dir;
   }
   pendingWarpStep = 0;
-
-  private injectStyles(): void {
-    if (document.getElementById('hud-style')) return;
-    const style = document.createElement('style');
-    style.id = 'hud-style';
-    style.textContent = `
-      .hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--ui-font); }
-      .hud button { pointer-events: auto; }
-      .hud-btn {
-        background: var(--ui-bg); color: var(--ui-fg); border: 1px solid #2a3d4d;
-        border-radius: 5px; padding: 4px 10px; font-size: 12px; cursor: pointer;
-      }
-      .hud-btn:hover { border-color: var(--ui-accent); color: #fff; }
-      .hud-top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-        display: flex; gap: 14px; align-items: center; background: var(--ui-bg);
-        border: 1px solid #223240; border-radius: 8px; padding: 6px 16px; pointer-events: auto; }
-      .hud-met { font-family: var(--ui-mono); font-size: 14px; color: var(--ui-accent); min-width: 90px; }
-      .hud-situation { font-size: 12px; letter-spacing: 2px; color: #9fb4c4; min-width: 90px; text-align: center; }
-      .hud-warp { font-family: var(--ui-mono); font-size: 13px; color: var(--ui-warn); min-width: 60px; text-align: right; }
-      .hud-warp-btns { display: flex; gap: 4px; }
-      .hud-sys { position: absolute; top: 10px; right: 12px; display: flex; gap: 6px; }
-      .hud-recover { border-color: var(--ui-good); }
-      .hud-left { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
-        display: flex; align-items: flex-end; gap: 10px; pointer-events: auto; }
-      .hud-navwrap { position: relative; }
-      .hud-navball { display: block; }
-      .hud-sas { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; align-content: end; }
-      .hud-sas-btn { width: 34px; height: 30px; padding: 2px; font-size: 14px; }
-      .hud-sas-btn.active { border-color: var(--ui-accent); background: #16303f; color: #fff; }
-      .hud-throttle { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-      .hud-throttle-label { font-size: 10px; color: #9fb4c4; }
-      .hud-throttle-track { width: 14px; height: 150px; background: #101c26; border: 1px solid #2a3d4d;
-        border-radius: 4px; position: relative; overflow: hidden; }
-      .hud-throttle-fill { position: absolute; bottom: 0; left: 0; right: 0; background: var(--ui-warn); height: 0%; }
-      .hud-readouts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-      .hud-readout { background: var(--ui-bg); border: 1px solid #223240; border-radius: 6px; padding: 4px 10px; min-width: 110px; }
-      .hud-readout-label { font-size: 9px; letter-spacing: 1.5px; color: #7d8b96; }
-      .hud-readout-value { font-family: var(--ui-mono); font-size: 15px; }
-      .hud-right { position: absolute; right: 12px; top: 56px; display: flex; flex-direction: column; gap: 8px;
-        width: 230px; pointer-events: auto; }
-      .hud-panel { background: var(--ui-bg); border: 1px solid #223240; border-radius: 8px; padding: 8px 10px; }
-      .hud-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; padding: 1px 0; }
-      .hud-key { color: #7d8b96; font-size: 11px; min-width: 34px; }
-      .hud-val { font-family: var(--ui-mono); }
-      .hud-eta { margin-left: auto; color: #7d8b96; font-size: 11px; font-family: var(--ui-mono); }
-      .hud-node-info { font-family: var(--ui-mono); font-size: 12px; color: var(--ui-accent); margin-top: 4px; white-space: pre-line; }
-      .hud-gauge { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-      .hud-gauge-track { flex: 1; height: 8px; background: #101c26; border-radius: 4px; overflow: hidden; }
-      .hud-gauge-fill { height: 100%; width: 0%; background: var(--ui-accent); }
-      .hud-gauge-text { font-family: var(--ui-mono); font-size: 10px; color: #9fb4c4; min-width: 50px; text-align: right; }
-      .hud-systems { display: flex; flex-direction: column; gap: 4px; }
-      .hud-sys-toggle { width: 100%; text-align: left; font-size: 11px; }
-      .hud-sys-toggle.active { border-color: var(--ui-good); color: #cfe8d6; }
-      .hud-stages { max-height: 40vh; overflow-y: auto; }
-      .hud-stage-btn { width: 100%; margin-bottom: 6px; border-color: var(--ui-warn); }
-      .hud-stage-list { display: flex; flex-direction: column-reverse; gap: 4px; }
-      .hud-stage { border: 1px solid #223240; border-radius: 5px; padding: 3px 8px; font-size: 11px; }
-      .hud-stage.next { border-color: var(--ui-warn); }
-      .hud-stage.spent { opacity: 0.35; }
-      .hud-stage-title { color: #9fb4c4; font-size: 10px; letter-spacing: 1px; }
-      .hud-events { position: absolute; left: 12px; top: 56px; display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
-      .hud-event { background: var(--ui-bg); border-left: 3px solid var(--ui-accent); border-radius: 4px;
-        padding: 5px 10px; font-size: 12px; animation: hudfade 6s forwards; }
-      .hud-event.warning { border-left-color: var(--ui-warn); }
-      .hud-event.danger { border-left-color: var(--ui-danger); }
-      @keyframes hudfade { 0% { opacity: 0; } 5% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-    `;
-    document.head.appendChild(style);
-  }
 
   setMissionStart(t: number): void {
     this.missionStart = t;

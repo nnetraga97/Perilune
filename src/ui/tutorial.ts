@@ -9,6 +9,7 @@ import { GameState } from '../sim/state';
 import { defOf } from '../sim/vessel';
 import { apoapsisOf, periapsisOf, stateToElements } from '../core/orbit';
 import type { Editor } from './editor';
+import { injectUiStyles } from './kit';
 
 export interface TutorialContext {
   game: GameState | null;
@@ -118,17 +119,7 @@ export class Tutorial {
     this.root = document.createElement('div');
     this.root.className = 'tut-box';
     this.root.innerHTML = '';
-    const style = document.createElement('style');
-    style.textContent = `
-      .tut-box { position: absolute; left: 260px; top: 56px; width: 320px;
-        background: rgba(14,24,32,0.95); border: 1px solid var(--ui-accent);
-        border-radius: 10px; padding: 12px 14px; pointer-events: auto; z-index: 40; }
-      .tut-progress { font-size: 10px; letter-spacing: 2px; color: var(--ui-accent); }
-      .tut-title { font-size: 15px; margin: 4px 0 6px; color: #fff; }
-      .tut-text { font-size: 12.5px; line-height: 1.5; color: #c4d2dd; }
-      .tut-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-    `;
-    document.head.appendChild(style);
+    injectUiStyles();
     this.progressEl = document.createElement('div');
     this.progressEl.className = 'tut-progress';
     this.titleEl = document.createElement('div');

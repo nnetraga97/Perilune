@@ -94,6 +94,7 @@ describe('compact map body presentation', () => {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: sharedTexture }));
     const line = new THREE.Line(sharedGeometry, sharedMaterial);
     const panel = { remove: vi.fn() };
+    // Styles are kit-owned and shared across screens; dispose must not touch them.
     const style = { remove: vi.fn() };
     const removeEventListener = vi.fn();
     vi.stubGlobal('window', { removeEventListener });
@@ -115,7 +116,6 @@ describe('compact map body presentation', () => {
       depositCache: new Map([['a', []]]),
       starfield,
       panel,
-      ownedStyle: style,
       resizeHandler: vi.fn(),
       disposed: false,
     });
@@ -133,7 +133,7 @@ describe('compact map body presentation', () => {
     expect(spriteMaterialDispose).toHaveBeenCalledOnce();
     expect(removeEventListener).toHaveBeenCalledOnce();
     expect(panel.remove).toHaveBeenCalledOnce();
-    expect(style.remove).toHaveBeenCalledOnce();
+    expect(style.remove).not.toHaveBeenCalled();
   });
 });
 

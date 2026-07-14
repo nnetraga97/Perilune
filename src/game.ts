@@ -32,6 +32,8 @@ import { apoapsisOf, periapsisOf, stateToElements } from './core/orbit';
 import { RenderDiagnostics } from './render/renderDiagnostics';
 import type { RenderStartupOptions } from './render/renderStartupOptions';
 import { surfaceVelocity } from './sim/bodyOrientation';
+import { InputService, type BindingScreen } from './ui/input';
+import { CheatSheet } from './ui/cheatSheet';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -66,6 +68,8 @@ class PeriluneGame {
   private controlBlocked = false;
   private nodeBurnDir = new Vec3(1, 0, 0);
   private dialogEl: HTMLElement | null = null;
+  private input = new InputService();
+  private cheatSheet!: CheatSheet;
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
 
@@ -187,6 +191,8 @@ class PeriluneGame {
     this.tutorial = new Tutorial(this.uiRoot);
     window.addEventListener('pagehide', this.onPageHide);
     this.buildMenu();
+    this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
+    this.registerBindings();
     this.bindInput(canvas);
     document.getElementById('boot')?.remove();
     requestAnimationFrame(() => this.frame());
@@ -526,7 +532,13 @@ class PeriluneGame {
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       this.keys.add(e.code);
-      this.handleKeyPress(e);
+      if (this.cheatSheet.visible && (e.code === 'Escape' || e.code === 'Slash')) {
+        this.cheatSheet.hide();
+        return;
+      }
+      if (this.screen === 'flight' || this.screen === 'editor') {
+        this.input.dispatch(e, this.screen as BindingScreen);
+      }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     canvas.addEventListener('pointerdown', (e) => {
@@ -605,57 +617,51 @@ class PeriluneGame {
     }, { passive: false });
   }
 
-  private handleKeyPress(e: KeyboardEvent): void {
-    const gv = this.game.active;
-    if (this.screen === 'editor') {
-      if (e.code === 'Delete' || e.code === 'Backspace') this.editor.deleteSelected();
-      if (e.code === 'KeyX') {
-        (this.editor as unknown as { cycleSymmetry(): void }).cycleSymmetry?.();
-      }
-      return;
-    }
-    if (this.screen !== 'flight' || !gv) return;
-    const v = gv.runtime;
-    switch (e.code) {
-      case 'Space':
-        this.stage();
-        break;
-      case 'KeyM':
-        this.toggleMap();
-        break;
-      case 'KeyT':
-        v.sas = v.sas === 'off' ? 'stability' : 'off';
-        break;
-      case 'KeyR':
-        v.controls.rcs = !v.controls.rcs;
-        break;
-      case 'KeyZ':
-        v.controls.throttle = 1;
-        break;
-      case 'KeyX':
-        v.controls.throttle = 0;
-        break;
-      case 'F5':
-        e.preventDefault();
-        this.quickSave();
-        break;
-      case 'F9':
-        e.preventDefault();
-        void this.quickLoad();
-        break;
-      case 'Comma':
-        this.stepWarp(-1);
-        break;
-      case 'Period':
-        this.stepWarp(1);
-        break;
-      case 'BracketLeft':
-        this.cycleVessel(-1);
-        break;
-      case 'BracketRight':
-        this.cycleVessel(1);
-        break;
-    }
+  /** Register every keyboard binding; the same table renders the ? cheat sheet. */
+  private registerBindings(): void {
+    const flight = 'flight' as const;
+    const editor = 'editor' as const;
+    const vessel = (fn: (v: import('./sim/flight').VesselRuntime) => void) => () => {
+      const gv = this.game.active;
+      if (gv) fn(gv.runtime);
+    };
+    // Every flight action requires an active vessel (matches the old switch).
+    const act = (fn: () => void) => () => {
+      if (this.game.active) fn();
+    };
+    this.input.add(
+      // ---- flight: mission
+      { code: 'Space', screen: flight, group: 'Mission', label: 'Fire next stage', keyLabel: 'Space', handler: act(() => this.stage()) },
+      { code: 'KeyM', screen: flight, group: 'Mission', label: 'Toggle map view', handler: act(() => this.toggleMap()) },
+      { code: 'F5', screen: flight, group: 'Mission', label: 'Quicksave', preventDefault: true, handler: act(() => this.quickSave()) },
+      { code: 'F9', screen: flight, group: 'Mission', label: 'Quickload', preventDefault: true, handler: act(() => void this.quickLoad()) },
+      { code: 'BracketLeft', screen: flight, group: 'Mission', label: 'Previous vessel', handler: act(() => this.cycleVessel(-1)) },
+      { code: 'BracketRight', screen: flight, group: 'Mission', label: 'Next vessel', handler: act(() => this.cycleVessel(1)) },
+      // ---- flight: control
+      { code: 'KeyT', screen: flight, group: 'Control', label: 'Toggle SAS', handler: vessel((v) => (v.sas = v.sas === 'off' ? 'stability' : 'off')) },
+      { code: 'KeyR', screen: flight, group: 'Control', label: 'Toggle RCS', handler: vessel((v) => (v.controls.rcs = !v.controls.rcs)) },
+      { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => (v.controls.throttle = 1)) },
+      { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => (v.controls.throttle = 0)) },
+      // ---- flight: held keys (polled in the frame loop; listed for the cheat sheet)
+      { code: '', screen: flight, group: 'Control', label: 'Pitch', keyLabel: 'W / S' },
+      { code: '', screen: flight, group: 'Control', label: 'Yaw', keyLabel: 'A / D' },
+      { code: '', screen: flight, group: 'Control', label: 'Roll', keyLabel: 'Q / E' },
+      { code: '', screen: flight, group: 'Control', label: 'Throttle up / down', keyLabel: 'Shift / Ctrl' },
+      { code: '', screen: flight, group: 'Control', label: 'RCS translate', keyLabel: 'I J K L U O' },
+      // ---- flight: time
+      { code: 'Comma', screen: flight, group: 'Time', label: 'Warp slower', handler: act(() => this.stepWarp(-1)) },
+      { code: 'Period', screen: flight, group: 'Time', label: 'Warp faster', handler: act(() => this.stepWarp(1)) },
+      // ---- editor
+      { code: 'Delete', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Del', handler: () => this.editor.deleteSelected() },
+      { code: 'Backspace', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Bksp', handler: () => this.editor.deleteSelected() },
+      { code: 'KeyX', screen: editor, group: 'Workshop', label: 'Cycle radial symmetry', handler: () => this.editor.cycleSymmetry() },
+      { code: '', screen: editor, group: 'Workshop', label: 'Orbit camera', keyLabel: 'Drag' },
+      { code: '', screen: editor, group: 'Workshop', label: 'Zoom', keyLabel: 'Wheel' },
+      // ---- help (both screens)
+      { code: 'Slash', shift: true, screen: 'any', group: 'Help', label: 'Show this cheat sheet', keyLabel: '?', handler: () => {
+        if (this.screen === 'flight' || this.screen === 'editor') this.cheatSheet.toggle(this.screen as BindingScreen);
+      } },
+    );
   }
 
   private cycleVessel(dir: number): void {

@@ -25,14 +25,7 @@ import { computeMassProperties } from '../sim/vessel';
 import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisualSource } from '../render/vesselMesh';
 import type { PartModelLibrary } from '../render/partModelLibrary';
 import { listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
-
-function el(tag: string, cls: string, parent: HTMLElement, text = ''): HTMLElement {
-  const e = document.createElement(tag);
-  e.className = cls;
-  if (text) e.textContent = text;
-  parent.appendChild(e);
-  return e;
-}
+import { el, injectUiStyles } from './kit';
 
 interface StackNodeSpot {
   parentKey: number;
@@ -131,55 +124,10 @@ export class Editor {
     // Inline style: #ui-root > * { pointer-events: auto } would override the
     // class rule by specificity; inline always wins.
     this.root.style.pointerEvents = 'none';
-    this.injectStyles();
+    injectUiStyles();
     this.buildDom();
     this.rebuildVisual();
     this.setVisible(false);
-  }
-
-  private injectStyles(): void {
-    if (document.getElementById('ed-style')) return;
-    const style = document.createElement('style');
-    style.id = 'ed-style';
-    style.textContent = `
-      .ed-root { position: absolute; inset: 0; pointer-events: none; }
-      .ed-root button, .ed-root input, .ed-root select { pointer-events: auto; }
-      .ed-left { position: absolute; left: 0; top: 0; bottom: 0; width: 244px;
-        background: rgba(10,16,22,0.94); border-right: 1px solid #223240;
-        display: flex; flex-direction: column; pointer-events: auto; }
-      .ed-title { padding: 10px 12px 4px; font-size: 15px; letter-spacing: 3px; color: var(--ui-accent); }
-      .ed-cats { display: flex; flex-wrap: wrap; gap: 3px; padding: 6px 8px; }
-      .ed-cat { font-size: 10px; padding: 3px 7px; }
-      .ed-cat.active { border-color: var(--ui-accent); background: #16303f; }
-      .ed-parts { flex: 1; overflow-y: auto; padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
-      .ed-part { border: 1px solid #223240; border-radius: 6px; padding: 6px 8px; cursor: pointer;
-        background: rgba(20,30,40,0.6); }
-      .ed-part:hover { border-color: var(--ui-accent); }
-      .ed-part-name { font-size: 12px; color: #d8e2ea; }
-      .ed-part-info { font-size: 10px; color: #7d8b96; }
-      .ed-right { position: absolute; right: 0; top: 0; bottom: 0; width: 268px;
-        background: rgba(10,16,22,0.94); border-left: 1px solid #223240;
-        display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow-y: auto; pointer-events: auto; }
-      .ed-panel { border: 1px solid #223240; border-radius: 8px; padding: 8px 10px; }
-      .ed-panel h3 { font-size: 10px; letter-spacing: 2px; color: #9fb4c4; margin-bottom: 6px; font-weight: normal; }
-      .ed-stats { font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.55; white-space: pre; }
-      .ed-warn { color: var(--ui-warn); font-size: 11px; padding: 2px 0; }
-      .ed-stage { border: 1px solid #223240; border-radius: 5px; padding: 4px 6px; margin-bottom: 4px; font-size: 11px; }
-      .ed-stage-head { display: flex; gap: 4px; align-items: center; color: #9fb4c4; font-size: 10px; }
-      .ed-stage-head button { padding: 0 6px; font-size: 10px; }
-      .ed-topbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-        display: flex; gap: 8px; align-items: center; pointer-events: auto;
-        background: var(--ui-bg); border: 1px solid #223240; border-radius: 8px; padding: 6px 12px; }
-      .ed-name { background: #101c26; border: 1px solid #2a3d4d; color: var(--ui-fg);
-        border-radius: 5px; padding: 4px 8px; width: 190px; font-size: 13px; }
-      .ed-launch { border-color: var(--ui-good) !important; color: var(--ui-good) !important; font-weight: bold; }
-      .ed-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-        background: var(--ui-bg); border-radius: 6px; padding: 4px 14px; font-size: 11px; color: #9fb4c4; }
-      .ed-craft-list { display: flex; flex-direction: column; gap: 3px; }
-      .ed-craft-item { display: flex; gap: 4px; }
-      .ed-craft-item button { font-size: 11px; }
-    `;
-    document.head.appendChild(style);
   }
 
   private buildDom(): void {
@@ -320,7 +268,7 @@ export class Editor {
     }
   }
 
-  private cycleSymmetry(): void {
+  cycleSymmetry(): void {
     const order = [1, 2, 3, 4, 6, 8];
     this.symmetry = order[(order.indexOf(this.symmetry) + 1) % order.length];
     this.symmetryBtn.textContent = `SYM ×${this.symmetry}`;
