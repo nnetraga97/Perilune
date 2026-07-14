@@ -8,6 +8,7 @@ import {
 import { GameState } from '../src/sim/state';
 import { addPart, createCraft } from '../src/sim/vessel';
 import { restoreGame, serializeGame } from '../src/save/persistence';
+import { SAVE_VERSION } from '../src/save/schema';
 
 function buildLander() {
   const craft = createCraft('Save lander');
@@ -37,7 +38,7 @@ describe('terrain-aware save migration', () => {
     );
 
     const save = serializeGame(game, 'surface');
-    expect(save.saveVersion).toBe(5);
+    expect(save.saveVersion).toBe(SAVE_VERSION);
     expect(save.vessels[0].surfacePose).toMatchObject({
       bodyId: 'veyra',
       recipeHash: expect.stringMatching(/^[a-f0-9]{32}$/),

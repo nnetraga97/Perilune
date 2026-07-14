@@ -44,17 +44,87 @@ export interface Stage {
   partKeys: number[];
 }
 
+export const ACTION_GROUP_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+export type ActionGroupId = (typeof ACTION_GROUP_IDS)[number];
+export type PartAction = 'toggle' | 'activate' | 'deactivate';
+
+export interface ActionGroupAssignment {
+  partKey: number;
+  action: PartAction;
+}
+
+export type ActionGroups = Partial<Record<ActionGroupId, ActionGroupAssignment[]>>;
+
+export interface StagePlan {
+  stages: Stage[];
+  currentStage: number;
+}
+
+export interface StagePartition {
+  retained: StagePlan;
+  detached: StagePlan;
+}
+
+/** Split and compact a stage plan while preserving each side's progress. */
+export function partitionStages(
+  stages: readonly Stage[],
+  currentStage: number,
+  detachedKeys: ReadonlySet<number>,
+): StagePartition {
+  const nextStage = Math.min(stages.length, Math.max(0, Math.trunc(currentStage)));
+  const project = (detached: boolean): StagePlan => {
+    const projected = stages.map((stage) => ({
+      partKeys: stage.partKeys.filter((key) => detachedKeys.has(key) === detached),
+    }));
+    const compacted = projected.filter((stage) => stage.partKeys.length > 0);
+    const firedStages = projected
+      .slice(0, nextStage)
+      .filter((stage) => stage.partKeys.length > 0).length;
+    return {
+      stages: compacted,
+      currentStage: Math.min(firedStages, compacted.length),
+    };
+  };
+  return {
+    retained: project(false),
+    detached: project(true),
+  };
+}
+
+/** Split action-group assignments by part ownership without mutating them. */
+export function partitionActionGroups(
+  groups: Readonly<ActionGroups>,
+  detachedKeys: ReadonlySet<number>,
+): { retained: ActionGroups; detached: ActionGroups } {
+  const retained: ActionGroups = {};
+  const detached: ActionGroups = {};
+  for (const id of ACTION_GROUP_IDS) {
+    const assignments = groups[id] ?? [];
+    const kept = assignments
+      .filter((assignment) => !detachedKeys.has(assignment.partKey))
+      .map((assignment) => ({ ...assignment }));
+    const split = assignments
+      .filter((assignment) => detachedKeys.has(assignment.partKey))
+      .map((assignment) => ({ ...assignment }));
+    if (kept.length) retained[id] = kept;
+    if (split.length) detached[id] = split;
+  }
+  return { retained, detached };
+}
+
 export interface Craft {
   name: string;
   version: number;
   parts: PartInstance[];
   /** stages[0] fires first (launch), matching bottom-of-list-first ordering. */
   stages: Stage[];
+  /** Player-defined activation groups, addressed by flight keys 1–0. */
+  actionGroups: ActionGroups;
   nextKey: number;
 }
 
 export function createCraft(name: string): Craft {
-  return { name, version: 1, parts: [], stages: [], nextKey: 1 };
+  return { name, version: 1, parts: [], stages: [], actionGroups: {}, nextKey: 1 };
 }
 
 export function craftPart(craft: Craft, key: number): PartInstance | undefined {
@@ -107,6 +177,7 @@ export function removeSubtree(craft: Craft, key: number): number[] {
     stage.partKeys = stage.partKeys.filter((k) => !removed.has(k));
   }
   craft.stages = craft.stages.filter((s) => s.partKeys.length > 0);
+  craft.actionGroups = partitionActionGroups(craft.actionGroups, removed).retained;
   return [...removed];
 }
 

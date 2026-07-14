@@ -8,7 +8,15 @@ import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import { GameState, GameVessel } from '../sim/state';
 import { createVesselRuntime, refreshDerived } from '../sim/flight';
-import type { Craft, PartInstance, AttachKind } from '../sim/vessel';
+import {
+  ACTION_GROUP_IDS,
+  type ActionGroupId,
+  type ActionGroups,
+  type AttachKind,
+  type Craft,
+  type PartAction,
+  type PartInstance,
+} from '../sim/vessel';
 import { partById, type ResourceId } from '../content/parts';
 import {
   migrateSave,
@@ -28,6 +36,15 @@ import {
 import { contactSurface } from '../sim/terrain';
 import { recipeForBody } from '../sim/terrainRecipe';
 import { scatterRecipeForBody } from '../sim/scatterRecipe';
+
+function cloneActionGroups(groups: Readonly<ActionGroups>): ActionGroups {
+  const clone: ActionGroups = {};
+  for (const group of ACTION_GROUP_IDS) {
+    const assignments = groups[group];
+    if (assignments?.length) clone[group] = assignments.map((assignment) => ({ ...assignment }));
+  }
+  return clone;
+}
 
 function isSurfaceSituation(situation: SavedVessel['situation']): boolean {
   return situation === 'prelaunch' || situation === 'landed' || situation === 'splashed';
@@ -83,6 +100,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
           temperature: p.temperature,
         })),
         stages: v.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
+        actionGroups: cloneActionGroups(v.craft.actionGroups),
         nextKey: v.craft.nextKey,
       },
       bodyId: v.bodyId,
@@ -107,6 +125,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
         ? { x: gv.rails.landedAtt.x, y: gv.rails.landedAtt.y, z: gv.rails.landedAtt.z, w: gv.rails.landedAtt.w }
         : null,
       surfacePose: serializeSurfacePose(game, gv),
+      target: gv.target,
     };
   });
 
@@ -138,6 +157,7 @@ export function restoreGame(save: SaveGame): GameState {
   // Validate every referenced recipe before constructing any vessel state.
   for (const vessel of migrated.vessels) {
     const body = game.universe.get(vessel.bodyId);
+    if (vessel.target !== null) game.universe.get(vessel.target);
     if (isSurfaceSituation(vessel.situation) && body.def.surfaceKind !== 'solid') {
       throw new Error(`${body.name} is a gas body with no solid surface for landed saves`);
     }
@@ -183,6 +203,7 @@ export function restoreGame(save: SaveGame): GameState {
         }),
       ),
       stages: sv.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
+      actionGroups: cloneActionGroups(sv.craft.actionGroups),
       nextKey: sv.craft.nextKey,
     };
     const runtime = createVesselRuntime(sv.id, sv.name, craft, sv.bodyId);
@@ -275,6 +296,7 @@ export function restoreGame(save: SaveGame): GameState {
         landedPos,
         landedAtt,
       },
+      target: sv.target,
     };
     game.vessels.push(gv);
     game.noteRestoredVessel(sv.id);
@@ -288,11 +310,13 @@ const DB_NAME = 'perilune';
 const STORE = 'saves';
 const BACKUPS = 3;
 
-interface SaveSlotMeta {
+export interface SaveSlotMeta {
   slot: string;
   label: string;
   createdAt: number;
   time: number;
+  vesselCount: number;
+  activeVesselName: string | null;
 }
 
 function openDb(): Promise<IDBDatabase | null> {
@@ -433,6 +457,8 @@ export async function listSaves(): Promise<SaveSlotMeta[]> {
         label: parsed.label,
         createdAt: parsed.createdAt,
         time: parsed.time,
+        vesselCount: parsed.vessels.length,
+        activeVesselName: parsed.vessels.find((vessel) => vessel.id === parsed.activeVesselId)?.name ?? null,
       });
     } catch {
       // skip corrupt
@@ -451,6 +477,12 @@ export async function deleteSave(slot: string): Promise<void> {
 
 const CRAFT_NAME_MAX_LENGTH = 80;
 const ATTACH_KINDS: readonly AttachKind[] = ['root', 'stack-top', 'stack-bottom', 'surface'];
+const PART_ACTIONS: readonly PartAction[] = ['toggle', 'activate', 'deactivate'];
+
+function actionGroupId(value: string): ActionGroupId | null {
+  const parsed = Number(value);
+  return ACTION_GROUP_IDS.includes(parsed as ActionGroupId) ? parsed as ActionGroupId : null;
+}
 
 function finiteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -529,6 +561,34 @@ export function validateCraftFile(raw: unknown): Craft | null {
     stages.push({ partKeys });
   }
 
+  const actionGroups: ActionGroups = {};
+  if (data.actionGroups !== undefined) {
+    if (
+      typeof data.actionGroups !== 'object'
+      || data.actionGroups === null
+      || Array.isArray(data.actionGroups)
+    ) return null;
+    for (const [rawGroup, rawAssignments] of Object.entries(data.actionGroups)) {
+      const group = actionGroupId(rawGroup);
+      if (group === null || !Array.isArray(rawAssignments)) return null;
+      const assignments = [];
+      for (const rawAssignment of rawAssignments) {
+        if (typeof rawAssignment !== 'object' || rawAssignment === null) return null;
+        const assignment = rawAssignment as Record<string, unknown>;
+        if (!Number.isInteger(assignment.partKey)) return null;
+        if (!PART_ACTIONS.includes(assignment.action as PartAction)) return null;
+        // Shared craft files may refer to a part removed by an older editor;
+        // discard that stale binding while preserving all valid assignments.
+        if (!keys.has(assignment.partKey as number)) continue;
+        assignments.push({
+          partKey: assignment.partKey as number,
+          action: assignment.action as PartAction,
+        });
+      }
+      if (assignments.length) actionGroups[group] = assignments;
+    }
+  }
+
   const maxKey = parts.reduce((max, part) => Math.max(max, part.key), 0);
   const nextKey = Number.isInteger(data.nextKey) && (data.nextKey as number) > maxKey
     ? (data.nextKey as number)
@@ -539,6 +599,7 @@ export function validateCraftFile(raw: unknown): Craft | null {
     version: data.version,
     parts,
     stages,
+    actionGroups,
     nextKey,
   };
 }
@@ -566,4 +627,8 @@ export async function readCraftFile(name: string): Promise<Craft | null> {
 export async function listCraftFiles(): Promise<string[]> {
   const keys = await idbKeys();
   return keys.filter((k) => k.startsWith('craft:')).map((k) => k.slice('craft:'.length));
+}
+
+export async function deleteCraftFile(name: string): Promise<void> {
+  await idbDelete(`craft:${name}`);
 }

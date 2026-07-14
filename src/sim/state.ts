@@ -13,9 +13,13 @@ import {
 import { Body, Universe } from './universe';
 import { AUREN_SYSTEM } from '../content/system';
 import {
+  ACTION_GROUP_IDS,
+  ActionGroupId,
   Craft,
   PartInstance,
   defOf,
+  partitionActionGroups,
+  partitionStages,
 } from './vessel';
 import {
   createVesselRuntime,
@@ -63,6 +67,8 @@ export interface GameVessel {
   runtime: VesselRuntime;
   regime: 'active' | 'rails';
   rails: RailsState;
+  /** Optional body id selected for navigation and map readouts. */
+  target: string | null;
 }
 
 export type AlarmKind = 'custom' | 'transfer' | 'maneuver' | 'entry';
@@ -72,6 +78,8 @@ export interface GameAlarm {
   time: number;
   label: string;
   kind: AlarmKind;
+  /** Vessel that owned the event when it was scheduled, if any. */
+  vesselId: string | null;
 }
 
 const _r = new Vec3();
@@ -102,6 +110,7 @@ export class GameState {
   scannedBodies = new Set<string>();
   /** Mission alarms, ordered by trigger time then stable id. */
   readonly alarms: GameAlarm[] = [];
+  private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
@@ -134,7 +143,12 @@ export class GameState {
     return this.railsWarp ? RAILS_WARP_RATES[this.warpIndex] : PHYSICS_WARP_RATES[this.warpIndex];
   }
 
-  addAlarm(time: number, label: string, kind: AlarmKind): GameAlarm {
+  addAlarm(
+    time: number,
+    label: string,
+    kind: AlarmKind,
+    vesselId: string | null = this.activeVesselId,
+  ): GameAlarm {
     if (!Number.isFinite(time) || time <= this.time) {
       throw new Error('Alarm time must be finite and in the future');
     }
@@ -145,6 +159,7 @@ export class GameState {
       time,
       label: trimmedLabel,
       kind,
+      vesselId,
     };
     this.alarms.push(alarm);
     this.sortAlarms();
@@ -156,6 +171,11 @@ export class GameState {
     if (index < 0) return false;
     this.alarms.splice(index, 1);
     return true;
+  }
+
+  /** Drain alarms that fired since the last UI poll. */
+  consumeFiredAlarms(): GameAlarm[] {
+    return this.firedAlarms.splice(0, this.firedAlarms.length);
   }
 
   /** Replace the queue from validated save data while preserving stable ids. */
@@ -180,7 +200,7 @@ export class GameState {
   private fireDueAlarms(): boolean {
     let fired = false;
     while (this.alarms.length && this.alarms[0].time <= this.time + 1e-9) {
-      this.alarms.shift();
+      this.firedAlarms.push(this.alarms.shift()!);
       fired = true;
     }
     if (fired) this.setWarp(0, false);
@@ -227,6 +247,7 @@ export class GameState {
       runtime,
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
+      target: null,
     };
     this.vessels.push(gv);
     this.activeVesselId = runtime.id;
@@ -247,6 +268,7 @@ export class GameState {
       runtime,
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
+      target: null,
     };
     this.vessels.push(gv);
     this.activeVesselId = runtime.id;
@@ -280,12 +302,31 @@ export class GameState {
         fired = true;
       }
     }
+    // Advance before splitting so every resulting vessel inherits the next
+    // stage rather than replaying the separation stage.
+    v.currentStage++;
     for (const dec of decouplersToFire) {
       this.detachSubtree(gv, dec, defOf(dec).decoupler!.ejection);
     }
-    v.currentStage++;
     refreshDerived(v);
     return fired;
+  }
+
+  /** Execute one player-defined craft action group. Returns resolved actions. */
+  executeActionGroup(gv: GameVessel, group: ActionGroupId): number {
+    const assignments = gv.runtime.craft.actionGroups[group] ?? [];
+    let executed = 0;
+    for (const assignment of assignments) {
+      const part = gv.runtime.craft.parts.find((candidate) => candidate.key === assignment.partKey);
+      if (!part) continue;
+      if (assignment.action === 'toggle') part.activated = !part.activated;
+      else part.activated = assignment.action === 'activate';
+      executed++;
+    }
+    if (executed > 0) {
+      logEvent(gv.runtime, this.time, `Action group ${group}: ${executed} action(s)`);
+    }
+    return executed;
   }
 
   /** Split parts at a decoupler/failed joint into a debris vessel. */
@@ -297,24 +338,29 @@ export class GameState {
     const crewBefore = [...v.crew];
     const keys = splitAtJoint(v.craft, atPart.key);
     if (keys.length === v.craft.parts.length) return; // would detach everything
-    const detachedParts = v.craft.parts.filter((p) => keys.includes(p.key));
-    v.craft.parts = v.craft.parts.filter((p) => !keys.includes(p.key));
-    for (const stage of v.craft.stages) {
-      stage.partKeys = stage.partKeys.filter((k) => !keys.includes(k));
-    }
+    const detachedKeys = new Set(keys);
+    const detachedParts = v.craft.parts.filter((p) => detachedKeys.has(p.key));
+    v.craft.parts = v.craft.parts.filter((p) => !detachedKeys.has(p.key));
+    const stagePartition = partitionStages(v.craft.stages, v.currentStage, detachedKeys);
+    const actionGroupPartition = partitionActionGroups(v.craft.actionGroups, detachedKeys);
+    v.craft.stages = stagePartition.retained.stages;
+    v.craft.actionGroups = actionGroupPartition.retained;
+    v.currentStage = stagePartition.retained.currentStage;
 
     // Build the debris craft. Keep positions; root the detached top part.
     const debrisCraft: Craft = {
       name: `${v.name} debris`,
       version: 1,
       parts: detachedParts,
-      stages: [],
+      stages: stagePartition.detached.stages,
+      actionGroups: actionGroupPartition.detached,
       nextKey: v.craft.nextKey,
     };
     const rootPart = detachedParts.find((p) => p.key === atPart.key) ?? detachedParts[0];
     rootPart.parentKey = null;
 
     const debris = createVesselRuntime(this.newVesselId(), debrisCraft.name, debrisCraft, v.bodyId);
+    debris.currentStage = stagePartition.detached.currentStage;
     const retainedHasControl = hasControlSource(v.craft);
     const detachedHasControl = hasControlSource(debrisCraft);
     v.isDebris = !retainedHasControl;
@@ -352,6 +398,7 @@ export class GameState {
       runtime: debris,
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
+      target: gv.target,
     };
     this.vessels.push(detachedGv);
 
@@ -741,6 +788,17 @@ export class GameState {
     // Stages append with remapped keys.
     for (const st of vb.craft.stages) {
       va.craft.stages.push({ partKeys: st.partKeys.map((k) => k + keyOffset) });
+    }
+    for (const id of ACTION_GROUP_IDS) {
+      const incoming = vb.craft.actionGroups[id];
+      if (!incoming?.length) continue;
+      va.craft.actionGroups[id] = [
+        ...(va.craft.actionGroups[id] ?? []),
+        ...incoming.map((assignment) => ({
+          ...assignment,
+          partKey: assignment.partKey + keyOffset,
+        })),
+      ];
     }
     va.craft.nextKey = keyOffset + vb.craft.nextKey;
     va.crew = [...va.crew, ...vb.crew];

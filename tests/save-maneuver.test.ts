@@ -24,6 +24,11 @@ describe('save system', () => {
     game.sciencePoints = 42;
     game.completedExperiments.add('thermal-scan@veyra-surface');
     game.flags.tutorialDone = true;
+    game.active!.target = 'palla';
+    const actionPartKey = game.active!.runtime.craft.parts[0].key;
+    game.active!.runtime.craft.actionGroups = {
+      1: [{ partKey: actionPartKey, action: 'toggle' }],
+    };
 
     const save = serializeGame(game, 'test');
     const json = JSON.stringify(save);
@@ -34,6 +39,10 @@ describe('save system', () => {
     expect(restored.completedExperiments.has('thermal-scan@veyra-surface')).toBe(true);
     expect(restored.flags.tutorialDone).toBe(true);
     expect(restored.vessels.length).toBe(game.vessels.length);
+    expect(restored.active!.target).toBe('palla');
+    expect(restored.active!.runtime.craft.actionGroups).toEqual({
+      1: [{ partKey: actionPartKey, action: 'toggle' }],
+    });
 
     const a = game.active!.runtime;
     const b = restored.active!.runtime;
@@ -60,6 +69,8 @@ describe('save system', () => {
     const good = serializeGame(game, 't');
     expect(validateSave(JSON.parse(JSON.stringify(good)))).toBe(true);
     expect(() => migrateSave({ ...good, saveVersion: SAVE_VERSION + 1 })).toThrow(/newer/);
+    good.vessels[0].target = 'not-a-body';
+    expect(() => restoreGame(good)).toThrow(/not-a-body/);
   });
 
   it('round-trips alarms and migrates version 2 saves with an empty queue', () => {
@@ -78,6 +89,24 @@ describe('save system', () => {
     v2.saveVersion = 2;
     delete v2.alarms;
     expect(migrateSave(v2).alarms).toEqual([]);
+
+    const legacyGame = new GameState();
+    legacyGame.spawnOnPad(buildTwoStageRocket(), 'Legacy craft');
+    const v5 = JSON.parse(JSON.stringify(serializeGame(legacyGame, 'v5')));
+    v5.saveVersion = 5;
+    for (const vessel of v5.vessels) {
+      delete vessel.target;
+      delete vessel.craft.actionGroups;
+    }
+    const migrated = migrateSave(v5);
+    expect(migrated.saveVersion).toBe(SAVE_VERSION);
+    expect(migrated.vessels[0].target).toBeNull();
+    expect(migrated.vessels[0].craft.actionGroups).toEqual({});
+
+    const v6 = JSON.parse(JSON.stringify(saved));
+    v6.saveVersion = 6;
+    for (const alarm of v6.alarms) delete alarm.vesselId;
+    expect(migrateSave(v6).alarms[0].vesselId).toBeNull();
   });
 });
 

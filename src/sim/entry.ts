@@ -11,14 +11,18 @@ import type { AeroModel } from './aero';
 import { groundRadiusInertial } from './terrain';
 import type { Body } from './universe';
 import { inertialToBodyFixed, surfaceVelocity } from './bodyOrientation';
+import { G0 } from './vessel';
 
 export interface EntryPrediction {
   willEnter: boolean;
   lands: boolean;
   landingDirBF: Vec3 | null;
   landingTime: number;
+  /** First atmospheric-interface crossing time, or 0 when no atmosphere is reached. */
+  entryTime: number;
   impactSpeed: number;
   peakHeatFlux: number;
+  peakG: number;
   samples: Vec3[];
 }
 
@@ -32,8 +36,10 @@ function emptyPrediction(samples: Vec3[] = []): EntryPrediction {
     lands: false,
     landingDirBF: null,
     landingTime: 0,
+    entryTime: 0,
     impactSpeed: 0,
     peakHeatFlux: 0,
+    peakG: 0,
     samples,
   };
 }
@@ -124,7 +130,9 @@ export function predictEntry(
   const rotatingSurfaceVelocity = new Vec3();
   let time = startTime;
   let entered = false;
+  let entryTime = 0;
   let peakHeatFlux = 0;
+  let peakG = 0;
   let previousTime = time;
   let previousClearance = body.def.surfaceKind === 'solid' ? clearance(body, r, time) : Infinity;
 
@@ -132,6 +140,7 @@ export function predictEntry(
     const radius = r.length();
     const altitude = radius - body.radius;
     const atmospheric = !!body.def.atmosphere && altitude < atmosphereTop;
+    if (atmospheric && !entered) entryTime = time;
     entered ||= atmospheric;
     const dt = Math.min(atmospheric ? 0.25 : 2, endTime - time);
 
@@ -167,6 +176,7 @@ export function predictEntry(
       const speed = airVelocity.length();
       if (speed > 0) {
         const dragK = (0.5 * dragDensity * cdA) / mass;
+        peakG = Math.max(peakG, dragK * speed * speed / G0);
         const nextSpeed = speed / (1 + dragK * speed * dt);
         v.addScaled(airVelocity, nextSpeed / speed - 1);
       }
@@ -188,8 +198,10 @@ export function predictEntry(
         lands: false,
         landingDirBF: null,
         landingTime: time,
+        entryTime,
         impactSpeed: relativeVelocity.length(),
         peakHeatFlux,
+        peakG,
         samples,
       };
     }
@@ -209,8 +221,10 @@ export function predictEntry(
         lands: true,
         landingDirBF: inertialDirectionToBodyFixed(body, landingPosition, landingTime),
         landingTime,
+        entryTime,
         impactSpeed,
         peakHeatFlux,
+        peakG,
         samples,
       };
     }
@@ -221,8 +235,10 @@ export function predictEntry(
     lands: false,
     landingDirBF: null,
     landingTime: 0,
+    entryTime,
     impactSpeed: 0,
     peakHeatFlux,
+    peakG,
     samples,
   };
 }

@@ -12,6 +12,7 @@ describe('craft file validation', () => {
     const validated = validateCraftFile(diagnosticCraft);
     expect(validated).not.toBeNull();
     expect(validated!.parts).toHaveLength(20);
+    expect(validated!.actionGroups).toEqual({});
     const keys = new Set(validated!.parts.map((part) => part.key));
     expect(validated!.stages.flatMap((stage) => stage.partKeys).every((key) => keys.has(key))).toBe(true);
   });
@@ -23,6 +24,7 @@ describe('craft file validation', () => {
     expect(validated!.name).toBe(craft.name);
     expect(validated!.parts).toHaveLength(craft.parts.length);
     expect(validated!.stages).toEqual(craft.stages);
+    expect(validated!.actionGroups).toEqual({});
     expect(validated!.nextKey).toBeGreaterThan(Math.max(...craft.parts.map((p) => p.key)));
   });
 
@@ -75,5 +77,27 @@ describe('craft file validation', () => {
     expect(validated!.name).toHaveLength(80);
     const maxKey = Math.max(...validated!.parts.map((p) => p.key));
     expect(validated!.nextKey).toBe(maxKey + 1);
+  });
+
+  it('preserves valid action groups and discards bindings to missing parts', () => {
+    const craft = serialized();
+    const partKey = (craft.parts as Array<{ key: number }>)[0].key;
+    craft.actionGroups = {
+      1: [
+        { partKey, action: 'toggle' },
+        { partKey: 9999, action: 'activate' },
+      ],
+    };
+
+    expect(validateCraftFile(craft)!.actionGroups).toEqual({
+      1: [{ partKey, action: 'toggle' }],
+    });
+  });
+
+  it('rejects malformed action-group actions', () => {
+    const craft = serialized();
+    const partKey = (craft.parts as Array<{ key: number }>)[0].key;
+    craft.actionGroups = { 1: [{ partKey, action: 'explode' }] };
+    expect(validateCraftFile(craft)).toBeNull();
   });
 });

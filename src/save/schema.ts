@@ -11,17 +11,18 @@
  */
 import type { Vec3Like } from '../core/vec3';
 import type { QuatLike } from '../core/quat';
-import type { Craft, Stage, PartInstance } from '../sim/vessel';
+import type { ActionGroups, Craft, Stage, PartInstance } from '../sim/vessel';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 7;
 
 export interface SavedAlarm {
   id: string;
   time: number;
   label: string;
   kind: AlarmKind;
+  vesselId: string | null;
 }
 
 export interface SavedSurfacePose {
@@ -52,6 +53,7 @@ export interface SavedCraft {
   version: number;
   parts: SavedPart[];
   stages: Stage[];
+  actionGroups: ActionGroups;
   nextKey: number;
 }
 
@@ -87,6 +89,8 @@ export interface SavedVessel {
   railsLandedAtt: QuatLike | null;
   /** Body-fixed landed pose and terrain compatibility contract (v4). */
   surfacePose: SavedSurfacePose | null;
+  /** Optional body id selected for navigation and map readouts (v6). */
+  target: string | null;
 }
 
 export interface SaveGame {
@@ -107,6 +111,7 @@ export interface SaveGame {
 }
 
 const ALARM_KINDS: ReadonlySet<AlarmKind> = new Set(['custom', 'transfer', 'maneuver', 'entry']);
+const PART_ACTIONS = new Set(['toggle', 'activate', 'deactivate']);
 
 export function validateSave(raw: unknown): raw is SaveGame {
   if (typeof raw !== 'object' || raw === null) return false;
@@ -121,6 +126,11 @@ export function validateSave(raw: unknown): raw is SaveGame {
       if (!Number.isFinite(alarm.time)) return false;
       if (typeof alarm.label !== 'string' || !alarm.label.trim()) return false;
       if (!ALARM_KINDS.has(alarm.kind)) return false;
+      if (
+        (s.saveVersion ?? 0) >= 7
+        && alarm.vesselId !== null
+        && (typeof alarm.vesselId !== 'string' || !alarm.vesselId)
+      ) return false;
     }
   }
   for (const v of s.vessels) {
@@ -141,6 +151,25 @@ export function validateSave(raw: unknown): raw is SaveGame {
         if (!pose.directionBF || !Number.isFinite(pose.directionBF.x)) return false;
         if (!pose.attitudeBF || !Number.isFinite(pose.attitudeBF.w)) return false;
         if (!Number.isFinite(pose.contactOffset)) return false;
+      }
+    }
+    if ((s.saveVersion ?? 0) >= 6) {
+      if (v.target !== null && (typeof v.target !== 'string' || !v.target)) return false;
+      if (
+        typeof v.craft.actionGroups !== 'object'
+        || v.craft.actionGroups === null
+        || Array.isArray(v.craft.actionGroups)
+      ) return false;
+      for (const [rawGroup, assignments] of Object.entries(v.craft.actionGroups)) {
+        const group = Number(rawGroup);
+        if (!Number.isInteger(group) || group < 1 || group > 10 || !Array.isArray(assignments)) {
+          return false;
+        }
+        for (const assignment of assignments) {
+          if (typeof assignment !== 'object' || assignment === null) return false;
+          if (!Number.isInteger(assignment.partKey)) return false;
+          if (!PART_ACTIONS.has(assignment.action)) return false;
+        }
       }
     }
   }
@@ -174,6 +203,24 @@ export function migrateSave(raw: SaveGame): SaveGame {
     // scatter hash as an alias of the terrain hash; restoreGame rewrites those
     // aliases to each body's declared scatter recipe once the universe is known.
     save = { ...save, saveVersion: 5 };
+  }
+  if (save.saveVersion === 5) {
+    save = {
+      ...save,
+      saveVersion: 6,
+      vessels: save.vessels.map((vessel) => ({
+        ...vessel,
+        target: null,
+        craft: { ...vessel.craft, actionGroups: {} },
+      })),
+    };
+  }
+  if (save.saveVersion === 6) {
+    save = {
+      ...save,
+      saveVersion: 7,
+      alarms: save.alarms.map((alarm) => ({ ...alarm, vesselId: null })),
+    };
   }
   if (save.saveVersion !== SAVE_VERSION) {
     throw new Error(`No migration path from save version ${save.saveVersion}.`);

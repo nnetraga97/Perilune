@@ -8,6 +8,7 @@ import {
   createCraft,
   crossfeedComponent,
   G0,
+  partitionStages,
   removeSubtree,
 } from '../src/sim/vessel';
 import { evaluateStructure, splitAtJoint } from '../src/sim/structure';
@@ -65,6 +66,30 @@ export function buildStressVessel(n: number): Craft {
 }
 
 describe('craft graph', () => {
+  it('partitions and compacts stages without mutating the source plan', () => {
+    const stages = [
+      { partKeys: [1, 2] },
+      { partKeys: [3] },
+      { partKeys: [] },
+    ];
+
+    expect(partitionStages(stages, 1, new Set([2, 3]))).toEqual({
+      retained: {
+        stages: [{ partKeys: [1] }],
+        currentStage: 1,
+      },
+      detached: {
+        stages: [{ partKeys: [2] }, { partKeys: [3] }],
+        currentStage: 1,
+      },
+    });
+    expect(stages).toEqual([
+      { partKeys: [1, 2] },
+      { partKeys: [3] },
+      { partKeys: [] },
+    ]);
+  });
+
   it('computes mass properties for a two-stage rocket', () => {
     const craft = buildTwoStageRocket();
     const props = computeMassProperties(craft);

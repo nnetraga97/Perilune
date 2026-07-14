@@ -148,6 +148,24 @@ export function surfaceHeight(body: Body, dir: Readonly<Vec3>): number {
   return result.kind === 'none' ? 0 : result.height;
 }
 
+/** Local terrain slope in degrees, sampled in the body-fixed tangent plane. */
+export function surfaceSlopeDegrees(body: Body, dir: Readonly<Vec3>, spanMeters = 5): number {
+  if (body.def.surfaceKind !== 'solid' || !(spanMeters > 0)) return 0;
+  const site = new Vec3(dir.x, dir.y, dir.z).normalize();
+  const east = new Vec3(-site.y, site.x, 0);
+  if (east.lengthSq() < 1e-12) east.set(1, 0, 0);
+  east.normalize();
+  const north = Vec3.cross(site, east, new Vec3()).normalize();
+  const angularSpan = spanMeters / body.radius;
+  const sample = (axis: Readonly<Vec3>, sign: number): number => {
+    const sampleDir = site.clone().addScaled(axis, angularSpan * sign).normalize();
+    return surfaceHeight(body, sampleDir);
+  };
+  const riseEast = (sample(east, 1) - sample(east, -1)) / (2 * spanMeters);
+  const riseNorth = (sample(north, 1) - sample(north, -1)) / (2 * spanMeters);
+  return Math.atan(Math.hypot(riseEast, riseNorth)) * (180 / Math.PI);
+}
+
 /** True if the point is over ocean. */
 export function isOcean(body: Body, dir: Readonly<Vec3>): boolean {
   return waterSurfaceHeight(body, dir).kind === 'water';
