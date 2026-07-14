@@ -213,6 +213,7 @@ export interface PerfSnapshot {
 
 export class PerfOverlay {
   private el: HTMLDivElement;
+  private miniEl: HTMLDivElement;
   private frameTimes: number[] = [];
   private simMs = 0;
   private renderMs = 0;
@@ -222,6 +223,7 @@ export class PerfOverlay {
   private rendererMetrics: RendererPlatformMetrics | null = null;
   private gpuMetrics: ProductionGpuMetrics | null = null;
   visible = false;
+  private miniVisible = false;
 
   constructor(uiRoot: HTMLElement) {
     this.el = document.createElement('div');
@@ -233,12 +235,27 @@ export class PerfOverlay {
       white-space: pre; display: none; z-index: 50; color: var(--ui-fg);
     `;
     uiRoot.appendChild(this.el);
+    this.miniEl = document.createElement('div');
+    this.miniEl.id = 'perf-mini';
+    this.miniEl.style.cssText = `
+      position: absolute; top: 10px; left: 12px;
+      font-family: var(--ui-mono); font-size: 10px; line-height: 1.3;
+      color: #7d8b96; display: none; z-index: 30; pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+    `;
+    uiRoot.appendChild(this.miniEl);
     (window as unknown as { __PERF__: PerfSnapshot }).__PERF__ = this.snapshot();
   }
 
   toggle(): void {
     this.visible = !this.visible;
     this.el.style.display = this.visible ? 'block' : 'none';
+  }
+
+  /** Show/hide the compact always-on readout (flight screen only). */
+  setMiniVisible(visible: boolean): void {
+    this.miniVisible = visible;
+    this.miniEl.style.display = visible ? 'block' : 'none';
   }
 
   beginSim(): number {
@@ -276,6 +293,12 @@ export class PerfOverlay {
 
     const snap = this.snapshot(renderer);
     (window as unknown as { __PERF__: PerfSnapshot }).__PERF__ = snap;
+
+    if (this.miniVisible) {
+      this.miniEl.textContent =
+        `${snap.fps.toFixed(0)} fps · ${snap.frameMs.toFixed(1)} ms · ` +
+        `p95 ${snap.frameP95.toFixed(1)} · p99 ${snap.frameP99.toFixed(1)}`;
+    }
 
     if (this.visible) {
       let text =

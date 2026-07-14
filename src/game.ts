@@ -342,6 +342,7 @@ class PeriluneGame {
     this.editor.setVisible(false);
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
   }
 
   private toEditor(): void {
@@ -350,6 +351,7 @@ class PeriluneGame {
     this.editor.setVisible(true);
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
     void writeSave(this.game, 'auto', 'autosave');
   }
 
@@ -360,6 +362,7 @@ class PeriluneGame {
     this.hud.root.style.display = '';
     this.map.setVisible(false);
     this.map.visible = false;
+    this.perf.setMiniVisible(true);
     this.missionStart = this.game.time;
     this.hud.setMissionStart(this.missionStart);
   }
