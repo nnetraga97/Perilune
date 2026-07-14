@@ -133,6 +133,7 @@ export class FlightHud {
     mk('Revert', 'Revert to launch', cb.onRevert);
     mk('Editor', 'Back to the workshop', cb.onExitToEditor);
     this.scienceBtn = mk('Science', 'Run experiments here', cb.onRunScience);
+    this.scienceBtn.dataset.action = 'science';
     this.recoverBtn = mk('Recover', 'Recover vessel (ends flight)', cb.onRecover);
     this.recoverBtn.classList.add('hud-recover');
 

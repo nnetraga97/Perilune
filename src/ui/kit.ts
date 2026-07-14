@@ -18,6 +18,38 @@ export function el(tag: string, cls: string, parent: HTMLElement, text = ''): HT
 
 const STYLE_ID = 'ui-kit-style';
 
+let spotlightEl: HTMLElement | null = null;
+
+/**
+ * Highlight a UI element for the tutorial (or hide the highlight with null).
+ * Cheap enough to call per frame; hides itself when the target is not
+ * currently laid out (hidden screen, display:none ancestor).
+ */
+export function spotlight(target: Element | null): void {
+  if (!spotlightEl) {
+    if (!target) return;
+    injectUiStyles();
+    spotlightEl = document.createElement('div');
+    spotlightEl.className = 'k-spotlight';
+    document.body.appendChild(spotlightEl);
+  }
+  const visible = target instanceof HTMLElement && target.offsetParent !== null;
+  if (!visible) {
+    spotlightEl.style.display = 'none';
+    return;
+  }
+  const rect = target.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    spotlightEl.style.display = 'none';
+    return;
+  }
+  spotlightEl.style.display = 'block';
+  spotlightEl.style.left = `${rect.left - 4}px`;
+  spotlightEl.style.top = `${rect.top - 4}px`;
+  spotlightEl.style.width = `${rect.width + 8}px`;
+  spotlightEl.style.height = `${rect.height + 8}px`;
+}
+
 /**
  * Inject the consolidated stylesheet once. Every UI module calls this from
  * its constructor; repeat calls are no-ops.
@@ -40,6 +72,24 @@ export function injectUiStyles(): void {
       .k-key { font-family: var(--ui-mono); color: var(--ui-accent); min-width: 86px; }
       .k-key-label { color: #c4d2dd; }
       .k-sheet-hint { margin-top: 10px; font-size: 10.5px; color: #7d8b96; }
+      .k-launcher { position: absolute; top: 46px; left: 50%; transform: translateX(-50%);
+        display: flex; gap: 4px; z-index: 44; pointer-events: auto; }
+      .k-launcher-btn { font-size: 10px; padding: 2px 8px; opacity: 0.9; }
+      .k-launcher-btn.active { border-color: var(--ui-accent); background: #16303f; }
+      .k-window { position: absolute; min-width: 190px; max-width: 340px;
+        background: rgba(10,16,22,0.94); border: 1px solid #2a3d4d; border-radius: 8px;
+        z-index: 45; pointer-events: auto; }
+      .k-window-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+        cursor: grab; border-bottom: 1px solid #1a2833; user-select: none; }
+      .k-window-title { flex: 1; font-size: 10px; letter-spacing: 2px; color: #9fb4c4; }
+      .k-window-btn { background: none; border: none; color: #7d8b96; cursor: pointer;
+        font-size: 12px; padding: 0 3px; }
+      .k-window-btn:hover { color: #fff; }
+      .k-window-content { padding: 8px 10px; }
+      .k-spotlight { position: fixed; border: 2px solid var(--ui-warn); border-radius: 8px;
+        box-shadow: 0 0 12px rgba(226,177,60,0.55); pointer-events: none; z-index: 55;
+        transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out;
+        display: none; }
 
       /* ============================== flight HUD */
       .hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--ui-font); }

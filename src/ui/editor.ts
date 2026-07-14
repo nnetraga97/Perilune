@@ -137,6 +137,7 @@ export class Editor {
     const cats = el('div', 'ed-cats', left);
     for (const c of CATEGORIES) {
       const b = el('button', 'hud-btn ed-cat', cats, c.label);
+      b.dataset.cat = c.id;
       b.onclick = () => {
         this.activeCategory = c.id;
         this.renderPartList();
@@ -203,6 +204,7 @@ export class Editor {
     stagePanel.innerHTML = '<h3>STAGING (fires bottom-up)</h3>';
     const stageBtns = el('div', 'map-row', stagePanel);
     const autoBtn = el('button', 'hud-btn', stageBtns, 'Auto-stage');
+    autoBtn.dataset.action = 'auto-stage';
     autoBtn.onclick = () => {
       this.autoStage();
       this.statsDirty = true;

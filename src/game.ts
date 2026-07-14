@@ -34,6 +34,8 @@ import type { RenderStartupOptions } from './render/renderStartupOptions';
 import { surfaceVelocity } from './sim/bodyOrientation';
 import { InputService, type BindingScreen } from './ui/input';
 import { CheatSheet } from './ui/cheatSheet';
+import { WindowManager } from './ui/window';
+import { browserProfileStore } from './ui/profileStore';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -70,6 +72,7 @@ class PeriluneGame {
   private dialogEl: HTMLElement | null = null;
   private input = new InputService();
   private cheatSheet!: CheatSheet;
+  private windows!: WindowManager;
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
 
@@ -192,6 +195,12 @@ class PeriluneGame {
     window.addEventListener('pagehide', this.onPageHide);
     this.buildMenu();
     this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
+    this.windows = new WindowManager(this.uiRoot, browserProfileStore());
+    this.windows.addAction('⌨ Keys', 'Keyboard reference (?)', () => {
+      if (this.screen === 'flight' || this.screen === 'editor') {
+        this.cheatSheet.toggle(this.screen as BindingScreen);
+      }
+    });
     this.registerBindings();
     this.bindInput(canvas);
     document.getElementById('boot')?.remove();
@@ -349,6 +358,7 @@ class PeriluneGame {
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
+    this.windows.setScreen('menu');
   }
 
   private toEditor(): void {
@@ -358,6 +368,7 @@ class PeriluneGame {
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
+    this.windows.setScreen('editor');
     void writeSave(this.game, 'auto', 'autosave');
   }
 
@@ -369,6 +380,7 @@ class PeriluneGame {
     this.map.setVisible(false);
     this.map.visible = false;
     this.perf.setMiniVisible(true);
+    this.windows.setScreen('flight');
     this.missionStart = this.game.time;
     this.hud.setMissionStart(this.missionStart);
   }
@@ -781,6 +793,7 @@ class PeriluneGame {
     }
     this.perf.endRender(renderStart);
     this.perf.frame(dtMs, this.ctx.renderer);
+    this.windows.update();
 
     this.tutorial.update({ game: this.game, editor: this.editor, screen: this.screen });
 

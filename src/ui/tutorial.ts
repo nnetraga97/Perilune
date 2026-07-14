@@ -9,7 +9,7 @@ import { GameState } from '../sim/state';
 import { defOf } from '../sim/vessel';
 import { apoapsisOf, periapsisOf, stateToElements } from '../core/orbit';
 import type { Editor } from './editor';
-import { injectUiStyles } from './kit';
+import { injectUiStyles, spotlight } from './kit';
 
 export interface TutorialContext {
   game: GameState | null;
@@ -20,37 +20,45 @@ export interface TutorialContext {
 interface TutorialStep {
   title: string;
   text: string;
+  /** CSS selector of the control to spotlight while this step is active. */
+  highlight?: string;
   done(ctx: TutorialContext): boolean;
 }
 
 const STEPS: TutorialStep[] = [
   {
     title: 'Welcome to the Workshop',
+    highlight: '[data-cat="pods"]',
     text: 'Every journey starts with a crew cabin. Open the PODS category on the left and place a Voyager Pod.',
     done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).pod),
   },
   {
     title: 'Something to burn',
+    highlight: '[data-cat="tanks"]',
     text: 'Rockets are mostly propellant. From TANKS, attach a fuel tank below the pod (click the bottom attachment node).',
     done: (ctx) => ctx.editor.craft.parts.some((p) => (p.resources.propellant ?? 0) > 0),
   },
   {
     title: 'Something to burn it in',
+    highlight: '[data-cat="engines"]',
     text: 'From ENGINES, attach an engine below the tank. The K-45 "Pike" is a dependable choice.',
     done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).engine),
   },
   {
     title: 'The way back down',
+    highlight: '[data-cat="utility"]',
     text: 'From UTILITY, place a Homecoming Chute on top of the pod. Your pilot will thank you later.',
     done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).parachute),
   },
   {
     title: 'Set the staging',
+    highlight: '[data-action="auto-stage"]',
     text: 'Press AUTO-STAGE on the right so the engine fires at launch and the chute arms for descent. Check the Δv readout — 3,400 m/s or more will reach orbit.',
     done: (ctx) => ctx.editor.craft.stages.length >= 1,
   },
   {
     title: 'Fly',
+    highlight: '.ed-launch',
     text: 'Press LAUNCH. On the pad: hold Shift to throttle up, press SPACE to ignite. Climb straight up at first.',
     done: (ctx) => ctx.screen === 'flight' && (ctx.game?.active?.runtime.situation === 'flying' || ctx.game?.active?.runtime.situation === 'suborbital' || ctx.game?.active?.runtime.situation === 'orbit'),
   },
@@ -88,6 +96,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'Science!',
+    highlight: '[data-action="science"]',
     text: 'Press the SCIENCE button to record observations from orbit. Every new situation around every world has something to teach.',
     done: (ctx) => (ctx.game?.active?.runtime.scienceData.size ?? 0) > 0 || (ctx.game?.completedExperiments.size ?? 0) > 0,
   },
@@ -101,6 +110,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'Homecoming',
+    highlight: '.hud-recover',
     text: 'Press RECOVER to bring the crew and their science home. The Cooperative is very proud. Next stop: Palla — plan a transfer with a maneuver node in Map view (M).',
     done: (ctx) => ctx.game !== null && ctx.game.flags.recoveredOnce === true,
   },
@@ -150,6 +160,7 @@ export class Tutorial {
     this.dismissed = true;
     this.active = false;
     this.root.style.display = 'none';
+    spotlight(null);
   }
 
   get currentStep(): number {
@@ -163,9 +174,11 @@ export class Tutorial {
       this.dismiss();
       return;
     }
+    spotlight(step.highlight ? document.querySelector(step.highlight) : null);
     if (step.done(ctx)) {
       this.stepIndex++;
       if (this.stepIndex >= STEPS.length) {
+        spotlight(null);
         this.progressEl.textContent = 'TUTORIAL COMPLETE';
         this.titleEl.textContent = 'Per aspera ad astra';
         this.textEl.textContent = 'You have flown the full loop: build, launch, orbit, return. The sky is no longer the limit.';
