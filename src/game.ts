@@ -45,6 +45,7 @@ import { SaveSyncService } from './cloud/saveSync';
 import { SyncStore } from './cloud/syncStore';
 import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
+import { MainMenu } from './ui/mainMenu';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -61,7 +62,7 @@ class PeriluneGame {
   private gpuProfiler!: GpuSubmissionProfiler;
   private unsubscribeGpuRestoration: (() => void) | null = null;
   private screen: Screen = 'menu';
-  private menuEl!: HTMLElement;
+  private menu!: MainMenu;
   private uiRoot!: HTMLElement;
   private keys = new Set<string>();
   private dragging = false;
@@ -283,7 +284,22 @@ class PeriluneGame {
       onSettings: (settings) => this.applySettings(settings),
       onTelemetry: (enabled) => telemetry.setEnabled(enabled),
     });
-    this.buildMenu();
+    this.menu = new MainMenu(this.uiRoot, {
+      onFirstLight: () => {
+        this.newGame();
+        this.tutorial.start();
+        this.toEditor();
+      },
+      onSandbox: () => {
+        this.newGame();
+        this.toEditor();
+      },
+      onContinue: () => this.continueAutosave(),
+      onSaves: () => this.utilityTools.openSaves(),
+      onAccount: () => this.account.open(),
+      onSettings: () => this.utilityTools.openSettings(),
+    });
+    void this.refreshMenuSave();
     void this.auth.start();
     this.windows.addAction('keyboard', 'Keyboard reference (?)', () => {
       if (this.screen === 'flight' || this.screen === 'editor') {
@@ -395,51 +411,19 @@ class PeriluneGame {
   }
 
   // ------------------------------------------------------------------ menu
-  private buildMenu(): void {
-    this.menuEl = document.createElement('div');
-    this.menuEl.style.cssText = `
-      position: absolute; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 14px;
-      background: radial-gradient(ellipse at 50% 65%, #0a1826 0%, #04070a 75%);
-      pointer-events: auto; z-index: 40;
-    `;
-    this.menuEl.innerHTML = `
-      <div style="font-size:54px;letter-spacing:16px;color:#6db3d6;font-weight:300">PERILUNE</div>
-      <div style="font-size:12px;letter-spacing:3px;color:#7d8b96;margin-bottom:20px">A SPACE PROGRAM OF THE SKYWARD COOPERATIVE</div>
-    `;
-    const mkBtn = (label: string, fn: () => void) => {
-      const b = document.createElement('button');
-      b.className = 'hud-btn';
-      b.textContent = label;
-      b.style.cssText = 'width:260px;padding:10px;font-size:15px;';
-      b.onclick = fn;
-      this.menuEl.appendChild(b);
-      return b;
-    };
-    mkBtn('Begin — First Light (tutorial)', () => {
-      this.newGame();
-      this.tutorial.start();
-      this.toEditor();
-    });
-    mkBtn('Sandbox — just build and fly', () => {
-      this.newGame();
-      this.toEditor();
-    });
-    mkBtn('Save & Load', () => this.utilityTools.openSaves());
-    mkBtn('Account', () => this.account.open());
-    mkBtn('Settings', () => this.utilityTools.openSettings());
-    const cont = mkBtn('Continue from last save', async () => {
-      const save = await this.saveSync.read('auto');
-      if (save) {
-        this.game = restoreGame(save);
-        if (this.game.active) this.toFlight(false);
-        else this.toEditor();
-      }
-    });
-    this.saveSync.read('auto').then((s) => {
-      if (!s) cont.style.opacity = '0.4';
-    });
-    this.uiRoot.appendChild(this.menuEl);
+  private async continueAutosave(): Promise<void> {
+    const save = await this.saveSync.read('auto');
+    if (!save) {
+      this.menu.setContinueSave(null);
+      return;
+    }
+    this.game = restoreGame(save);
+    if (this.game.active) this.toFlight(false);
+    else this.toEditor();
+  }
+
+  private async refreshMenuSave(): Promise<void> {
+    this.menu.setContinueSave(await this.saveSync.read('auto'));
   }
 
   private newGame(): void {
@@ -449,19 +433,20 @@ class PeriluneGame {
 
   private showMenu(): void {
     this.screen = 'menu';
-    this.menuEl.style.display = 'flex';
+    this.menu.setVisible(true);
     this.editor.setVisible(false);
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
     this.windows.setLauncherHost(null);
     this.windows.setScreen('menu');
+    void this.refreshMenuSave();
   }
 
   private toEditor(): void {
     this.paused = false;
     this.screen = 'editor';
-    this.menuEl.style.display = 'none';
+    this.menu.setVisible(false);
     this.editor.setVisible(true);
     this.hud.root.style.display = 'none';
     this.map.setVisible(false);
@@ -474,7 +459,7 @@ class PeriluneGame {
   private toFlight(spawn = true): void {
     this.paused = false;
     this.screen = 'flight';
-    this.menuEl.style.display = 'none';
+    this.menu.setVisible(false);
     this.editor.setVisible(false);
     this.hud.root.style.display = '';
     this.map.setVisible(false);

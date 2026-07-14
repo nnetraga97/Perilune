@@ -403,6 +403,45 @@ export function injectUiStyles(): void {
         .hud-utility-host .k-launcher { max-width:262px; column-gap:2px; row-gap:0; }
       }
 
+      /* main menu */
+      .perilune-menu { position:absolute; inset:0; overflow:hidden; z-index:40; pointer-events:auto;
+        background:#03080d url('/ui/perilune-command-deck-bg.jpg') 72% center/cover no-repeat; }
+      .perilune-menu-vignette { position:absolute; inset:0; background:
+        linear-gradient(90deg,rgba(2,7,12,.86) 0%,rgba(2,7,12,.30) 52%,rgba(2,7,12,.15)),
+        linear-gradient(0deg,rgba(2,7,12,.72),transparent 42%); }
+      .perilune-menu-masthead { position:absolute; left:clamp(28px,6vw,96px); top:clamp(54px,11vh,116px); }
+      .perilune-menu-eyebrow { color:#9fb5c2; font-size:10px; letter-spacing:3px; }
+      .perilune-menu-logo { margin:9px 0 0; color:#a1dcf2; font-size:clamp(44px,6vw,82px); line-height:.92;
+        font-weight:300; letter-spacing:clamp(10px,1.6vw,22px); text-shadow:0 5px 24px rgba(50,151,195,.28); }
+      .perilune-menu-tagline { margin-top:14px; max-width:420px; color:#c0ccd2; font-size:12px; letter-spacing:.7px; }
+      .perilune-menu-build { position:absolute; top:28px; right:34px; color:#8da3af; font:9px var(--ui-mono); letter-spacing:1.5px; }
+      .perilune-command-deck { position:absolute; left:3.5vw; right:3.5vw; bottom:4vh; display:grid;
+        grid-template-columns:minmax(250px,1.5fr) minmax(190px,1fr) minmax(190px,1fr) auto; gap:8px;
+        padding:10px; background:linear-gradient(180deg,rgba(9,18,26,.86),rgba(5,11,17,.95));
+        border:1px solid rgba(100,163,193,.5); border-top-color:#73bfdf; backdrop-filter:blur(12px);
+        box-shadow:0 18px 50px rgba(0,0,0,.42); animation:menuDeckIn .45s ease-out both; }
+      .perilune-mission { min-height:76px; padding:12px 14px; text-align:left; color:#e8f0f3;
+        border:1px solid #345267; background:rgba(10,23,33,.68); cursor:pointer; }
+      .perilune-mission:hover { border-color:#8ed1ec; transform:translateY(-1px); }
+      .perilune-mission:focus-visible { border-color:#8ed1ec; outline:2px solid #f4c15f;
+        outline-offset:3px; transform:translateY(-1px); }
+      .perilune-mission-primary { border-color:#dca94a; background:linear-gradient(120deg,rgba(121,75,24,.56),rgba(28,36,39,.76)); }
+      .perilune-mission-eyebrow { display:block; color:#8fa7b4; font-size:8px; letter-spacing:2px; }
+      .perilune-mission-title { display:block; margin-top:5px; font-size:14px; letter-spacing:.8px; }
+      .perilune-mission-detail { display:block; margin-top:5px; color:#9fadb4; font-size:9px; }
+      .perilune-menu-utilities { grid-column:4; display:flex; align-items:center; gap:6px; padding:0 4px 0 10px; border-left:1px solid #29404f; }
+      .perilune-menu-utilities .k-icon-btn { width:42px; height:42px; }
+      @keyframes menuDeckIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+      @media (max-width:820px) {
+        .perilune-menu { background-position:68% center; }
+        .perilune-command-deck { grid-template-columns:1fr 1fr; bottom:20px; }
+        .perilune-menu-utilities { grid-column:1/-1; border-left:0; border-top:1px solid #29404f; padding:8px 0 0; }
+      }
+      @media (prefers-reduced-motion:reduce) {
+        .perilune-command-deck { animation:none; }
+        .perilune-mission,.k-icon-tooltip { transition:none; }
+      }
+
       /* ============================== tutorial */
       .tut-box { position: absolute; left: 260px; top: 56px; width: 320px;
         background: rgba(14,24,32,0.95); border: 1px solid var(--ui-accent);
