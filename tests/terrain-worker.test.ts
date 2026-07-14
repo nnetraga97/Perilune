@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { Vec3 } from '../src/core/vec3';
+import { launchPadTerrainEnvelope } from '../src/sim/terrain';
+import { LAUNCH_PAD_FOOTPRINT_RADIUS, launchSiteBodyFixedDirection } from '../src/sim/launchSite';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import {
   buildTerrainChunkGeometry,
@@ -15,7 +17,7 @@ import {
   type WorkerLike,
 } from '../src/render/terrain/chunkWorkerPool';
 import { handleTerrainChunkWorkerRequest } from '../src/render/terrain/chunkWorker';
-import { createTerrainTileId } from '../src/render/terrain/tile';
+import { CUBE_FACE_BASES, createTerrainTileId, type TerrainTileId } from '../src/render/terrain/tile';
 import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo } from '../src/render/planet';
 
 const veyra = new GameState().universe.get('veyra');
@@ -66,7 +68,101 @@ function absolutePosition(result: TerrainChunkGeometryResult, vertex: number): [
   ];
 }
 
+function tileAtDirection(direction: Readonly<Vec3>, depth: number): TerrainTileId {
+  let face = 0;
+  let faceScale = -Infinity;
+  for (let candidate = 0; candidate < 6; candidate++) {
+    const normal = CUBE_FACE_BASES[candidate as 0 | 1 | 2 | 3 | 4 | 5].n;
+    const scale = direction.x * normal[0] + direction.y * normal[1] + direction.z * normal[2];
+    if (scale > faceScale) {
+      face = candidate;
+      faceScale = scale;
+    }
+  }
+  const basis = CUBE_FACE_BASES[face as 0 | 1 | 2 | 3 | 4 | 5];
+  const u = Math.atan(
+    (direction.x * basis.u[0] + direction.y * basis.u[1] + direction.z * basis.u[2]) / faceScale,
+  ) / (Math.PI / 4);
+  const v = Math.atan(
+    (direction.x * basis.v[0] + direction.y * basis.v[1] + direction.z * basis.v[2]) / faceScale,
+  ) / (Math.PI / 4);
+  const count = 2 ** depth;
+  return createTerrainTileId(
+    face,
+    depth,
+    Math.max(0, Math.min(count - 1, Math.floor((u + 1) / 2 * count))),
+    Math.max(0, Math.min(count - 1, Math.floor((v + 1) / 2 * count))),
+  );
+}
+
+function rayMeshAltitude(
+  result: TerrainChunkGeometryResult,
+  direction: Readonly<Vec3>,
+  radius: number,
+  resolution: number,
+): number {
+  let nearest = Infinity;
+  const gridIndexCount = (resolution - 1) ** 2 * 6;
+  for (let start = 0; start < gridIndexCount; start += 3) {
+    const triangle = [result.index[start], result.index[start + 1], result.index[start + 2]];
+    const [a, b, c] = triangle.map((vertex) => absolutePosition(result, vertex));
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const p = [
+      direction.y * e2[2] - direction.z * e2[1],
+      direction.z * e2[0] - direction.x * e2[2],
+      direction.x * e2[1] - direction.y * e2[0],
+    ];
+    const determinant = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+    if (Math.abs(determinant) < 1e-9) continue;
+    const t = [-a[0], -a[1], -a[2]];
+    const u = (t[0] * p[0] + t[1] * p[1] + t[2] * p[2]) / determinant;
+    if (u < 0 || u > 1) continue;
+    const q = [
+      t[1] * e1[2] - t[2] * e1[1],
+      t[2] * e1[0] - t[0] * e1[2],
+      t[0] * e1[1] - t[1] * e1[0],
+    ];
+    const v = (direction.x * q[0] + direction.y * q[1] + direction.z * q[2]) / determinant;
+    if (v < 0 || u + v > 1) continue;
+    const distance = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / determinant;
+    if (distance > 0) nearest = Math.min(nearest, distance);
+  }
+  return nearest - radius;
+}
+
 describe('terrain chunk geometry builder', () => {
+  it('keeps the launchpad footprint above interpolated terrain at every LOD', () => {
+    const site = launchSiteBodyFixedDirection(new Vec3());
+    const east = new Vec3(-site.y, site.x, 0).normalize();
+    const north = Vec3.cross(site, east, new Vec3()).normalize();
+    const footprint = [site];
+    for (let index = 0; index < 8; index++) {
+      const angle = index / 8 * Math.PI * 2;
+      footprint.push(site.clone()
+        .addScaled(east, Math.cos(angle) * LAUNCH_PAD_FOOTPRINT_RADIUS / veyra.radius)
+        .addScaled(north, Math.sin(angle) * LAUNCH_PAD_FOOTPRINT_RADIUS / veyra.radius)
+        .normalize());
+    }
+    const deckHeight = launchPadTerrainEnvelope(veyra).deckHeight;
+    for (const resolution of [9, 17, 33]) {
+      for (let depth = 0; depth <= 16; depth++) {
+        const chunks = new Map<string, TerrainChunkGeometryResult>();
+        for (const direction of footprint) {
+          const tile = tileAtDirection(direction, depth);
+          const key = `${tile.face}/${tile.depth}/${tile.x}/${tile.y}`;
+          let chunk = chunks.get(key);
+          if (!chunk) {
+            chunk = buildTerrainChunkGeometry(request({ jobKey: key, tile, resolution }));
+            chunks.set(key, chunk);
+          }
+          expect(rayMeshAltitude(chunk, direction, veyra.radius, resolution), `resolution ${resolution}, depth ${depth}`)
+            .toBeLessThanOrEqual(deckHeight + 0.1);
+        }
+      }
+    }
+  });
+
   it('is deterministic, floating-origin independent, and agrees across a shared edge', () => {
     const leftRequest = request();
     const rightRequest = request({ jobKey: 'right', tile: createTerrainTileId(0, 1, 1, 0) });

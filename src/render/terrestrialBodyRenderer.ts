@@ -23,7 +23,8 @@ import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
-import { naturalContactSurface } from '../sim/terrain';
+import { launchPadTerrainEnvelope, naturalContactSurface } from '../sim/terrain';
+import { launchSiteBodyFixedDirection } from '../sim/launchSite';
 
 const PREWARM_RADIUS_MULTIPLIER = 70;
 const VISIBLE_RADIUS_MULTIPLIER = 60;
@@ -65,6 +66,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private compactAnchorHeight = 0;
   private compactAnchorSource: 'surface' | 'camera' | 'datum' = 'datum';
   private readonly compactAnchorDirection = new Vec3();
+  private readonly launchSiteDirection = new Vec3();
+  private readonly workerPool = typeof Worker === 'undefined'
+    ? undefined
+    : new TerrainChunkWorkerPool();
 
   constructor(
     private readonly body: Body,
@@ -148,7 +153,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
-      workerPool: typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool(),
+      workerPool: this.workerPool,
+      ownsWorkerPool: false,
       terrainAllocationBytes: allocation.allocationBytes,
       diagnostics: this.diagnostics,
       diagnosticSource: this.root.uuid,
@@ -266,6 +272,22 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.compactAnchorDirection.set(anchor.x / length, anchor.y / length, anchor.z / length);
     const surface = naturalContactSurface(this.body, this.compactAnchorDirection);
     this.compactAnchorHeight = surface.kind === 'none' ? 0 : surface.height;
+    if (this.body.id === 'veyra') {
+      const launchDirection = launchSiteBodyFixedDirection(this.launchSiteDirection);
+      const angularDistance = Math.acos(Math.max(-1, Math.min(1,
+        this.compactAnchorDirection.x * launchDirection.x
+          + this.compactAnchorDirection.y * launchDirection.y
+          + this.compactAnchorDirection.z * launchDirection.z,
+      )));
+      if (angularDistance * this.body.radius < 10_000) {
+        // The compact emergency sphere must remain below the visible deck
+        // until streamed terrain owns depth around Cape Skyward.
+        this.compactAnchorHeight = Math.min(
+          this.compactAnchorHeight,
+          launchPadTerrainEnvelope(this.body).deckHeight - 0.25,
+        );
+      }
+    }
     this.compactRadius = this.body.radius + this.compactAnchorHeight;
     this.compactAnchorSource = frame.surfaceAnchorBodyFixed ? 'surface' : 'camera';
     this.compact.scale.setScalar(this.compactRadius);
@@ -326,6 +348,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   dispose(): void {
     if (this.disposed) return;
     this.releaseStack();
+    this.workerPool?.dispose();
     this.disposed = true;
   }
 }

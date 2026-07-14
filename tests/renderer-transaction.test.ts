@@ -414,7 +414,7 @@ describe('transactional body renderer replacement', () => {
     expect(ledger.residentFlightBodyIds()).toEqual(['auren']);
   });
 
-  test('active-SOI transition releases the old owner then promotes an existing authored compact manager', async () => {
+  test('active-SOI transition releases the old claim without discarding its live renderer', async () => {
     const ledger = new RendererResourceLedger({
       activeBodyGpuBytes: { low: 100, medium: 100, high: 100 },
       transientPeakBytes: { low: 100, medium: 100, high: 100 },
@@ -458,7 +458,7 @@ describe('transactional body renderer replacement', () => {
     expect(world.retryActiveBodyRenderer()).toBe(true);
     expect(world.retryActiveBodyRenderer()).toBe(false);
     await vi.waitFor(() => expect(ledger.residentFlightBodyIds()).toEqual(['cinder']));
-    expect(a.manager.current()).toBeNull();
+    expect(a.manager.current()).toBe(a.made[0].renderer);
     expect(b.made).toHaveLength(3);
     expect(b.manager.current()).toBe(b.made[2].renderer);
     expect(promotionAttempts).toBe(2);

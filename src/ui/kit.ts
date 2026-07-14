@@ -114,6 +114,15 @@ export function injectUiStyles(): void {
         box-shadow: 0 0 12px rgba(226,177,60,0.55); pointer-events: none; z-index: 55;
         transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out;
         display: none; }
+      .k-render-failure { position:absolute; top:64px; left:50%; transform:translateX(-50%);
+        z-index:58; display:flex; align-items:center; gap:12px; max-width:min(680px,calc(100vw - 32px));
+        padding:9px 12px; border:1px solid var(--ui-warn); border-radius:7px;
+        background:rgba(24,18,8,.96); color:#f1dfae; font-size:12px; box-shadow:0 8px 28px rgba(0,0,0,.35); }
+      .k-render-failure[hidden] { display:none; }
+      .k-render-failure-message { flex:1; }
+      .k-render-failure-retry { border:1px solid #8f7335; border-radius:4px; padding:5px 9px;
+        background:#2b210d; color:#fff0c5; cursor:pointer; white-space:nowrap; }
+      .k-render-failure-retry:hover,.k-render-failure-retry:focus-visible { border-color:var(--ui-warn); }
 
       /* ============================== flight HUD */
       .hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--ui-font); }
@@ -123,6 +132,8 @@ export function injectUiStyles(): void {
         border-radius: 5px; padding: 4px 10px; font-size: 12px; cursor: pointer;
       }
       .hud-btn:hover { border-color: var(--ui-accent); color: #fff; }
+      .hud-btn:disabled { cursor: not-allowed; opacity: 0.42; border-color: #34434e; color: #788791; }
+      .hud-btn:disabled:hover { border-color: #34434e; color: #788791; }
       .hud-top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
         display: flex; gap: 14px; align-items: center; background: var(--ui-bg);
         border: 1px solid #223240; border-radius: 8px; padding: 6px 16px; pointer-events: auto; }
@@ -335,6 +346,7 @@ export function injectUiStyles(): void {
       .ed-name { background: #101c26; border: 1px solid #2a3d4d; color: var(--ui-fg);
         border-radius: 5px; padding: 4px 8px; width: 190px; font-size: 13px; }
       .ed-launch { border-color: var(--ui-good) !important; color: var(--ui-good) !important; font-weight: bold; }
+      .ed-launch:disabled { border-color: #34434e !important; color: #788791 !important; }
       .ed-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
         background: var(--ui-bg); border-radius: 6px; padding: 4px 14px; font-size: 11px; color: #9fb4c4; }
       .ed-craft-list { display: flex; flex-direction: column; gap: 3px; }

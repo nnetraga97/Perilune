@@ -1,5 +1,8 @@
 # Perilune Code Review — 2026-07-12
 
+> Historical review snapshot. Verification counts and current-state claims
+> below describe the repository on 2026-07-12 and are not live project status.
+
 **Scope:** The docs refreshed this cycle (`RENDERING.md`, `PERFORMANCE.md`, `STATUS.md`, the
 2026-07-10 planet-graphics spec, the 2026-07-11 Veyra surface-stack plan) plus a deep read of the
 rendering and architecture-critical modules: `src/render/planet.ts`, `worldScene.ts`,

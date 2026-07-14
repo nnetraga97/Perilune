@@ -13,6 +13,11 @@ export const LAUNCH_PAD_CONTACT_RADIUS = 9;
 export const LAUNCH_PAD_FOOTPRINT_RADIUS = 9.8;
 /** Separation kept between the deck and the highest terrain in its footprint. */
 export const LAUNCH_PAD_TERRAIN_CLEARANCE = 0.25;
+/** Flat authored terrain around the pad, with a broad graded approach. */
+export const LAUNCH_PAD_TERRAIN_FLAT_RADIUS = 80;
+export const LAUNCH_PAD_TERRAIN_BLEND_RADIUS = 450;
+/** Radius that is guaranteed maximum terrain LOD while the site is rendered. */
+export const LAUNCH_PAD_MAX_LOD_RADIUS = 40;
 
 /** Cape Skyward surface normal in the rotating body-fixed frame. */
 export function launchSiteBodyFixedDirection(out: Vec3): Vec3 {

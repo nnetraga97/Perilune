@@ -175,7 +175,7 @@ const _sPos = new Vec3();
  * @param density atmospheric density (kg/m^3)
  * @param speedOfSound m/s (0 = no atmosphere)
  * @param comY craft CoM height along craft Y (for CP lever arm)
- * @param controlPitchYaw normalized control input −1..1 (deflects control fins)
+ * @param controls normalized pitch/yaw/roll input (deflects control surfaces)
  * @param out result object (reused)
  */
 export function evaluateAero(
@@ -235,7 +235,11 @@ export function evaluateAero(
     let sinLocal = -Vec3.dot(_sNormal, _vDir); // flow onto the panel face
     if (surf.control) {
       // Control deflection adds effective incidence.
-      const cmd = controls.pitch * surf.normal.z + controls.yaw * surf.normal.x;
+      const rollMoment = surf.position.z * surf.normal.x - surf.position.x * surf.normal.z;
+      const rollSign = Math.abs(rollMoment) > 1e-6 ? Math.sign(rollMoment) : 0;
+      const cmd = controls.pitch * surf.normal.z
+        + controls.yaw * surf.normal.x
+        + controls.roll * rollSign;
       sinLocal += Math.sin(surf.maxDeflection) * Math.max(-1, Math.min(1, cmd));
     }
     // Stall: effectiveness collapses beyond ~20° incidence.

@@ -57,6 +57,8 @@ export interface PlanetRendererOptions {
   readonly oceanEnabled?: boolean;
   /** Ownership transfers to PlanetRenderer and is released by dispose(). */
   readonly workerPool?: TerrainChunkWorkerPool;
+  /** False when a longer-lived renderer owns and reuses the worker pool. */
+  readonly ownsWorkerPool?: boolean;
   readonly terrainAllocationBytes?: number;
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly now?: () => number;
@@ -215,6 +217,7 @@ export class PlanetRenderer {
       material: this.material,
       terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_ALLOCATION_BYTES,
       workerPool: options.workerPool,
+      ownsWorkerPool: options.ownsWorkerPool,
       now: options.now,
       diagnostics: options.diagnostics,
       diagnosticSource: options.diagnosticSource,

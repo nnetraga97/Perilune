@@ -207,6 +207,24 @@ export class BodyRendererManager {
     return this.enqueue(async () => { await this.transact(body, this.quality); });
   }
 
+  /** Release only the active-body budget claim while keeping visual state live. */
+  releaseFlightResidency(): void {
+    if (this.committed) this.options.ledger.release(this.ledgerOwner, this.committed.assets);
+  }
+
+  /** Reclaim an already-loaded flight-scale pack without rebuilding the renderer. */
+  claimFlightResidency(): boolean {
+    if (!this.committed?.assets.flightScale) return false;
+    this.options.ledger.assertCanStage(this.committed.renderer.quality, this.committed.assets);
+    this.options.ledger.commit(
+      this.ledgerOwner,
+      this.committed.body.id,
+      this.committed.renderer.quality,
+      this.committed.assets,
+    );
+    return true;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

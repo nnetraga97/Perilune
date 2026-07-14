@@ -107,7 +107,9 @@ describe('stage plans after vessel splits', () => {
     expect(game.fireStage(retained)).toBe(true);
     expect(game.fireStage(retained)).toBe(true);
 
-    const lower = game.vessels.find((gv) => gv !== retained)!;
+    const lower = game.vessels.find((gv) => (
+      gv !== retained && gv.runtime.craft.parts.some((part) => part.key === lowerEngine.key)
+    ))!;
     expect(stageKeys(retained)).toEqual([
       [middleEngine.key],
       [upperDec.key, upperEngine.key],

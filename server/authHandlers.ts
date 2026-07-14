@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { clientIp, HttpError, jsonError, jsonOk, methodNotAllowed, readJsonBody, requestId, safeHandlerError } from './http.js';
-import { rateLimitIdentity, type RateLimiter } from './rateLimit.js';
+import { rateLimitIdentity, rateLimitIpIdentity, type RateLimiter } from './rateLimit.js';
 
 interface AuthInput { email?: unknown; password?: unknown }
 
@@ -25,15 +25,28 @@ export function createAuthHandler(
       const password = typeof body.password === 'string' ? body.password : '';
       if (!EMAIL.test(email) || email.length > 320) throw new HttpError(400, 'INVALID_EMAIL', 'Enter a valid email address');
       if (password.length < 8 || password.length > 256) throw new HttpError(400, 'INVALID_PASSWORD', 'Password must be 8 to 256 characters');
-      const limit = await dependencies.limiter.consume(
-        mode,
-        rateLimitIdentity(email, clientIp(request)),
+      const ip = clientIp(request);
+      const identityLimit = await dependencies.limiter.consume(
+        `${mode}:identity`,
+        rateLimitIdentity(email, ip),
         mode === 'signup' ? 5 : 10,
         mode === 'signup' ? 900 : 600,
       );
-      if (!limit.allowed) {
+      const ipLimit = await dependencies.limiter.consume(
+        `${mode}:ip`,
+        rateLimitIpIdentity(ip),
+        mode === 'signup' ? 20 : 60,
+        mode === 'signup' ? 900 : 600,
+      );
+      if (!identityLimit.backendAvailable || !ipLimit.backendAvailable) {
+        return jsonError('AUTH_TEMPORARILY_UNAVAILABLE', 'Sign-in protection is temporarily unavailable.', 503, id, {
+          'Retry-After': '30',
+        });
+      }
+      if (!identityLimit.allowed || !ipLimit.allowed) {
+        const retryAfter = Math.max(identityLimit.retryAfterSeconds, ipLimit.retryAfterSeconds);
         return jsonError('RATE_LIMITED', 'Too many attempts. Try again later.', 429, id, {
-          'Retry-After': String(limit.retryAfterSeconds),
+          'Retry-After': String(retryAfter),
         });
       }
       if (mode === 'signup' && dependencies.adminSupabase) {

@@ -47,6 +47,43 @@ const _bodyQ = new Quat();
 const _starAbs = new Vec3();
 const _bodySunDir = new Vec3();
 const _drawingBufferSize = new THREE.Vector2();
+const _east = new Vec3();
+const _north = new Vec3();
+const _camOffset = new Vec3();
+const _craftRight = new Vec3();
+const _craftNose = new Vec3();
+const _craftUp = new Vec3();
+const _chaseForward = new Vec3();
+const _chaseRight = new Vec3();
+const _cameraFromBody = new Vec3();
+const _freeUp = new Vec3(0, 0, 1);
+const _cameraVelocity = new Vec3();
+const _renderOffset = new THREE.Vector3();
+const _previousCameraRotation = new THREE.Quaternion();
+const _targetCameraRotation = new THREE.Quaternion();
+const _skyColor = new THREE.Color();
+interface MutableVectorCoordinates { x: number; y: number; z: number }
+interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: number }
+interface MutableBodyRenderFrame {
+  cameraRelativeOrigin: MutableVectorCoordinates;
+  cameraBodyFixed: MutableVectorCoordinates;
+  surfaceAnchorBodyFixed?: MutableVectorCoordinates;
+  cameraBodyFixedVelocity: MutableVectorCoordinates;
+  verticalFovRadians: number;
+  drawingBufferHeight: number;
+  orientation: MutableQuaternionCoordinates;
+  cameraSunDirection: MutableVectorCoordinates;
+  bodySunDirection: MutableVectorCoordinates;
+  time: number;
+  deltaSeconds: number;
+  framePressure: boolean;
+  altitude: number;
+  allowFlightTerrain: boolean;
+}
+
+function copyCoordinates(target: MutableVectorCoordinates, source: Readonly<VectorCoordinates>): void {
+  target.x = source.x; target.y = source.y; target.z = source.z;
+}
 
 export function usesLegacyAtmosphereTint(rendererKind: BodyRendererKind | undefined): boolean {
   return rendererKind !== 'terrestrial';
@@ -86,14 +123,17 @@ export function bodyFixedCameraVelocity(
   current: VectorCoordinates,
   previous: Readonly<BodyRenderFrame> | undefined,
   deltaSeconds: number,
+  out: MutableVectorCoordinates = { x: 0, y: 0, z: 0 },
 ): VectorCoordinates {
-  if (!previous || !(deltaSeconds > 0)) return { x: 0, y: 0, z: 0 };
+  if (!previous || !(deltaSeconds > 0)) {
+    out.x = 0; out.y = 0; out.z = 0;
+    return out;
+  }
   const inverseDelta = 1 / deltaSeconds;
-  return {
-    x: (current.x - previous.cameraBodyFixed.x) * inverseDelta,
-    y: (current.y - previous.cameraBodyFixed.y) * inverseDelta,
-    z: (current.z - previous.cameraBodyFixed.z) * inverseDelta,
-  };
+  out.x = (current.x - previous.cameraBodyFixed.x) * inverseDelta;
+  out.y = (current.y - previous.cameraBodyFixed.y) * inverseDelta;
+  out.z = (current.z - previous.cameraBodyFixed.z) * inverseDelta;
+  return out;
 }
 
 export function pruneBodyFrameSamples(
@@ -137,8 +177,12 @@ export class WorldScene {
   private flightPromotedBodyId: string | null = null;
   private readonly flightPromotionPending = new Set<string>();
   private readonly flightPromotionFailed = new Set<string>();
+  private renderFailureState: { bodyId: string; message: string } | null = null;
   /** Last active vessel id, tracked for the read-only plume-count test probe. */
   private activeVesselId: string | null = null;
+  private readonly renderSet = new Set<string>();
+  private readonly sampledBodyIds = new Set<string>();
+  private readonly considerBodies: Body[] = [];
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -274,7 +318,8 @@ export class WorldScene {
         if (bodyId === this.flightTerrainBodyId && this.checkedPlanetManifest.hasPack(bodyId, tier)) {
           this.flightPromotedBodyId = bodyId;
         }
-      }).catch(() => undefined);
+        if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
+      }).catch((error) => this.noteRendererFailure(bodyId, error));
     }
   }
 
@@ -399,10 +444,11 @@ export class WorldScene {
         if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
           if (replacement) this.bodyRenderers.set(body.id, replacement);
           if (body.id === this.flightTerrainBodyId) this.flightPromotedBodyId = body.id;
+          if (this.renderFailureState?.bodyId === body.id) this.renderFailureState = null;
         } else {
           manager.dispose();
         }
-      }).catch(() => undefined);
+      }).catch((error) => this.noteRendererFailure(body.id, error));
     }
     return renderer;
   }
@@ -411,18 +457,10 @@ export class WorldScene {
     const previousId = this.flightTerrainBodyId;
     if (previousId !== bodyId && bodyId) this.flightPromotionFailed?.delete(bodyId);
     if (previousId && previousId !== bodyId) {
-      const manager = this.bodyRendererManagers?.get(previousId);
-      if (manager) {
-        manager.dispose();
-        this.bodyRendererManagers.delete(previousId);
-      }
-      const previous = this.bodyRenderers.get(previousId);
-      if (previous && !manager) {
-        this.scene.remove(previous.root);
-        previous.dispose();
-      }
-      this.bodyRenderers.delete(previousId);
-      this.flightPromotionPending?.delete(previousId);
+      // The previous primary is still rendered as a parent/sibling immediately
+      // after an SOI change. Release only its active-body budget claim; keep
+      // the manager, renderer, and loaded compact presentation alive.
+      this.bodyRendererManagers?.get(previousId)?.releaseFlightResidency();
       if (this.flightPromotedBodyId === previousId) this.flightPromotedBodyId = null;
     }
     this.flightTerrainBodyId = bodyId;
@@ -437,14 +475,21 @@ export class WorldScene {
     ) return;
     const manager = this.bodyRendererManagers?.get(bodyId);
     if (!manager?.current()) return;
+    if (manager.claimFlightResidency()) {
+      this.flightPromotedBodyId = bodyId;
+      if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
+      return;
+    }
     this.flightPromotionPending.add(bodyId);
     void manager.rebuildCommitted().then(() => {
       if (this.disposed || this.flightTerrainBodyId !== bodyId || this.bodyRendererManagers.get(bodyId) !== manager) return;
       const renderer = manager.current();
       if (renderer) this.bodyRenderers.set(bodyId, renderer);
       this.flightPromotedBodyId = bodyId;
-    }).catch(() => {
+      if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
+    }).catch((error) => {
       if (this.flightTerrainBodyId === bodyId) this.flightPromotionFailed.add(bodyId);
+      this.noteRendererFailure(bodyId, error);
     }).finally(() => {
       this.flightPromotionPending.delete(bodyId);
     });
@@ -455,8 +500,23 @@ export class WorldScene {
     const bodyId = this.flightTerrainBodyId;
     if (!bodyId || !this.flightPromotionFailed.has(bodyId)) return false;
     this.flightPromotionFailed.delete(bodyId);
+    if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
     this.promoteFlightRenderer(bodyId);
     return true;
+  }
+
+  rendererFailure(): Readonly<{ bodyId: string; message: string }> | null {
+    return this.renderFailureState;
+  }
+
+  private noteRendererFailure(bodyId: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.renderFailureState = { bodyId, message };
+    this.diagnostics?.anomaly('planet-asset-pack-unavailable', 'assets', {
+      body: bodyId,
+      message,
+      retryAvailable: bodyId === this.flightTerrainBodyId,
+    }, { bodyId });
   }
 
   /** Rebuild every renderer owned by this live scene after WebGL restoration. */
@@ -519,6 +579,18 @@ export class WorldScene {
     }
   }
 
+  /** Clear save-specific visuals while retaining loaders and body renderers. */
+  resetDynamicState(): void {
+    for (const visual of this.vesselVisuals.values()) {
+      this.scene.remove(visual.group);
+      disposeVesselVisual(visual);
+    }
+    this.vesselVisuals.clear();
+    this.activeVesselId = null;
+    this.lastBodyFrames.clear();
+    this.setFlightTerrainOwner(null);
+  }
+
   /**
    * Update the whole scene for this frame.
    * Returns the camera's absolute position for other systems (map etc).
@@ -543,10 +615,10 @@ export class WorldScene {
     // "horizon" space (up = away from body center).
     const up = _tmp.copy(v.pos).normalize();
     // Build a local frame: up + east.
-    const east = new Vec3(-up.y, up.x, 0);
+    const east = _east.set(-up.y, up.x, 0);
     if (east.lengthSq() < 1e-9) east.set(1, 0, 0);
     east.normalize();
-    const north = new Vec3();
+    const north = _north;
     Vec3.cross(up, east, north);
 
     const cy = Math.cos(this.camYaw);
@@ -554,10 +626,10 @@ export class WorldScene {
     const cp = Math.cos(this.camPitch);
     const sp = Math.sin(this.camPitch);
     // Camera offset from vessel (in the local horizon frame).
-    const camOffset = new Vec3();
-    const craftRight = v.att.rotate(new Vec3(1, 0, 0), new Vec3());
-    const craftNose = v.att.rotate(new Vec3(0, 1, 0), new Vec3());
-    const craftUp = v.att.rotate(new Vec3(0, 0, 1), new Vec3());
+    const camOffset = _camOffset.set(0, 0, 0);
+    const craftRight = v.att.rotate(_craftRight.set(1, 0, 0), _craftRight);
+    const craftNose = v.att.rotate(_craftNose.set(0, 1, 0), _craftNose);
+    const craftUp = v.att.rotate(_craftUp.set(0, 0, 1), _craftUp);
     let cameraUp = up;
     if (this.cameraMode === 'orbit') {
       camOffset
@@ -565,10 +637,10 @@ export class WorldScene {
         .addScaled(north, sy * cp * this.camDist)
         .addScaled(up, sp * this.camDist);
     } else if (this.cameraMode === 'chase') {
-      const chaseForward = craftNose.clone().addScaled(up, -craftNose.dot(up));
+      const chaseForward = _chaseForward.copy(craftNose).addScaled(up, -craftNose.dot(up));
       if (chaseForward.lengthSq() < 1e-8) chaseForward.copy(north);
       chaseForward.normalize();
-      const chaseRight = Vec3.cross(chaseForward, up, new Vec3()).normalize();
+      const chaseRight = Vec3.cross(chaseForward, up, _chaseRight).normalize();
       camOffset
         .addScaled(chaseForward, -cy * cp * this.camDist)
         .addScaled(chaseRight, sy * cp * this.camDist)
@@ -581,12 +653,12 @@ export class WorldScene {
       cameraUp = craftUp;
     } else {
       camOffset.set(cy * cp * this.camDist, sy * cp * this.camDist, sp * this.camDist);
-      cameraUp = new Vec3(0, 0, 1);
+      cameraUp = _freeUp;
     }
 
     // Keep the camera above authoritative terrain on solid bodies.
     if (body.def.surfaceKind === 'solid') {
-      const cameraFromBody = v.pos.clone().add(camOffset);
+      const cameraFromBody = _cameraFromBody.copy(v.pos).add(camOffset);
       if (cameraFromBody.lengthSq() > 0) {
         const ground = groundRadiusInertial(body, cameraFromBody, t) + 1.5;
         if (cameraFromBody.length() < ground) {
@@ -607,8 +679,10 @@ export class WorldScene {
 
     // ---- planets: full LOD for the SOI body and its close family; simple
     // spheres beyond.
-    const renderSet = new Set<string>();
-    const considerBodies: Body[] = [];
+    const renderSet = this.renderSet;
+    renderSet.clear();
+    const considerBodies = this.considerBodies;
+    considerBodies.length = 0;
     const consider = (candidate: Body | null): void => {
       if (candidate && !considerBodies.some((existing) => existing.id === candidate.id)) considerBodies.push(candidate);
     };
@@ -620,7 +694,8 @@ export class WorldScene {
       consider(sibling);
     }
 
-    const sampledBodyIds = new Set<string>();
+    const sampledBodyIds = this.sampledBodyIds;
+    sampledBodyIds.clear();
     for (const b of considerBodies) {
       game.universe.absolutePosition(b, t, _bodyAbs);
       Vec3.sub(_bodyAbs, _camAbs, _rel); // body center in camera-relative world
@@ -638,35 +713,45 @@ export class WorldScene {
       if (!renderer) continue;
       renderer.root.visible = true;
       const previousFrame = this.lastBodyFrames.get(b.id);
-      const cameraBodyFixedVelocity = bodyFixedCameraVelocity(_camBF, previousFrame, dt);
-      const frame: BodyRenderFrame = {
-        cameraRelativeOrigin: _rel,
-        cameraBodyFixed: _camBF,
-        surfaceAnchorBodyFixed,
-        cameraBodyFixedVelocity,
-        verticalFovRadians,
-        drawingBufferHeight,
-        orientation: _bodyQ,
-        cameraSunDirection: _sunDir,
-        bodySunDirection: _bodySunDir,
-        time: t,
-        deltaSeconds: dt,
-        framePressure: dt > 1 / 45,
-        altitude: dist - b.radius,
-        allowFlightTerrain: b.id === body.id && b.def.surfaceKind === 'solid',
-      };
-      const stableFrame: BodyRenderFrame = {
-        ...frame,
-        cameraRelativeOrigin: { ...frame.cameraRelativeOrigin },
-        cameraBodyFixed: { ...frame.cameraBodyFixed },
-        surfaceAnchorBodyFixed: frame.surfaceAnchorBodyFixed
-          ? { ...frame.surfaceAnchorBodyFixed }
-          : undefined,
-        cameraBodyFixedVelocity: { ...frame.cameraBodyFixedVelocity },
-        orientation: { ...frame.orientation },
-        cameraSunDirection: { ...frame.cameraSunDirection },
-        bodySunDirection: { ...frame.bodySunDirection },
-      };
+      bodyFixedCameraVelocity(_camBF, previousFrame, dt, _cameraVelocity);
+      let stableFrame = previousFrame as MutableBodyRenderFrame | undefined;
+      if (!stableFrame) {
+        stableFrame = {
+          cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
+          cameraBodyFixed: { x: 0, y: 0, z: 0 },
+          cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
+          verticalFovRadians: 0,
+          drawingBufferHeight: 0,
+          orientation: { x: 0, y: 0, z: 0, w: 1 },
+          cameraSunDirection: { x: 0, y: 0, z: 0 },
+          bodySunDirection: { x: 0, y: 0, z: 0 },
+          time: 0,
+          deltaSeconds: 0,
+          framePressure: false,
+          altitude: 0,
+          allowFlightTerrain: false,
+        };
+      }
+      copyCoordinates(stableFrame.cameraRelativeOrigin, _rel);
+      copyCoordinates(stableFrame.cameraBodyFixed, _camBF);
+      copyCoordinates(stableFrame.cameraBodyFixedVelocity, _cameraVelocity);
+      if (surfaceAnchorBodyFixed) {
+        stableFrame.surfaceAnchorBodyFixed ??= { x: 0, y: 0, z: 0 };
+        copyCoordinates(stableFrame.surfaceAnchorBodyFixed, surfaceAnchorBodyFixed);
+      } else {
+        stableFrame.surfaceAnchorBodyFixed = undefined;
+      }
+      copyCoordinates(stableFrame.orientation, _bodyQ);
+      stableFrame.orientation.w = _bodyQ.w;
+      copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
+      copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
+      stableFrame.verticalFovRadians = verticalFovRadians;
+      stableFrame.drawingBufferHeight = drawingBufferHeight;
+      stableFrame.time = t;
+      stableFrame.deltaSeconds = dt;
+      stableFrame.framePressure = dt > 1 / 30;
+      stableFrame.altitude = dist - b.radius;
+      stableFrame.allowFlightTerrain = b.id === body.id && b.def.surfaceKind === 'solid';
       this.lastBodyFrames.set(b.id, stableFrame);
       sampledBodyIds.add(b.id);
       renderer.update(stableFrame);
@@ -731,7 +816,7 @@ export class WorldScene {
       vis.group.position.set(_rel.x, _rel.y, _rel.z);
       vis.group.quaternion.set(rv.att.x, rv.att.y, rv.att.z, rv.att.w);
       const com = rv.massProps.com;
-      const offset = new THREE.Vector3(-com.x, -com.y, -com.z).applyQuaternion(vis.group.quaternion);
+      const offset = _renderOffset.set(-com.x, -com.y, -com.z).applyQuaternion(vis.group.quaternion);
       vis.group.position.x += offset.x;
       vis.group.position.y += offset.y;
       vis.group.position.z += offset.z;
@@ -740,16 +825,16 @@ export class WorldScene {
         1,
         this.bodyOf(game, gv).pressureAt(rv.pos.length() - this.bodyOf(game, gv).radius) / 101_325,
       );
-      syncVesselVisual(vis, rv.craft, rv.controls.throttle, pressureFrac, dt);
+      syncVesselVisual(vis, rv.craft, rv.controls.throttle, pressureFrac, dt, rv.crossfeedIndex);
     }
 
     // ---- camera orientation: look at the active vessel.
-    const previousCameraRotation = this.camera.quaternion.clone();
+    const previousCameraRotation = _previousCameraRotation.copy(this.camera.quaternion);
     this.camera.position.set(0, 0, 0);
     this.camera.up.set(cameraUp.x, cameraUp.y, cameraUp.z);
     this.camera.lookAt(-camOffset.x, -camOffset.y, -camOffset.z);
     if (this.cameraSmoothing && dt > 0) {
-      const targetCameraRotation = this.camera.quaternion.clone();
+      const targetCameraRotation = _targetCameraRotation.copy(this.camera.quaternion);
       this.camera.quaternion.copy(previousCameraRotation).slerp(targetCameraRotation, 1 - Math.exp(-dt * 12));
     }
 
@@ -760,7 +845,7 @@ export class WorldScene {
     if (atmo && legacyAtmosphereTint && alt < atmo.height) {
       const f = Math.max(0, 1 - alt / atmo.height);
       const dayness = Math.max(0, Vec3.dot(up, _sunDir));
-      const sky = new THREE.Color().setRGB(
+      const sky = _skyColor.setRGB(
         0.05 + 0.35 * f * dayness,
         0.07 + 0.5 * f * dayness,
         0.1 + 0.72 * f * dayness,

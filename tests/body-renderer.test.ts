@@ -217,7 +217,7 @@ describe('body renderer adapters', () => {
     expect(materialDispose).not.toHaveBeenCalled();
   });
 
-  test('losing the active vessel releases the previous flight renderer before returning', () => {
+  test('losing the active vessel preserves the previous renderer for rapid state recovery', () => {
     const root = new THREE.Group();
     const dispose = vi.fn();
     const previous = { root, dispose } as unknown as BodyRenderer;
@@ -232,8 +232,8 @@ describe('body renderer adapters', () => {
 
     world.update({ active: null } as never, 0);
 
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(scene.children).not.toContain(root);
+    expect(dispose).not.toHaveBeenCalled();
+    expect(scene.children).toContain(root);
   });
 
   test('setQuality retries only managers whose committed tier is still stale', async () => {

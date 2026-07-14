@@ -3,6 +3,11 @@ import { terrainFaceToDirection } from './chunkGeometry';
 import { nextTerrainSplitState, screenSpaceErrorPixels, type TerrainQualityPolicy } from './terrainPolicy';
 import type { PlanetSurfaceProvider, TerrainTileDescriptor } from './surfaceProvider';
 import { edgeNeighbor, terrainTileKey, terrainTileParent, type TerrainTileEdge } from './tile';
+import {
+  LAUNCH_PAD_MAX_LOD_RADIUS,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
+} from '../../sim/launchSite';
 
 export interface TerrainSelectionFrame {
   readonly cameraBodyFixed: VectorCoordinates;
@@ -150,9 +155,26 @@ export function selectTerrainDetail(
     });
     screenSpaceErrors.set(tile.key, sse);
     const previouslySplit = previousSplitKeys.has(tile.key);
-    const split = leaves.length + 3 < quality.maximumDesiredLeaves
-      && tile.id.depth < provider.maximumDepth
-      && nextTerrainSplitState(previouslySplit, sse, quality);
+    const launchSiteDot = provider.bodyId === 'veyra'
+      ? (
+          (bounds.center.x / Math.hypot(bounds.center.x, bounds.center.y, bounds.center.z))
+            * Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON)
+          + (bounds.center.y / Math.hypot(bounds.center.x, bounds.center.y, bounds.center.z))
+            * Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON)
+          + (bounds.center.z / Math.hypot(bounds.center.x, bounds.center.y, bounds.center.z))
+            * Math.sin(LAUNCH_SITE_LAT)
+        )
+      : -1;
+    const launchSiteDistance = provider.bodyId === 'veyra'
+      ? Math.acos(Math.max(-1, Math.min(1, launchSiteDot)))
+      : Infinity;
+    const forceLaunchSiteDetail = launchSiteDistance
+      <= bounds.angularRadius + LAUNCH_PAD_MAX_LOD_RADIUS / provider.radiusMeters;
+    const split = tile.id.depth < provider.maximumDepth
+      && (forceLaunchSiteDetail || (
+        leaves.length + 3 < quality.maximumDesiredLeaves
+        && nextTerrainSplitState(previouslySplit, sse, quality)
+      ));
     if (split !== previouslySplit) {
       changes.push(Object.freeze({ key: tile.key, depth: tile.id.depth, screenSpaceError: sse, split }));
     }

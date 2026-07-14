@@ -13,6 +13,7 @@ export interface TerrainChunkWorkerPoolOptions {
   readonly size?: number;
   readonly hardwareConcurrency?: number;
   readonly workerFactory?: TerrainWorkerFactory;
+  readonly jobTimeoutMs?: number;
 }
 
 export interface TerrainWorkerTimings {
@@ -32,6 +33,7 @@ interface Slot {
   worker: WorkerLike;
   job: Job | null;
   dead: boolean;
+  dispatchedAt: number;
 }
 
 /** Replacement workers allowed per slot before the slot is retired. */
@@ -53,6 +55,7 @@ export class TerrainChunkWorkerPool {
   private completed: TerrainChunkGeometryResult[] = [];
   private readonly buildTimings: number[] = [];
   private readonly factory: TerrainWorkerFactory;
+  private readonly jobTimeoutMs: number;
   private respawnsRemaining: number;
   private disposed = false;
 
@@ -61,8 +64,14 @@ export class TerrainChunkWorkerPool {
     const size = options.size ?? terrainWorkerPoolSize(hardwareConcurrency);
     if (!Number.isInteger(size) || size < 1) throw new RangeError(`Invalid worker pool size ${size}`);
     this.factory = options.workerFactory ?? productionWorker;
+    this.jobTimeoutMs = options.jobTimeoutMs ?? 15_000;
+    if (!Number.isFinite(this.jobTimeoutMs) || this.jobTimeoutMs <= 0) {
+      throw new RangeError(`Invalid terrain worker timeout ${this.jobTimeoutMs}`);
+    }
     this.respawnsRemaining = size * RESPAWNS_PER_SLOT;
-    this.slots = Array.from({ length: size }, () => ({ worker: this.factory(), job: null, dead: false }));
+    this.slots = Array.from({ length: size }, () => ({
+      worker: this.factory(), job: null, dead: false, dispatchedAt: 0,
+    }));
     for (const slot of this.slots) this.wireSlot(slot);
   }
 
@@ -90,6 +99,17 @@ export class TerrainChunkWorkerPool {
   availableSlots(): number {
     if (this.disposed) return 0;
     return this.slots.filter((slot) => !slot.dead && slot.job === null).length;
+  }
+
+  /** Fail and replace workers whose dispatched job stopped making progress. */
+  checkHealth(now = performance.now()): void {
+    if (this.disposed) return;
+    for (const slot of this.slots) {
+      if (!slot.job || slot.dead || now - slot.dispatchedAt <= this.jobTimeoutMs) continue;
+      this.fail(slot, new Error(
+        `Terrain worker timed out after ${Math.round(now - slot.dispatchedAt)} ms`,
+      ));
+    }
   }
 
   /** Cancel work that has not reached a worker. Building jobs are immutable. */
@@ -154,10 +174,12 @@ export class TerrainChunkWorkerPool {
         const job = this.queue.shift();
         if (!job) return;
         slot.job = job;
+        slot.dispatchedAt = performance.now();
         try {
           slot.worker.postMessage(job.request);
         } catch (cause) {
           slot.job = null;
+          slot.dispatchedAt = 0;
           if (this.jobs.get(job.request.jobKey) === job) {
             this.jobs.delete(job.request.jobKey);
             job.reject(cause instanceof Error ? cause : new Error(String(cause)));
@@ -170,6 +192,7 @@ export class TerrainChunkWorkerPool {
   private complete(slot: Slot, result: TerrainChunkGeometryResult): void {
     const dispatched = slot.job;
     slot.job = null;
+    slot.dispatchedAt = 0;
     if (
       dispatched?.request.jobKey === result.jobKey &&
       dispatched.request.generation === result.generation
@@ -189,6 +212,7 @@ export class TerrainChunkWorkerPool {
   private fail(slot: Slot, error: Error): void {
     const dispatched = slot.job;
     slot.job = null;
+    slot.dispatchedAt = 0;
     if (dispatched && this.jobs.get(dispatched.request.jobKey) === dispatched) {
       this.jobs.delete(dispatched.request.jobKey);
       dispatched.reject(error);

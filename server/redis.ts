@@ -6,7 +6,11 @@ export interface CacheStore {
   getJson<T>(key: string): Promise<T | null>;
   setJson(key: string, value: unknown, ttlSeconds: number): Promise<void>;
   delete(...keys: string[]): Promise<void>;
-  increment(key: string, windowSeconds: number): Promise<{ count: number; ttlSeconds: number }>;
+  increment(key: string, windowSeconds: number): Promise<{
+    count: number;
+    ttlSeconds: number;
+    available?: boolean;
+  }>;
 }
 
 let clientPromise: Promise<RedisClientType | null> | null = null;
@@ -54,18 +58,22 @@ export function createCacheStore(env: Pick<ServerEnv, 'redisUrl'>): CacheStore {
         console.warn('Redis cache invalidation failed', error instanceof Error ? error.message : 'unknown');
       }
     },
-    async increment(key, windowSeconds): Promise<{ count: number; ttlSeconds: number }> {
+    async increment(key, windowSeconds): Promise<{
+      count: number;
+      ttlSeconds: number;
+      available?: boolean;
+    }> {
       const client = await connectedClient(env.redisUrl);
-      if (!client) return { count: 0, ttlSeconds: windowSeconds };
+      if (!client) return { count: 0, ttlSeconds: windowSeconds, available: false };
       try {
         const count = await client.incr(key);
         if (count === 1) await client.expire(key, windowSeconds);
         const ttl = await client.ttl(key);
-        return { count, ttlSeconds: ttl > 0 ? ttl : windowSeconds };
+        return { count, ttlSeconds: ttl > 0 ? ttl : windowSeconds, available: true };
       } catch (error) {
         captureServerWarning('rate_limit', 'redis');
         console.warn('Redis rate limit unavailable', error instanceof Error ? error.message : 'unknown');
-        return { count: 0, ttlSeconds: windowSeconds };
+        return { count: 0, ttlSeconds: windowSeconds, available: false };
       }
     },
   };

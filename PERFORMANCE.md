@@ -1,7 +1,8 @@
 # Perilune — Performance Log
 
-Budgets, benchmark history, and profiling notes. CI target: `npm run bench`
-must stay within budgets; regressions fail review.
+Budgets, benchmark history, and profiling notes. `npm run bench` records the
+numerical benchmarks; release review compares them with the tables below.
+The current CI invocation does not automatically enforce every frame budget.
 
 ## Frame budget (60 FPS = 16.7 ms)
 
@@ -52,11 +53,15 @@ the main thread if real-device profiling shows the 8 ms build spikes.
 - Numerics: TypeScript, no WASM (ADR-001) — 5–15× headroom.
 - Terrain: quadtree cube-sphere + floating origin works orbit→ground with
   crack-free skirts and stable memory (ADR-003 validated in-browser).
-- Workers: **not required at current scale** (sim ≤ 8 ms worst including
-  mesh builds). Revisit for chunk building + trajectory sweeps if profiling
-  on target hardware demands it.
+- Workers: terrain mesh construction now uses a reusable pool of up to four
+  workers. Jobs have a watchdog, bounded respawn, and a no-progress anomaly;
+  desired leaves are capped after neighbor balancing.
+- Crossfeed: vessel geometry builds a cached component index once; the 50 Hz
+  engine path and per-frame plume/HUD reads reuse it rather than rebuilding a
+  graph per engine.
 - Save serialization: craft/vessel state is plain JSON data by construction;
-  round-trip is covered by the save-system unit tests in M1.
+  periodic autosaves are scheduled during browser idle time; round-trip is
+  covered by the save-system tests.
 - Renderer capability: WebGL2 is required and receives an explicit capability
   screen when unavailable. WebGPU is not detected or used, and there is no
   WebGL1 fallback. Software WebGL2 remains useful for correctness smoke tests,

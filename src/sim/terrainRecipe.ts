@@ -6,8 +6,13 @@ import {
   NOISE3_GRADIENT_BOUND,
   NOISE3_VALUE_BOUND,
 } from '../core/noise';
-import type { Vec3 } from '../core/vec3';
 import type { Body, TerrainDef } from './universe';
+import {
+  LAUNCH_PAD_TERRAIN_BLEND_RADIUS,
+  LAUNCH_PAD_TERRAIN_FLAT_RADIUS,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
+} from './launchSite';
 
 export interface CraterFeature {
   readonly center: { readonly x: number; readonly y: number; readonly z: number };
@@ -18,6 +23,7 @@ export interface CraterFeature {
 
 export interface BodyFeatureRecipe {
   readonly bodyId: string;
+  readonly radiusMeters: number;
   readonly version: number;
   readonly hash: string;
   readonly terrain: Readonly<TerrainDef>;
@@ -33,6 +39,12 @@ export interface TerrainRecipeBounds {
 
 const recipes = new WeakMap<Body, BodyFeatureRecipe>();
 const MASK_64 = (1n << 64n) - 1n;
+const CAPE_SKYWARD = Object.freeze({
+  x: Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON),
+  y: Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON),
+  z: Math.sin(LAUNCH_SITE_LAT),
+});
+const capeSkywardHeight = new Map<string, number>();
 
 function fnv1a64(text: string, offset: bigint): string {
   let hash = offset;
@@ -76,6 +88,7 @@ export function recipeForBody(body: Body): BodyFeatureRecipe {
   const terrain = Object.freeze({ ...body.def.terrain });
   const recipe = Object.freeze({
     bodyId: body.id,
+    radiusMeters: body.radius,
     version: body.def.terrainRecipeVersion,
     hash: contentHash(recipeContent(body, craters)),
     terrain,
@@ -182,7 +195,35 @@ export function terrainRecipeBounds(recipe: Readonly<BodyFeatureRecipe>): Terrai
 /** The only evaluator for collision-scale terrain height. */
 export function evaluateRecipeHeight(
   recipe: BodyFeatureRecipe,
-  direction: Readonly<Vec3>,
+  direction: Readonly<{ x: number; y: number; z: number }>,
+): number {
+  const naturalHeight = evaluateNaturalRecipeHeight(recipe, direction);
+  if (recipe.bodyId !== 'veyra') return naturalHeight;
+
+  // Cape Skyward is authored into the same immutable terrain recipe consumed
+  // by physics, workers, and baked assets. A flat center plus a wide smooth
+  // grade ensures nearby LOD vertices cannot bridge a steep hillside over the
+  // small physical deck footprint.
+  const dot = Math.max(-1, Math.min(1,
+    direction.x * CAPE_SKYWARD.x + direction.y * CAPE_SKYWARD.y + direction.z * CAPE_SKYWARD.z,
+  ));
+  const distanceMeters = Math.acos(dot) * recipe.radiusMeters;
+  if (distanceMeters >= LAUNCH_PAD_TERRAIN_BLEND_RADIUS) return naturalHeight;
+  let plateauHeight = capeSkywardHeight.get(recipe.hash);
+  if (plateauHeight === undefined) {
+    plateauHeight = evaluateNaturalRecipeHeight(recipe, CAPE_SKYWARD);
+    capeSkywardHeight.set(recipe.hash, plateauHeight);
+  }
+  if (distanceMeters <= LAUNCH_PAD_TERRAIN_FLAT_RADIUS) return plateauHeight;
+  const t = (distanceMeters - LAUNCH_PAD_TERRAIN_FLAT_RADIUS)
+    / (LAUNCH_PAD_TERRAIN_BLEND_RADIUS - LAUNCH_PAD_TERRAIN_FLAT_RADIUS);
+  const smooth = t * t * (3 - 2 * t);
+  return plateauHeight + (naturalHeight - plateauHeight) * smooth;
+}
+
+function evaluateNaturalRecipeHeight(
+  recipe: BodyFeatureRecipe,
+  direction: Readonly<{ x: number; y: number; z: number }>,
 ): number {
   const terrain = recipe.terrain;
   if (terrain.amplitude === 0) return 0;

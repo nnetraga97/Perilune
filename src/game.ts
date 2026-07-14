@@ -46,6 +46,7 @@ import { SyncStore } from './cloud/syncStore';
 import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
 import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
+import { el, injectUiStyles } from './ui/kit';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -80,6 +81,7 @@ class PeriluneGame {
   private paused = false;
   private uiHidden = false;
   private lastAutosave = 0;
+  private autosaveScheduled = false;
   private comms: CommsStatus = { connected: true, path: [], strength: 1 };
   private lastCommsCheck = 0;
   private controlBlocked = false;
@@ -96,6 +98,9 @@ class PeriluneGame {
   private unsubscribeMenuSave: (() => void) | null = null;
   private account!: AccountWindow;
   private uiSettings: UiSettings | null = null;
+  private rendererFailureEl: HTMLElement | null = null;
+  private rendererFailureMessage: HTMLElement | null = null;
+  private reportedRendererFailure = '';
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
 
@@ -174,6 +179,13 @@ class PeriluneGame {
       quality: this.renderOptions.quality,
       diagnostics: this.diagnostics,
     });
+    injectUiStyles();
+    this.rendererFailureEl = el('div', 'k-render-failure', this.uiRoot);
+    this.rendererFailureMessage = el('span', 'k-render-failure-message', this.rendererFailureEl);
+    const retryRenderer = el('button', 'k-render-failure-retry', this.rendererFailureEl, 'Retry visuals');
+    retryRenderer.setAttribute('type', 'button');
+    retryRenderer.addEventListener('click', () => this.world.retryActiveBodyRenderer());
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
@@ -439,6 +451,7 @@ class PeriluneGame {
     this.perf.setMiniVisible(false);
     this.windows.setLauncherHost(null);
     this.windows.setScreen('menu');
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
   }
 
   private toEditor(): void {
@@ -451,6 +464,7 @@ class PeriluneGame {
     this.perf.setMiniVisible(false);
     this.windows.setLauncherHost(this.editor.utilityHost);
     this.windows.setScreen('editor');
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
     void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
@@ -503,6 +517,20 @@ class PeriluneGame {
     });
   }
 
+  private scheduleAutosave(): void {
+    if (this.autosaveScheduled) return;
+    this.autosaveScheduled = true;
+    const run = () => {
+      this.autosaveScheduled = false;
+      void this.saveSync.write(this.game, 'auto', 'autosave');
+    };
+    if ('requestIdleCallback' in window) {
+      window.requestIdleCallback(run, { timeout: 5_000 });
+    } else {
+      globalThis.setTimeout(run, 0);
+    }
+  }
+
   private async quickLoad(): Promise<void> {
     await this.loadSlot('quick');
   }
@@ -511,11 +539,7 @@ class PeriluneGame {
     const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save);
-    this.world.dispose();
-    this.world = new WorldScene(this.ctx, this.partModels, {
-      quality: this.renderOptions.quality,
-      diagnostics: this.diagnostics,
-    });
+    this.world.resetDynamicState();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
@@ -986,7 +1010,8 @@ class PeriluneGame {
     const now = performance.now();
     const dtMs = now - this.lastFrame;
     this.lastFrame = now;
-    const dt = Math.min(0.1, dtMs / 1000);
+    const realDt = dtMs > 1_000 ? 0 : Math.max(0, dtMs / 1000);
+    const dt = Math.min(0.1, realDt);
 
     const simStart = this.perf.beginSim();
     if (this.screen === 'flight') {
@@ -1003,13 +1028,27 @@ class PeriluneGame {
       if (!this.paused) {
         if (!this.controlBlocked) this.applyContinuousInput(dt);
         this.updateNodeAssist(dt);
-        this.game.update(dt);
+        this.game.update(realDt);
         for (const alarm of this.game.consumeFiredAlarms()) {
           const vessel = (alarm.vesselId
             ? this.game.vessels.find((candidate) => candidate.runtime.id === alarm.vesselId)
             : this.game.active)?.runtime;
           if (vessel) logEvent(vessel, this.game.time, `Alarm: ${alarm.label}`, 'warning');
           this.missionTools.showFiredAlarm(alarm);
+        }
+      }
+
+      const rendererFailure = this.world.rendererFailure();
+      if (this.rendererFailureEl && this.rendererFailureMessage) {
+        this.rendererFailureEl.hidden = !rendererFailure;
+        if (rendererFailure) {
+          this.rendererFailureMessage.textContent =
+            `Detailed planet visuals for ${rendererFailure.bodyId} could not load. Procedural fallback active.`;
+          const signature = `${rendererFailure.bodyId}:${rendererFailure.message}`;
+          if (signature !== this.reportedRendererFailure) {
+            this.reportedRendererFailure = signature;
+            telemetry.captureError(new Error(`Planet renderer degraded: ${signature}`));
+          }
         }
       }
 
@@ -1022,7 +1061,7 @@ class PeriluneGame {
       // Periodic autosave (wall-clock; skips high warp to avoid stutter).
       if (!this.paused && now - this.lastAutosave > 120_000 && this.game.warpRate <= 5) {
         this.lastAutosave = now;
-        void this.saveSync.write(this.game, 'auto', 'autosave');
+        this.scheduleAutosave();
       }
 
       // Destruction dialog.

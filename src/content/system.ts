@@ -119,7 +119,7 @@ export const AUREN_SYSTEM: BodyDef[] = [
     rotationPeriod: 27_000, // 7.5 hour day
     axialTilt: 12 * DEG,
     surfaceKind: 'solid',
-    terrainRecipeVersion: 1,
+    terrainRecipeVersion: 2,
     parent: 'auren',
     color: '#5fa8d3',
     scienceValue: 1,

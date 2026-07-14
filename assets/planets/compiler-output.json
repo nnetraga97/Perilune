@@ -81,8 +81,8 @@
     {
       "bodyId": "veyra",
       "surfaceKind": "solid",
-      "recipeVersion": 1,
-      "recipeHash": "92b8a8cfa5b49226469a8f275292608d",
+      "recipeVersion": 2,
+      "recipeHash": "44abd8aeafa906052576df19f768536e",
       "rawHeightSha256": "2e237219e1d9896f44791f962b8d54769c357c0254ab0d3dca333677f8668f3d"
     },
     {
@@ -99,13 +99,13 @@
     "rawHashes": {
       "albedo": "397af7d42a4f0f9151a3de8593094cd73d1e88a8948d69b97f66d9c4e6940c04",
       "normal": "cf5eb48f452b2535f79400fddbd1b72cb4e7469509693927d153a9492c6e7745",
-      "material": "ddedcc35548125de7da3d7f4c5fe867777350df91846e06b5b4088ed49b05afb",
+      "material": "0539311725e303c60b51a208d60a2f24e1d46b01a9c17bb6e8bdcbd66271ef02",
       "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
     },
-    "identitySha256": "04f2625d2aaf7655ab695c0975ee92abd19fd2dc476bfb02f00b0f613006148d",
+    "identitySha256": "e02ff53b3b7b744eb6c7c5f87aabef103c2e598962b69ec568779318a1a461f5",
     "heightArtifact": {
       "path": "generated/veyra/canonical/height.s16le",
-      "checksumSha256": "7ca283b3c5d91290d7050915030193d13bb78917207a1c1819ccd6a0a1f71488",
+      "checksumSha256": "682dd15caead1154458581d2b40f23f9d79697cf401bf723a9adfba063b821e5",
       "quantizationMeters": 0.5,
       "byteOrder": "little-endian"
     }
@@ -113,11 +113,11 @@
   "veyraScatter": {
     "path": "generated/veyra/canonical/scatter.json",
     "runtimePath": "src/generated/veyra-scatter.json",
-    "scatterRecipeHash": "a486833c1abdb3bb5837db1558b8129a",
-    "terrainRecipeHash": "92b8a8cfa5b49226469a8f275292608d",
-    "recordCount": 994,
-    "cellCount": 783,
+    "scatterRecipeHash": "542b11adb433592db9861718871de672",
+    "terrainRecipeHash": "44abd8aeafa906052576df19f768536e",
+    "recordCount": 979,
+    "cellCount": 784,
     "cellResolution": 32,
-    "checksumSha256": "796a1d31bb824c7255ae59c728e60fce06c5a1e71f3fd7e65b455f241352b81e"
+    "checksumSha256": "afe4e970965af2a1d52cab2027f63da16d9a6ec4912f4c21b85da2ee0fe7da53"
   }
 }

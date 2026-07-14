@@ -6,34 +6,40 @@ All simulation is TypeScript (f64 throughout, ADR-001). Fixed timestep
 
 ## Two regimes (ADR-004)
 
-- **Active**: the controlled vessel and neighbors within 20 km — full 6-DOF.
+- **Active**: the controlled vessel plus same-SOI neighbors that wake inside
+  2.5 km and sleep outside 4 km — full 6-DOF. The hysteresis prevents regime
+  thrashing; the separate 20 km threshold is used only for distant debris culling.
 - **Rails**: everyone else — exact conic propagation from orbital elements;
   landed vessels store a body-fixed pose. Transitions are lossless
   (elements ↔ state round-trip tested to 1e-9 relative).
 
 ## Orbital mechanics
 
-- Classical elements with Kepler solvers (Newton) for elliptic and
-  hyperbolic regimes; universal-variable propagation (Stumpff functions)
-  for arbitrary states, verified against analytic propagation.
-- Patched conics with spheres of influence `r = a·(m/M)^(2/5)`; SOI
-  transitions handled in both regimes with exact frame re-expression.
+- Runtime rails use classical elements with guarded Kepler solvers for elliptic
+  and hyperbolic regimes. Near-parabolic states are regularized onto the correct
+  side of `e=1`; the standalone universal-variable propagator remains available
+  for arbitrary-state calculations and numerical verification.
+- Patched conics with spheres of influence `r = a·(m/M)^(2/5)`; rails warp
+  searches continuously for radial hazards and adaptively for moving child SOIs,
+  then re-expresses state in the new frame at the crossing time.
 - Maneuver nodes are impulsive Δv in the RTN frame; trajectory prediction
-  chains conics and finds moon encounters by analytic scan + bisection
+  chains conics and finds moon encounters by adaptive scan + bisection
   (`src/sim/maneuver.ts`).
 
 ## Vessel dynamics
 
 - One welded rigid body per vessel (no joint springs). Mass, CoM, and a
-  diagonal inertia tensor recomputed as fuel drains.
+  diagonal inertia tensor recomputed as fuel drains. Part-local inertia is
+  rotated into craft axes and integration includes the gyroscopic term.
 - **Structure**: O(n) analytic joint-load pass; per-joint axial and bending
   limits from contact area; failures split the craft with an attributable
   message ("X joint broke, bending 47 kN over limit").
 - **Engines**: thrust from Isp interpolated sea-level↔vacuum by ambient
   pressure; gimbal deflection produces physical torque (axis mapping tested
   in vacuum); solid boosters are unthrottleable and self-contained.
-- **Fuel**: crossfeed flood-fill across parent/child links, blocked by
-  decouplers; engines drain their reachable pool proportionally.
+- **Fuel**: crossfeed components are cached per vessel geometry, blocked by
+  decouplers; engines drain their reachable pool proportionally and partial
+  final ticks scale thrust to the mass actually delivered.
 - **Attitude**: reaction wheels + pod torque + gimbal + RCS; SAS is a PD
   controller with modes (stability/prograde/retrograde/normal/radial/
   node/custom). Prograde-family modes are surface-relative in atmosphere
@@ -64,6 +70,8 @@ Terrain height is a deterministic function shared with rendering
 a spring-damper at the vessel's lowest extent with friction against the
 **rotating** surface; crash tolerance is judged on ground-relative impact
 speed; landed vessels damp to rest and rails-freeze in the body frame.
+Cape Skyward's plateau is authored into that shared terrain recipe, with a
+guaranteed maximum-LOD render region beneath the physical launch deck.
 
 ## Parachutes & guidance
 

@@ -104,8 +104,9 @@ const _relV = new Vec3();
  * Scan an orbit around `primary` for the first SOI encounter with one of its
  * moons (or SOI escape) within `lookahead` seconds from `startTime`.
  *
- * Sampling + bisection refinement: analytic evaluation makes this cheap
- * (~600 samples), and it only reruns when the orbit or nodes change.
+ * Adaptive sampling + bisection refinement. The cadence is derived from the
+ * smallest child SOI transit time and fastest relevant orbit so small moon
+ * encounters cannot fall wholly between two fixed multi-minute samples.
  */
 export function predictTrajectory(
   universe: Universe,
@@ -119,10 +120,30 @@ export function predictTrajectory(
   const result: TrajectoryPrediction = { elements, encounter: null, escape: null };
 
   const children = primary.children.filter((c) => c.soiRadius > 0);
-  const steps = 800;
+  const periapsis = Math.max(1, elements.a * (1 - elements.e));
+  const vesselSpeed = Math.sqrt(Math.max(0, elements.mu * (2 / periapsis - 1 / elements.a)));
+  let fastestRelativeSpeed = vesselSpeed;
+  let shortestPeriod = Number.isFinite(period) ? period : Infinity;
+  let smallestSoi = Infinity;
+  for (const child of children) {
+    smallestSoi = Math.min(smallestSoi, child.soiRadius);
+    shortestPeriod = Math.min(shortestPeriod, child.orbitalPeriod);
+    if (child.orbit) {
+      const childPeriapsis = Math.max(1, child.orbit.a * (1 - child.orbit.e));
+      fastestRelativeSpeed += Math.sqrt(Math.max(
+        0,
+        child.orbit.mu * (2 / childPeriapsis - 1 / child.orbit.a),
+      ));
+    }
+  }
+  const transitStep = Number.isFinite(smallestSoi) && fastestRelativeSpeed > 0
+    ? smallestSoi / fastestRelativeSpeed / 4
+    : Infinity;
+  const angularStep = Number.isFinite(shortestPeriod) ? shortestPeriod / 4096 : Infinity;
+  const targetStep = Math.max(1, Math.min(3_750, transitStep, angularStep));
+  const steps = Math.max(800, Math.min(50_000, Math.ceil(span / targetStep)));
   const dt = span / steps;
 
-  let prevInside: Body | null = null;
   for (let i = 0; i <= steps; i++) {
     const t = startTime + i * dt;
     elementsAtTime(elements, t, _r, _v);
@@ -154,7 +175,7 @@ export function predictTrajectory(
       universe.localPosition(moon, t, _bp, _bv);
       Vec3.sub(_r, _bp, _rel);
       const d = _rel.length();
-      if (d < moon.soiRadius && prevInside !== moon) {
+      if (d < moon.soiRadius) {
         const entryTime = refineCrossing(
           (tt) => {
             elementsAtTime(elements, tt, _mr, _mv);

@@ -46,7 +46,9 @@ describe('craft action groups', () => {
     const game = new GameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(retained)).toBe(true);
-    const detached = game.vessels.find((candidate) => candidate !== retained)!;
+    const detached = game.vessels.find((candidate) => (
+      candidate !== retained && candidate.runtime.craft.parts.some((part) => part.key === engine.key)
+    ))!;
     expect(retained.runtime.craft.actionGroups[1]).toEqual([
       { partKey: solar.key, action: 'toggle' },
     ]);

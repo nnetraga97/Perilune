@@ -39,7 +39,8 @@ if (manifestDigest !== checkedArtifact.manifestSha256) {
 }
 const planetSourceDir = resolve(root, 'assets/planets');
 const planetDestinationDir = resolve(root, 'public/planets');
-await rm(planetDestinationDir, { recursive: true, force: true });
+const planetStagedDir = resolve(root, `public/planets.stage-${process.pid}`);
+const planetBackupDir = resolve(root, `public/planets.backup-${process.pid}`);
 let planetFiles = 0;
 function checkedAssetPath(base, relativePath) {
   if (
@@ -55,6 +56,7 @@ function checkedAssetPath(base, relativePath) {
   }
   return target;
 }
+const checkedPlanetFiles = [];
 for (const pack of checkedArtifact.manifest.packs) {
   for (const channel of pack.channels) {
     for (const [relativePath, checksum] of [
@@ -62,19 +64,35 @@ for (const pack of checkedArtifact.manifest.packs) {
       [channel.fallbackPath, channel.fallbackChecksumSha256],
     ]) {
       const source = checkedAssetPath(planetSourceDir, relativePath);
-      const destination = checkedAssetPath(planetDestinationDir, relativePath);
-      await mkdir(dirname(destination), { recursive: true });
       const expected = await readFile(source);
       const actualChecksum = createHash('sha256').update(expected).digest('hex');
       if (actualChecksum !== checksum) {
         throw new Error(`Validated planet asset checksum mismatch for ${relativePath}`);
       }
-      await copyFile(source, destination);
-      const actual = await readFile(destination);
-      if (!actual.equals(expected)) throw new Error(`Planet asset verification failed: ${destination}`);
-      planetFiles++;
+      checkedPlanetFiles.push({ relativePath, checksum, source, expected });
     }
   }
+}
+await rm(planetStagedDir, { recursive: true, force: true });
+await mkdir(planetStagedDir, { recursive: true });
+try {
+  for (const { relativePath, checksum, source, expected } of checkedPlanetFiles) {
+    const destination = checkedAssetPath(planetStagedDir, relativePath);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    const actual = await readFile(destination);
+    if (!actual.equals(expected) || createHash('sha256').update(actual).digest('hex') !== checksum) {
+      throw new Error(`Staged planet asset verification failed: ${destination}`);
+    }
+    planetFiles++;
+  }
+  await swapDirectoryAtomically({
+    stagedPath: planetStagedDir,
+    targetPath: planetDestinationDir,
+    backupPath: planetBackupDir,
+  });
+} finally {
+  await rm(planetStagedDir, { recursive: true, force: true });
 }
 console.log(`renderer assets: verified ${planetFiles} validated planet pack files`);
 

@@ -8,7 +8,9 @@ import { Quat } from '../core/quat';
 import {
   OrbitalElements,
   elementsAtTime,
+  periodOf,
   stateToElements,
+  timeToTrueAnomaly,
 } from '../core/orbit';
 import { Body, Universe } from './universe';
 import { AUREN_SYSTEM } from '../content/system';
@@ -69,6 +71,12 @@ export interface GameVessel {
   rails: RailsState;
   /** Optional body id selected for navigation and map readouts. */
   target: string | null;
+}
+
+interface RailsEvent {
+  time: number;
+  kind: 'primary-exit' | 'child-entry' | 'hazard';
+  child?: Body;
 }
 
 export type AlarmKind = 'custom' | 'transfer' | 'maneuver' | 'entry';
@@ -207,7 +215,7 @@ export class GameState {
     return fired;
   }
 
-  /** Place a craft on the launch pad of Veyra (Cape Skyward, lon 0). */
+  /** Place a craft on Veyra's Cape Skyward launch pad. */
   spawnOnPad(craft: Craft, name: string): GameVessel {
     const veyra = this.universe.get('veyra');
     const runtime = createVesselRuntime(this.newVesselId(), name, craft, 'veyra');
@@ -728,20 +736,29 @@ export class GameState {
     if (this.railsWarp && this.warpIndex > 0) {
       // Rails warp: pure analytic time advance.
       const requestedDt = realDt * this.warpRate;
+      const startTime = this.time;
       const nextAlarm = this.alarms[0];
-      const endTime = nextAlarm
+      let endTime = nextAlarm
         ? Math.min(this.time + requestedDt, nextAlarm.time)
         : this.time + requestedDt;
+      const active = this.active;
+      if (active?.regime === 'rails' && active.rails.elements) {
+        const event = this.firstRailsEvent(active, startTime, endTime);
+        if (event) endTime = Math.min(endTime, event.time);
+      }
       const dtSim = endTime - this.time;
       this.time = endTime;
-      this.checkSoiTransitionsRails();
+      this.checkRailsEvents(startTime, endTime);
       this.stepBackgroundSystems(dtSim);
       this.fireDueAlarms();
       return 0;
     }
 
+    // If physics warp can no longer be simulated in real time, drop back to
+    // 1x instead of silently discarding requested simulation time.
+    if (this.warpIndex > 0 && realDt * this.warpRate > 0.5) this.warpIndex = 0;
     const simDt = realDt * this.warpRate;
-    this.accumulator = Math.min(this.accumulator + simDt, 0.5); // spiral-of-death guard
+    this.accumulator += simDt;
     while (this.accumulator >= PHYSICS_DT) {
       this.accumulator -= PHYSICS_DT;
       this.stepPhysics(PHYSICS_DT);
@@ -825,7 +842,7 @@ export class GameState {
   private stepPhysics(dt: number): void {
     this.manageBubble();
     // Sun direction for each vessel's body frame (approx: from body to star).
-    for (const gv of this.vessels) {
+    for (const gv of [...this.vessels]) {
       if (gv.regime !== 'active') continue;
       const v = gv.runtime;
       const body = this.bodyOf(gv);
@@ -971,15 +988,48 @@ export class GameState {
     const qRel = qaInv.clone().multiply(vb.att);
     const keyOffset = va.craft.nextKey;
 
-    const comA = va.massProps.com;
-    const comB = vb.massProps.com;
+    const comA = va.massProps.com.clone();
+    const comB = vb.massProps.com.clone();
+    const posA = va.pos.clone();
+    const posB = vb.pos.clone();
+    const velA = va.vel.clone();
+    const velB = vb.vel.clone();
     const dPos = _r.copy(vb.pos).sub(va.pos);
     qaInv.rotate(dPos, dPos); // into A craft frame
 
     // Momentum-conserving velocity of the merged stack.
     const mA = va.massProps.mass;
     const mB = vb.massProps.mass;
-    va.vel.scale(mA / (mA + mB)).addScaled(vb.vel, mB / (mA + mB));
+    const mergedMass = mA + mB;
+    const mergedVelocity = velA.clone().scale(mA / mergedMass).addScaled(velB, mB / mergedMass);
+    const mergedWorldCom = posA.clone().scale(mA / mergedMass).addScaled(posB, mB / mergedMass);
+
+    // Preserve total angular momentum about the merged center of mass. The
+    // vessel model uses diagonal craft-frame inertia, so the final projection
+    // is the closest representable angular velocity in A's craft frame.
+    const angularMomentum = va.att.rotate(
+      new Vec3(
+        va.massProps.inertia.x * va.angVel.x,
+        va.massProps.inertia.y * va.angVel.y,
+        va.massProps.inertia.z * va.angVel.z,
+      ),
+      new Vec3(),
+    );
+    const spinB = vb.att.rotate(
+      new Vec3(
+        vb.massProps.inertia.x * vb.angVel.x,
+        vb.massProps.inertia.y * vb.angVel.y,
+        vb.massProps.inertia.z * vb.angVel.z,
+      ),
+      new Vec3(),
+    );
+    angularMomentum.add(spinB);
+    const armA = posA.clone().sub(mergedWorldCom);
+    const armB = posB.clone().sub(mergedWorldCom);
+    const momentumA = velA.clone().sub(mergedVelocity).scale(mA);
+    const momentumB = velB.clone().sub(mergedVelocity).scale(mB);
+    angularMomentum.add(Vec3.cross(armA, momentumA, new Vec3()));
+    angularMomentum.add(Vec3.cross(armB, momentumB, new Vec3()));
 
     const tmp = new Vec3();
     for (const p of vb.craft.parts) {
@@ -1026,6 +1076,18 @@ export class GameState {
     va.crew = [...va.crew, ...vb.crew];
     va.charge.amount += vb.charge.amount;
     refreshDerived(va);
+    // Runtime position is the world-space craft CoM. Recenter it after the
+    // geometry merge so every existing part keeps the same world position.
+    const comShift = va.massProps.com.clone().sub(comA);
+    va.att.rotate(comShift, comShift);
+    va.pos.copy(posA).add(comShift);
+    va.vel.copy(mergedVelocity);
+    const angularMomentumCraft = va.att.clone().conjugate().rotate(angularMomentum, new Vec3());
+    va.angVel.set(
+      angularMomentumCraft.x / va.massProps.inertia.x,
+      angularMomentumCraft.y / va.massProps.inertia.y,
+      angularMomentumCraft.z / va.massProps.inertia.z,
+    );
     logEvent(va, this.time, `Docking confirmed: ${vb.name} + ${va.name}`);
     this.vessels = this.vessels.filter((x) => x !== b);
     if (this.activeVesselId === vb.id) this.activeVesselId = va.id;
@@ -1129,56 +1191,171 @@ export class GameState {
     }
   }
 
-  private checkSoiTransitionsRails(): void {
-    for (const gv of this.vessels) {
-      if (gv.regime !== 'rails' || !gv.rails.elements) continue;
-      const v = gv.runtime;
-      const body = this.bodyOf(gv);
-      this.railsPosition(gv, _r, _v);
-      let transitioned = false;
-      if (body.soiRadius !== Infinity && _r.length() > body.soiRadius && body.parent) {
-        this.universe.localPosition(body, this.time, _br, _bv);
-        _r.add(_br);
-        _v.add(_bv);
-        v.bodyId = body.parent.id;
-        transitioned = true;
-        logEvent(v, this.time, `Entered ${body.parent.name}'s sphere of influence`);
-      } else {
-        for (const child of body.children) {
-          this.universe.localPosition(child, this.time, _br, _bv);
-          const d = _tmpDist.copy(_r).sub(_br).length();
-          if (d < child.soiRadius) {
-            _r.sub(_br);
-            _v.sub(_bv);
-            v.bodyId = child.id;
-            transitioned = true;
-            logEvent(v, this.time, `Entered ${child.name}'s sphere of influence`);
+  /** Find the first continuous rails event in a time interval. */
+  private firstRailsEvent(gv: GameVessel, startTime: number, endTime: number): RailsEvent | null {
+    const elements = gv.rails.elements;
+    if (!elements || endTime < startTime) return null;
+    const body = this.bodyOf(gv);
+    let earliest: RailsEvent | null = null;
+    const consider = (event: RailsEvent | null) => {
+      if (!event || event.time < startTime - 1e-6 || event.time > endTime + 1e-6) return;
+      if (!earliest || event.time < earliest.time) earliest = event;
+    };
+
+    const active = gv.runtime.id === this.activeVesselId;
+    const atmoTop = body.def.atmosphere?.height ?? 0;
+    const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
+    const hazardAltitude = active ? Math.max(atmoTop, terrainTop + 2_000) : Math.max(atmoTop, terrainTop);
+    consider(radialCrossingEvent(
+      elements,
+      startTime,
+      endTime,
+      body.radius + hazardAltitude,
+      true,
+      'hazard',
+    ));
+    if (body.parent && Number.isFinite(body.soiRadius)) {
+      consider(radialCrossingEvent(
+        elements,
+        startTime,
+        endTime,
+        body.soiRadius,
+        false,
+        'primary-exit',
+      ));
+    }
+
+    // Child SOIs move relative to the vessel conic. Sample at a bounded
+    // cadence and bisect the first sign change so short flybys cannot jump
+    // across an entire SOI in one high-warp frame.
+    const span = endTime - startTime;
+    if (span > 0 && body.children.length) {
+      const period = periodOf(elements);
+      const step = Math.max(0.25, Math.min(15, Number.isFinite(period) ? period / 4096 : 15));
+      const samples = Math.max(1, Math.min(8192, Math.ceil(span / step)));
+      for (const child of body.children) {
+        let previousTime = startTime;
+        let previous = this.childSoiDistance(elements, child, previousTime);
+        if (previous <= 0) {
+          consider({ time: startTime, kind: 'child-entry', child });
+          continue;
+        }
+        for (let sample = 1; sample <= samples; sample++) {
+          const time = startTime + (span * sample) / samples;
+          const distance = this.childSoiDistance(elements, child, time);
+          if (distance <= 0) {
+            let low = previousTime;
+            let high = time;
+            for (let iteration = 0; iteration < 36; iteration++) {
+              const mid = (low + high) / 2;
+              if (this.childSoiDistance(elements, child, mid) <= 0) high = mid;
+              else low = mid;
+            }
+            consider({ time: high, kind: 'child-entry', child });
             break;
           }
+          previousTime = time;
+          previous = distance;
+          const cutoff = (earliest as RailsEvent | null)?.time ?? Infinity;
+          if (previousTime >= cutoff) break;
         }
       }
-      if (transitioned) {
+    }
+    return earliest;
+  }
+
+  private childSoiDistance(elements: OrbitalElements, child: Body, time: number): number {
+    elementsAtTime(elements, time, _eventR, _eventV);
+    this.universe.localPosition(child, time, _eventBodyR, _eventBodyV);
+    return _eventDelta.copy(_eventR).sub(_eventBodyR).length() - child.soiRadius;
+  }
+
+  /** Process every vessel through SOI and impact events over a warp interval. */
+  private checkRailsEvents(startTime: number, endTime: number): void {
+    for (const gv of [...this.vessels]) {
+      if (gv.regime !== 'rails' || !gv.rails.elements) continue;
+      let cursor = startTime;
+      for (let transitions = 0; transitions < 8 && gv.rails.elements; transitions++) {
+        const event = this.firstRailsEvent(gv, cursor, endTime);
+        if (!event) break;
+        const elements = gv.rails.elements;
+        const body = this.bodyOf(gv);
+        elementsAtTime(elements, event.time, _r, _v);
+
+        if (event.kind === 'hazard') {
+          gv.runtime.pos.copy(_r);
+          gv.runtime.vel.copy(_v);
+          if (gv.runtime.id === this.activeVesselId) {
+            // The global clock was limited to this event before entering here.
+            this.setWarp(0, false);
+          } else {
+            const reason = body.def.atmosphere
+              ? `Destroyed during atmospheric entry at warp over ${body.name}`
+              : `Impacted ${body.name} during warp`;
+            this.destroyVessel(gv, reason);
+          }
+          break;
+        }
+
+        if (event.kind === 'primary-exit' && body.parent) {
+          this.universe.localPosition(body, event.time, _br, _bv);
+          _r.add(_br);
+          _v.add(_bv);
+          gv.runtime.bodyId = body.parent.id;
+          logEvent(gv.runtime, event.time, `Entered ${body.parent.name}'s sphere of influence`);
+        } else if (event.kind === 'child-entry' && event.child) {
+          this.universe.localPosition(event.child, event.time, _br, _bv);
+          _r.sub(_br);
+          _v.sub(_bv);
+          gv.runtime.bodyId = event.child.id;
+          logEvent(gv.runtime, event.time, `Entered ${event.child.name}'s sphere of influence`);
+        } else {
+          break;
+        }
         const newBody = this.bodyOf(gv);
-        gv.rails.elements = stateToElements(newBody.mu, _r, _v, this.time);
-        v.pos.copy(_r);
-        v.vel.copy(_v);
-      } else {
-        // Keep runtime pos/vel roughly current for UI reads.
-        v.pos.copy(_r);
-        v.vel.copy(_v);
+        gv.rails.elements = stateToElements(newBody.mu, _r, _v, event.time);
+        cursor = Math.min(endTime, event.time + 1e-4);
+        if (cursor >= endTime) break;
       }
-      // Atmosphere entry or ground impact during rails warp: drop to active.
-      const alt = _r.length() - body.radius;
-      const atmoTop = this.bodyOf(gv).def.atmosphere?.height ?? 0;
-      if (!gv.rails.landedPos && alt < Math.max(atmoTop, 2000) && gv.runtime.id === this.activeVesselId) {
-        this.setWarp(0, false);
-      }
+      if (!this.vessels.includes(gv) || gv.regime !== 'rails' || !gv.rails.elements) continue;
+      elementsAtTime(gv.rails.elements, endTime, gv.runtime.pos, gv.runtime.vel);
     }
   }
 }
 
 const _tmpDist = new Vec3();
 const _pf = new Vec3();
+const _eventR = new Vec3();
+const _eventV = new Vec3();
+const _eventBodyR = new Vec3();
+const _eventBodyV = new Vec3();
+const _eventDelta = new Vec3();
+
+function radialCrossingEvent(
+  elements: OrbitalElements,
+  startTime: number,
+  endTime: number,
+  radius: number,
+  inbound: boolean,
+  kind: RailsEvent['kind'],
+): RailsEvent | null {
+  elementsAtTime(elements, startTime, _eventR, _eventV);
+  const startRadius = _eventR.length();
+  if (inbound && startRadius <= radius) return { time: startTime, kind };
+  if (!inbound && startRadius >= radius) return { time: startTime, kind };
+  if (elements.e < 1e-12) return null;
+  const p = elements.a * (1 - elements.e * elements.e);
+  const cosNu = (p / radius - 1) / elements.e;
+  if (cosNu < -1 || cosNu > 1 || !Number.isFinite(cosNu)) return null;
+  const angle = Math.acos(Math.max(-1, Math.min(1, cosNu)));
+  const targetAnomaly = inbound ? (elements.e < 1 ? Math.PI * 2 - angle : -angle) : angle;
+  let dt = timeToTrueAnomaly(elements, startTime, targetAnomaly);
+  if (elements.e < 1 && dt < 1e-6) dt += periodOf(elements);
+  const time = startTime + dt;
+  return Number.isFinite(time) && time >= startTime && time <= endTime
+    ? { time, kind }
+    : null;
+}
 
 /** World position of a dock port's mating face. */
 function portFaceWorld(v: VesselRuntime, port: PartInstance, face: 1 | -1, out: Vec3): Vec3 {

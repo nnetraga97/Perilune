@@ -17,7 +17,10 @@ export class HttpError extends Error {
 }
 
 export function requestId(request: Request): string {
-  return request.headers.get('x-vercel-id')?.slice(0, 160) || randomUUID();
+  const candidate = request.headers.get('x-vercel-id') ?? '';
+  return candidate && candidate.length <= 160 && /^[A-Za-z0-9:._-]+$/.test(candidate)
+    ? candidate
+    : randomUUID();
 }
 
 export function jsonOk<T>(data: T, status = 200, headers?: HeadersInit): Response {
@@ -46,9 +49,22 @@ export async function readJsonBody<T>(request: Request, maxBytes: number): Promi
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw new HttpError(413, 'PAYLOAD_TOO_LARGE', 'Request payload is too large');
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes) {
-    throw new HttpError(413, 'PAYLOAD_TOO_LARGE', 'Request payload is too large');
+  const reader = request.body?.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let received = 0;
+  if (reader) {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel();
+        throw new HttpError(413, 'PAYLOAD_TOO_LARGE', 'Request payload is too large');
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
   }
   try {
     return JSON.parse(text) as T;
@@ -71,6 +87,11 @@ export function safeHandlerError(error: unknown, id: string): Response {
 }
 
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  return (forwarded?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown').slice(0, 128);
+  // Forwarding headers are trustworthy only behind the configured Vercel
+  // proxy. Self-hosted callers cannot select their own rate-limit identity.
+  if (process.env.VERCEL === '1') {
+    const forwarded = request.headers.get('x-forwarded-for');
+    return (forwarded?.split(',')[0]?.trim() || 'unknown').slice(0, 128);
+  }
+  return 'direct';
 }

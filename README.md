@@ -4,9 +4,11 @@ An original browser-based orbital engineering game by the Skyward
 Cooperative: build spacecraft, fly them with credible physics, reach orbit,
 land on moons, and bring your crew home.
 
-**Status: Milestone 1 vertical slice — playable.** Build a rocket in the
+**Status: Milestone 2 systems slice — playable.** Build a rocket in the
 Workshop, launch from Veyra, reach orbit, plan a transfer to the moon Palla
-with maneuver nodes, land, return, and recover. The star system, parts,
+with maneuver nodes, land, return, and recover. Docking and undocking, vessel
+switching, alarms, transfer planning, entry prediction, communications,
+rovers, resource surveying, and ISRU are also playable. The star system, parts,
 simulation, and writing are original. Veyra's authored global albedo uses a
 public-domain Natural Earth II source through Perilune's deterministic asset
 compiler; its provenance and modifications are recorded in
@@ -45,10 +47,17 @@ The production build deploys to any HTTPS static host.
 | T | Toggle SAS · navball buttons pick hold modes |
 | R | RCS toggle · IJKL/UO translate |
 | M | Map view (maneuver planning) |
+| [ / ] | Previous / next controllable vessel |
+| 1–0 | Execute action groups 1–10 |
 | , . | Time warp down / up |
+| / | Cancel time warp |
 | F5 / F9 | Quicksave / quickload |
 | F3 | Performance overlay |
 | Mouse drag / wheel | Camera orbit / zoom |
+
+Docking captures automatically when compatible ports meet slowly and face one
+another. Undocking, ISRU, resource scans, alarms, and transfer tools are exposed
+through the flight HUD windows.
 
 ## Documentation
 

@@ -12,8 +12,8 @@ import { Quat } from '../core/quat';
 import {
   Craft,
   PartInstance,
+  buildCrossfeedIndex,
   computeMassProperties,
-  crossfeedComponent,
   defOf,
   G0,
   MassProperties,
@@ -93,6 +93,8 @@ export interface VesselRuntime {
   aeroModel: AeroModel;
   massProps: MassProperties;
   massDirtyCounter: number;
+  /** Crossfeed components, rebuilt only when vessel geometry changes. */
+  crossfeedIndex: Map<number, readonly PartInstance[]>;
   /** Latest evaluated aero for HUD/structure. */
   aero: AeroForces;
   events: FlightEvent[];
@@ -108,11 +110,14 @@ export interface VesselRuntime {
   properAccel: number;
   /** Target direction (world frame) for SAS mode 'custom' and 'node'. */
   sasCustomDir: Vec3;
+  /** Per-vessel result storage avoids shared mutable state across vessel steps. */
+  stepResult: StepResult;
 }
 
 export function refreshDerived(v: VesselRuntime): void {
   v.aeroModel = buildAeroModel(v.craft);
   v.massProps = computeMassProperties(v.craft);
+  v.crossfeedIndex = buildCrossfeedIndex(v.craft);
   let cap = 0;
   for (const p of v.craft.parts) {
     const b = defOf(p).battery;
@@ -157,6 +162,7 @@ export function createVesselRuntime(
     aeroModel: buildAeroModel(craft),
     massProps: computeMassProperties(craft),
     massDirtyCounter: 0,
+    crossfeedIndex: buildCrossfeedIndex(craft),
     aero: newAeroForces(),
     events: [],
     isDebris: false,
@@ -166,6 +172,7 @@ export function createVesselRuntime(
     landedBodyFixed: null,
     properAccel: 0,
     sasCustomDir: new Vec3(0, 1, 0),
+    stepResult: { destroyedParts: [], crashed: false, crashSpeed: 0, terminalFailure: null },
   };
   refreshDerived(v);
   v.charge.amount = v.charge.capacity;
@@ -214,20 +221,17 @@ export interface StepResult {
   terminalFailure: string | null;
 }
 
-const stepResult: StepResult = {
-  destroyedParts: [],
-  crashed: false,
-  crashSpeed: 0,
-  terminalFailure: null,
-};
-
 /** True if the engine part can currently produce thrust. */
-export function engineHasFuel(craft: Craft, part: PartInstance): boolean {
+export function engineHasFuel(
+  craft: Craft,
+  part: PartInstance,
+  crossfeedIndex?: ReadonlyMap<number, readonly PartInstance[]>,
+): boolean {
   const eng = defOf(part).engine!;
   if (eng.propellant === 'solidFuel') return (part.resources.solidFuel ?? 0) > 0;
-  for (const key of crossfeedComponent(craft, part.key)) {
-    const p = craft.parts.find((q) => q.key === key);
-    if (p && (p.resources.propellant ?? 0) > 1e-9) return true;
+  const pool = crossfeedIndex?.get(part.key) ?? buildCrossfeedIndex(craft).get(part.key) ?? [];
+  for (const candidate of pool) {
+    if ((candidate.resources.propellant ?? 0) > 1e-9) return true;
   }
   return false;
 }
@@ -238,7 +242,7 @@ export function maxThrust(v: VesselRuntime, pressure: number): number {
   for (const p of v.craft.parts) {
     const eng = defOf(p).engine;
     if (!eng || !p.activated) continue;
-    if (!engineHasFuel(v.craft, p)) continue;
+    if (!engineHasFuel(v.craft, p, v.crossfeedIndex)) continue;
     const frac = Math.min(1, pressure / 101_325);
     if (eng.airBreathing) {
       total += eng.thrustVac * frac;
@@ -254,7 +258,7 @@ export function maxThrust(v: VesselRuntime, pressure: number): number {
 function releasesPrelaunchClamp(v: VesselRuntime): boolean {
   for (const part of v.craft.parts) {
     const engine = defOf(part).engine;
-    if (!engine || !part.activated || !engineHasFuel(v.craft, part)) continue;
+    if (!engine || !part.activated || !engineHasFuel(v.craft, part, v.crossfeedIndex)) continue;
     if (engine.propellant === 'solidFuel' || v.controls.throttle > 0.001) return true;
   }
   return false;
@@ -268,6 +272,7 @@ export function stepVessel(
   ctx: StepContext,
   dt: number,
 ): StepResult {
+  const stepResult = v.stepResult;
   stepResult.destroyedParts.length = 0;
   stepResult.crashed = false;
   stepResult.crashSpeed = 0;
@@ -350,7 +355,7 @@ export function stepVessel(
     const isSolid = eng.propellant === 'solidFuel';
     const effThrottle = isSolid ? 1 : throttle;
     if (effThrottle <= 0) continue;
-    if (!engineHasFuel(v.craft, p)) continue;
+    if (!engineHasFuel(v.craft, p, v.crossfeedIndex)) continue;
 
     let thrust: number;
     let isp: number;
@@ -366,13 +371,23 @@ export function stepVessel(
       thrust = eng.thrustVac * (isp / eng.ispVac) * effThrottle;
     }
     const flow = thrust / (isp * G0); // kg/s
+    const requestedMass = flow * dt;
+    const availableMass = isSolid
+      ? (p.resources.solidFuel ?? 0) * RESOURCE_DENSITY.solidFuel
+      : availablePropellantMass(v.crossfeedIndex.get(p.key) ?? []);
+    const deliveredFraction = requestedMass > 0 ? Math.min(1, availableMass / requestedMass) : 0;
+    if (!(deliveredFraction > 0)) continue;
+    thrust *= deliveredFraction;
 
     // Drain propellant.
     if (isSolid) {
-      const units = (flow * dt) / RESOURCE_DENSITY.solidFuel;
+      const units = (requestedMass * deliveredFraction) / RESOURCE_DENSITY.solidFuel;
       p.resources.solidFuel = Math.max(0, (p.resources.solidFuel ?? 0) - units);
     } else {
-      drainPropellant(v.craft, p, (flow * dt) / RESOURCE_DENSITY.propellant);
+      drainPropellant(
+        v.crossfeedIndex.get(p.key) ?? [],
+        (requestedMass * deliveredFraction) / RESOURCE_DENSITY.propellant,
+      );
     }
 
     // Thrust direction: craft +Y with gimbal deflection. Axis mapping: the
@@ -473,7 +488,7 @@ export function stepVessel(
   stepElectricity(v, ctx, dt);
 
   // ---------------------------------------------------------------- heating
-  stepThermal(v, ctx, density, dt);
+  stepThermal(v, ctx, density, dt, stepResult);
 
   // ----------------------------------------------------------- ground contact
   let isOverOcean = false;
@@ -492,7 +507,7 @@ export function stepVessel(
 
     if (hasWheels) {
       // Multi-point wheel contact (rovers, aircraft gear).
-      contactNear = stepWheeledContact(v, body, time, mass, com, dt, isOverOcean);
+      contactNear = stepWheeledContact(v, body, time, mass, com, dt, isOverOcean, stepResult);
       if (stepResult.crashed) return stepResult;
     } else {
       // Single bottom-point contact for stacks (legs, hull).
@@ -566,9 +581,14 @@ export function stepVessel(
   _attInv.rotate(_torqueW, _tmp);
   _tmp.add(_torqueC);
   const I = v.massProps.inertia;
-  v.angVel.x += (_tmp.x / I.x) * dt;
-  v.angVel.y += (_tmp.y / I.y) * dt;
-  v.angVel.z += (_tmp.z / I.z) * dt;
+  // Euler rigid-body equation for diagonal body-frame inertia:
+  // I*wDot = torque - w x (I*w).
+  const wx = v.angVel.x;
+  const wy = v.angVel.y;
+  const wz = v.angVel.z;
+  v.angVel.x += ((_tmp.x - wy * wz * (I.z - I.y)) / I.x) * dt;
+  v.angVel.y += ((_tmp.y - wz * wx * (I.x - I.z)) / I.y) * dt;
+  v.angVel.z += ((_tmp.z - wx * wy * (I.y - I.x)) / I.z) * dt;
   // Rotational damping from air (prevents endless spin in atmosphere).
   if (density > 0.001) {
     const damp = Math.max(0, 1 - dt * density * 0.6);
@@ -641,6 +661,7 @@ function stepWheeledContact(
   com: Readonly<Vec3>,
   dt: number,
   isOverOcean: boolean,
+  result: StepResult,
 ): boolean {
   let nWheels = 0;
   for (const p of v.craft.parts) if (defOf(p).wheel) nWheels++;
@@ -693,8 +714,8 @@ function stepWheeledContact(
     if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
       const impact = -vRad;
       if (impact > defOf(p).crashTolerance) {
-        stepResult.crashed = true;
-        stepResult.crashSpeed = impact;
+        result.crashed = true;
+        result.crashSpeed = impact;
         return true;
       }
     }
@@ -793,8 +814,8 @@ function stepWheeledContact(
       if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
         const impact = -vRad;
         if (impact > crashToleranceOfLowestPart(v.craft)) {
-          stepResult.crashed = true;
-          stepResult.crashSpeed = impact;
+          result.crashed = true;
+          result.crashSpeed = impact;
           return true;
         }
       }
@@ -832,7 +853,7 @@ function crashToleranceOfLowestPart(craft: Craft): number {
     if (def.leg) bottom -= def.leg.length;
     if (bottom < minY) {
       minY = bottom;
-      tol = def.leg ? def.crashTolerance : def.crashTolerance;
+      tol = def.crashTolerance;
     }
   }
   return tol;
@@ -855,13 +876,18 @@ function drainMonoprop(craft: Craft, units: number): void {
   }
 }
 
-function drainPropellant(craft: Craft, engine: PartInstance, units: number): void {
+function availablePropellantMass(pool: readonly PartInstance[]): number {
+  let units = 0;
+  for (const part of pool) units += part.resources.propellant ?? 0;
+  return units * RESOURCE_DENSITY.propellant;
+}
+
+function drainPropellant(poolParts: readonly PartInstance[], units: number): void {
   // Drain evenly from tanks in the crossfeed pool (bottom tanks first would
   // be more realistic; even drain keeps CoM steadier and is kinder).
   const pool: PartInstance[] = [];
-  for (const key of crossfeedComponent(craft, engine.key)) {
-    const p = craft.parts.find((q) => q.key === key);
-    if (p && (p.resources.propellant ?? 0) > 0) pool.push(p);
+  for (const part of poolParts) {
+    if ((part.resources.propellant ?? 0) > 0) pool.push(part);
   }
   if (!pool.length) return;
   let remaining = units;
@@ -902,7 +928,13 @@ function stepElectricity(v: VesselRuntime, ctx: StepContext, dt: number): void {
   v.charge.amount = clamp(v.charge.amount + net * dt, 0, v.charge.capacity);
 }
 
-function stepThermal(v: VesselRuntime, ctx: StepContext, density: number, dt: number): void {
+function stepThermal(
+  v: VesselRuntime,
+  ctx: StepContext,
+  density: number,
+  dt: number,
+  result: StepResult,
+): void {
   const flux = v.aero.heatFlux; // 0.5 ρ v³
   if (flux < 100 && density < 1e-7) {
     // Cheap cooling pass only when nothing is hot.
@@ -937,7 +969,7 @@ function stepThermal(v: VesselRuntime, ctx: StepContext, density: number, dt: nu
     temp -= cooling * dt;
     p.temperature = Math.max(200, temp);
     if (temp > def.maxTemp) {
-      stepResult.destroyedParts.push(p.key);
+      result.destroyedParts.push(p.key);
     }
   }
 }

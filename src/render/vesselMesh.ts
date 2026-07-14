@@ -220,6 +220,7 @@ export function syncVesselVisual(
   throttle: number,
   pressureFrac: number,
   dt = 1 / 60,
+  crossfeedIndex?: ReadonlyMap<number, readonly PartInstance[]>,
 ): void {
   // Remove meshes for missing parts. Plume groups parent under the part holder,
   // so disposing/removing the holder also releases their owned geometry.
@@ -242,7 +243,7 @@ export function syncVesselVisual(
     if (!plumeGroup) continue;
     const def = defOf(part);
     const solid = def.engine!.propellant === 'solidFuel';
-    const targetPower = part.activated && engineHasFuel(craft, part) ? (solid ? 1 : throttle) : 0;
+    const targetPower = part.activated && engineHasFuel(craft, part, crossfeedIndex) ? (solid ? 1 : throttle) : 0;
     const previousPower = Number(plumeGroup.userData.power ?? 0);
     const response = targetPower > previousPower ? 18 : 7;
     let power = previousPower + (targetPower - previousPower) * (1 - Math.exp(-response * Math.max(0, dt)));

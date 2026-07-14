@@ -284,14 +284,40 @@ export function computeMassProperties(craft: Craft): MassProperties {
     const dy = p.position.y - com.y;
     const dz = p.position.z - com.z;
     const def = defOf(p);
-    // Per-part self inertia approximated as solid cylinder
-    const r = def.shape.radiusBottom ?? def.shape.width ?? 0.3;
     const h = def.shape.height;
-    const selfLat = (m * (3 * r * r + h * h)) / 12;
-    const selfAx = (m * r * r) / 2;
-    inertia.x += selfLat + m * (dy * dy + dz * dz);
-    inertia.y += selfAx + m * (dx * dx + dz * dz);
-    inertia.z += selfLat + m * (dx * dx + dy * dy);
+    let localIx: number;
+    let localIy: number;
+    let localIz: number;
+    if (def.shape.kind === 'box' || def.shape.kind === 'panel') {
+      const w = def.shape.width ?? 0.3;
+      const d = def.shape.depth ?? 0.3;
+      localIx = (m * (h * h + d * d)) / 12;
+      localIy = (m * (w * w + d * d)) / 12;
+      localIz = (m * (w * w + h * h)) / 12;
+    } else {
+      // Cylinder/cone/capsule approximation around the part-local +Y axis.
+      const r = def.shape.radiusBottom ?? (def.shape.width ?? 0.6) / 2;
+      localIx = (m * (3 * r * r + h * h)) / 12;
+      localIy = (m * r * r) / 2;
+      localIz = localIx;
+    }
+
+    // Rotate the local diagonal tensor into craft axes. We retain the diagonal
+    // terms supported by the flight integrator instead of treating every
+    // radially-mounted part as axis-aligned.
+    const q = p.rotation;
+    const xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
+    const xy = q.x * q.y, xz = q.x * q.z, yz = q.y * q.z;
+    const wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
+    const r00 = 1 - 2 * (yy + zz), r01 = 2 * (xy - wz), r02 = 2 * (xz + wy);
+    const r10 = 2 * (xy + wz), r11 = 1 - 2 * (xx + zz), r12 = 2 * (yz - wx);
+    const r20 = 2 * (xz - wy), r21 = 2 * (yz + wx), r22 = 1 - 2 * (xx + yy);
+    const selfX = r00 * r00 * localIx + r01 * r01 * localIy + r02 * r02 * localIz;
+    const selfY = r10 * r10 * localIx + r11 * r11 * localIy + r12 * r12 * localIz;
+    const selfZ = r20 * r20 * localIx + r21 * r21 * localIy + r22 * r22 * localIz;
+    inertia.x += selfX + m * (dy * dy + dz * dz);
+    inertia.y += selfY + m * (dx * dx + dz * dz);
+    inertia.z += selfZ + m * (dx * dx + dy * dy);
   }
   // Never allow zero inertia (single tiny part)
   inertia.x = Math.max(inertia.x, 10);
@@ -333,6 +359,43 @@ export function crossfeedComponent(craft: Craft, startKey: number): Set<number> 
     }
   }
   return seen;
+}
+
+/** Build every crossfeed component once for reuse by engines in hot loops. */
+export function buildCrossfeedIndex(craft: Craft): Map<number, readonly PartInstance[]> {
+  const partsByKey = new Map<number, PartInstance>();
+  const adjacency = new Map<number, number[]>();
+  for (const part of craft.parts) {
+    partsByKey.set(part.key, part);
+    adjacency.set(part.key, []);
+  }
+  for (const part of craft.parts) {
+    if (part.parentKey === null) continue;
+    const parent = partsByKey.get(part.parentKey);
+    if (!parent || !defOf(part).crossfeed || !defOf(parent).crossfeed) continue;
+    adjacency.get(part.key)!.push(parent.key);
+    adjacency.get(parent.key)!.push(part.key);
+  }
+  const index = new Map<number, readonly PartInstance[]>();
+  const visited = new Set<number>();
+  for (const part of craft.parts) {
+    if (visited.has(part.key)) continue;
+    const keys: number[] = [];
+    const queue = [part.key];
+    visited.add(part.key);
+    while (queue.length) {
+      const key = queue.pop()!;
+      keys.push(key);
+      for (const neighbor of adjacency.get(key) ?? []) {
+        if (visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+    const component = keys.map((key) => partsByKey.get(key)!);
+    for (const key of keys) index.set(key, component);
+  }
+  return index;
 }
 
 // ---------------------------------------------------------------------------

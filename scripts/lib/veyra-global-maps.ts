@@ -342,6 +342,21 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
     }
   }
 
+  // The rendered ocean/land boundary must remain derived from the same signed
+  // height field used by terrain geometry and physics. This turns coastline
+  // agreement into a compiler invariant instead of trusting two outputs that
+  // merely happened to be produced in the same function.
+  for (let index = 0; index < heights.length; index++) {
+    if (heights[index] === 0) continue; // datum itself is an intentionally blended shoreline texel
+    const heightSaysOcean = heights[index] < 0;
+    const materialSaysOcean = material[index * 4 + 3] >= 128;
+    if (heightSaysOcean !== materialSaysOcean) {
+      const x = index % width;
+      const y = Math.floor(index / width);
+      throw new Error(`Veyra coastline mask disagrees with canonical height at ${x},${y}`);
+    }
+  }
+
   return {
     albedo,
     normal,

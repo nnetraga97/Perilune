@@ -43,6 +43,7 @@ export interface PlanetTerrainEngineOptions {
   readonly material: THREE.Material;
   readonly terrainAllocationBytes: number;
   readonly workerPool?: TerrainChunkWorkerPool;
+  readonly ownsWorkerPool?: boolean;
   readonly now?: () => number;
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly diagnosticSource?: string;
@@ -147,6 +148,7 @@ export class PlanetTerrainEngine {
   private readonly transitions = new TerrainLodTransitionManager();
   private readonly dither: TerrainLodDitherBinding;
   private readonly workerPool?: TerrainChunkWorkerPool;
+  private readonly ownsWorkerPool: boolean;
   private readonly now: () => number;
   private readonly diagnostics?: RenderDiagnosticsPort;
   private readonly diagnosticSource: string;
@@ -164,6 +166,9 @@ export class PlanetTerrainEngine {
   private frame = 0;
   private disposed = false;
   private shadowReceiver = false;
+  private pendingSince: number | null = null;
+  private lastCompletionAt: number | null = null;
+  private stallReported = false;
   stats: PlanetTerrainEngineStats = Object.freeze({
     frame: 0, chunks: 0, visible: 0, triangles: 0, coverageGaps: 0,
     rootsReady: false, coverageReady: false, scheduleMs: 0, installMs: 0,
@@ -178,6 +183,7 @@ export class PlanetTerrainEngine {
     this.quality = options.quality;
     this.material = options.material;
     this.workerPool = options.workerPool;
+    this.ownsWorkerPool = options.ownsWorkerPool ?? true;
     this.now = options.now ?? (() => performance.now());
     this.diagnostics = options.diagnostics;
     this.diagnosticSource = options.diagnosticSource ?? `terrain:${options.provider.bodyId}`;
@@ -193,8 +199,14 @@ export class PlanetTerrainEngine {
     this.diagnosticContext = frame.diagnosticContext ?? {};
     this.diagnosticLifecycleBatch = [];
     this.frame++;
+    this.workerPool?.checkHealth(this.now());
     const installStarted = this.now();
     const completed = this.scheduler.drainCompleted();
+    if (completed.length > 0) {
+      this.lastCompletionAt = installStarted;
+      this.pendingSince = null;
+      this.stallReported = false;
+    }
     for (const completion of completed) {
       const record = this.records.get(completion.result.jobKey);
       if (record && record.generation === completion.result.generation) {
@@ -223,10 +235,22 @@ export class PlanetTerrainEngine {
     }
     const installMs = Math.max(0, this.now() - installStarted);
 
-    const selected = selectTerrainDetail(
-      this.provider, this.quality, frame, this.previousSplitKeys, frame.visible,
+    let selectionQuality = this.quality;
+    let selected = selectTerrainDetail(
+      this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
     );
-    const balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    let balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    // Neighbor balancing may add leaves after the selector reaches its own
+    // budget. Tighten selection until the final balanced set respects the
+    // quality-tier cap instead of allowing an unbounded first-paint target.
+    for (let attempts = 0; balanced.length > this.quality.maximumDesiredLeaves && attempts < 4; attempts++) {
+      const reducedLimit = Math.max(24, Math.floor(selectionQuality.maximumDesiredLeaves * 0.7));
+      selectionQuality = Object.freeze({ ...this.quality, maximumDesiredLeaves: reducedLimit });
+      selected = selectTerrainDetail(
+        this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
+      );
+      balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    }
     const balanceViolations = terrainNeighborDepthViolations(balanced);
     if (balanceViolations.length > 0) {
       this.diagnostics?.anomaly('terrain-neighbor-depth-violation', 'terrain', {
@@ -270,7 +294,7 @@ export class PlanetTerrainEngine {
     }
 
     const predicted = selectPredictedTerrainDetail(
-      this.provider, this.quality, frame, this.previousSplitKeys, frame.visible,
+      this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
     );
     const scheduleStarted = this.now();
     const queueBudgetMs = this.quality.schedulingBudgetMs * 0.6;
@@ -323,6 +347,23 @@ export class PlanetTerrainEngine {
     this.previousRenderedKeys = new Set(stableRenderedKeys);
     const residency = this.residency.stats();
     const scheduler = this.scheduler.stats();
+    const pendingWork = scheduler.queued + scheduler.building;
+    if (pendingWork > 0) {
+      this.pendingSince ??= this.now();
+      const progressAt = this.lastCompletionAt ?? this.pendingSince;
+      if (!this.stallReported && this.now() - progressAt > 5_000) {
+        this.stallReported = true;
+        this.diagnostics?.anomaly('terrain-worker-no-progress', 'terrain', {
+          pending: pendingWork,
+          queued: scheduler.queued,
+          building: scheduler.building,
+          stalledMs: this.now() - progressAt,
+        }, this.diagnosticContext);
+      }
+    } else {
+      this.pendingSince = null;
+      this.stallReported = false;
+    }
     let triangles = 0;
     for (const key of renderKeys) {
       const index = this.chunks.get(key)?.mesh.geometry.getIndex();
@@ -879,7 +920,7 @@ export class PlanetTerrainEngine {
     if (this.disposed) return;
     this.disposed = true;
     this.scheduler.cancelGeneration(this.provider.generation);
-    this.workerPool?.dispose();
+    if (this.ownsWorkerPool) this.workerPool?.dispose();
     for (const key of [...this.chunks.keys()]) this.disposeChunk(key, true, 'engine-dispose');
     this.records.clear();
     this.requestedAt.clear();

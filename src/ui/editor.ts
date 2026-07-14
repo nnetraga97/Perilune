@@ -123,6 +123,7 @@ export class Editor {
   private envSelect!: HTMLSelectElement;
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
+  private launchBtn!: HTMLButtonElement;
   private searchInput!: HTMLInputElement;
   private sortSelect!: HTMLSelectElement;
   private craftListEl!: HTMLElement;
@@ -234,9 +235,9 @@ export class Editor {
       await writeCraftFile(this.craft.name, this.craft);
       this.refreshCraftList();
     };
-    const launch = el('button', 'hud-btn ed-launch', top, '▲ LAUNCH');
-    launch.onclick = () => {
-      if (this.craft.parts.length > 0) this.cb.onLaunch(structuredClone(this.craft));
+    this.launchBtn = el('button', 'hud-btn ed-launch', top, '▲ LAUNCH') as HTMLButtonElement;
+    this.launchBtn.onclick = () => {
+      this.cb.onLaunch(structuredClone(this.craft));
     };
     const utilityHost = el('div', 'ed-utility-host', top);
 
@@ -1028,6 +1029,10 @@ export class Editor {
     if (this.visual) this.scene.remove(this.visual.group);
     this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
+    const canLaunch = this.craft.parts.length > 0;
+    this.launchBtn.disabled = !canLaunch;
+    this.launchBtn.title = canLaunch ? 'Launch this craft' : 'Add at least one part before launch';
+    this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
     if (this.selectedKey !== null) this.setSelected(this.selectedKey);
   }
 

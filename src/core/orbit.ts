@@ -83,11 +83,19 @@ export function stateToElements(
     ((vSq - mu / rLen) * r.y - rv * v.y) / mu,
     ((vSq - mu / rLen) * r.z - rv * v.z) / mu,
   );
-  const e = ev.length();
+  const rawE = ev.length();
 
   const energy = vSq / 2 - mu / rLen;
-  const parabolic = Math.abs(e - 1) < 1e-10;
-  const a = parabolic ? Infinity : -mu / (2 * energy);
+  // Classical elements are singular at exactly e=1. Keep runtime elements on
+  // the correct side of the conic boundary using the state energy, with a
+  // finite semi-major axis derived from p. Arbitrary-state propagation can
+  // still use propagateUniversal without passing through this representation.
+  const nearParabolic = Math.abs(rawE - 1) < 1e-10 || Math.abs(energy) < mu / rLen * 1e-12;
+  const e = nearParabolic
+    ? (energy >= 0 ? 1 + 1e-10 : 1 - 1e-10)
+    : rawE;
+  const p = (hLen * hLen) / mu;
+  const a = nearParabolic ? p / (1 - e * e) : -mu / (2 * energy);
 
   const i = Math.acos(clamp(h.z / hLen, -1, 1));
 
@@ -176,7 +184,9 @@ export function solveKeplerElliptic(M: number, e: number): number {
   for (let iter = 0; iter < 32; iter++) {
     const f = E - e * Math.sin(E) - M;
     const fp = 1 - e * Math.cos(E);
+    if (Math.abs(fp) < 1e-15) break;
     const dE = f / fp;
+    if (!Number.isFinite(dE)) break;
     E -= dE;
     if (Math.abs(dE) < 1e-14) break;
   }
@@ -185,11 +195,14 @@ export function solveKeplerElliptic(M: number, e: number): number {
 
 /** Solve M = e sinhH - H by Newton iteration. */
 export function solveKeplerHyperbolic(M: number, e: number): number {
+  if (!(e > 1)) throw new RangeError('Hyperbolic Kepler solve requires e > 1');
   let H = Math.sign(M) * Math.log((2 * Math.abs(M)) / e + 1.8);
   for (let iter = 0; iter < 64; iter++) {
     const f = e * Math.sinh(H) - H - M;
     const fp = e * Math.cosh(H) - 1;
+    if (Math.abs(fp) < 1e-15) break;
     const dH = f / fp;
+    if (!Number.isFinite(dH)) break;
     H -= dH;
     if (Math.abs(dH) < 1e-13) break;
   }
@@ -247,13 +260,15 @@ export function elementsAtTime(el: OrbitalElements, t: number, outR: Vec3, outV:
 export function timeToTrueAnomaly(el: OrbitalElements, tNow: number, nuTarget: number): number {
   const n = meanMotionOf(el);
   const MTarget = trueToMean(nuTarget, el.e);
-  const MNow = (el.meanAnomaly0 + n * (tNow - el.epoch)) % TWO_PI;
-  let dM = MTarget - (MNow < 0 ? MNow + TWO_PI : MNow);
+  const rawMNow = el.meanAnomaly0 + n * (tNow - el.epoch);
   if (el.e < 1) {
+    const MNow = ((rawMNow % TWO_PI) + TWO_PI) % TWO_PI;
+    let dM = MTarget - MNow;
     while (dM < 0) dM += TWO_PI;
     return dM / n;
   }
-  return dM / n; // hyperbolic: may be negative (already passed)
+  // Hyperbolic mean anomaly is not periodic and must never be wrapped.
+  return (MTarget - rawMNow) / n; // may be negative (already passed)
 }
 
 // ---------------------------------------------------------------------------
