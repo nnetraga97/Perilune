@@ -1,0 +1,10 @@
+.git
+.vercel
+node_modules
+dist
+playwright-report
+test-results
+artifacts
+*.local
+assets/planets/sources/**/*.tif
+assets/planets/sources/**/*.zip

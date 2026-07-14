@@ -1,6 +1,6 @@
 import type { GameState } from '../sim/state';
 import { EXPERIMENTS, experimentValue, type ScienceSituation } from '../content/science';
-import { deleteSave, listSaves, type SaveSlotMeta } from '../save/persistence';
+import type { ConflictChoice, UnifiedSaveSlot } from '../cloud/types';
 import { el } from './kit';
 import { type KeyBinding, InputService, keyDisplay } from './input';
 import type { ProfileStore } from './profileStore';
@@ -16,6 +16,7 @@ export interface UiSettings {
   fov: number;
   cameraSmoothing: boolean;
   simplifiedTerms: boolean;
+  telemetryEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: UiSettings = {
@@ -28,12 +29,19 @@ const DEFAULT_SETTINGS: UiSettings = {
   fov: 55,
   cameraSmoothing: true,
   simplifiedTerms: false,
+  telemetryEnabled: true,
 };
 
 export interface UtilityCallbacks {
   onSave(slot: string, label: string): Promise<boolean>;
   onLoad(slot: string): Promise<void>;
+  onListSaves(): Promise<UnifiedSaveSlot[]>;
+  onRefreshSaves(): Promise<void>;
+  onDeleteSave(slot: string): Promise<boolean>;
+  onResolveConflict(slot: string, choice: ConflictChoice): Promise<boolean>;
+  onSavesChanged(listener: () => void): () => void;
   onSettings(settings: UiSettings): void;
+  onTelemetry(enabled: boolean): void;
 }
 
 const SITUATIONS: readonly ScienceSituation[] = [
@@ -72,6 +80,8 @@ export class UtilityTools {
     const remaps = store.get<Record<string, { code: string; shift: boolean; alt: boolean; ctrl: boolean }>>('keybindings', {});
     input.configureRemaps(remaps, (next) => store.set('keybindings', next));
     callbacks.onSettings(this.settings);
+    callbacks.onTelemetry(this.settings.telemetryEnabled);
+    callbacks.onSavesChanged(() => { if (this.savesEl) void this.renderSaves(); });
 
     windows.register({
       id: 'science-archive', title: 'SCIENCE ARCHIVE', buttonLabel: 'Science', screen: 'any',
@@ -99,7 +109,7 @@ export class UtilityTools {
 
   openSaves(): void {
     this.windows.toggle('save-browser');
-    void this.renderSaves();
+    void this.callbacks.onRefreshSaves().finally(() => this.renderSaves());
   }
 
   openSettings(): void {
@@ -161,21 +171,24 @@ export class UtilityTools {
     save.onclick = async () => {
       const label = name.value.trim() || `Mission ${new Date().toLocaleString()}`;
       const slot = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || `save-${Date.now()}`;
-      const existing = (await listSaves()).some((candidate) => candidate.slot === slot);
+      const existing = (await this.callbacks.onListSaves()).some((candidate) => candidate.slot === slot);
       if (existing && !window.confirm(`Overwrite save “${label}”?`)) return;
       if (await this.callbacks.onSave(slot, label)) await this.renderSaves();
     };
-    const slots = await listSaves();
+    const slots = await this.callbacks.onListSaves();
     if (!slots.length) el('div', 'mission-empty', content, 'No saves yet');
     for (const meta of slots) this.renderSaveRow(content, meta);
   }
 
-  private renderSaveRow(parent: HTMLElement, meta: SaveSlotMeta): void {
+  private renderSaveRow(parent: HTMLElement, meta: UnifiedSaveSlot): void {
     const row = el('div', 'utility-save', parent);
     const copy = el('div', 'utility-save-copy', row);
     el('div', 'utility-heading', copy, meta.slot === 'auto' ? 'AUTOSAVE' : meta.label);
-    el('div', 'utility-muted', copy,
-      `${new Date(meta.createdAt).toLocaleString()} · UT ${meta.time.toFixed(0)} s · ${meta.vesselCount} vessel${meta.vesselCount === 1 ? '' : 's'}${meta.activeVesselName ? ` · ${meta.activeVesselName}` : ''}`);
+    el('span', `utility-sync utility-sync-${meta.state}`, copy, meta.state.toUpperCase());
+    const details = meta.time === null || meta.vesselCount === null
+      ? `${new Date(meta.createdAt).toLocaleString()} · available from cloud`
+      : `${new Date(meta.createdAt).toLocaleString()} · UT ${meta.time.toFixed(0)} s · ${meta.vesselCount} vessel${meta.vesselCount === 1 ? '' : 's'}${meta.activeVesselName ? ` · ${meta.activeVesselName}` : ''}`;
+    el('div', 'utility-muted', copy, details);
     const actions = el('div', 'utility-actions', row);
     const load = el('button', 'hud-btn', actions, 'Load');
     load.onclick = () => void this.callbacks.onLoad(meta.slot);
@@ -186,11 +199,20 @@ export class UtilityTools {
         await this.renderSaves();
       }
     };
+    if (meta.state === 'conflict') {
+      for (const [choice, label] of [
+        ['keep-local', 'Keep local'], ['keep-cloud', 'Keep cloud'], ['keep-both', 'Keep both'],
+      ] as Array<[ConflictChoice, string]>) {
+        const resolve = el('button', 'hud-btn', actions, label);
+        resolve.onclick = async () => {
+          if (await this.callbacks.onResolveConflict(meta.slot, choice)) await this.renderSaves();
+        };
+      }
+    }
     const remove = el('button', 'hud-btn', actions, 'Delete');
     remove.onclick = async () => {
       if (!window.confirm(`Delete “${meta.label}” and its backups?`)) return;
-      await deleteSave(meta.slot);
-      await this.renderSaves();
+      if (await this.callbacks.onDeleteSave(meta.slot)) await this.renderSaves();
     };
   }
 
@@ -224,6 +246,7 @@ export class UtilityTools {
     this.addRange('Camera FOV', 'fov', 35, 85, 1);
     this.addToggle('Camera smoothing', 'cameraSmoothing');
     this.addToggle('Plain-language orbit labels', 'simplifiedTerms');
+    this.addToggle('Share anonymous diagnostics and usage', 'telemetryEnabled');
 
     el('div', 'mission-section-title', this.settingsEl, 'KEYBINDINGS · CLICK A KEY TO REMAP');
     const bindings = el('div', 'utility-bindings', this.settingsEl);
@@ -235,6 +258,7 @@ export class UtilityTools {
   private commitSettings(): void {
     this.store.set('settings', this.settings);
     this.callbacks.onSettings(this.settings);
+    this.callbacks.onTelemetry(this.settings.telemetryEnabled);
   }
 
   private addRange<K extends 'uiScale' | 'dragSensitivity' | 'fov'>(label: string, key: K, min: number, max: number, step: number): void {
@@ -247,7 +271,7 @@ export class UtilityTools {
     row.appendChild(input);
   }
 
-  private addToggle<K extends 'reducedMotion' | 'invertX' | 'invertY' | 'cameraSmoothing' | 'simplifiedTerms'>(label: string, key: K): void {
+  private addToggle<K extends 'reducedMotion' | 'invertX' | 'invertY' | 'cameraSmoothing' | 'simplifiedTerms' | 'telemetryEnabled'>(label: string, key: K): void {
     const row = el('label', 'utility-setting', this.settingsEl!);
     el('span', '', row, label);
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.settings[key];

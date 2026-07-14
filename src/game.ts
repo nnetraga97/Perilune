@@ -18,7 +18,7 @@ import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
 import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
 import { GpuTimerRing } from './render/gpuTimer';
-import { readSave, restoreGame, serializeGame, writeSave } from './save/persistence';
+import { restoreGame } from './save/persistence';
 import {
   experimentKey,
   experimentValue,
@@ -39,6 +39,12 @@ import { browserProfileStore } from './ui/profileStore';
 import { FlightInstruments } from './ui/flightInstruments';
 import { MissionTools } from './ui/missionTools';
 import { UtilityTools, type UiSettings } from './ui/utilityTools';
+import { AuthService } from './cloud/auth';
+import { CloudSaveClient } from './cloud/client';
+import { SaveSyncService } from './cloud/saveSync';
+import { SyncStore } from './cloud/syncStore';
+import { AccountWindow } from './ui/account';
+import { telemetry } from './telemetry/service';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -84,6 +90,9 @@ class PeriluneGame {
   private instruments!: FlightInstruments;
   private missionTools!: MissionTools;
   private utilityTools!: UtilityTools;
+  private auth!: AuthService;
+  private saveSync!: SaveSyncService;
+  private account!: AccountWindow;
   private uiSettings: UiSettings | null = null;
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
@@ -109,6 +118,8 @@ class PeriluneGame {
     this.unsubscribeGpuRestoration?.();
     this.unsubscribeGpuRestoration = null;
     this.gpuProfiler.dispose();
+    this.saveSync.dispose();
+    this.auth.dispose();
     this.map.dispose();
     // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
@@ -212,10 +223,18 @@ class PeriluneGame {
     });
     this.tutorial = new Tutorial(this.uiRoot);
     window.addEventListener('pagehide', this.onPageHide);
-    this.buildMenu();
     this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
     const profile = browserProfileStore();
     this.windows = new WindowManager(this.uiRoot, profile);
+    this.auth = new AuthService();
+    this.saveSync = new SaveSyncService(
+      this.auth,
+      new CloudSaveClient(this.auth),
+      new SyncStore(profile),
+    );
+    this.saveSync.initialize();
+    this.account = new AccountWindow(this.windows, this.auth);
+    this.auth.subscribe((state) => telemetry.setUser(state.kind === 'signed-in' ? state.session.userId : null));
     this.instruments = new FlightInstruments(this.windows, () => this.game);
     this.missionTools = new MissionTools(this.windows, () => this.game, {
       onSwitchVessel: (vesselId) => this.activateVessel(vesselId),
@@ -254,10 +273,18 @@ class PeriluneGame {
       },
     }, this.uiRoot);
     this.utilityTools = new UtilityTools(this.windows, profile, this.input, () => this.game, {
-      onSave: (slot, label) => writeSave(this.game, slot, label),
+      onSave: (slot, label) => this.saveSync.write(this.game, slot, label),
       onLoad: (slot) => this.loadSlot(slot),
+      onListSaves: () => this.saveSync.list(),
+      onRefreshSaves: () => this.saveSync.refresh(),
+      onDeleteSave: (slot) => this.saveSync.delete(slot),
+      onResolveConflict: (slot, choice) => this.saveSync.resolveConflict(slot, choice),
+      onSavesChanged: (listener) => this.saveSync.subscribe(listener),
       onSettings: (settings) => this.applySettings(settings),
+      onTelemetry: (enabled) => telemetry.setEnabled(enabled),
     });
+    this.buildMenu();
+    void this.auth.start();
     this.windows.addAction('⌨ Keys', 'Keyboard reference (?)', () => {
       if (this.screen === 'flight' || this.screen === 'editor') {
         this.cheatSheet.toggle(this.screen as BindingScreen);
@@ -399,16 +426,17 @@ class PeriluneGame {
       this.toEditor();
     });
     mkBtn('Save & Load', () => this.utilityTools.openSaves());
+    mkBtn('Account', () => this.account.open());
     mkBtn('Settings', () => this.utilityTools.openSettings());
     const cont = mkBtn('Continue from last save', async () => {
-      const save = await readSave('auto');
+      const save = await this.saveSync.read('auto');
       if (save) {
         this.game = restoreGame(save);
         if (this.game.active) this.toFlight(false);
         else this.toEditor();
       }
     });
-    readSave('auto').then((s) => {
+    this.saveSync.read('auto').then((s) => {
       if (!s) cont.style.opacity = '0.4';
     });
     this.uiRoot.appendChild(this.menuEl);
@@ -416,6 +444,7 @@ class PeriluneGame {
 
   private newGame(): void {
     this.game = new GameState();
+    telemetry.track('game_started', { mode: this.auth.state.kind === 'signed-in' ? 'account' : 'guest' });
   }
 
   private showMenu(): void {
@@ -437,7 +466,7 @@ class PeriluneGame {
     this.map.setVisible(false);
     this.perf.setMiniVisible(false);
     this.windows.setScreen('editor');
-    void writeSave(this.game, 'auto', 'autosave');
+    void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
   private toFlight(spawn = true): void {
@@ -459,6 +488,7 @@ class PeriluneGame {
     this.game.clearFlightVessels();
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
+    telemetry.track('launch');
     logEvent(this.game.active!.runtime, this.game.time, `${craft.name} on the pad. Throttle up (Shift) and stage (Space) when ready.`);
   }
 
@@ -481,7 +511,7 @@ class PeriluneGame {
   }
 
   private quickSave(): void {
-    void writeSave(this.game, 'quick', 'quicksave').then((ok) => {
+    void this.saveSync.write(this.game, 'quick', 'quicksave').then((ok) => {
       const gv = this.game.active;
       if (gv) logEvent(gv.runtime, this.game.time, ok ? 'Quicksaved.' : 'Quicksave FAILED', ok ? 'info' : 'danger');
     });
@@ -492,7 +522,7 @@ class PeriluneGame {
   }
 
   private async loadSlot(slot: string): Promise<void> {
-    const save = await readSave(slot);
+    const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save);
     this.world.dispose();
@@ -580,7 +610,7 @@ class PeriluneGame {
         (v.crew.length ? ` Crew ${v.crew.join(', ')} return to a hero's welcome.` : ''),
       [{ label: 'Back to the Workshop', fn: () => this.toEditor() }],
     );
-    void writeSave(this.game, 'auto', 'autosave');
+    void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
   private warpToNode(node: ManeuverNode): void {
@@ -1006,7 +1036,7 @@ class PeriluneGame {
       // Periodic autosave (wall-clock; skips high warp to avoid stutter).
       if (!this.paused && now - this.lastAutosave > 120_000 && this.game.warpRate <= 5) {
         this.lastAutosave = now;
-        void writeSave(this.game, 'auto', 'autosave');
+        void this.saveSync.write(this.game, 'auto', 'autosave');
       }
 
       // Destruction dialog.

@@ -404,6 +404,16 @@ async function idbDelete(key: string): Promise<void> {
 export async function writeSave(game: GameState, slot: string, label: string): Promise<boolean> {
   try {
     const save = serializeGame(game, label);
+    return await writeSaveDocument(slot, save);
+  } catch (err) {
+    console.error('writeSave error:', err);
+    return false;
+  }
+}
+
+/** Persist an already serialized save through the same validation and backup rotation. */
+export async function writeSaveDocument(slot: string, save: SaveGame): Promise<boolean> {
+  try {
     const json = JSON.stringify(save);
     // Verify what we are about to store actually parses + validates.
     const parsed = JSON.parse(json) as unknown;
@@ -420,7 +430,7 @@ export async function writeSave(game: GameState, slot: string, label: string): P
     }
     return await idbPut(`save:${slot}`, json);
   } catch (err) {
-    console.error('writeSave error:', err);
+    console.error('writeSaveDocument error:', err);
     return false;
   }
 }

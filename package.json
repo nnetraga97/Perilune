@@ -9,6 +9,8 @@
     "dev": "vite",
     "prebuild": "npm run validate:content && npm run sync:renderer-assets",
     "build": "tsc --noEmit && vite build",
+    "migrate:cloud": "node scripts/apply-cloud-migration.mjs",
+    "vercel-build": "npm run migrate:cloud && npm run build",
     "preview": "vite preview",
     "serve": "vite preview --port 4173",
     "test": "vitest run",
@@ -28,7 +30,12 @@
     "fetch:planet-source": "node scripts/fetch-planet-source.mjs"
   },
   "dependencies": {
+    "@sentry/browser": "^10.65.0",
+    "@sentry/node": "^10.65.0",
+    "@supabase/supabase-js": "^2.110.3",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
+    "redis": "^6.1.0",
     "three": "^0.170.0"
   },
   "devDependencies": {
@@ -37,11 +44,13 @@
     "@gltf-transform/extensions": "4.3.0",
     "@gltf-transform/functions": "4.3.0",
     "@playwright/test": "^1.49.0",
+    "@sentry/vite-plugin": "^5.4.0",
     "@types/node": "22.20.1",
     "@types/three": "^0.170.0",
     "draco3dgltf": "1.5.7",
     "fast-check": "^3.23.0",
     "meshoptimizer": "1.0.1",
+    "postgres": "^3.4.9",
     "sharp": "0.35.3",
     "tsx": "4.23.0",
     "typescript": "^5.7.0",

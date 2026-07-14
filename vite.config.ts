@@ -1,7 +1,27 @@
 import { defineConfig } from 'vite';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+const sentryUpload = process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+  ? sentryVitePlugin({
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    sourcemaps: { filesToDeleteAfterUpload: ['dist/**/*.map'] },
+  })
+  : null;
 
 export default defineConfig({
   base: './',
+  plugins: sentryUpload ? [sentryUpload] : [],
+  define: {
+    __SUPABASE_URL__: JSON.stringify(process.env.SUPABASE_URL ?? ''),
+    __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(
+      process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? '',
+    ),
+    __SENTRY_DSN__: JSON.stringify(process.env.SENTRY_DSN ?? ''),
+    __PERILUNE_RELEASE__: JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA ?? 'development'),
+    __VERCEL_DEPLOYED__: JSON.stringify(process.env.VERCEL === '1'),
+  },
   build: {
     target: 'es2022',
     sourcemap: true,

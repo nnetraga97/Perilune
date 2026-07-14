@@ -349,8 +349,16 @@ export function injectUiStyles(): void {
         font-size: 10px; padding: 4px 6px; }
       .utility-save { border-top: 1px solid #223240; padding: 6px 0; }
       .utility-save-copy { margin-bottom: 4px; }
+      .utility-sync { display: inline-block; margin-left: 6px; color: #91a5b2; font: 8px var(--ui-mono); letter-spacing: 0.5px; }
+      .utility-sync-synced { color: var(--ui-good); }
+      .utility-sync-pending, .utility-sync-conflict { color: var(--ui-warn); }
       .utility-actions { display: flex; gap: 4px; justify-content: flex-end; }
       .utility-actions button { padding: 2px 6px; font-size: 9px; }
+      .account-form { display: grid; gap: 5px; border-top: 1px solid #223240; margin-top: 8px; padding-top: 7px; }
+      .account-email { color: var(--ui-accent); font: 10px var(--ui-mono); margin: 4px 0 7px; overflow-wrap: anywhere; }
+      .account-submit { justify-self: end; margin-top: 3px; }
+      .account-error { min-height: 16px; color: var(--ui-danger); font-size: 9px; padding-top: 5px; }
+      .account-error-empty { visibility: hidden; }
       .utility-log { display: grid; grid-template-columns: 58px 1fr; gap: 6px; padding: 4px 0;
         border-top: 1px solid #1c2b35; color: #bccbd5; font-size: 9px; }
       .utility-log.warning { color: var(--ui-warn); }

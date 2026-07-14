@@ -4,10 +4,14 @@
  */
 import { RenderCapabilityError } from './render/context';
 import { parseRenderStartupOptions } from './render/renderStartupOptions';
+import { browserProfileStore } from './ui/profileStore';
+import { telemetry } from './telemetry/service';
 
 const params = new URLSearchParams(location.search);
 const proto = params.get('proto');
 const renderStartupOptions = parseRenderStartupOptions(location.search);
+const telemetryPreference = browserProfileStore().get<{ telemetryEnabled?: boolean }>('settings', {});
+telemetry.start(telemetryPreference.telemetryEnabled ?? true);
 
 function setBoot(status: string, progress: number): void {
   const el = document.getElementById('boot-status');
@@ -34,6 +38,7 @@ async function boot(): Promise<void> {
 }
 
 boot().catch((err) => {
+  telemetry.captureError(err);
   console.error('Boot failed:', err);
   if (err instanceof RenderCapabilityError) {
     setBoot(err.message, 0);
