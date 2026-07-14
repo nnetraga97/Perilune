@@ -74,9 +74,11 @@ export function injectUiStyles(): void {
       .k-key-label { color: #c4d2dd; }
       .k-sheet-hint { margin-top: 10px; font-size: 10.5px; color: #7d8b96; }
       .k-launcher { display:flex; flex-wrap:wrap; gap:4px; pointer-events:auto; }
-      .ed-utility-host { display:flex; align-items:center; margin-left:2px; padding-left:7px; border-left:1px solid #2a3d4d; }
-      .hud-utility-host { position:absolute; top:10px; left:12px; width:236px; z-index:44; pointer-events:auto; }
-      .hud-utility-host .k-launcher { max-width:236px; }
+      .ed-utility-host,.hud-utility-host { position:absolute; left:0; bottom:0; z-index:44; pointer-events:auto; }
+      .ed-utility-host .k-launcher,.hud-utility-host .k-launcher {
+        flex-direction:column; flex-wrap:nowrap; gap:2px; }
+      .ed-utility-host .k-icon-btn,.hud-utility-host .k-icon-btn {
+        border-left:0; border-radius:0 5px 5px 0; }
       .k-icon-btn { position:relative; width:36px; height:36px; padding:0; display:grid; place-items:center;
         border:1px solid #2f4859; border-radius:5px; background:rgba(9,19,27,.9); color:#a9c2ce; cursor:pointer; }
       .k-icon-btn:hover { border-color:var(--ui-accent); color:#fff; }
@@ -92,11 +94,12 @@ export function injectUiStyles(): void {
       .k-icon-btn:hover .k-icon-tooltip,.k-icon-btn:focus-visible .k-icon-tooltip {
         opacity:1; visibility:visible; transform:translate(-50%,0); }
       .ed-utility-host .k-icon-tooltip,
-      .hud-utility-host .k-icon-tooltip { top:calc(100% + 7px); bottom:auto; transform:translate(-50%,-4px); }
+      .hud-utility-host .k-icon-tooltip { left:calc(100% + 7px); top:50%; bottom:auto;
+        transform:translate(-4px,-50%); }
       .ed-utility-host .k-icon-btn:hover .k-icon-tooltip,
       .ed-utility-host .k-icon-btn:focus-visible .k-icon-tooltip,
       .hud-utility-host .k-icon-btn:hover .k-icon-tooltip,
-      .hud-utility-host .k-icon-btn:focus-visible .k-icon-tooltip { transform:translate(-50%,0); }
+      .hud-utility-host .k-icon-btn:focus-visible .k-icon-tooltip { transform:translate(0,-50%); }
       .k-window { position: absolute; min-width: 190px; max-width: 340px;
         background: rgba(10,16,22,0.94); border: 1px solid #2a3d4d; border-radius: 8px;
         z-index: 45; pointer-events: auto; }
@@ -411,8 +414,7 @@ export function injectUiStyles(): void {
 
       @media (max-width:820px), (pointer:coarse) {
         .k-icon-btn { width:42px; height:42px; }
-        .hud-utility-host { top:4px; width:262px; }
-        .hud-utility-host .k-launcher { max-width:262px; column-gap:2px; row-gap:0; }
+        .ed-utility-host .k-launcher,.hud-utility-host .k-launcher { gap:2px; }
       }
 
       /* main menu */

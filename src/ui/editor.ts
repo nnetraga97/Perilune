@@ -239,7 +239,7 @@ export class Editor {
     this.launchBtn.onclick = () => {
       this.cb.onLaunch(structuredClone(this.craft));
     };
-    const utilityHost = el('div', 'ed-utility-host', top);
+    const utilityHost = el('div', 'ed-utility-host', this.root);
 
     // Right: stats, staging, warnings, craft files
     const right = el('div', 'ed-right', this.root);
