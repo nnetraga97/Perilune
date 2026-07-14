@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-13
 
-**Status:** Revision 2 — reviewed for ambiguity and sim-contract accuracy; no implementation yet
+**Status:** Revision 3 approved — UI-first sequencing: workstream 1 leads; workstream 0 items land just-in-time before the workstream that consumes them
 
 **Scope:** Replace the bare-bones flight/map/editor interface with a cohesive, mission-control-grade UI, borrowing the proven interaction patterns of Kerbal Space Program and its most popular UI mods (Kerbal Engineer Redux, MechJeb's node editor, Kerbal Alarm Clock, Precise Maneuver, Trajectories, Transfer Window Planner, Docking Port Alignment Indicator).
 
@@ -163,7 +163,7 @@ All S-sized sim/schema changes the UI work consumes, done before or alongside wo
 - Craft management: rename/duplicate/delete saved craft, part-count/mass/Δv summary per saved entry.
 - **Workshop interaction tweaks & shortcuts** (stock KSP VAB + Editor Extensions Redux patterns; today the editor binds only Delete and X):
   - **Undo/redo** — `Ctrl+Z` / `Ctrl+Y` over a bounded craft-snapshot history. The single biggest absent editor feature; every destructive action (place, move, delete subtree, stage edit) pushes a snapshot.
-  - **Part rotation vs camera pan — one rule:** `W/A/S/D/Q/E` **rotate** the held or selected part (pitch/roll/yaw by the snap increment, `Shift` for fine steps, `Space` resets orientation) **when a part is held or selected**; with nothing held or selected they **pan/elevate the camera** (Better VAB Camera pattern). Middle-drag always pans regardless of selection, so the mouse path never depends on mode. Rotation is new sim-visible state: part orientation currently only exists for surface-attach yaw.
+  - **Part rotation vs camera pan — one rule:** `W/A/S/D/Q/E` **rotate** the held or selected part (pitch/roll/yaw by the snap increment, `Shift` for fine steps, `Space` resets orientation) **when a part is held or selected**; with nothing held or selected they **pan/elevate the camera** (Better VAB Camera pattern). Middle-drag always pans regardless of selection, so the mouse path never depends on mode. **Approved scope: surface-attached parts only** — rotation extends the existing surface-attach yaw to full orientation on those parts; stack-attached parts stay axis-aligned (no new orientation math for the stack tree, aero, or mass properties).
   - **Angle snap** — `C` cycles snap increments (off/5°/15°/45°/90°) with an on-screen indicator next to the symmetry badge.
   - **Symmetry** — keep `X` to cycle count, add `Shift+X` to step back and `R` to toggle radial vs mirror mode (mirror matters once wings/planes are viable).
   - **Vertical snap** — `V` aligns a surface-attached part to the parent's vertical centerline (Editor Extensions Redux's most-loved toggle).
@@ -222,4 +222,7 @@ Suggested first milestone (**"UI M1"**): workstreams 0 + 1 + 2 + 3 — precursor
 2. **Vessel targeting scope:** workstream 7 adds body targets only. Is vessel-to-vessel targeting (rendezvous prep) wanted in this redesign, or deferred with docking?
 3. **Editor thumbnails:** offline-generated (deterministic, adds a content-pipeline step) vs runtime offscreen renders (simpler, small load cost)?
 4. **Gamepad/touch:** ignore for this milestone, or should the kit's hit targets be sized for touch from day one?
-5. **Editor part rotation depth:** full free rotation of any part (new orientation state on `PartInstance`, affects aero/mass math) vs rotation limited to surface-attached parts (cheap, covers fins/ladders/antennas)? The W/A/S/D/Q/E spec above assumes at least surface-attach rotation; full stack-part rotation is a bigger sim change.
+
+### Resolved
+
+- **Editor part rotation depth** (2026-07-14): surface-attached parts only. Full stack-part rotation is out of scope for this redesign.
