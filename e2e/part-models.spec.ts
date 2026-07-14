@@ -30,7 +30,7 @@ async function probe<T>(page: Page, fn: (t: TestProbe) => T): Promise<T> {
 
 async function enterSandbox(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByText('Sandbox — just build and fly').click();
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
 }
 

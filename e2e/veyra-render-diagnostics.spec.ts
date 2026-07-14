@@ -25,7 +25,7 @@ for (const tier of ['medium', 'high'] as const) {
     });
     await seedDiagnosticCraft(page, diagnosticCraft);
     await page.goto(`/?quality=${tier}&renderDebug=1`);
-    await page.getByText('Sandbox — just build and fly').click();
+    await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
     await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
     await page.getByRole('button', { name: 'Veyra Diagnostic Orbiter' }).click();
     await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(20);

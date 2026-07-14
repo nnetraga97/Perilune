@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('parts can be dragged from the palette onto the craft canvas', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Sandbox — just build and fly').click();
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
 
   const pod = page.locator('.ed-part', { hasText: 'Voyager Pod' });

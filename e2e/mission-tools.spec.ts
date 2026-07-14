@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('mission windows connect alarms, transfers, targets, and maneuver sketches', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Sandbox — just build and fly').click();
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
 
   const pod = page.locator('.ed-part', { hasText: 'Voyager Pod' });

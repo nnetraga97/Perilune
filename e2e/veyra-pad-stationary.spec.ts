@@ -58,7 +58,7 @@ test('stationary Veyra launch anchors its fallback and establishes terrain witho
   test.setTimeout(120_000);
   await seedDiagnosticCraft(page, mulePadCraft);
   await page.goto('/?quality=high&renderDebug=1');
-  await page.getByText('Sandbox — just build and fly').click();
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
   await page.getByRole('button', { name: 'Veyra Diagnostic Orbiter' }).click();
   await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(2);
