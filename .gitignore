@@ -14,3 +14,4 @@ assets/planets/sources/**/*.tif
 assets/planets/sources/**/*.partial
 assets/parts/sources/**
 .DS_Store
+.vercel
