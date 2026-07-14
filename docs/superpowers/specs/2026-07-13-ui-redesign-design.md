@@ -24,7 +24,19 @@ The aesthetic target is a **readable instrument panel**: dark glass panels, one 
 - **Editor** (`src/ui/editor.ts`): text-only part cards (`name + mass + blurb`), engineering stats as one preformatted monospace block, staging assignment via a "+sel" button rather than drag, no part search, no thumbnails, no tooltip with full part stats.
 - **No shared UI kit.** Each file injects its own `<style>` string; panels, buttons, and rows are re-implemented three times. Only the color variables in `index.html` are shared.
 - **No settings surface at all** — bindings, UI scale, and accessibility options (committed in `ACCESSIBILITY.md` for M3–M5) have nowhere to live.
+- **Keyboard coverage is near zero.** The editor binds exactly two keys (Delete/Backspace to remove, X to cycle symmetry — `game.ts` `handleKeyPress`). Flight binds ~11 (stage, map, SAS/RCS toggles, full/cut throttle, quicksave/load, warp step, vessel cycle). There is no undo, no part rotation, no angle snap, no precision-control mode, no pause, no way to discover any of the bindings in-game beyond button tooltips.
 - The plain-DOM, no-framework, direct-mutation approach (per the UI-layer ADR) performs fine and is worth keeping; the problem is what is drawn, not how.
+
+## Known Defect: Staging Lost After Decoupling
+
+**Bug (confirmed by play, root cause identified in code):** after a decoupler fires, the craft can lose its entire staging sequence — the HUD staging list empties and Space does nothing.
+
+Mechanism, in `GameState.detachSubtree` (`src/sim/state.ts:291-365`):
+
+- The debris craft is always constructed with `stages: []` (`src/sim/state.ts:311`). When the detached side is the one holding the control pod, control transfers to it (`src/sim/state.ts:361-363`) — and the vessel the player now flies has **no stages at all**. Upper-stage separations where the decoupler's child side carries the pod hit this directly.
+- The retained side filters detached part keys out of its stages (`src/sim/state.ts:302-304`) but, unlike `removeSubtree` in `src/sim/vessel.ts:106-109`, keeps now-empty stage entries, so `currentStage` can point at hollow stages that fire nothing.
+
+**Fix direction (test-first, sim-layer, before workstream 2 builds UI on top of staging):** partition the original stage list across the split — each surviving vessel keeps the stages whose parts it retained, in order, with empty stages dropped and `currentStage` re-pointed at the first unfired stage. Deterministic Vitest cases: pod-above-decoupler, pod-below-decoupler, multi-stage serial stack, and save/load round-trip mid-separation. The workstream-2 staging list (per-stage Δv chips) and workstream-8 staging editor both assume this invariant holds.
 
 ## What the Mods Teach
 
@@ -63,6 +75,16 @@ Numbered for delivery order; each lands independently behind the existing screen
 - **Staging list with numbers:** each stage row shows Δv / TWR / burn time (editor parity), current stage emphasized, next-stage preview on hover.
 - **Status strip:** g-force and dynamic-pressure bars near the throttle; atmosphere-depth indicator during ascent/entry; comms indicator kept.
 - **Part interaction:** click a part on the vessel (or in a vessel systems window) for a KSP-style part action popup — replaces the bespoke ISRU panel and generalizes to future part actions (lights, science re-run, fuel priority).
+- **Flight keyboard shortcuts** (extends the current Space/M/T/R/Z/X/F5/F9/,/./[/] set):
+  - `Esc` — pause menu (resume / settings / quicksave / exit to editor). There is currently no pause surface at all.
+  - `/` — cancel warp to 1× instantly (KSP muscle memory; today only step-down exists).
+  - `Alt+.` — force physics warp even inside rails range, matching KSP's split.
+  - `CapsLock` — precision-control mode: attitude inputs scaled down, indicator on the HUD (KSP's fine-control toggle).
+  - `Backspace` — abort action group placeholder (reserved; wired when action groups land).
+  - `1–0` — action groups mapped to part systems (drills, converters, future lights/panels): assignment UI lives in the editor pass (workstream 8), execution + HUD indicator here.
+  - `F2` — hide UI for screenshots; `F3` already serves the perf overlay.
+  - `?` (or `F1`) — **keybinding reference overlay**: searchable cheat-sheet window generated from the actual binding table, so documentation can never drift from behavior. Same table drives the remap UI in workstream 9.
+  - All bindings route through one declarative table (code → action → screen) instead of the hardcoded `switch` in `game.ts`, which is the prerequisite for remapping.
 
 ### 3. Maneuver Planning (Precise-Maneuver-grade)
 
@@ -104,6 +126,18 @@ Numbered for delivery order; each lands independently behind the existing screen
 - Engineering panel: structured rows instead of preformatted text; environment selector kept; TWR/Δv per stage aligned with the staging column.
 - Part context: click part → action popup (remove, move, symmetry count, crossfeed later); advisor warnings link to the offending part (click to highlight).
 - Craft management: rename/duplicate/delete saved craft, part-count/mass/Δv summary per saved entry.
+- **Workshop interaction tweaks & shortcuts** (stock KSP VAB + Editor Extensions Redux patterns; today the editor binds only Delete and X):
+  - **Undo/redo** — `Ctrl+Z` / `Ctrl+Y` over a bounded craft-snapshot history. The single biggest absent editor feature; every destructive action (place, move, delete subtree, stage edit) pushes a snapshot.
+  - **Part rotation** — `Q/E` (yaw), `W/S` (pitch), `A/D` (roll) rotate the held/selected part by the snap increment, `Shift+key` for fine steps, `Space` resets orientation. Currently parts can only be translated.
+  - **Angle snap** — `C` cycles snap increments (off/5°/15°/45°/90°) with an on-screen indicator next to the symmetry badge.
+  - **Symmetry** — keep `X` to cycle count, add `Shift+X` to step back and `R` to toggle radial vs mirror mode (mirror matters once wings/planes are viable).
+  - **Vertical snap** — `V` aligns a surface-attached part to the parent's vertical centerline (Editor Extensions Redux's most-loved toggle).
+  - **Duplicate** — `Alt+click` a placed part to pick up a copy of it and its subtree.
+  - **Re-root** — a root tool (`4` in KSP's 1/2/3/4 tool row) to change which part is the craft root; affects staging tree and docking later.
+  - **Held-part handling** — `Esc` drops the held part (today only Delete does double duty).
+  - **Editor camera** — `WASD`/`QE` pan and elevate (Better VAB Camera pattern), wheel zoom kept, `Home` refits the whole craft in view.
+  - **Palette navigation** — `Ctrl+F` (or `/`) focuses part search; `Tab` cycles category tabs.
+  - Same declarative binding table + `?` cheat-sheet overlay as flight (workstream 2), so the workshop keys are discoverable and remappable from day one.
 
 ### 9. Notifications, Settings, Accessibility
 
@@ -124,6 +158,8 @@ Numbered for delivery order; each lands independently behind the existing screen
 | 7 | Map usability | M | 1; target selection feeds 5/6 |
 | 8 | Editor pass | L | 1 |
 | 9 | Settings & a11y | M | 1 |
+
+**Workstream 0 (bug fix, before UI M1):** the staging-loss-after-decoupling defect above is a sim fix with Vitest coverage, sized S, and must land before workstream 2's staging list or workstream 8's staging editor — both would otherwise build UI on broken state.
 
 Suggested first milestone (**"UI M1"**): workstreams 1 + 2 + 3 — foundation, HUD, and node editing are what a player touches every single flight. Second milestone (**"UI M2"**): 4 + 5 + 6 + 7, which together turn the buried M2 sim baseline into visible gameplay. Editor and settings (8 + 9) can proceed in parallel with UI M2 if desired.
 
