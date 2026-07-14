@@ -410,7 +410,7 @@ export class FlightHud {
           .map((p) => defOf(p!).name);
         const stageTitle = document.createElement('div');
         stageTitle.className = 'hud-stage-title';
-        stageTitle.textContent = `STAGE ${i}`;
+        stageTitle.textContent = `STAGE ${v.craft.stages.length - 1 - i}`;
         const metrics = analysis.stages[i];
         const figures = document.createElement('div');
         figures.className = 'hud-stage-metrics';

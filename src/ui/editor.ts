@@ -1148,7 +1148,8 @@ export class Editor {
       div.ondragstart = (event) => event.dataTransfer?.setData('application/x-perilune-stage', String(i));
       this.addStageDropTarget(div, i);
       const head = el('div', 'ed-stage-head', div);
-      el('span', '', head, `STAGE ${i}`);
+      const displayStage = this.craft.stages.length - 1 - i;
+      el('span', '', head, `STAGE ${displayStage}`);
       const metrics = analysis.stages[i];
       el('span', 'ed-stage-metrics', head, metrics
         ? `Δv ${metrics.deltaV.toFixed(0)} · TWR ${metrics.twrStart.toFixed(2)} · ${metrics.burnTime.toFixed(0)}s`

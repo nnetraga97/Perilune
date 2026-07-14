@@ -48,6 +48,13 @@ export interface EngineDef {
   airBreathing?: boolean;
 }
 
+export interface DecouplerDef {
+  ejection: number;
+  /** Separators release every attached edge; decouplers release their payload side. */
+  mode: 'decoupler' | 'separator';
+  radial?: boolean;
+}
+
 export interface PartDef {
   id: string;
   name: string;
@@ -82,7 +89,7 @@ export interface PartDef {
   rcs?: { thrust: number };
   pod?: { crew: number; torque: number };
   probe?: { torque: number };
-  decoupler?: { ejection: number; radial?: boolean };
+  decoupler?: DecouplerDef;
   parachute?: { dragArea: number; semiDeployAlt: number; deployAlt: number };
   wing?: { liftArea: number; control?: boolean; maxDeflection?: number };
   battery?: { capacity: number };
@@ -450,7 +457,7 @@ export const PARTS: PartDef[] = [
     crossfeed: false,
     maxTemp: 1700,
     crashTolerance: 9,
-    decoupler: { ejection: 800 },
+    decoupler: { ejection: 800, mode: 'separator' },
     color: '#e2b13c',
     accent: '#3f4750',
   },
@@ -467,7 +474,7 @@ export const PARTS: PartDef[] = [
     crossfeed: false,
     maxTemp: 1700,
     crashTolerance: 9,
-    decoupler: { ejection: 1600 },
+    decoupler: { ejection: 1600, mode: 'separator' },
     color: '#e2b13c',
     accent: '#3f4750',
   },
@@ -484,7 +491,7 @@ export const PARTS: PartDef[] = [
     crossfeed: false,
     maxTemp: 1700,
     crashTolerance: 9,
-    decoupler: { ejection: 500, radial: true },
+    decoupler: { ejection: 500, mode: 'decoupler', radial: true },
     color: '#e2b13c',
     accent: '#3f4750',
   },

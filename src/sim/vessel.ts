@@ -65,28 +65,44 @@ export interface StagePartition {
   detached: StagePlan;
 }
 
-/** Split and compact a stage plan, omitting consumed one-shot actions. */
+/** Project a stage plan onto one connected component without mutating it. */
+export function projectStages(
+  stages: readonly Stage[],
+  currentStage: number,
+  partKeys: ReadonlySet<number>,
+  consumedKeys: ReadonlySet<number> = new Set<number>(),
+): StagePlan {
+  const nextStage = Math.min(stages.length, Math.max(0, Math.trunc(currentStage)));
+  const projected = stages.map((stage) => ({
+    partKeys: stage.partKeys.filter(
+      (key) => partKeys.has(key) && !consumedKeys.has(key),
+    ),
+  }));
+  const compacted = projected.filter((stage) => stage.partKeys.length > 0);
+  const firedStages = projected
+    .slice(0, nextStage)
+    .filter((stage) => stage.partKeys.length > 0).length;
+  return {
+    stages: compacted,
+    currentStage: Math.min(firedStages, compacted.length),
+  };
+}
+
+/** Split and compact a stage plan between two resulting vessel components. */
 export function partitionStages(
   stages: readonly Stage[],
   currentStage: number,
   detachedKeys: ReadonlySet<number>,
   consumedKeys: ReadonlySet<number> = new Set<number>(),
 ): StagePartition {
-  const nextStage = Math.min(stages.length, Math.max(0, Math.trunc(currentStage)));
   const project = (detached: boolean): StagePlan => {
-    const projected = stages.map((stage) => ({
-      partKeys: stage.partKeys.filter(
-        (key) => !consumedKeys.has(key) && detachedKeys.has(key) === detached,
-      ),
-    }));
-    const compacted = projected.filter((stage) => stage.partKeys.length > 0);
-    const firedStages = projected
-      .slice(0, nextStage)
-      .filter((stage) => stage.partKeys.length > 0).length;
-    return {
-      stages: compacted,
-      currentStage: Math.min(firedStages, compacted.length),
-    };
+    const keys = new Set<number>();
+    for (const stage of stages) {
+      for (const key of stage.partKeys) {
+        if (detachedKeys.has(key) === detached) keys.add(key);
+      }
+    }
+    return projectStages(stages, currentStage, keys, consumedKeys);
   };
   return {
     retained: project(false),
@@ -419,21 +435,6 @@ export function analyzeCraft(
     return seen;
   };
 
-  const subtreeKeys = (rootKey: number) => {
-    const subtree = new Set<number>([rootKey]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const sp of sim.values()) {
-        if (sp.alive && sp.parentKey !== null && subtree.has(sp.parentKey) && !subtree.has(sp.key)) {
-          subtree.add(sp.key);
-          grew = true;
-        }
-      }
-    }
-    return subtree;
-  };
-
   const killKeys = (keys: ReadonlySet<number>) => {
     for (const k of keys) {
       const sp = sim.get(k);
@@ -441,20 +442,72 @@ export function analyzeCraft(
     }
   };
 
-  // Match runtime separation ownership: the root-side vessel stays active
-  // unless it has no control and the detached subtree does. Craft analysis
-  // must not assume the original construction root always remains playable.
+  const sideHasControl = (keys: ReadonlySet<number>) => [...keys].some((key) => {
+    const def = sim.get(key)?.def;
+    return Boolean(def?.pod || def?.probe);
+  });
+
+  // Match runtime component ownership: keep the root-side component unless it
+  // loses control, while an omni separator itself becomes discarded debris.
   const separateAt = (rootKey: number) => {
-    const live = new Set([...sim.values()].filter((sp) => sp.alive).map((sp) => sp.key));
-    const detached = subtreeKeys(rootKey);
-    if (detached.size === live.size) return;
-    const retained = new Set([...live].filter((key) => !detached.has(key)));
-    const hasControl = (keys: ReadonlySet<number>) => [...keys].some((key) => {
-      const def = sim.get(key)?.def;
-      return Boolean(def?.pod || def?.probe);
-    });
-    const keepDetached = !hasControl(retained) && hasControl(detached);
-    killKeys(keepDetached ? retained : detached);
+    const coupling = sim.get(rootKey);
+    if (!coupling?.alive || !coupling.def.decoupler) return;
+    const omni = coupling.def.decoupler.mode === 'separator';
+    const liveParts = [...sim.values()].filter((part) => part.alive);
+    const adjacency = new Map<number, number[]>();
+    for (const part of liveParts) adjacency.set(part.key, []);
+    let cutEdges = 0;
+    for (const part of liveParts) {
+      if (part.parentKey === null || !adjacency.has(part.parentKey)) continue;
+      const cut = omni
+        ? part.key === rootKey || part.parentKey === rootKey
+        : part.parentKey === rootKey;
+      if (cut) {
+        cutEdges++;
+        continue;
+      }
+      adjacency.get(part.key)!.push(part.parentKey);
+      adjacency.get(part.parentKey)!.push(part.key);
+    }
+    if (cutEdges === 0) return;
+
+    const components: Set<number>[] = [];
+    const visited = new Set<number>();
+    for (const key of adjacency.keys()) {
+      if (visited.has(key)) continue;
+      const component = new Set<number>();
+      const queue = [key];
+      visited.add(key);
+      while (queue.length) {
+        const current = queue.pop()!;
+        component.add(current);
+        for (const neighbor of adjacency.get(current) ?? []) {
+          if (visited.has(neighbor)) continue;
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+      components.push(component);
+    }
+    if (components.length < 2) return;
+
+    const liveRoot = liveParts.find(
+      (part) => part.parentKey === null || !sim.get(part.parentKey)?.alive,
+    )?.key;
+    const nonRingComponents = omni
+      ? components.filter((component) => !(component.size === 1 && component.has(rootKey)))
+      : components;
+    let keep = nonRingComponents.find(
+      (component) => liveRoot !== undefined && liveRoot !== rootKey && component.has(liveRoot),
+    );
+    if (!keep || !sideHasControl(keep)) {
+      keep = nonRingComponents.find((component) => sideHasControl(component)) ?? keep;
+    }
+    keep ??= [...nonRingComponents].sort((a, b) => b.size - a.size)[0];
+    if (!keep) return;
+    for (const component of components) {
+      if (component !== keep) killKeys(component);
+    }
   };
 
   const ispAt = (eng: NonNullable<PartDef['engine']>): number => {

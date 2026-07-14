@@ -19,7 +19,7 @@ import {
   PartInstance,
   defOf,
   partitionActionGroups,
-  partitionStages,
+  projectStages,
 } from './vessel';
 import {
   createVesselRuntime,
@@ -308,7 +308,12 @@ export class GameState {
     const consumedDecouplers = new Set(decouplersToFire.map((dec) => dec.key));
     for (const dec of decouplersToFire) {
       if (!v.craft.parts.some((part) => part.key === dec.key)) continue;
-      this.detachSubtree(gv, dec, defOf(dec).decoupler!.ejection, consumedDecouplers);
+      const coupling = defOf(dec).decoupler!;
+      if (coupling.mode === 'separator') {
+        this.detachStackSeparator(gv, dec, coupling.ejection, consumedDecouplers);
+      } else {
+        this.detachDecouplerPayload(gv, dec, coupling.ejection, consumedDecouplers);
+      }
     }
     refreshDerived(v);
     return fired;
@@ -339,87 +344,292 @@ export class GameState {
     consumedStageKeys: ReadonlySet<number> = new Set<number>(),
   ): void {
     const v = gv.runtime;
+    const keys = splitAtJoint(v.craft, atPart.key);
+    if (keys.length === v.craft.parts.length) return; // would detach everything
+    this.detachPartSet(gv, new Set(keys), atPart, ejectionImpulse, consumedStageKeys);
+  }
+
+  /** A one-sided decoupler stays with the parent-side craft and releases its payload branches. */
+  private detachDecouplerPayload(
+    gv: GameVessel,
+    decoupler: PartInstance,
+    ejectionImpulse: number,
+    consumedStageKeys: ReadonlySet<number>,
+  ): void {
+    const craft = gv.runtime.craft;
+    const components = this.componentsAfterCouplingFires(craft, decoupler.key, false);
+    if (components.length < 2) {
+      // Legacy/inverted craft may have the explosive side authored as the
+      // parent edge. Preserve that orientation until attachment nodes carry
+      // an explicit explosive-node id.
+      this.detachSubtree(gv, decoupler, ejectionImpulse, consumedStageKeys);
+      return;
+    }
+    const retained = components.find((component) => component.has(decoupler.key))!;
+    this.separatePartComponents(gv, components, retained, ejectionImpulse, consumedStageKeys);
+  }
+
+  /**
+   * An omni separator releases every edge attached to the ring. The ring is
+   * retained as its own physical debris component rather than being deleted.
+   */
+  private detachStackSeparator(
+    gv: GameVessel,
+    separator: PartInstance,
+    ejectionImpulse: number,
+    consumedStageKeys: ReadonlySet<number>,
+  ): void {
+    const craft = gv.runtime.craft;
+    const components = this.componentsAfterCouplingFires(craft, separator.key, true);
+    if (components.length < 2) return;
+
+    const originalRoot = craft.parts.find((part) => part.parentKey === null)?.key;
+    const nonRingComponents = components.filter(
+      (component) => !(component.size === 1 && component.has(separator.key)),
+    );
+    const retained = nonRingComponents.find(
+      (component) => originalRoot !== undefined && originalRoot !== separator.key && component.has(originalRoot),
+    ) ?? nonRingComponents.find((component) => this.componentHasControl(craft, component))
+      ?? [...nonRingComponents].sort((a, b) => b.size - a.size)[0];
+    if (!retained) return;
+    this.separatePartComponents(gv, components, retained, ejectionImpulse, consumedStageKeys);
+  }
+
+  /** Connected components after cutting the configured coupling edges. */
+  private componentsAfterCouplingFires(
+    craft: Craft,
+    couplingKey: number,
+    omni: boolean,
+  ): Set<number>[] {
+    const adjacency = new Map<number, number[]>();
+    for (const part of craft.parts) adjacency.set(part.key, []);
+    let cutEdges = 0;
+    for (const part of craft.parts) {
+      if (part.parentKey === null || !adjacency.has(part.parentKey)) continue;
+      const cut = omni
+        ? part.key === couplingKey || part.parentKey === couplingKey
+        : part.parentKey === couplingKey;
+      if (cut) {
+        cutEdges++;
+        continue;
+      }
+      adjacency.get(part.key)!.push(part.parentKey);
+      adjacency.get(part.parentKey)!.push(part.key);
+    }
+    if (cutEdges === 0) return [];
+
+    const components: Set<number>[] = [];
+    const visited = new Set<number>();
+    for (const key of adjacency.keys()) {
+      if (visited.has(key)) continue;
+      const component = new Set<number>();
+      const queue = [key];
+      visited.add(key);
+      while (queue.length) {
+        const current = queue.pop()!;
+        component.add(current);
+        for (const neighbor of adjacency.get(current) ?? []) {
+          if (visited.has(neighbor)) continue;
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+      components.push(component);
+    }
+    return components;
+  }
+
+  private componentHasControl(craft: Craft, keys: ReadonlySet<number>): boolean {
+    return craft.parts.some(
+      (part) => keys.has(part.key) && Boolean(defOf(part).pod || defOf(part).probe),
+    );
+  }
+
+  private detachPartSet(
+    gv: GameVessel,
+    detachedKeys: ReadonlySet<number>,
+    detachedRoot: PartInstance,
+    ejectionImpulse: number,
+    consumedStageKeys: ReadonlySet<number>,
+  ): void {
+    const v = gv.runtime;
+    const retainedKeys = new Set(
+      v.craft.parts.filter((part) => !detachedKeys.has(part.key)).map((part) => part.key),
+    );
+    if (detachedKeys.size === 0 || retainedKeys.size === 0) return;
+    this.separatePartComponents(
+      gv,
+      [retainedKeys, new Set(detachedKeys)],
+      retainedKeys,
+      ejectionImpulse,
+      consumedStageKeys,
+      detachedRoot,
+    );
+  }
+
+  /** Split one craft into every connected component while preserving each component's stage plan. */
+  private separatePartComponents(
+    gv: GameVessel,
+    components: readonly ReadonlySet<number>[],
+    retainedKeys: ReadonlySet<number>,
+    ejectionImpulse: number,
+    consumedStageKeys: ReadonlySet<number>,
+    preferredDetachedRoot?: PartInstance,
+  ): void {
+    const v = gv.runtime;
     const wasActive = this.activeVesselId === v.id;
     const oldCom = v.massProps.com.clone();
     const oldPos = v.pos.clone();
+    const oldVel = v.vel.clone();
+    const oldAtt = v.att.clone();
+    const oldAngVel = v.angVel.clone();
+    const oldSituation = v.situation;
+    const oldSas = v.sas;
+    const oldSasCustomDir = v.sasCustomDir.clone();
+    const oldControls = {
+      pitch: v.controls.pitch,
+      yaw: v.controls.yaw,
+      roll: v.controls.roll,
+      throttle: v.controls.throttle,
+      rcs: v.controls.rcs,
+      translate: v.controls.translate.clone(),
+      wheelDrive: v.controls.wheelDrive,
+      wheelSteer: v.controls.wheelSteer,
+      brake: v.controls.brake,
+    };
     const crewBefore = [...v.crew];
-    const keys = splitAtJoint(v.craft, atPart.key);
-    if (keys.length === v.craft.parts.length) return; // would detach everything
-    const detachedKeys = new Set(keys);
-    const detachedParts = v.craft.parts.filter((p) => detachedKeys.has(p.key));
-    v.craft.parts = v.craft.parts.filter((p) => !detachedKeys.has(p.key));
-    const stagePartition = partitionStages(
-      v.craft.stages,
-      v.currentStage,
-      detachedKeys,
-      consumedStageKeys,
-    );
-    const actionGroupPartition = partitionActionGroups(v.craft.actionGroups, detachedKeys);
-    v.craft.stages = stagePartition.retained.stages;
-    v.craft.actionGroups = actionGroupPartition.retained;
-    v.currentStage = stagePartition.retained.currentStage;
+    const sourceCraft = v.craft;
+    const sourceParts = [...sourceCraft.parts];
+    const sourceStages = sourceCraft.stages;
+    const sourceActionGroups = sourceCraft.actionGroups;
+    const sourceCurrentStage = v.currentStage;
 
-    // Build the debris craft. Keep positions; root the detached top part.
-    const debrisCraft: Craft = {
-      name: `${v.name} debris`,
-      version: 1,
-      parts: detachedParts,
-      stages: stagePartition.detached.stages,
-      actionGroups: actionGroupPartition.detached,
-      nextKey: v.craft.nextKey,
-    };
-    const rootPart = detachedParts.find((p) => p.key === atPart.key) ?? detachedParts[0];
-    rootPart.parentKey = null;
+    const orderedComponents = [
+      retainedKeys,
+      ...components.filter((component) => component !== retainedKeys),
+    ].filter((component) => component.size > 0);
+    if (orderedComponents.length < 2) return;
 
-    const debris = createVesselRuntime(this.newVesselId(), debrisCraft.name, debrisCraft, v.bodyId);
-    debris.currentStage = stagePartition.detached.currentStage;
-    const retainedHasControl = hasControlSource(v.craft);
-    const detachedHasControl = hasControlSource(debrisCraft);
-    v.isDebris = !retainedHasControl;
-    debris.isDebris = !detachedHasControl;
+    const componentData = orderedComponents.map((keys, index) => {
+      const parts = sourceParts.filter((part) => keys.has(part.key));
+      for (const part of parts) {
+        if (part.parentKey !== null && !keys.has(part.parentKey)) {
+          part.parentKey = null;
+          part.attach = 'root';
+        }
+      }
+      const stagePlan = projectStages(
+        sourceStages,
+        sourceCurrentStage,
+        keys,
+        consumedStageKeys,
+      );
+      const craft: Craft = {
+        name: index === 0 ? sourceCraft.name : `${v.name} debris`,
+        version: sourceCraft.version,
+        parts,
+        stages: stagePlan.stages,
+        actionGroups: partitionActionGroups(sourceActionGroups, keys).detached,
+        nextKey: sourceCraft.nextKey,
+      };
+      return { keys, craft, stagePlan };
+    });
+
+    const retained = componentData[0];
+    v.craft = retained.craft;
+    v.currentStage = retained.stagePlan.currentStage;
     refreshDerived(v);
+    v.isDebris = !hasControlSource(v.craft);
 
-    // Runtime positions track each craft's CoM. Recenter both pieces so every
-    // part remains at the same world-space position across separation.
-    const retainedShift = v.massProps.com.clone().sub(oldCom);
-    v.att.rotate(retainedShift, retainedShift);
-    v.pos.copy(oldPos).add(retainedShift);
-    const detachedShift = debris.massProps.com.clone().sub(oldCom);
-    v.att.rotate(detachedShift, detachedShift);
-    debris.pos.copy(oldPos).add(detachedShift);
-    debris.vel.copy(v.vel);
-    debris.att.copy(v.att);
-    debris.angVel.copy(v.angVel).scale(1.2);
-    debris.situation = v.situation;
+    const componentVessels: Array<{ gv: GameVessel; keys: ReadonlySet<number> }> = [
+      { gv, keys: retained.keys },
+    ];
+    for (let index = 1; index < componentData.length; index++) {
+      const data = componentData[index];
+      const runtime = createVesselRuntime(
+        this.newVesselId(),
+        data.craft.name,
+        data.craft,
+        v.bodyId,
+      );
+      runtime.currentStage = data.stagePlan.currentStage;
+      runtime.isDebris = !hasControlSource(data.craft);
+      const componentGv: GameVessel = {
+        runtime,
+        regime: 'active',
+        rails: { elements: null, landedPos: null, landedAtt: null },
+        target: gv.target,
+      };
+      this.vessels.push(componentGv);
+      componentVessels.push({ gv: componentGv, keys: data.keys });
+    }
 
-    // Ejection: push debris along its offset direction (usually down/side).
-    const dv = ejectionImpulse / Math.max(1, debris.massProps.mass);
-    const offset = new Vec3(
-      rootPart.position.x - oldCom.x,
-      rootPart.position.y - oldCom.y,
-      rootPart.position.z - oldCom.z,
-    );
-    if (offset.lengthSq() < 1e-6) offset.set(0, -1, 0);
-    offset.normalize();
-    v.att.rotate(offset, offset);
-    debris.vel.addScaled(offset, dv);
-    v.vel.addScaled(offset, -ejectionImpulse / Math.max(1, v.massProps.mass) * 0.3);
+    // Runtime positions track each component's CoM. Recenter every component
+    // so all parts keep their pre-separation world positions.
+    for (const component of componentVessels) {
+      const runtime = component.gv.runtime;
+      const shift = runtime.massProps.com.clone().sub(oldCom);
+      oldAtt.rotate(shift, shift);
+      runtime.pos.copy(oldPos).add(shift);
+      runtime.vel.copy(oldVel);
+      runtime.att.copy(oldAtt);
+      runtime.angVel.copy(oldAngVel);
+      runtime.situation = oldSituation;
+      runtime.sas = oldSas;
+      runtime.sasCustomDir.copy(oldSasCustomDir);
+      runtime.controls.pitch = oldControls.pitch;
+      runtime.controls.yaw = oldControls.yaw;
+      runtime.controls.roll = oldControls.roll;
+      runtime.controls.throttle = oldControls.throttle;
+      runtime.controls.rcs = oldControls.rcs;
+      runtime.controls.translate.copy(oldControls.translate);
+      runtime.controls.wheelDrive = oldControls.wheelDrive;
+      runtime.controls.wheelSteer = oldControls.wheelSteer;
+      runtime.controls.brake = oldControls.brake;
+    }
 
-    logEvent(v, this.time, `Stage separation`);
-    const detachedGv: GameVessel = {
-      runtime: debris,
-      regime: 'active',
-      rails: { elements: null, landedPos: null, landedAtt: null },
-      target: gv.target,
-    };
-    this.vessels.push(detachedGv);
+    // Push each released component away from the original craft center. The
+    // retained component receives the corresponding recoil from every branch.
+    for (let index = 1; index < componentVessels.length; index++) {
+      const runtime = componentVessels[index].gv.runtime;
+      const rootPart = runtime.craft.parts.find((part) => part.parentKey === null)
+        ?? (preferredDetachedRoot && componentVessels[index].keys.has(preferredDetachedRoot.key)
+          ? preferredDetachedRoot
+          : runtime.craft.parts[0]);
+      const offset = runtime.massProps.com.clone().sub(oldCom);
+      if (offset.lengthSq() < 1e-6 && rootPart) {
+        offset.set(
+          rootPart.position.x - oldCom.x,
+          rootPart.position.y - oldCom.y,
+          rootPart.position.z - oldCom.z,
+        );
+      }
+      if (offset.lengthSq() < 1e-6) offset.set(0, index % 2 === 0 ? 1 : -1, 0);
+      offset.normalize();
+      oldAtt.rotate(offset, offset);
+      runtime.vel.addScaled(offset, ejectionImpulse / Math.max(1, runtime.massProps.mass));
+      v.vel.addScaled(offset, -ejectionImpulse / Math.max(1, v.massProps.mass) * 0.3);
+    }
 
-    const retainedSeats = v.craft.parts.reduce((sum, p) => sum + (defOf(p).pod?.crew ?? 0), 0);
-    v.crew = crewBefore.slice(0, retainedSeats);
-    debris.crew = crewBefore.slice(retainedSeats);
-    if (wasActive && !retainedHasControl && detachedHasControl) {
-      this.activeVesselId = debris.id;
-      logEvent(debris, this.time, 'Control transferred after separation.');
+    // Crew has no per-seat identity yet, so preserve the existing deterministic
+    // allocation by component capacity.
+    let crewIndex = 0;
+    for (const component of componentVessels) {
+      const capacity = component.gv.runtime.craft.parts.reduce(
+        (sum, part) => sum + (defOf(part).pod?.crew ?? 0),
+        0,
+      );
+      component.gv.runtime.crew = crewBefore.slice(crewIndex, crewIndex + capacity);
+      crewIndex += capacity;
+    }
+
+    logEvent(v, this.time, 'Stage separation');
+    if (wasActive && v.isDebris) {
+      const controlled = componentVessels.find((component) => !component.gv.runtime.isDebris);
+      if (controlled) {
+        this.activeVesselId = controlled.gv.runtime.id;
+        logEvent(controlled.gv.runtime, this.time, 'Control transferred after separation.');
+      }
     }
   }
 
