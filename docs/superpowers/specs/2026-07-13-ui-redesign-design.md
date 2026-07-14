@@ -75,6 +75,13 @@ Numbered for delivery order; each lands independently behind the existing screen
 - **Staging list with numbers:** each stage row shows Δv / TWR / burn time (editor parity), current stage emphasized, next-stage preview on hover.
 - **Status strip:** g-force and dynamic-pressure bars near the throttle; atmosphere-depth indicator during ascent/entry; comms indicator kept.
 - **Part interaction:** click a part on the vessel (or in a vessel systems window) for a KSP-style part action popup — replaces the bespoke ISRU panel and generalizes to future part actions (lights, science re-run, fuel priority).
+- **Flight camera modes** (today there is exactly one: an orbit rig in the local horizon frame, `WorldScene.camYaw/camPitch/camDist`):
+  - `V` cycles modes with a HUD badge: **Orbit** (current behavior, horizon-referenced — the default), **Chase** (camera frame follows the vessel's orientation; the right mode for atmospheric flight and, later, docking), **Locked** (rigidly rotates with the craft), **Free** (inertial frame, no auto-leveling — for spectating rotations).
+  - `Home` (or double-tap `V`) resets the camera behind the vessel at default distance.
+  - **Terrain avoidance:** clamp the camera above the deterministic terrain height under it (the sim exposes this authority already) so low-orbit and landed shots stop clipping through the ground.
+  - Drag smoothing/inertia and zoom-toward-vessel easing, honoring the reduced-motion setting.
+  - Optional `Shift+wheel` FOV zoom (telephoto looks for landings/screenshots); plain wheel keeps meaning distance.
+- **Map camera:** pan (middle-drag or right-drag) in the orbital plane in addition to the existing yaw/pitch/zoom; zoom toward cursor; eased transition when re-focusing bodies (workstream 7) instead of an instant jump; `Home` recenters on the active vessel.
 - **Flight keyboard shortcuts** (extends the current Space/M/T/R/Z/X/F5/F9/,/./[/] set):
   - `Esc` — pause menu (resume / settings / quicksave / exit to editor). There is currently no pause surface at all.
   - `/` — cancel warp to 1× instantly (KSP muscle memory; today only step-down exists).
@@ -135,14 +142,14 @@ Numbered for delivery order; each lands independently behind the existing screen
   - **Duplicate** — `Alt+click` a placed part to pick up a copy of it and its subtree.
   - **Re-root** — a root tool (`4` in KSP's 1/2/3/4 tool row) to change which part is the craft root; affects staging tree and docking later.
   - **Held-part handling** — `Esc` drops the held part (today only Delete does double duty).
-  - **Editor camera** — `WASD`/`QE` pan and elevate (Better VAB Camera pattern), wheel zoom kept, `Home` refits the whole craft in view.
+  - **Editor camera** — `WASD`/`QE` pan and elevate (Better VAB Camera pattern), wheel zoom kept, `Home` refits the whole craft in view, `F` frames the selected part.
   - **Palette navigation** — `Ctrl+F` (or `/`) focuses part search; `Tab` cycles category tabs.
   - Same declarative binding table + `?` cheat-sheet overlay as flight (workstream 2), so the workshop keys are discoverable and remappable from day one.
 
 ### 9. Notifications, Settings, Accessibility
 
 - Unified toast/notification service in the kit (flight events, alarm fires, quicksave confirmations, science results) with severity styling and a scrollback log window.
-- Settings window: keybinding remap (fulfills ACCESSIBILITY.md commitment), UI scale slider, colorblind-safe accent palette audit + alternates, reduced-motion toggle, simplified-terminology toggle (e.g. "highest/lowest point" alongside Ap/Pe).
+- Settings window: keybinding remap (fulfills ACCESSIBILITY.md commitment), UI scale slider, colorblind-safe accent palette audit + alternates, reduced-motion toggle, camera options (drag sensitivity, invert X/Y, FOV, smoothing on/off), simplified-terminology toggle (e.g. "highest/lowest point" alongside Ap/Pe).
 - Persist settings via `src/save/` schema migration.
 
 ## Sequencing & Sizing
