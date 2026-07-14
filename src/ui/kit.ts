@@ -75,11 +75,13 @@ export function injectUiStyles(): void {
       .k-sheet-hint { margin-top: 10px; font-size: 10.5px; color: #7d8b96; }
       .k-launcher { display:flex; flex-wrap:wrap; gap:4px; pointer-events:auto; }
       .ed-utility-host { display:flex; align-items:center; margin-left:2px; padding-left:7px; border-left:1px solid #2a3d4d; }
-      .hud-utility-host { position:absolute; top:10px; left:12px; width:208px; z-index:44; pointer-events:auto; }
-      .hud-utility-host .k-launcher { max-width:208px; }
-      .k-icon-btn { position:relative; width:30px; height:30px; padding:0; display:grid; place-items:center;
+      .hud-utility-host { position:absolute; top:10px; left:12px; width:236px; z-index:44; pointer-events:auto; }
+      .hud-utility-host .k-launcher { max-width:236px; }
+      .k-icon-btn { position:relative; width:36px; height:36px; padding:0; display:grid; place-items:center;
         border:1px solid #2f4859; border-radius:5px; background:rgba(9,19,27,.9); color:#a9c2ce; cursor:pointer; }
-      .k-icon-btn:hover,.k-icon-btn:focus-visible { border-color:var(--ui-accent); color:#fff; outline:none; }
+      .k-icon-btn:hover { border-color:var(--ui-accent); color:#fff; }
+      .k-icon-btn:focus-visible { border-color:var(--ui-accent); color:#fff; outline:2px solid var(--ui-accent);
+        outline-offset:2px; z-index:1; }
       .k-icon-btn.active { border-color:var(--ui-accent); background:#16303f; color:#fff; }
       .k-icon-svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7;
         stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
@@ -89,6 +91,12 @@ export function injectUiStyles(): void {
         transition:opacity .12s ease,transform .12s ease; z-index:70; }
       .k-icon-btn:hover .k-icon-tooltip,.k-icon-btn:focus-visible .k-icon-tooltip {
         opacity:1; visibility:visible; transform:translate(-50%,0); }
+      .ed-utility-host .k-icon-tooltip,
+      .hud-utility-host .k-icon-tooltip { top:calc(100% + 7px); bottom:auto; transform:translate(-50%,-4px); }
+      .ed-utility-host .k-icon-btn:hover .k-icon-tooltip,
+      .ed-utility-host .k-icon-btn:focus-visible .k-icon-tooltip,
+      .hud-utility-host .k-icon-btn:hover .k-icon-tooltip,
+      .hud-utility-host .k-icon-btn:focus-visible .k-icon-tooltip { transform:translate(-50%,0); }
       .k-window { position: absolute; min-width: 190px; max-width: 340px;
         background: rgba(10,16,22,0.94); border: 1px solid #2a3d4d; border-radius: 8px;
         z-index: 45; pointer-events: auto; }
@@ -191,7 +199,7 @@ export function injectUiStyles(): void {
       .hud-entry-card.warning { border-color: var(--ui-warn); }
       .hud-entry-card .hud-key { min-width: 52px; }
       .hud-entry-card .hud-val { margin-left: auto; font-size: 10.5px; }
-      .hud-events { position: absolute; left: 12px; top: 82px; display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
+      .hud-events { position: absolute; left: 12px; top: 88px; display: flex; flex-direction: column; gap: 4px; max-width: 320px; }
       .hud-event { background: var(--ui-bg); border-left: 3px solid var(--ui-accent); border-radius: 4px;
         padding: 5px 10px; font-size: 12px; animation: hudfade 6s forwards; }
       .hud-event.warning { border-left-color: var(--ui-warn); }
@@ -387,6 +395,12 @@ export function injectUiStyles(): void {
       .utility-reset { margin-top: 6px; font-size: 9px; }
       .k-reduced-motion *, .k-reduced-motion *::before, .k-reduced-motion *::after {
         animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
+      }
+
+      @media (max-width:820px), (pointer:coarse) {
+        .k-icon-btn { width:42px; height:42px; }
+        .hud-utility-host { top:4px; width:262px; }
+        .hud-utility-host .k-launcher { max-width:262px; column-gap:2px; row-gap:0; }
       }
 
       /* ============================== tutorial */
