@@ -436,17 +436,21 @@ describe('planet content validator', () => {
     expect(fetchScript).not.toContain('if (!existsSync(imagePath))');
   });
 
-  it('provides an authoritative volume-backed linux/amd64 compiler command', () => {
+  it('provides native authoring with an explicit authoritative linux/amd64 release mode', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
     expect(packageJson.scripts['compile:planet-assets:container'])
       .toBe('node scripts/compile-planet-assets-container.mjs');
     const runner = readFileSync('scripts/compile-planet-assets-container.mjs', 'utf8');
-    expect(runner).toContain("const platform = 'linux/amd64'");
+    expect(runner).toContain("const release = process.argv.includes('--release')");
+    expect(runner).toContain("const architecture = release ? 'amd64' : dockerArchitecture()");
+    expect(runner).toContain("const platform = `linux/${architecture}`");
     expect(runner).toContain("'--platform', platform");
     expect(runner).toMatch(/type=bind/);
     expect(runner).toMatch(/assets\/planets/);
     expect(runner).toContain('compile:planet-assets');
     expect(runner).toContain('--write');
+    expect(runner).toContain('native authoring');
+    expect(runner).toContain('release');
   });
 
   it('pins the Linux KTX encoder archive at the manifest and container boundary', () => {

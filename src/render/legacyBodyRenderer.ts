@@ -6,6 +6,10 @@ import type { BodyMaterialDescriptor } from './bodyMaterial';
 import type { BodyRenderer, BodyRendererStats, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from './bodyRenderer';
 import { PLANET_QUALITY, PlanetRenderer, type PlanetDiagnosticContext, type PlanetRenderProjection } from './planet';
 import { CloudLayer } from './clouds';
+import { createAirlessGlobalMaterial } from './airless/globalMaterial';
+import { createGlobalSphereGeometry } from './terrestrial/globalGeometry';
+import { BODY_VISUALS, type BodyId } from '../content/bodyVisuals';
+import { terrainPresentationBand } from './terrainPresentation';
 
 interface TerrainAdapter {
   readonly group: THREE.Group;
@@ -37,8 +41,8 @@ export class LegacyBodyRenderer implements BodyRenderer {
   readonly kind = 'legacy' as const;
   readonly root = new THREE.Group();
   private readonly compactGeometry: THREE.SphereGeometry;
-  private readonly compactMaterial: THREE.MeshLambertMaterial;
-  private readonly compact: THREE.Mesh;
+  private compactMaterial: THREE.Material;
+  private readonly compact: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
   private terrain: TerrainAdapter | null = null;
   private cloud: CloudAdapter | null = null;
   private disposed = false;
@@ -52,7 +56,7 @@ export class LegacyBodyRenderer implements BodyRenderer {
     private readonly dependencies: LegacyBodyRendererDependencies = {},
   ) {
     this.bodyId = body.id;
-    this.compactGeometry = new THREE.SphereGeometry(1, 28, 18);
+    this.compactGeometry = createGlobalSphereGeometry(quality);
     this.compactMaterial = new THREE.MeshLambertMaterial({ color: descriptor.albedo.mid });
     this.compact = new THREE.Mesh(this.compactGeometry, this.compactMaterial);
     this.compact.scale.setScalar(body.radius);
@@ -63,7 +67,18 @@ export class LegacyBodyRenderer implements BodyRenderer {
   get ready(): boolean { return !this.disposed; }
 
   stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void {
-    if (pack !== null) throw new Error(`${this.bodyId} legacy renderer accepts procedural assets only`);
+    if (pack === null) return;
+    if (pack.bodyId !== this.bodyId || pack.tier !== this.quality) {
+      throw new Error(`Cannot stage ${pack.bodyId}/${pack.tier} for ${this.bodyId}/${this.quality}`);
+    }
+    if (BODY_VISUALS[this.bodyId as BodyId]?.targetArchetype !== 'airless') {
+      throw new Error(`${this.bodyId} legacy renderer accepts procedural assets only`);
+    }
+    const replacement = createAirlessGlobalMaterial(pack, this.caps.maxAnisotropy);
+    const previous = this.compactMaterial;
+    this.compactMaterial = replacement;
+    this.compact.material = replacement;
+    previous.dispose();
   }
 
   private ensureFlightVisuals(): void {
@@ -97,20 +112,22 @@ export class LegacyBodyRenderer implements BodyRenderer {
     this.compact.position.set(frame.cameraRelativeOrigin.x, frame.cameraRelativeOrigin.y, frame.cameraRelativeOrigin.z);
     this.compact.quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
 
-    const near = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z) < this.body.radius * 60;
+    const band = terrainPresentationBand(this.body);
+    const prewarm = frame.allowFlightTerrain && frame.altitude < band.prewarmAltitude;
+    const near = frame.allowFlightTerrain && frame.altitude < band.visibleAltitude;
     if (!frame.allowFlightTerrain) this.releaseFlightVisuals();
-    if (frame.allowFlightTerrain && near) this.ensureFlightVisuals();
+    if (prewarm) this.ensureFlightVisuals();
     this.terrainActive = this.terrain !== null && frame.allowFlightTerrain && near;
     this.compact.visible = !this.terrainActive;
     if (this.terrain) {
       this.terrain.group.visible = this.terrainActive;
-      if (this.terrainActive) {
+      if (prewarm) {
         this.terrain.update(
           frame.cameraBodyFixed,
           frame.orientation as Readonly<Quat>,
           frame.cameraRelativeOrigin,
           frame.cameraBodyFixedVelocity,
-          { terrainRequested: true, simulationTime: frame.time, altitudeMeters: frame.altitude },
+          { terrainRequested: near, simulationTime: frame.time, altitudeMeters: frame.altitude },
           {
             verticalFovRadians: frame.verticalFovRadians,
             drawingBufferHeight: frame.drawingBufferHeight,

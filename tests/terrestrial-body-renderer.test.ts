@@ -80,10 +80,11 @@ describe('TerrestrialBodyRenderer integration', () => {
     const renderer = createBodyRendererCandidate({
       body: veyra, caps, quality: 'medium', diagnostics,
     }) as TerrestrialBodyRenderer;
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
+    const approach = { cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 }, altitude: 1_000 };
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0.35 }));
     const states = diagnostics.snapshot().entries
       .filter((entry) => entry.event === 'presentation-state')
       .map((entry) => entry.data.state);
@@ -127,18 +128,19 @@ describe('TerrestrialBodyRenderer integration', () => {
     const veyra = body('veyra');
     const renderer = createBodyRendererCandidate({ body: veyra, caps, quality: 'low' }) as TerrestrialBodyRenderer;
     renderer.stageAssets(pack('low'));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
+    const approach = { cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 }, altitude: 1_000 };
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0.175 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0.175 }));
     const compact = renderer.root.getObjectByName('terrestrial-compact:veyra') as THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
     const terrain = renderer.root.getObjectByName('terrestrial-terrain:veyra')!;
     expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 0.5 });
     expect(terrain.visible).toBe(true);
     expect(compact.visible).toBe(true);
     expect(compact.material).toMatchObject({ transparent: true, depthWrite: false, opacity: 0.5 });
-    renderer.update(frame(veyra.radius, { deltaSeconds: 0.35 }));
+    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0.35 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: true, coverageProgress: 1 });
     expect(compact.visible).toBe(false);
     renderer.update(frame(veyra.radius, { allowFlightTerrain: false }));

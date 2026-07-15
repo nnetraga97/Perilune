@@ -71,6 +71,19 @@ describe('compact map body presentation', () => {
     expect(mesh.userData.assetPack).toBe(pack);
   });
 
+  test('uses the authored airless material for a moon pack without requiring clouds', () => {
+    const texture = () => new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+    const pack: RuntimeBodyAssetPack = {
+      bodyId: 'palla', tier: 'medium', width: 2048, height: 1024,
+      manifestDigest: 'map-test', gpuBytes: 12,
+      textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()]]),
+    };
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('palla')), pack, 16, 'medium');
+
+    expect(mesh.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla' });
+    expect(pack.textures.get('albedo')!.anisotropy).toBe(8);
+  });
+
   test('applies the authoritative body orientation to every compact mesh at simulation time', () => {
     const body = universe.get('veyra');
     const mesh = compactBodyMesh(bodyMaterialDescriptor(body));

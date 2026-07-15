@@ -42,6 +42,7 @@ import {
   surfaceVelocity,
 } from './bodyOrientation';
 import { launchSiteDirection } from './launchSite';
+import { preferredOrbitAltitude } from './orbitPlacement';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -297,8 +298,7 @@ export class GameState {
     const atmosphereTop = body.def.atmosphere?.height ?? 0;
     const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
     const clearance = Math.max(atmosphereTop, terrainTop);
-    const margin = Math.max(10_000, body.radius * 0.02);
-    const preferredAltitude = Math.max(body.radius * 0.1, clearance + margin);
+    const preferredAltitude = preferredOrbitAltitude(body);
     const soiAltitudeLimit = Number.isFinite(body.soiRadius)
       ? body.soiRadius * 0.25 - body.radius
       : preferredAltitude;

@@ -66,6 +66,24 @@ describe('body renderer adapters', () => {
     starRenderer.dispose();
   });
 
+  test('airless legacy bodies stage authored albedo, oct normals, and material maps', () => {
+    const palla = body('palla');
+    const renderer = new LegacyBodyRenderer(palla, bodyMaterialDescriptor(palla), caps, 'medium');
+    const texture = () => new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+    const pack: RuntimeBodyAssetPack = {
+      bodyId: 'palla', tier: 'medium', width: 2048, height: 1024,
+      manifestDigest: '0'.repeat(64), gpuBytes: 12,
+      textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()]]),
+    };
+
+    expect(() => renderer.stageAssets(pack)).not.toThrow();
+    const compact = renderer.root.children[0] as THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
+    expect(compact.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla' });
+    expect(compact.geometry.parameters).toMatchObject({ widthSegments: 96, heightSegments: 64 });
+    expect(pack.textures.get('albedo')!.anisotropy).toBe(8);
+    renderer.dispose();
+  });
+
   test('factory selection is controlled by BODY_VISUALS, not surface or terrain data', () => {
     const star = body('auren');
     star.def.surfaceKind = 'solid';
@@ -79,7 +97,7 @@ describe('body renderer adapters', () => {
     expect(createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' })).toBeInstanceOf(TerrestrialBodyRenderer);
   });
 
-  test('legacy solid renderer owns compact, terrain, and cloud visuals without amplitude selection', () => {
+  test('legacy solid renderer owns compact, terrain, and cloud visuals during landing approach', () => {
     const solid = body('veyra');
     solid.def.terrain.amplitude = 0;
     const terrain = { group: new THREE.Group(), stats: { chunks: 2, visible: 1 }, update: vi.fn(), dispose: vi.fn() };
@@ -89,7 +107,7 @@ describe('body renderer adapters', () => {
       createCloud: () => cloud,
     });
 
-    renderer.update(frame({ cameraBodyFixed: { x: solid.radius * 2, y: 0, z: 0 } }));
+    renderer.update(frame({ cameraBodyFixed: { x: solid.radius + 1_000, y: 0, z: 0 }, altitude: 1_000 }));
     expect(renderer.root.children).toContain(terrain.group);
     expect(renderer.root.children).toContain(cloud.mesh);
     expect(terrain.update).toHaveBeenCalledOnce();
