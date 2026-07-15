@@ -18,6 +18,8 @@ import type { GpuTimerSnapshot, GpuTimingSample } from '../src/render/gpuTimer';
 import type { RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { WorldScene } from '../src/render/worldScene';
 import { RenderContextLifecycle } from '../src/render/contextLifecycle';
+import { GameState } from '../src/sim/state';
+import { createCraft } from '../src/sim/vessel';
 
 const universe = new Universe(structuredClone(AUREN_SYSTEM));
 
@@ -30,6 +32,27 @@ function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAsse
 }
 
 describe('compact map body presentation', () => {
+  test('returns default map focus to the active vessel SOI body', () => {
+    const game = new GameState();
+    const active = game.spawnInOrbit(createCraft('Map focus probe'), 'Map focus probe', 'palla', 10_000);
+    game.activeVesselId = active.runtime.id;
+
+    const map = Object.create(MapView.prototype) as MapView;
+    Object.assign(map as unknown as Record<string, unknown>, {
+      focusBodyId: 'veyra',
+      followsActiveVessel: false,
+      desiredFocus: new THREE.Vector3(12, 34, 56),
+      camFocus: new THREE.Vector3(65, 43, 21),
+    });
+
+    map.focusActiveVessel(game);
+
+    expect((map as unknown as { focusBodyId: string }).focusBodyId).toBe('palla');
+    expect((map as unknown as { followsActiveVessel: boolean }).followsActiveVessel).toBe(true);
+    expect((map as unknown as { desiredFocus: THREE.Vector3 }).desiredFocus).toEqual(new THREE.Vector3());
+    expect((map as unknown as { camFocus: THREE.Vector3 }).camFocus).toEqual(new THREE.Vector3());
+  });
+
   test('selects solid, gas, and star materials from the shared descriptor identity', () => {
     const solid = compactBodyMesh(bodyMaterialDescriptor(universe.get('veyra')));
     const gas = compactBodyMesh(bodyMaterialDescriptor(universe.get('tyran')));

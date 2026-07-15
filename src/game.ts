@@ -50,6 +50,22 @@ import { el, injectUiStyles } from './ui/kit';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
+type EditorGestureKind = 'part-press' | 'canvas-press' | 'part-drag' | 'orbit' | 'pan' | 'secondary-press' | 'secondary-orbit' | 'pinch';
+
+interface EditorGesture {
+  kind: EditorGestureKind;
+  pointerId: number;
+  pointerType: string;
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  partKey: number | null;
+  additive: boolean;
+  duplicate: boolean;
+  longPressOpened: boolean;
+}
+
 class PeriluneGame {
   private ctx!: RenderContext;
   private game = new GameState();
@@ -67,12 +83,15 @@ class PeriluneGame {
   private uiRoot!: HTMLElement;
   private keys = new Set<string>();
   private dragging = false;
-  private draggingPart = false;
   private draggingMapControl = false;
   private dragMoved = 0;
   private dragButton = 0;
   private lastX = 0;
   private lastY = 0;
+  private editorGesture: EditorGesture | null = null;
+  private editorPointers = new Map<number, { x: number; y: number }>();
+  private editorPinchDistance = 0;
+  private editorLongPressTimer: number | null = null;
   private lastFrame = performance.now();
   private launchedCraft: Craft | null = null;
   private missionStart = 0;
@@ -283,8 +302,8 @@ class PeriluneGame {
         }
       },
       onFocusBody: (bodyId) => {
-        this.map.focusBody(bodyId);
         if (!this.map.visible) this.toggleMap();
+        this.map.focusBody(bodyId);
       },
       onRenameVessel: (vesselId, name) => {
         const vessel = this.game.vessels.find((candidate) => candidate.runtime.id === vesselId);
@@ -352,7 +371,7 @@ class PeriluneGame {
       smokeParticleCount: () => this.world.smokeParticleCount(),
       partCount: () => this.editor.craft.parts.length,
       stageCount: () => this.editor.craft.stages.length,
-      parts: () => this.editor.craft.parts.map((p) => ({ defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),
+      parts: () => this.editor.craft.parts.map((p) => ({ key: p.key, parentKey: p.parentKey, defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),
       projectEditor: (x: number, y: number, z: number) => {
         const v = new THREE.Vector3(x, y, z).project(this.editor.camera);
         return {
@@ -438,7 +457,15 @@ class PeriluneGame {
         candidate:
           (this.editor as unknown as { candidate?: { kind: string } }).candidate?.kind ?? null,
         selected: this.editor.selectedPartKey,
+        selectedKeys: this.editor.selectedPartKeys,
+        hovered: this.editor.hoveredPartKey,
         selectionHighlighted: this.editor.selectionHighlighted,
+        rootIndicatorVisible: this.editor.rootIndicatorVisible,
+        contextMenuOpen: this.editor.contextMenuOpen,
+        mobilePanel: this.editor.activeMobilePanel,
+        editorCameraDistance: this.editor.cameraDistance,
+        editorCameraYaw: this.editor.cameraYaw,
+        editorUndoDepth: this.editor.undoDepth,
       }),
     };
   }
@@ -462,6 +489,7 @@ class PeriluneGame {
 
   private showMenu(): void {
     this.screen = 'menu';
+    document.getElementById('game-canvas')?.classList.remove('vab-active');
     this.menu.setVisible(true);
     this.editor.setVisible(false);
     this.hud.root.style.display = 'none';
@@ -475,6 +503,7 @@ class PeriluneGame {
   private toEditor(): void {
     this.paused = false;
     this.screen = 'editor';
+    document.getElementById('game-canvas')?.classList.add('vab-active');
     this.menu.setVisible(false);
     this.editor.setVisible(true);
     this.hud.root.style.display = 'none';
@@ -489,6 +518,7 @@ class PeriluneGame {
   private toFlight(spawn = true): void {
     this.paused = false;
     this.screen = 'flight';
+    document.getElementById('game-canvas')?.classList.remove('vab-active');
     this.menu.setVisible(false);
     this.editor.setVisible(false);
     this.hud.root.style.display = '';
@@ -525,6 +555,7 @@ class PeriluneGame {
   private toggleMap(): void {
     if (this.screen !== 'flight') return;
     this.map.visible = !this.map.visible;
+    if (this.map.visible) this.map.focusActiveVessel(this.game);
     this.map.setVisible(this.map.visible);
   }
 
@@ -744,6 +775,146 @@ class PeriluneGame {
   }
 
   // ----------------------------------------------------------------- input
+  private editorNdc(clientX: number, clientY: number): { x: number; y: number } {
+    return {
+      x: (clientX / window.innerWidth) * 2 - 1,
+      y: -(clientY / window.innerHeight) * 2 + 1,
+    };
+  }
+
+  private cancelEditorLongPress(): void {
+    if (this.editorLongPressTimer !== null) window.clearTimeout(this.editorLongPressTimer);
+    this.editorLongPressTimer = null;
+  }
+
+  private editorPointerDown(canvas: HTMLCanvasElement, event: PointerEvent): void {
+    const point = this.editorNdc(event.clientX, event.clientY);
+    this.editor.updatePointer(point.x, point.y, event.pointerType === 'mouse');
+    this.editorPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic test events and older browsers may not expose capture.
+    }
+
+    if (this.editorPointers.size >= 2) {
+      this.cancelEditorLongPress();
+      if (this.editorGesture?.longPressOpened) this.editor.closePartContext();
+      if (this.editorGesture?.kind === 'part-drag') this.editor.endPartDrag(true);
+      const pointers = [...this.editorPointers.values()].slice(0, 2);
+      this.editorPinchDistance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+      this.editorGesture = {
+        kind: 'pinch', pointerId: event.pointerId, pointerType: event.pointerType,
+        startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY,
+        partKey: null, additive: false, duplicate: false, longPressOpened: false,
+      };
+      event.preventDefault();
+      return;
+    }
+
+    const partKey = this.editor.isHoldingPart ? null : this.editor.pickPart(point.x, point.y);
+    const secondary = event.button === 2 || (event.button === 0 && event.ctrlKey && event.pointerType === 'mouse');
+    const kind: EditorGestureKind = event.button === 1
+      ? 'pan'
+      : secondary
+        ? 'secondary-press'
+        : partKey !== null
+          ? 'part-press'
+          : 'canvas-press';
+    this.editorGesture = {
+      kind,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      partKey,
+      additive: event.shiftKey || event.metaKey || (event.pointerType !== 'mouse' && this.editor.touchMultiSelectEnabled),
+      duplicate: event.altKey,
+      longPressOpened: false,
+    };
+    if (event.pointerType !== 'mouse' && partKey !== null) {
+      this.editorLongPressTimer = window.setTimeout(() => {
+        const gesture = this.editorGesture;
+        if (!gesture || gesture.kind !== 'part-press' || gesture.partKey === null || this.editorPointers.size !== 1) return;
+        gesture.longPressOpened = true;
+        this.editor.openPartContext(gesture.startX, gesture.startY, true, gesture.partKey);
+      }, 450);
+    }
+    event.preventDefault();
+  }
+
+  private editorPointerMove(event: PointerEvent): void {
+    const point = this.editorNdc(event.clientX, event.clientY);
+    const tracked = this.editorPointers.get(event.pointerId);
+    if (tracked) {
+      tracked.x = event.clientX;
+      tracked.y = event.clientY;
+    }
+    const gesture = this.editorGesture;
+    if (!gesture) {
+      this.editor.updatePointer(point.x, point.y, event.pointerType === 'mouse');
+      return;
+    }
+    if (gesture.kind === 'pinch') {
+      if (this.editorPointers.size >= 2) {
+        const pointers = [...this.editorPointers.values()].slice(0, 2);
+        const distance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+        if (distance > 0 && this.editorPinchDistance > 0) this.editor.zoomCamera(this.editorPinchDistance / distance);
+        this.editorPinchDistance = distance;
+      }
+      return;
+    }
+    if (gesture.pointerId !== event.pointerId) return;
+    this.editor.updatePointer(point.x, point.y, event.pointerType === 'mouse');
+    const moved = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
+    if (moved > 8 && (gesture.kind === 'part-press' || gesture.kind === 'canvas-press' || gesture.kind === 'secondary-press')) {
+      this.cancelEditorLongPress();
+      if (gesture.kind === 'secondary-press') {
+        gesture.kind = 'secondary-orbit';
+        this.editor.closePartContext();
+      } else if (gesture.kind === 'part-press' && gesture.partKey !== null) {
+        gesture.kind = this.editor.beginPartDrag(point.x, point.y, gesture.duplicate, gesture.partKey) ? 'part-drag' : 'orbit';
+      } else {
+        gesture.kind = 'orbit';
+      }
+    }
+    const sensitivity = this.uiSettings?.dragSensitivity ?? 1;
+    const dx = (event.clientX - gesture.lastX) * sensitivity * (this.uiSettings?.invertX ? -1 : 1);
+    const dy = (event.clientY - gesture.lastY) * sensitivity * (this.uiSettings?.invertY ? -1 : 1);
+    gesture.lastX = event.clientX;
+    gesture.lastY = event.clientY;
+    if (gesture.kind === 'part-drag') this.editor.dragSelectedPart(point.x, point.y);
+    else if (gesture.kind === 'orbit' || gesture.kind === 'secondary-orbit') this.editor.orbitCamera(dx, dy);
+    else if (gesture.kind === 'pan') this.editor.panCameraLocal(-dx * 0.012, dy * 0.012, 0);
+  }
+
+  private editorPointerUp(event: PointerEvent, cancel = false): void {
+    this.editorPointers.delete(event.pointerId);
+    const gesture = this.editorGesture;
+    if (!gesture) return;
+    if (gesture.kind === 'pinch') {
+      if (this.editorPointers.size < 2) {
+        this.editorGesture = null;
+        this.editorPinchDistance = 0;
+      }
+      return;
+    }
+    if (gesture.pointerId !== event.pointerId) return;
+    this.cancelEditorLongPress();
+    if (gesture.kind === 'part-drag') this.editor.endPartDrag(cancel);
+    else if (!cancel && !gesture.longPressOpened && gesture.kind === 'part-press') {
+      this.editor.click(gesture.additive, gesture.partKey);
+    } else if (!cancel && gesture.kind === 'canvas-press') {
+      this.editor.click(false, null);
+    } else if (!cancel && gesture.kind === 'secondary-press') {
+      if (gesture.partKey === null) this.editor.closePartContext();
+      else this.editor.openPartContext(event.clientX, event.clientY, false, gesture.partKey);
+    }
+    this.editorGesture = null;
+  }
+
   private bindInput(canvas: HTMLCanvasElement): void {
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
@@ -758,6 +929,10 @@ class PeriluneGame {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     canvas.addEventListener('pointerdown', (e) => {
+      if (this.screen === 'editor') {
+        this.editorPointerDown(canvas, e);
+        return;
+      }
       if (this.screen === 'flight' && this.map.visible && e.button === 0 && this.map.beginPointer(e.clientX, e.clientY)) {
         this.draggingMapControl = true;
         this.dragging = false;
@@ -765,16 +940,6 @@ class PeriluneGame {
         this.lastY = e.clientY;
         e.preventDefault();
         return;
-      }
-      if (this.screen === 'editor' && e.button === 0) {
-        const nx = (e.clientX / window.innerWidth) * 2 - 1;
-        const ny = -(e.clientY / window.innerHeight) * 2 + 1;
-        if (this.editor.beginPartDrag(nx, ny, e.altKey)) {
-          this.draggingPart = true;
-          this.dragging = false;
-          e.preventDefault();
-          return;
-        }
       }
       this.dragging = true;
       this.dragButton = e.button;
@@ -799,14 +964,11 @@ class PeriluneGame {
       this.editor.click();
     });
     canvas.addEventListener('contextmenu', (e) => {
-      if (this.screen === 'flight' && this.map.visible) e.preventDefault();
+      if (this.screen === 'editor' || (this.screen === 'flight' && this.map.visible)) e.preventDefault();
     });
     window.addEventListener('pointermove', (e) => {
-      const nx = (e.clientX / window.innerWidth) * 2 - 1;
-      const ny = -(e.clientY / window.innerHeight) * 2 + 1;
-      if (this.screen === 'editor') this.editor.updatePointer(nx, ny);
-      if (this.draggingPart) {
-        this.editor.dragSelectedPart(nx, ny);
+      if (this.screen === 'editor') {
+        this.editorPointerMove(e);
         return;
       }
       if (this.draggingMapControl) {
@@ -824,11 +986,7 @@ class PeriluneGame {
       this.dragMoved += Math.abs(dx) + Math.abs(dy);
       this.lastX = e.clientX;
       this.lastY = e.clientY;
-      if (this.screen === 'editor') {
-        if (this.dragButton === 1) this.editor.panCameraLocal(-dx * 0.012, dy * 0.012, 0);
-        else this.editor.orbitCamera(dx, dy);
-      }
-      else if (this.screen === 'flight' && this.map.visible) {
+      if (this.screen === 'flight' && this.map.visible) {
         if (this.dragButton === 1 || this.dragButton === 2) this.map.panCamera(dx, dy);
         else this.map.orbitCamera(dx, dy);
       }
@@ -838,25 +996,29 @@ class PeriluneGame {
       }
     });
     window.addEventListener('pointerup', (e) => {
+      if (this.screen === 'editor') {
+        this.editorPointerUp(e);
+        return;
+      }
       if (this.draggingMapControl) {
         this.map.endPointer();
         this.draggingMapControl = false;
         return;
-      }
-      if (this.draggingPart) {
-        this.editor.endPartDrag();
-        this.draggingPart = false;
-        this.dragging = false;
-        return;
-      }
-      if (this.dragging && this.dragMoved < 6 && this.screen === 'editor') {
-        this.editor.click();
       }
       if (this.dragging && this.dragMoved < 6 && this.screen === 'flight' && !this.map.visible) {
         const partKey = this.world.pickActivePart(e.clientX, e.clientY);
         if (partKey !== null) this.hud.showPartActions(this.game, partKey, e.clientX, e.clientY);
       }
       this.dragging = false;
+    });
+    window.addEventListener('pointercancel', (e) => {
+      if (this.screen === 'editor') this.editorPointerUp(e, true);
+    });
+    canvas.addEventListener('pointerleave', (e) => {
+      if (this.screen === 'editor' && !this.editorGesture) {
+        const point = this.editorNdc(e.clientX, e.clientY);
+        this.editor.updateHover(point.x, point.y, false);
+      }
     });
     canvas.addEventListener('wheel', (e) => {
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
@@ -929,7 +1091,7 @@ class PeriluneGame {
       // ---- editor
       { code: 'Delete', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Del', handler: () => this.editor.deleteSelected() },
       { code: 'Backspace', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Bksp', handler: () => this.editor.deleteSelected() },
-      { code: 'Escape', screen: editor, group: 'Workshop', label: 'Drop held part', keyLabel: 'Esc', handler: () => this.editor.cancelHolding() },
+      { code: 'Escape', screen: editor, group: 'Workshop', label: 'Close context / drop held / clear selection', keyLabel: 'Esc', handler: () => this.editor.escape() },
       { code: 'KeyZ', ctrl: true, screen: editor, group: 'Workshop', label: 'Undo craft edit', handler: () => this.editor.undo() },
       { code: 'KeyY', ctrl: true, screen: editor, group: 'Workshop', label: 'Redo craft edit', handler: () => this.editor.redo() },
       { code: 'KeyX', screen: editor, group: 'Workshop', label: 'Cycle radial symmetry', handler: () => this.editor.cycleSymmetry() },
@@ -988,6 +1150,7 @@ class PeriluneGame {
   private activateVessel(id: string): void {
     if (!this.game.vessels.some((vessel) => vessel.runtime.id === id)) return;
     this.game.setActive(id);
+    this.map.focusActiveVessel(this.game);
     this.hud.setMissionStart(this.game.time);
   }
 

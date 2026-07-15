@@ -96,7 +96,7 @@ test('full playable loop: build, launch, fly, quicksave/load', async ({ page }) 
   await page.screenshot({ path: 'test-results/editor-rocket.png' });
 
   // ------------------------------------------------------------- launch!
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
   expect(await probe(page, (t) => t.situation())).toBeTruthy();
 

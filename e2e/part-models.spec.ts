@@ -125,7 +125,7 @@ test('a failed part asset falls back to procedural geometry and still launches',
   expect(tankSource, 'tank still model').toBe('model');
 
   // Launch remains available despite the fallback.
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
   expect(await probe(page, (t) => t.screen())).toBe('flight');
 });
@@ -146,7 +146,7 @@ test('multi-nozzle engines build one plume per authored anchor', async ({ page }
   await page.getByRole('button', { name: 'Auto-stage' }).click();
   await page.waitForTimeout(120);
 
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
   // Ignite so the active-vessel visual (and its plume groups) is live.
   await page.keyboard.press('KeyZ');

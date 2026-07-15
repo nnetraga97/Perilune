@@ -244,7 +244,8 @@ export class MapView {
   private postReadout: HTMLElement;
   private budgetReadout: HTMLElement;
   private cb: MapCallbacks;
-  private focusBodyId = 'veyra';
+  private focusBodyId = '';
+  private followsActiveVessel = true;
   private desiredFocus = new THREE.Vector3();
   private bodyCard: HTMLElement | null = null;
   private markerEvents = new Map<THREE.Object3D, { label: string; time: number }>();
@@ -390,9 +391,23 @@ export class MapView {
   }
 
   focusBody(bodyId: string): void {
+    this.followsActiveVessel = false;
     this.focusBodyId = bodyId;
     const mesh = this.bodyMeshes.get(bodyId);
     if (mesh) this.desiredFocus.copy(mesh.position);
+  }
+
+  /** Return map focus to the celestial body currently carrying the active vessel. */
+  focusActiveVessel(game: GameState): void {
+    this.followsActiveVessel = true;
+    const active = game.active;
+    if (!active) return;
+    this.focusBodyId = game.bodyOf(active).id;
+    // The map coordinate frame is centered on the active vessel's SOI body.
+    // Reset immediately so stale mesh positions from the previous vessel cannot
+    // leave the newly opened map drifting across interplanetary distances.
+    this.desiredFocus.set(0, 0, 0);
+    this.camFocus.set(0, 0, 0);
   }
 
   /** Pointer controls (called by game shell). */
@@ -704,7 +719,10 @@ export class MapView {
     if (!gv) return;
     const v = gv.runtime;
     const body = game.bodyOf(gv);
-    if (!game.universe.bodies.has(this.focusBodyId)) this.focusBodyId = body.id;
+    if (this.followsActiveVessel || !game.universe.bodies.has(this.focusBodyId)) {
+      this.followsActiveVessel = true;
+      this.focusBodyId = body.id;
+    }
     const t = game.time;
     const starDirection = mapStarDirection(game.universe, body, t, new Vec3());
     const lightDistance = Math.max(100, this.camDist * 2);

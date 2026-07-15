@@ -53,6 +53,39 @@ const CATEGORIES: Array<{ id: PartDef['category']; label: string }> = [
 
 const SNAP_ANGLES = [0, 5, 15, 45, 90] as const;
 
+/** Remove selected descendants whose ancestor is already selected. */
+export function normalizedBranchRoots(craft: Readonly<Craft>, keys: Iterable<number>): number[] {
+  const selected = new Set(keys);
+  const byKey = new Map(craft.parts.map((part) => [part.key, part]));
+  return [...selected].filter((key) => {
+    const seen = new Set<number>([key]);
+    let parentKey = byKey.get(key)?.parentKey ?? null;
+    while (parentKey !== null) {
+      if (selected.has(parentKey)) return false;
+      if (seen.has(parentKey)) break;
+      seen.add(parentKey);
+      parentKey = byKey.get(parentKey)?.parentKey ?? null;
+    }
+    return byKey.has(key);
+  });
+}
+
+/** Expand one or more branch roots to every descendant, without duplicates. */
+export function expandedBranchKeys(craft: Readonly<Craft>, roots: Iterable<number>): Set<number> {
+  const expanded = new Set(roots);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const part of craft.parts) {
+      if (part.parentKey !== null && expanded.has(part.parentKey) && !expanded.has(part.key)) {
+        expanded.add(part.key);
+        changed = true;
+      }
+    }
+  }
+  return expanded;
+}
+
 function partThumbnail(def: PartDef): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = 56;
@@ -102,9 +135,15 @@ export class Editor {
   private ghostMaterials: THREE.Material[] = [];
   private holdingDef: PartDef | null = null;
   private holdingRotation = new Quat();
-  private selectedKey: number | null = null;
-  private selectionHelper: THREE.BoxHelper | null = null;
+  private selectedKeys = new Set<number>();
+  private primarySelectedKey: number | null = null;
+  private hoveredKey: number | null = null;
+  private selectionHelpers = new Map<number, THREE.BoxHelper>();
+  private hoverHelper: THREE.BoxHelper | null = null;
+  private rootHelper: THREE.BoxHelper | null = null;
+  private rootLabel: THREE.Sprite | null = null;
   private movingKeys: Set<number> | null = null;
+  private moveChanged = false;
   private readonly movePlane = new THREE.Plane();
   private readonly lastMovePoint = new THREE.Vector3();
   private symmetry = 1;
@@ -126,6 +165,9 @@ export class Editor {
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
   private launchBtn!: HTMLButtonElement;
+  private undoBtn!: HTMLButtonElement;
+  private redoBtn!: HTMLButtonElement;
+  private mobileMultiBtn!: HTMLButtonElement;
   private searchInput!: HTMLInputElement;
   private sortSelect!: HTMLSelectElement;
   private craftListEl!: HTMLElement;
@@ -137,6 +179,12 @@ export class Editor {
   private redoHistory: Craft[] = [];
   private moveSnapshot: Craft | null = null;
   private partContextEl: HTMLElement | null = null;
+  private contextPoint: { x: number; y: number; touch: boolean } | null = null;
+  private noticeEl!: HTMLElement;
+  private mobilePanel: 'parts' | 'craft' | 'stages' | 'engineer' | null = null;
+  private mobileHosts = new Map<'parts' | 'craft' | 'stages' | 'engineer', HTMLElement>();
+  private mobileDockButtons = new Map<'parts' | 'craft' | 'stages' | 'engineer', HTMLButtonElement>();
+  private touchMultiSelect = false;
   /** Ghost attach candidate this frame. */
   private candidate:
     | { kind: 'stack'; spot: StackNodeSpot; pos: Vec3 }
@@ -182,7 +230,10 @@ export class Editor {
 
   private buildDom(): HTMLElement {
     // Left: palette
-    const left = el('div', 'ed-left', this.root);
+    const left = el('div', 'ed-left ed-mobile-panel', this.root);
+    left.dataset.mobilePanel = 'parts';
+    left.id = 'ed-mobile-parts';
+    this.mobileHosts.set('parts', left);
     el('div', 'ed-title', left, 'WORKSHOP');
     const cats = el('div', 'ed-cats', left);
     for (const c of CATEGORIES) {
@@ -212,31 +263,39 @@ export class Editor {
 
     // Top bar
     const top = el('div', 'ed-topbar', this.root);
-    this.nameInput = el('input', 'ed-name', top) as HTMLInputElement;
+    const topScroll = el('div', 'ed-topbar-scroll', top);
+    this.nameInput = el('input', 'ed-name', topScroll) as HTMLInputElement;
     this.nameInput.value = this.craft.name;
     this.nameInput.onchange = () => {
       this.craft.name = this.nameInput.value || 'Untitled Craft';
     };
-    this.symmetryBtn = el('button', 'hud-btn', top, 'SYM ×1');
+    this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
+    this.undoBtn.onclick = () => this.undo();
+    this.redoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Redo') as HTMLButtonElement;
+    this.redoBtn.onclick = () => this.redo();
+    this.symmetryBtn = el('button', 'hud-btn', topScroll, 'SYM ×1');
     this.symmetryBtn.title = 'Radial symmetry (X)';
     this.symmetryBtn.onclick = () => this.cycleSymmetry();
-    this.snapBtn = el('button', 'hud-btn', top, `SNAP ${SNAP_ANGLES[this.snapIndex]}°`);
+    this.snapBtn = el('button', 'hud-btn', topScroll, `SNAP ${SNAP_ANGLES[this.snapIndex]}°`);
     this.snapBtn.title = 'Cycle angle snap (C)';
     this.snapBtn.onclick = () => this.cycleSnap();
-    const clear = el('button', 'hud-btn', top, 'New');
+    const clear = el('button', 'hud-btn', topScroll, 'New');
     clear.onclick = () => {
       this.pushHistory();
       this.craft = createCraft('Untitled Craft');
       this.nameInput.value = this.craft.name;
-      this.selectedKey = null;
+      this.setSelection([], null);
       this.statsDirty = true;
       this.rebuildVisual();
     };
-    const save = el('button', 'hud-btn', top, 'Save');
+    const save = el('button', 'hud-btn', topScroll, 'Save');
     save.onclick = async () => {
       await writeCraftFile(this.craft.name, this.craft);
       this.refreshCraftList();
     };
+    this.mobileMultiBtn = el('button', 'hud-btn ed-mobile-multi', topScroll, 'Select multiple') as HTMLButtonElement;
+    this.mobileMultiBtn.setAttribute('aria-pressed', 'false');
+    this.mobileMultiBtn.onclick = () => this.toggleTouchMultiSelect();
     this.launchBtn = el('button', 'hud-btn ed-launch', top, '▲ LAUNCH') as HTMLButtonElement;
     this.launchBtn.onclick = () => {
       this.cb.onLaunch(structuredClone(this.craft));
@@ -245,7 +304,20 @@ export class Editor {
 
     // Right: stats, staging, warnings, craft files
     const right = el('div', 'ed-right', this.root);
-    const envPanel = el('div', 'ed-panel', right);
+    const engineerGroup = el('div', 'ed-mobile-group ed-mobile-panel', right);
+    engineerGroup.dataset.mobilePanel = 'engineer';
+    engineerGroup.id = 'ed-mobile-engineer';
+    this.mobileHosts.set('engineer', engineerGroup);
+    const stagesGroup = el('div', 'ed-mobile-group ed-mobile-panel', right);
+    stagesGroup.dataset.mobilePanel = 'stages';
+    stagesGroup.id = 'ed-mobile-stages';
+    this.mobileHosts.set('stages', stagesGroup);
+    const craftGroup = el('div', 'ed-mobile-group ed-mobile-panel', right);
+    craftGroup.dataset.mobilePanel = 'craft';
+    craftGroup.id = 'ed-mobile-craft';
+    this.mobileHosts.set('craft', craftGroup);
+
+    const envPanel = el('div', 'ed-panel', engineerGroup);
     envPanel.innerHTML = '<h3>ENVIRONMENT</h3>';
     this.envSelect = document.createElement('select');
     this.envSelect.className = 'ed-name';
@@ -263,11 +335,11 @@ export class Editor {
     this.envSelect.onchange = () => (this.statsDirty = true);
     envPanel.appendChild(this.envSelect);
 
-    const statsPanel = el('div', 'ed-panel', right);
+    const statsPanel = el('div', 'ed-panel', engineerGroup);
     statsPanel.innerHTML = '<h3>ENGINEERING</h3>';
     this.statsEl = el('div', 'ed-stats', statsPanel);
 
-    const stagePanel = el('div', 'ed-panel', right);
+    const stagePanel = el('div', 'ed-panel', stagesGroup);
     stagePanel.innerHTML = '<h3>STAGING (fires bottom-up)</h3>';
     const stageBtns = el('div', 'map-row', stagePanel);
     const autoBtn = el('button', 'hud-btn', stageBtns, 'Auto-stage');
@@ -286,17 +358,17 @@ export class Editor {
     };
     this.stagesEl = el('div', '', stagePanel);
 
-    const warnPanel = el('div', 'ed-panel', right);
+    const warnPanel = el('div', 'ed-panel', engineerGroup);
     warnPanel.innerHTML = '<h3>ADVISOR</h3>';
     this.warningsEl = el('div', '', warnPanel);
 
-    const builtInPanel = el('div', 'ed-panel ed-built-in-panel', right);
+    const builtInPanel = el('div', 'ed-panel ed-built-in-panel', craftGroup);
     builtInPanel.innerHTML = '<h3>BUILT-IN CRAFT</h3>';
     const builtInList = el('div', 'ed-craft-list', builtInPanel);
     builtInList.dataset.section = 'built-in-crafts';
     this.renderBuiltInCraftList(builtInList);
 
-    const craftPanel = el('div', 'ed-panel', right);
+    const craftPanel = el('div', 'ed-panel', craftGroup);
     craftPanel.innerHTML = '<h3>SAVED CRAFT</h3>';
     this.craftListEl = el('div', 'ed-craft-list', craftPanel);
     this.refreshCraftList();
@@ -305,8 +377,23 @@ export class Editor {
       'div',
       'ed-hint',
       this.root,
-      'drag parts to build · drag stage chips to reorder · Ctrl+Z/Y history · C angle snap · X symmetry · ? controls',
+      'click to select · Shift/Command adds parts · secondary click opens actions · drag to move · ? controls',
     );
+    this.noticeEl = el('div', 'ed-notice', this.root);
+    this.noticeEl.hidden = true;
+    const dock = el('nav', 'ed-mobile-dock', this.root);
+    dock.setAttribute('aria-label', 'Workshop panels');
+    for (const [id, label] of [
+      ['parts', 'Parts'], ['craft', 'Craft'], ['stages', 'Stages'], ['engineer', 'Engineer'],
+    ] as const) {
+      const button = el('button', 'ed-mobile-dock-btn', dock, label) as HTMLButtonElement;
+      button.dataset.panel = id;
+      button.setAttribute('aria-controls', `ed-mobile-${id}`);
+      button.setAttribute('aria-expanded', 'false');
+      button.onclick = () => this.toggleMobilePanel(id);
+      this.mobileDockButtons.set(id, button);
+    }
+    this.updateHistoryButtons();
     return utilityHost;
   }
 
@@ -479,17 +566,58 @@ export class Editor {
   }
 
   get selectedPartKey(): number | null {
-    return this.selectedKey;
+    return this.primarySelectedKey;
+  }
+
+  get selectedPartKeys(): readonly number[] {
+    return [...this.selectedKeys];
+  }
+
+  get hoveredPartKey(): number | null {
+    return this.hoveredKey;
+  }
+
+  get contextMenuOpen(): boolean {
+    return this.partContextEl !== null;
+  }
+
+  get activeMobilePanel(): string | null {
+    return this.mobilePanel;
+  }
+
+  get cameraDistance(): number {
+    return this.camDist;
+  }
+
+  get cameraYaw(): number {
+    return this.camYaw;
+  }
+
+  get undoDepth(): number {
+    return this.history.length;
+  }
+
+  get rootIndicatorVisible(): boolean {
+    return this.rootLabel?.visible === true;
   }
 
   get hasPartSelection(): boolean {
-    return this.selectedKey !== null || this.holdingDef !== null;
+    return this.selectedKeys.size > 0 || this.holdingDef !== null;
+  }
+
+  get isHoldingPart(): boolean {
+    return this.holdingDef !== null;
+  }
+
+  get touchMultiSelectEnabled(): boolean {
+    return this.touchMultiSelect;
   }
 
   private pushHistory(snapshot: Craft = this.craft): void {
     this.history.push(structuredClone(snapshot));
     if (this.history.length > 50) this.history.shift();
     this.redoHistory = [];
+    this.updateHistoryButtons();
   }
 
   undo(): void {
@@ -497,6 +625,7 @@ export class Editor {
     if (!previous) return;
     this.redoHistory.push(structuredClone(this.craft));
     this.restoreCraftSnapshot(previous);
+    this.updateHistoryButtons();
   }
 
   redo(): void {
@@ -504,15 +633,22 @@ export class Editor {
     if (!next) return;
     this.history.push(structuredClone(this.craft));
     this.restoreCraftSnapshot(next);
+    this.updateHistoryButtons();
   }
 
   private restoreCraftSnapshot(snapshot: Craft): void {
     this.dropHolding();
     this.craft = structuredClone(snapshot);
     this.nameInput.value = this.craft.name;
-    this.setSelected(null);
+    this.setSelection([], null);
     this.statsDirty = true;
     this.rebuildVisual();
+  }
+
+  private updateHistoryButtons(): void {
+    if (!this.undoBtn || !this.redoBtn) return;
+    this.undoBtn.disabled = this.history.length === 0;
+    this.redoBtn.disabled = this.redoHistory.length === 0;
   }
 
   focusSearch(): void {
@@ -534,6 +670,18 @@ export class Editor {
     this.dropHolding();
   }
 
+  escape(): void {
+    if (this.partContextEl) {
+      this.closePartContext();
+      return;
+    }
+    if (this.holdingDef) {
+      this.dropHolding();
+      return;
+    }
+    this.setSelection([], null);
+  }
+
   /**
    * Read-only test probe: how a placed part is currently rendered — an imported
    * checked model or the procedural fallback — or null if no such part. Does not
@@ -545,57 +693,200 @@ export class Editor {
   }
 
   get selectionHighlighted(): boolean {
-    return this.selectionHelper !== null && this.selectionHelper.visible;
+    return this.selectionHelpers.size > 0;
   }
 
-  private setSelected(key: number | null): void {
-    this.selectedKey = key;
-    if (this.selectionHelper) {
-      this.scene.remove(this.selectionHelper);
-      this.selectionHelper.geometry.dispose();
-      this.selectionHelper = null;
+  private disposeOutline(helper: THREE.BoxHelper | null): void {
+    if (!helper) return;
+    this.scene.remove(helper);
+    helper.geometry.dispose();
+    (helper.material as THREE.Material).dispose();
+  }
+
+  private makeOutline(mesh: THREE.Object3D, color: number, opacity: number, order: number): THREE.BoxHelper {
+    const helper = new THREE.BoxHelper(mesh, color);
+    const material = helper.material as THREE.LineBasicMaterial;
+    material.depthTest = false;
+    material.transparent = true;
+    material.opacity = opacity;
+    helper.renderOrder = order;
+    this.scene.add(helper);
+    return helper;
+  }
+
+  private clearHighlights(): void {
+    for (const helper of this.selectionHelpers.values()) this.disposeOutline(helper);
+    this.selectionHelpers.clear();
+    this.disposeOutline(this.hoverHelper);
+    this.hoverHelper = null;
+    this.disposeOutline(this.rootHelper);
+    this.rootHelper = null;
+    if (this.rootLabel) {
+      this.scene.remove(this.rootLabel);
+      this.rootLabel.material.map?.dispose();
+      this.rootLabel.material.dispose();
+      this.rootLabel = null;
     }
-    if (key !== null && this.visual) {
-      const mesh = this.visual.partMeshes.get(key);
+  }
+
+  private syncHighlights(): void {
+    this.clearHighlights();
+    if (!this.visual) return;
+    const root = this.craft.parts.find((part) => part.parentKey === null);
+    if (root) {
+      const mesh = this.visual.partMeshes.get(root.key);
+      if (mesh && !this.selectedKeys.has(root.key)) this.rootHelper = this.makeOutline(mesh, 0xe2b13c, 0.78, 98);
       if (mesh) {
-        const helper = new THREE.BoxHelper(mesh, 0x6db3d6);
-        const material = helper.material as THREE.LineBasicMaterial;
-        material.depthTest = false;
-        material.transparent = true;
-        material.opacity = 0.95;
-        helper.renderOrder = 100;
-        this.selectionHelper = helper;
-        this.scene.add(helper);
+        const canvas = document.createElement('canvas');
+        canvas.width = 192;
+        canvas.height = 64;
+        const context = canvas.getContext('2d')!;
+        context.fillStyle = 'rgba(20,14,4,.9)';
+        context.strokeStyle = '#e2b13c';
+        context.lineWidth = 4;
+        context.roundRect(3, 3, 186, 58, 12);
+        context.fill();
+        context.stroke();
+        context.fillStyle = '#ffe3a0';
+        context.font = '700 30px ui-monospace, monospace';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('ROOT', 96, 33);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
+        this.rootLabel = new THREE.Sprite(material);
+        this.rootLabel.name = 'editor-root-label';
+        const bounds = new THREE.Box3().setFromObject(mesh);
+        this.rootLabel.position.set(
+          (bounds.min.x + bounds.max.x) / 2,
+          bounds.max.y + Math.max(0.35, (bounds.max.y - bounds.min.y) * 0.16),
+          (bounds.min.z + bounds.max.z) / 2,
+        );
+        this.rootLabel.scale.set(1.35, 0.45, 1);
+        this.rootLabel.renderOrder = 104;
+        this.scene.add(this.rootLabel);
       }
     }
+    for (const key of this.selectedKeys) {
+      const mesh = this.visual.partMeshes.get(key);
+      if (!mesh) continue;
+      this.selectionHelpers.set(
+        key,
+        this.makeOutline(mesh, 0x6db3d6, key === this.primarySelectedKey ? 1 : 0.48, key === this.primarySelectedKey ? 102 : 101),
+      );
+    }
+    if (this.hoveredKey !== null && !this.selectedKeys.has(this.hoveredKey)) {
+      const mesh = this.visual.partMeshes.get(this.hoveredKey);
+      if (mesh) this.hoverHelper = this.makeOutline(mesh, 0x8fe4ff, 0.5, 100);
+    }
+  }
+
+  private setSelection(keys: Iterable<number>, primary: number | null): void {
+    const valid = new Set([...keys].filter((key) => Boolean(craftPart(this.craft, key))));
+    this.selectedKeys = valid;
+    this.primarySelectedKey = primary !== null && valid.has(primary) ? primary : valid.values().next().value ?? null;
+    this.closePartContext();
+    this.syncHighlights();
     this.statsDirty = true;
+  }
+
+  selectPart(key: number | null, additive = false): void {
+    if (key === null) {
+      this.setSelection([], null);
+      return;
+    }
+    if (!additive) {
+      this.setSelection([key], key);
+      return;
+    }
+    const next = new Set(this.selectedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    this.setSelection(next, next.has(key) ? key : this.primarySelectedKey === key ? null : this.primarySelectedKey);
+  }
+
+  isPartSelected(key: number): boolean {
+    return this.selectedKeys.has(key);
+  }
+
+  pickPart(nx: number, ny: number): number | null {
+    if (!this.visual) return null;
+    this.pointer.set(nx, ny);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects([...this.visual.partMeshes.values()], true)[0];
+    return hit ? this.partKeyForObject(hit.object) : null;
+  }
+
+  updateHover(nx: number, ny: number, enabled = true): void {
+    const next = enabled && !this.holdingDef ? this.pickPart(nx, ny) : null;
+    if (next === this.hoveredKey) return;
+    this.hoveredKey = next;
+    this.disposeOutline(this.hoverHelper);
+    this.hoverHelper = null;
+    if (next !== null && !this.selectedKeys.has(next) && this.visual) {
+      const mesh = this.visual.partMeshes.get(next);
+      if (mesh) this.hoverHelper = this.makeOutline(mesh, 0x8fe4ff, 0.5, 100);
+    }
+  }
+
+  closePartContext(): void {
+    this.partContextEl?.remove();
+    this.partContextEl = null;
+    this.contextPoint = null;
+  }
+
+  openPartContext(clientX: number, clientY: number, touch = false, key: number | null = null): void {
+    if (key !== null && !this.selectedKeys.has(key)) this.setSelection([key], key);
+    if (!this.selectedKeys.size) {
+      this.closePartContext();
+      return;
+    }
+    this.contextPoint = { x: clientX, y: clientY, touch };
     this.refreshPartContext();
   }
 
   private refreshPartContext(): void {
+    const point = this.contextPoint;
     this.partContextEl?.remove();
     this.partContextEl = null;
-    if (this.selectedKey === null) return;
-    const part = craftPart(this.craft, this.selectedKey);
+    if (!point || this.primarySelectedKey === null) return;
+    const part = craftPart(this.craft, this.primarySelectedKey);
     if (!part) return;
     const definition = defOf(part);
     const panel = el('div', 'ed-part-context', this.root);
+    panel.classList.toggle('touch-sheet', point.touch);
     this.partContextEl = panel;
     const heading = el('div', 'hud-part-heading', panel);
-    el('strong', '', heading, definition.name);
+    el('strong', '', heading, this.selectedKeys.size > 1 ? `${this.selectedKeys.size} PARTS SELECTED` : definition.name);
     const close = el('button', 'k-window-btn', heading, '×');
-    close.onclick = () => this.setSelected(null);
-    el('div', 'ed-part-context-meta', panel, `${part.attach} · symmetry ${part.symmetry || 'none'} · ${definition.crossfeed ? 'crossfeed' : 'isolated'}`);
+    close.onclick = () => this.closePartContext();
+    const roots = normalizedBranchRoots(this.craft, this.selectedKeys);
+    el(
+      'div',
+      'ed-part-context-meta',
+      panel,
+      this.selectedKeys.size > 1
+        ? `${roots.length} movable ${roots.length === 1 ? 'branch' : 'branches'}`
+        : `${part.attach} · symmetry ${part.symmetry || 'none'} · ${definition.crossfeed ? 'crossfeed' : 'isolated'}`,
+    );
     const actions = el('div', 'ed-part-context-actions', panel);
     const remove = el('button', 'hud-btn', actions, 'Remove');
     remove.onclick = () => this.deleteSelected();
     const frame = el('button', 'hud-btn', actions, 'Frame');
     frame.onclick = () => this.frameSelected();
-    const reroot = el('button', 'hud-btn', actions, 'Re-root');
-    reroot.onclick = () => this.rerootSelected();
-    if (part.attach === 'surface') {
+    if (this.selectedKeys.size === 1) {
+      const reroot = el('button', 'hud-btn', actions, 'Make root') as HTMLButtonElement;
+      reroot.disabled = part.parentKey === null;
+      reroot.onclick = () => this.rerootSelected();
+    }
+    if (this.selectedKeys.size === 1 && part.attach === 'surface') {
       const align = el('button', 'hud-btn', actions, 'Center Y');
       align.onclick = () => this.verticalAlignSelected();
+    }
+    if (this.selectedKeys.size > 1) {
+      this.positionPartContext(panel, point);
+      return;
     }
     const actionRow = el('div', 'mission-section-title', panel, 'ACTION GROUP');
     const actionSelect = document.createElement('select');
@@ -624,6 +915,43 @@ export class Editor {
         this.refreshPartContext();
       };
     }
+    this.positionPartContext(panel, point);
+  }
+
+  private positionPartContext(panel: HTMLElement, point: { x: number; y: number; touch: boolean }): void {
+    if (point.touch) return;
+    const margin = 10;
+    panel.style.left = `${Math.max(margin, Math.min(point.x + 10, window.innerWidth - 270))}px`;
+    panel.style.top = `${Math.max(margin, Math.min(point.y + 10, window.innerHeight - 330))}px`;
+  }
+
+  private toggleMobilePanel(panel: 'parts' | 'craft' | 'stages' | 'engineer'): void {
+    this.mobilePanel = this.mobilePanel === panel ? null : panel;
+    for (const [id, host] of this.mobileHosts) host.classList.toggle('mobile-open', id === this.mobilePanel);
+    for (const [id, button] of this.mobileDockButtons) {
+      const active = id === this.mobilePanel;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-expanded', String(active));
+    }
+  }
+
+  private toggleTouchMultiSelect(): void {
+    this.touchMultiSelect = !this.touchMultiSelect;
+    this.mobileMultiBtn.classList.toggle('active', this.touchMultiSelect);
+    this.mobileMultiBtn.setAttribute('aria-pressed', String(this.touchMultiSelect));
+    this.mobileMultiBtn.textContent = this.touchMultiSelect ? 'Selecting multiple' : 'Select multiple';
+    if (!this.touchMultiSelect && this.primarySelectedKey !== null && this.selectedKeys.size > 1) {
+      this.setSelection([this.primarySelectedKey], this.primarySelectedKey);
+    }
+  }
+
+  private showNotice(message: string, danger = false): void {
+    this.noticeEl.textContent = message;
+    this.noticeEl.classList.toggle('danger', danger);
+    this.noticeEl.hidden = false;
+    window.setTimeout(() => {
+      if (this.noticeEl.textContent === message) this.noticeEl.hidden = true;
+    }, 2600);
   }
 
   rotateSelected(axis: 'x' | 'y' | 'z', direction: number, fine = false): void {
@@ -635,8 +963,8 @@ export class Editor {
       this.applyGhostRotation();
       return;
     }
-    if (this.selectedKey === null) return;
-    const part = craftPart(this.craft, this.selectedKey);
+    if (this.selectedKeys.size !== 1 || this.primarySelectedKey === null) return;
+    const part = craftPart(this.craft, this.primarySelectedKey);
     if (!part || part.attach !== 'surface') return;
     this.pushHistory();
     const rotation = new Quat(part.rotation.x, part.rotation.y, part.rotation.z, part.rotation.w);
@@ -652,8 +980,8 @@ export class Editor {
       this.applyGhostRotation();
       return;
     }
-    if (this.selectedKey === null) return;
-    const part = craftPart(this.craft, this.selectedKey);
+    if (this.selectedKeys.size !== 1 || this.primarySelectedKey === null) return;
+    const part = craftPart(this.craft, this.primarySelectedKey);
     if (!part || part.attach !== 'surface') return;
     this.pushHistory();
     part.rotation = { x: 0, y: 0, z: 0, w: 1 };
@@ -668,8 +996,8 @@ export class Editor {
   }
 
   verticalAlignSelected(): void {
-    if (this.selectedKey === null) return;
-    const part = craftPart(this.craft, this.selectedKey);
+    if (this.selectedKeys.size !== 1 || this.primarySelectedKey === null) return;
+    const part = craftPart(this.craft, this.primarySelectedKey);
     const parent = part?.parentKey !== null && part?.parentKey !== undefined
       ? craftPart(this.craft, part.parentKey)
       : null;
@@ -681,16 +1009,30 @@ export class Editor {
   }
 
   rerootSelected(): void {
-    if (this.selectedKey === null) return;
-    const selected = craftPart(this.craft, this.selectedKey);
+    if (this.selectedKeys.size !== 1 || this.primarySelectedKey === null) return;
+    const selected = craftPart(this.craft, this.primarySelectedKey);
     if (!selected || selected.parentKey === null) return;
+    const before = structuredClone(this.craft);
     const path: PartInstance[] = [];
+    const visited = new Set<number>();
     let current: PartInstance | undefined = selected;
     while (current) {
+      if (visited.has(current.key)) {
+        this.showNotice('Cannot make root: attachment cycle detected.', true);
+        return;
+      }
+      visited.add(current.key);
       path.push(current);
-      current = current.parentKey === null ? undefined : craftPart(this.craft, current.parentKey);
+      if (current.parentKey === null) current = undefined;
+      else {
+        const parent = craftPart(this.craft, current.parentKey);
+        if (!parent) {
+          this.showNotice('Cannot make root: attachment parent is missing.', true);
+          return;
+        }
+        current = parent;
+      }
     }
-    this.pushHistory();
     const oldAttach = path.map((part) => part.attach);
     path[0].parentKey = null;
     path[0].attach = 'root';
@@ -703,8 +1045,22 @@ export class Editor {
           ? 'stack-top'
           : 'surface';
     }
+    const roots = this.craft.parts.filter((part) => part.parentKey === null);
+    const keys = new Set(this.craft.parts.map((part) => part.key));
+    const valid = roots.length === 1
+      && roots[0].attach === 'root'
+      && this.craft.parts.every((part) => part.parentKey === null || keys.has(part.parentKey));
+    if (!valid) {
+      this.craft = before;
+      this.showNotice('Make root failed; the craft was restored.', true);
+      this.rebuildVisual();
+      return;
+    }
+    this.pushHistory(before);
     this.statsDirty = true;
+    this.closePartContext();
     this.rebuildVisual();
+    this.showNotice(`${defOf(selected).name} is now the root part.`);
   }
 
   fitCamera(): void {
@@ -719,14 +1075,18 @@ export class Editor {
   }
 
   frameSelected(): void {
-    if (this.selectedKey === null) return;
-    const part = craftPart(this.craft, this.selectedKey);
-    if (!part) return;
+    if (!this.selectedKeys.size) return;
+    const framed = [...expandedBranchKeys(this.craft, normalizedBranchRoots(this.craft, this.selectedKeys))]
+      .map((key) => craftPart(this.craft, key))
+      .filter((part): part is PartInstance => Boolean(part));
+    if (!framed.length) return;
     const mid = this.craft.parts.length
       ? (Math.min(...this.craft.parts.map((candidate) => candidate.position.y)) + Math.max(...this.craft.parts.map((candidate) => candidate.position.y))) / 2
       : 3;
-    this.camFocusOffset.set(part.position.x, part.position.y - mid, part.position.z);
-    this.camDist = Math.max(5, Math.min(this.camDist, 12));
+    const center = framed.reduce((sum, part) => sum.add(new Vec3(part.position.x, part.position.y, part.position.z)), new Vec3()).scale(1 / framed.length);
+    const span = framed.reduce((max, part) => Math.max(max, Math.hypot(part.position.x - center.x, part.position.y - center.y, part.position.z - center.z)), 0);
+    this.camFocusOffset.set(center.x, center.y - mid, center.z);
+    this.camDist = Math.max(5, Math.min(40, Math.max(12, span * 3)));
   }
 
   panCameraLocal(x: number, y: number, z: number): void {
@@ -746,33 +1106,27 @@ export class Editor {
     return null;
   }
 
-  /** Select a placed part and begin free movement on a camera-facing plane. */
-  beginPartDrag(nx: number, ny: number, duplicate = false): boolean {
+  /** Begin free movement after the shell's press-versus-drag threshold is crossed. */
+  beginPartDrag(nx: number, ny: number, duplicate = false, pressedKey: number | null = null): boolean {
     if (this.holdingDef || !this.visual) return false;
-    this.pointer.set(nx, ny);
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hit = this.raycaster.intersectObjects([...this.visual.partMeshes.values()], true)[0];
-    if (!hit) return false;
-    const key = this.partKeyForObject(hit.object);
+    const key = pressedKey ?? this.pickPart(nx, ny);
     if (key === null) return false;
     this.moveSnapshot = structuredClone(this.craft);
+    this.moveChanged = false;
 
     let movingRoot = key;
-    if (duplicate) movingRoot = this.duplicateSubtree(key);
-    this.setSelected(movingRoot);
-
-    const moving = new Set<number>([movingRoot]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const part of this.craft.parts) {
-        if (part.parentKey !== null && moving.has(part.parentKey) && !moving.has(part.key)) {
-          moving.add(part.key);
-          grew = true;
-        }
-      }
+    if (duplicate) {
+      movingRoot = this.duplicateSubtree(key);
+      this.setSelection([movingRoot], movingRoot);
+      this.moveChanged = true;
+    } else if (!this.selectedKeys.has(key)) {
+      this.setSelection([key], key);
+    } else {
+      this.primarySelectedKey = key;
+      this.syncHighlights();
     }
-    this.movingKeys = moving;
+    const roots = normalizedBranchRoots(this.craft, duplicate ? [movingRoot] : this.selectedKeys);
+    this.movingKeys = expandedBranchKeys(this.craft, roots);
     const part = craftPart(this.craft, movingRoot)!;
     const point = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
     const normal = this.camera.getWorldDirection(new THREE.Vector3());
@@ -816,6 +1170,7 @@ export class Editor {
     const point = this.raycaster.ray.intersectPlane(this.movePlane, new THREE.Vector3());
     if (!point) return;
     const delta = point.sub(this.lastMovePoint);
+    if (delta.lengthSq() <= 1e-12) return;
     this.lastMovePoint.add(delta);
     for (const key of this.movingKeys) {
       const part = craftPart(this.craft, key);
@@ -825,14 +1180,28 @@ export class Editor {
       part.position.z += delta.z;
       this.visual.partMeshes.get(key)?.position.set(part.position.x, part.position.y, part.position.z);
     }
-    this.selectionHelper?.update();
+    this.moveChanged = true;
+    for (const helper of this.selectionHelpers.values()) helper.update();
+    this.hoverHelper?.update();
+    this.rootHelper?.update();
+    const rootKey = this.craft.parts.find((part) => part.parentKey === null)?.key;
+    if (rootKey !== undefined && this.movingKeys.has(rootKey) && this.rootLabel) this.rootLabel.position.add(delta);
     this.statsDirty = true;
   }
 
-  endPartDrag(): void {
-    if (this.moveSnapshot) this.pushHistory(this.moveSnapshot);
+  endPartDrag(cancel = false): void {
+    if (cancel && this.moveSnapshot) {
+      const snapshot = this.moveSnapshot;
+      this.moveSnapshot = null;
+      this.movingKeys = null;
+      this.moveChanged = false;
+      this.restoreCraftSnapshot(snapshot);
+      return;
+    }
+    if (this.moveSnapshot && this.moveChanged) this.pushHistory(this.moveSnapshot);
     this.moveSnapshot = null;
     this.movingKeys = null;
+    this.moveChanged = false;
   }
 
   // ------------------------------------------------------ attachment logic
@@ -857,12 +1226,14 @@ export class Editor {
   }
 
   /** Update ghost position from pointer; compute the attach candidate. */
-  updatePointer(nx: number, ny: number): void {
+  updatePointer(nx: number, ny: number, allowHover = true): void {
     this.pointer.set(nx, ny);
     if (!this.holdingDef || !this.ghost) {
       this.candidate = null;
+      this.updateHover(nx, ny, allowHover);
       return;
     }
+    this.updateHover(nx, ny, false);
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const def = this.holdingDef;
     const halfH = def.shape.height / 2;
@@ -948,28 +1319,13 @@ export class Editor {
   }
 
   /** Left click: place held part / select existing part. */
-  click(): void {
+  click(additive = false, keyOverride: number | null | undefined = undefined): void {
     if (this.holdingDef && this.candidate) {
       this.placeHeld();
       return;
     }
-    // Selection.
-    if (!this.visual) return;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hits = this.raycaster.intersectObjects([...this.visual.partMeshes.values()], true);
-    if (hits.length) {
-      let obj: THREE.Object3D | null = hits[0].object;
-      while (obj) {
-        for (const [key, mesh] of this.visual.partMeshes) {
-          if (mesh === obj) {
-            this.setSelected(key);
-            return;
-          }
-        }
-        obj = obj.parent;
-      }
-    }
-    this.setSelected(null);
+    const key = keyOverride === undefined ? this.pickPart(this.pointer.x, this.pointer.y) : keyOverride;
+    this.selectPart(key, additive);
   }
 
   private placeHeld(): void {
@@ -1029,10 +1385,10 @@ export class Editor {
       this.dropHolding();
       return;
     }
-    if (this.selectedKey !== null) {
+    if (this.selectedKeys.size) {
       this.pushHistory();
-      removeSubtree(this.craft, this.selectedKey);
-      this.setSelected(null);
+      for (const key of normalizedBranchRoots(this.craft, this.selectedKeys)) removeSubtree(this.craft, key);
+      this.setSelection([], null);
       this.statsDirty = true;
       this.rebuildVisual();
     }
@@ -1046,11 +1402,7 @@ export class Editor {
 
   // ------------------------------------------------------------- rendering
   rebuildVisual(): void {
-    if (this.selectionHelper) {
-      this.scene.remove(this.selectionHelper);
-      this.selectionHelper.geometry.dispose();
-      this.selectionHelper = null;
-    }
+    this.clearHighlights();
     if (this.visual) {
       this.scene.remove(this.visual.group);
       disposeVesselVisual(this.visual);
@@ -1061,7 +1413,11 @@ export class Editor {
     this.launchBtn.disabled = !canLaunch;
     this.launchBtn.title = canLaunch ? 'Launch this craft' : 'Add at least one part before launch';
     this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
-    if (this.selectedKey !== null) this.setSelected(this.selectedKey);
+    this.selectedKeys = new Set([...this.selectedKeys].filter((key) => Boolean(craftPart(this.craft, key))));
+    if (this.primarySelectedKey !== null && !this.selectedKeys.has(this.primarySelectedKey)) {
+      this.primarySelectedKey = this.selectedKeys.values().next().value ?? null;
+    }
+    this.syncHighlights();
   }
 
   orbitCamera(dx: number, dy: number): void {
@@ -1074,6 +1430,10 @@ export class Editor {
   }
 
   setVisible(vis: boolean): void {
+    if (!vis) {
+      this.closePartContext();
+      this.updateHover(this.pointer.x, this.pointer.y, false);
+    }
     this.root.style.display = vis ? '' : 'none';
   }
 
@@ -1157,7 +1517,7 @@ export class Editor {
       if (suspect) {
         warning.classList.add('linked');
         warning.title = `Select ${defOf(suspect).name}`;
-        warning.onclick = () => this.setSelected(suspect.key);
+        warning.onclick = () => this.selectPart(suspect.key);
       }
     }
     if (!warnings.length) el('div', 'ed-part-info', this.warningsEl, 'no complaints — impressive');
@@ -1218,7 +1578,7 @@ export class Editor {
       event.stopPropagation();
       event.dataTransfer?.setData('application/x-perilune-part', String(part.key));
     };
-    chip.onclick = () => this.setSelected(part.key);
+    chip.onclick = () => this.selectPart(part.key);
   }
 
   private addStageDropTarget(element: HTMLElement, targetIndex: number | null): void {

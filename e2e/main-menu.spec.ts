@@ -86,7 +86,7 @@ test('a live autosave appears in the catalog and enables Continue Mission', asyn
     targetPosition: { x: 640, y: 400 },
   });
   await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(1);
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
   await page.getByRole('button', { name: 'Saves' }).click();
   await expect(page.locator('.utility-save', { hasText: 'AUTOSAVE' })).toBeVisible();

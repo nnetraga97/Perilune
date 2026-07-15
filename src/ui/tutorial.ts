@@ -29,7 +29,7 @@ const STEPS: TutorialStep[] = [
   {
     title: 'Welcome to the Workshop',
     highlight: '[data-cat="pods"]',
-    text: 'Every journey starts with a crew cabin. Open the PODS category on the left and place a Voyager Pod.',
+    text: 'Every journey starts with a crew cabin. Open PODS, then click or tap a Voyager Pod and place it in the workshop.',
     done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).pod),
   },
   {
