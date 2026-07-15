@@ -25,9 +25,8 @@ import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
 import { launchPadTerrainEnvelope, naturalContactSurface } from '../sim/terrain';
 import { launchSiteBodyFixedDirection } from '../sim/launchSite';
+import { terrainPresentationBand } from './terrainPresentation';
 
-const PREWARM_RADIUS_MULTIPLIER = 70;
-const VISIBLE_RADIUS_MULTIPLIER = 60;
 const DEFAULT_ACTIVE_BODY_BUDGET: Readonly<Record<QualityTier, number>> = Object.freeze({
   low: 64 * 1024 * 1024,
   medium: 128 * 1024 * 1024,
@@ -182,9 +181,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (!this.ready) return;
-    const cameraDistance = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z);
-    const prewarm = frame.allowFlightTerrain && cameraDistance < this.body.radius * PREWARM_RADIUS_MULTIPLIER;
-    const visibleBand = frame.allowFlightTerrain && cameraDistance < this.body.radius * VISIBLE_RADIUS_MULTIPLIER;
+    const band = terrainPresentationBand(this.body);
+    const prewarm = frame.allowFlightTerrain && frame.altitude < band.prewarmAltitude;
+    const visibleBand = frame.allowFlightTerrain && frame.altitude < band.visibleAltitude;
     this.updateCompactSurface(frame, prewarm);
     const origin = frame.cameraRelativeOrigin;
     this.compact.position.set(origin.x, origin.y, origin.z);

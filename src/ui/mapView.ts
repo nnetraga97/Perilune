@@ -39,6 +39,7 @@ import {
 } from '../render/bodyMaterial';
 import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
 import { createTerrestrialGlobalMaterial, updateTerrestrialCloudLighting } from '../render/terrestrial/globalMaterial';
+import { createAirlessGlobalMaterial } from '../render/airless/globalMaterial';
 import { WEATHER_CLOUD_DRIFT_RATE } from '../render/terrestrial/cloudLayer';
 import { createGlobalSphereGeometry } from '../render/terrestrial/globalGeometry';
 import type { QualityTier, RuntimeBodyAssetPack } from '../render/bodyRenderer';
@@ -91,7 +92,9 @@ export function compactBodyMesh(
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
-      : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy);
+      : pack && descriptor.renderer !== 'terrestrial'
+        ? createAirlessGlobalMaterial(pack, maxAnisotropy)
+        : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `compact-body:${descriptor.bodyId}`;
   mesh.userData.bodyMaterial = {

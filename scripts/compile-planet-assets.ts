@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { dirname, relative, resolve } from 'node:path';
 import sharp from 'sharp';
 import { AUREN_SYSTEM } from '../src/content/system';
@@ -9,6 +9,7 @@ import { recipeForBody } from '../src/sim/terrainRecipe';
 import { solidHeight } from '../src/sim/terrain';
 import { Universe } from '../src/sim/universe';
 import { generateVeyraCanonicalMaps, type VeyraCanonicalMaps } from './lib/veyra-global-maps';
+import { generateAirlessGlobalMaps, type AirlessGlobalMaps } from './lib/airless-global-maps';
 import { generateVeyraScatter } from './lib/veyra-scatter';
 import { expandLogicalRgToRgb, resizeLogicalRg } from './lib/rg-image';
 
@@ -30,7 +31,41 @@ const quantizationMeters = 0.5;
 const compilerVersion = '2.3.0';
 const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
-const writeGlobal = write && !process.argv.includes('--fingerprints-only');
+const fingerprintsOnly = process.argv.includes('--fingerprints-only');
+const tierDimensions = {
+  low: [1024, 512],
+  medium: [2048, 1024],
+  high: [4096, 2048],
+} as const;
+type CompiledTier = keyof typeof tierDimensions;
+type CompiledBody = 'veyra' | 'palla' | 'wisp';
+
+function optionValues(name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < process.argv.length; index++) {
+    if (process.argv[index] !== name) continue;
+    const value = process.argv[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+    values.push(...value.split(',').map((entry) => entry.trim()).filter(Boolean));
+  }
+  return values;
+}
+
+const requestedBodies = optionValues('--body');
+const targetBodies = new Set<CompiledBody>(
+  (requestedBodies.length > 0 ? requestedBodies : ['veyra']).map((bodyId) => {
+    if (!['veyra', 'palla', 'wisp'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
+    return bodyId as CompiledBody;
+  }),
+);
+const requestedTiers = optionValues('--tier');
+const targetTiers = new Set<CompiledTier>(
+  (requestedTiers.length > 0 ? requestedTiers : Object.keys(tierDimensions)).map((tier) => {
+    if (!(tier in tierDimensions)) throw new Error(`Unsupported planet asset tier: ${tier}`);
+    return tier as CompiledTier;
+  }),
+);
+const writeGlobal = write && !fingerprintsOnly && targetBodies.has('veyra');
 
 interface RecipeRecord { bodyId: string; version: number; hash: string }
 interface ChannelOutput {
@@ -97,45 +132,74 @@ function relativeAssetPath(path: string): string {
   return relative(assetsRoot, path).split('\\').join('/');
 }
 
-function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['name']): void {
+function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['name']): Promise<void> {
   const executable = process.env.KTX_CLI ?? 'ktx';
   const format = channel === 'albedo' ? 'R8G8B8_SRGB' :
     channel === 'material' ? 'R8G8B8A8_UNORM' : 'R8G8_UNORM';
   const encoding = channel === 'albedo'
     ? ['--encode', 'basis-lz', '--qlevel', '180']
     : ['--encode', 'uastc', '--uastc-quality', '2', '--zstd', '9'];
-  const result = spawnSync(executable, [
-    'create', '--format', format, '--generate-mipmap', '--mipmap-filter', 'lanczos3',
-    '--threads', '1', '--testrun', '--assign-texcoord-origin', 'top-left',
-    ...encoding, inputPath, outputPath,
-  ], { encoding: 'utf8', env: process.env });
-  if (result.status !== 0) {
-    const detail = result.error?.message || result.stderr || result.stdout ||
-      `exit=${String(result.status)} signal=${String(result.signal)}`;
-    throw new Error(`KTX encoding failed for ${channel}: ${detail}`);
-  }
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, [
+      'create', '--format', format, '--generate-mipmap', '--mipmap-filter', 'lanczos3',
+      '--threads', '1', '--testrun', '--assign-texcoord-origin', 'top-left',
+      ...encoding, inputPath, outputPath,
+    ], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (bytes) => { output += String(bytes); });
+    child.stderr.on('data', (bytes) => { output += String(bytes); });
+    child.on('error', (error) => reject(new Error(`KTX encoding failed for ${channel}: ${error.message}`)));
+    child.on('close', (code, signal) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`KTX encoding failed for ${channel}: ${output || `exit=${code} signal=${signal}`}`));
+    });
+  });
+}
+
+async function mapWithConcurrency<T>(
+  values: readonly T[],
+  concurrency: number,
+  operation: (value: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= values.length) return;
+      await operation(values[index]);
+    }
+  }));
 }
 
 async function writeTier(
-  tier: 'low' | 'medium' | 'high',
+  bodyId: CompiledBody,
+  tier: CompiledTier,
   width: number,
   height: number,
-  canonical: VeyraCanonicalMaps,
+  sourceWidth: number,
+  sourceHeight: number,
+  maps: AirlessGlobalMaps | VeyraCanonicalMaps,
 ): Promise<{ pack: Record<string, unknown>; channels: ChannelOutput[] }> {
-  const tierDir = resolve(generatedRoot, tier);
+  const bodyGeneratedRoot = resolve(assetsRoot, `generated/${bodyId}`);
+  const tierDir = resolve(bodyGeneratedRoot, tier);
   mkdirSync(tierDir, { recursive: true });
   const definitions = [
-    { name: 'albedo' as const, data: canonical.albedo, channels: 3 as const, fallback: 'webp' as const },
-    { name: 'normal' as const, data: canonical.normal, channels: 2 as const, fallback: 'png' as const },
-    { name: 'material' as const, data: canonical.material, channels: 4 as const, fallback: 'png' as const },
-    { name: 'clouds' as const, data: canonical.clouds, channels: 2 as const, fallback: 'png' as const },
+    { name: 'albedo' as const, data: maps.albedo, channels: 3 as const, fallback: 'webp' as const },
+    { name: 'normal' as const, data: maps.normal, channels: 2 as const, fallback: 'png' as const },
+    { name: 'material' as const, data: maps.material, channels: 4 as const, fallback: 'png' as const },
+    ...('clouds' in maps
+      ? [{ name: 'clouds' as const, data: maps.clouds, channels: 2 as const, fallback: 'png' as const }]
+      : []),
   ];
   const channels: ChannelOutput[] = [];
+  const prepared: Array<{ definition: (typeof definitions)[number]; fallbackPath: string; encoderInput: string; packagePath: string }> = [];
   for (const definition of definitions) {
-    const resized = definition.channels === 2
-      ? await resizeLogicalRg(definition.data, canonicalWidth, canonicalHeight, width, height)
+    const resized = sourceWidth === width && sourceHeight === height
+      ? Buffer.from(definition.data)
+      : definition.channels === 2
+      ? await resizeLogicalRg(definition.data, sourceWidth, sourceHeight, width, height)
       : await sharp(Buffer.from(definition.data), {
-        raw: { width: canonicalWidth, height: canonicalHeight, channels: definition.channels },
+        raw: { width: sourceWidth, height: sourceHeight, channels: definition.channels },
         sequentialRead: true,
       }).resize(width, height, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
     const image = sharp(resized, { raw: { width, height, channels: definition.channels } });
@@ -150,12 +214,25 @@ async function writeTier(
         .png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
       await image.clone().png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     } else {
-      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
-      await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+      // Packed RGBA textures carry shader data in RGB. Disable palette
+      // quantization so libvips cannot rewrite channels that happen to sit
+      // behind an unused alpha value.
+      await image.clone().png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
+      await image.clone().png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     }
     const packagePath = resolve(tierDir, `${definition.name}.ktx2`);
-    runKtx(encoderInput, packagePath, definition.name);
-    rmSync(encoderInput, { force: true });
+    prepared.push({ definition, fallbackPath, encoderInput, packagePath });
+  }
+  // Two single-threaded encoders use the two cores Docker Desktop is commonly
+  // granted without changing the deterministic per-texture KTX settings.
+  await mapWithConcurrency(prepared, 2, async ({ definition, encoderInput, packagePath }) => {
+    try {
+      await runKtx(encoderInput, packagePath, definition.name);
+    } finally {
+      rmSync(encoderInput, { force: true });
+    }
+  });
+  for (const { definition, fallbackPath, packagePath } of prepared) {
     const blockBytes = definition.name === 'albedo' ? 8 : 16;
     channels.push({
       name: definition.name,
@@ -181,15 +258,15 @@ async function writeTier(
   return {
     channels,
     pack: {
-      bodyId: 'veyra', tier, width, height, compressedBytes,
-      transientBytes: width * height * 22,
-      bootCritical: tier === 'medium',
+      bodyId, tier, width, height, compressedBytes,
+      transientBytes: width * height * ('clouds' in maps ? 22 : 18),
+      bootCritical: bodyId === 'veyra' && tier === 'medium',
       channels,
     },
   };
 }
 
-async function compileVeyraGlobal(universe: Universe): Promise<{
+async function compileVeyraGlobal(universe: Universe, tiersToWrite: ReadonlySet<CompiledTier>): Promise<{
   rawHashes: VeyraCanonicalMaps['rawHashes'];
   heightChecksumSha256: string;
   packs: unknown[];
@@ -219,10 +296,239 @@ async function compileVeyraGlobal(universe: Universe): Promise<{
   writeFileSync(canonicalHeightPath, canonical.heightS16le);
   const heightChecksumSha256 = sha256(canonical.heightS16le);
   const tiers = [];
-  tiers.push(await writeTier('low', 1024, 512, canonical));
-  tiers.push(await writeTier('medium', 2048, 1024, canonical));
-  tiers.push(await writeTier('high', 4096, 2048, canonical));
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    tiers.push(await writeTier('veyra', tier, width, height, canonicalWidth, canonicalHeight, canonical));
+  }
   return { rawHashes: canonical.rawHashes, heightChecksumSha256, packs: tiers.map((tier) => tier.pack) };
+}
+
+const nasaReview = Object.freeze({
+  thirdPartyContent: false,
+  commercialUseReviewed: true,
+  modificationReviewed: true,
+  endorsementSafe: true,
+  termsSnapshot: 'https://www.nasa.gov/nasa-brand-center/images-and-media/',
+});
+
+const airlessSources = {
+  palla: {
+    albedoPath: resolve(assetsRoot, 'sources/nasa-lro-palla/lroc_color_16bit_srgb_8k.tif'),
+    heightPath: resolve(assetsRoot, 'sources/nasa-lro-palla/ldem_16_uint.tif'),
+    sources: [
+      {
+        id: 'nasa-lro-palla-color-8k',
+        url: 'https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_8k.tif',
+        author: 'NASA Scientific Visualization Studio and LRO',
+        license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+        attribution: 'NASA LRO/LOLA; used for fictional moon Palla without recoloring',
+        checksumSha256: 'db7808e878b6a55eb409bb231eab8deb477f84b5c9d7396d76ff73e5d54992d9',
+        localPath: 'sources/nasa-lro-palla/lroc_color_16bit_srgb_8k.tif', authoringOnly: true,
+        sourceDimensions: [8192, 4096], transformations: ['Lanczos3 tier resampling', 'RGB8 fallback and BasisLZ KTX2 encoding'],
+        bodies: ['palla'], channels: ['albedo'], review: nasaReview,
+      },
+      {
+        id: 'nasa-lola-palla-height',
+        url: 'https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif',
+        author: 'NASA Scientific Visualization Studio and LOLA',
+        license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+        attribution: 'NASA LOLA; used to derive fictional moon Palla normals and material response',
+        checksumSha256: '45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62',
+        localPath: 'sources/nasa-lro-palla/ldem_16_uint.tif', authoringOnly: true,
+        sourceDimensions: [5760, 2880], transformations: ['0.5 meter unsigned LOLA elevation decode', 'body-space oct normal derivation', 'UASTC KTX2 encoding'],
+        bodies: ['palla'], channels: ['normal', 'material'], review: nasaReview,
+      },
+    ],
+  },
+  wisp: {
+    albedoPath: resolve(assetsRoot, 'sources/nasa-osiris-rex-wisp/Bennu_global_ShapeV20_GndControl_ROLOphase_ALBEDO_8bit_v6.tif'),
+    sources: [
+      {
+        id: 'nasa-osiris-rex-wisp-albedo',
+        url: 'https://svs.gsfc.nasa.gov/vis/a000000/a005000/a005069/Bennu_global_ShapeV20_GndControl_ROLOphase_ALBEDO_8bit_v6.tif',
+        author: 'NASA Scientific Visualization Studio and OSIRIS-REx',
+        license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+        attribution: 'NASA OSIRIS-REx Bennu albedo; used for fictional moon Wisp without recoloring',
+        checksumSha256: '71bfeecce5615a5602d16d176c4cc17cc2550b2dc8c7cdac1332dea8d9f3da36',
+        localPath: 'sources/nasa-osiris-rex-wisp/Bennu_global_ShapeV20_GndControl_ROLOphase_ALBEDO_8bit_v6.tif', authoringOnly: true,
+        sourceDimensions: [25134, 12568], transformations: ['Lanczos3 tier resampling', 'grayscale-to-RGB channel expansion', 'polar no-observation fill from adjacent source pixels', 'procedural-authority oct normal derivation', 'BasisLZ and UASTC KTX2 encoding'],
+        bodies: ['wisp'], channels: ['albedo', 'normal', 'material'], review: nasaReview,
+      },
+    ],
+  },
+} as const;
+
+function fillPolarObservationVoids(albedo: Uint8Array, width: number, height: number): Uint8Array {
+  const pixelCount = width * height;
+  const missing = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let queueStart = 0;
+  let queueEnd = 0;
+  // Resampling produces a dark anti-aliased fringe around the source mask;
+  // keep that fringe connected to the no-observation region as well.
+  const isObserved = (index: number) => albedo[index] + albedo[index + 1] + albedo[index + 2] > 120;
+  const enqueue = (pixel: number) => {
+    if (missing[pixel] || isObserved(pixel * 3)) return;
+    missing[pixel] = 1;
+    queue[queueEnd++] = pixel;
+  };
+  for (let x = 0; x < width; x++) {
+    enqueue(x);
+    enqueue((height - 1) * width + x);
+  }
+  while (queueStart < queueEnd) {
+    const pixel = queue[queueStart++];
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    enqueue(y * width + ((x + width - 1) % width));
+    enqueue(y * width + ((x + 1) % width));
+    if (y > 0) enqueue(pixel - width);
+    if (y + 1 < height) enqueue(pixel + width);
+  }
+
+  let firstFilledRow = -1;
+  let lastFilledRow = -1;
+  for (let y = 0; y < height; y++) {
+    const validXs: number[] = [];
+    for (let x = 0; x < width; x++) if (!missing[y * width + x]) validXs.push(x);
+    if (validXs.length === 0) continue;
+    if (firstFilledRow < 0) firstFilledRow = y;
+    lastFilledRow = y;
+    for (let x = 0; x < width; x++) {
+      if (!missing[y * width + x]) continue;
+      let low = 0;
+      let high = validXs.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (validXs[middle] < x) low = middle + 1;
+        else high = middle;
+      }
+      const right = validXs[low % validXs.length];
+      const left = validXs[(low + validXs.length - 1) % validXs.length];
+      const leftDistance = (x - left + width) % width;
+      const rightDistance = (right - x + width) % width;
+      const blend = leftDistance / Math.max(1, leftDistance + rightDistance);
+      for (let channel = 0; channel < 3; channel++) {
+        const leftValue = albedo[(y * width + left) * 3 + channel];
+        const rightValue = albedo[(y * width + right) * 3 + channel];
+        albedo[(y * width + x) * 3 + channel] = Math.round(leftValue + (rightValue - leftValue) * blend);
+      }
+    }
+  }
+
+  if (firstFilledRow < 0 || lastFilledRow < 0) throw new Error('Wisp albedo contains no observed pixels');
+  const fillEmptyPolarRows = (edgeRow: number, start: number, end: number, step: number) => {
+    const average = [0, 0, 0];
+    for (let x = 0; x < width; x++) {
+      for (let channel = 0; channel < 3; channel++) average[channel] += albedo[(edgeRow * width + x) * 3 + channel];
+    }
+    for (let channel = 0; channel < 3; channel++) average[channel] /= width;
+    for (let y = start; y !== end; y += step) {
+      const distance = Math.abs(edgeRow - y);
+      const span = step > 0 ? edgeRow : height - 1 - edgeRow;
+      const blend = Math.pow(distance / Math.max(1, span), 0.7);
+      for (let x = 0; x < width; x++) {
+        const edgeOffset = (edgeRow * width + x) * 3;
+        const targetOffset = (y * width + x) * 3;
+        for (let channel = 0; channel < 3; channel++) {
+          const edgeValue = albedo[edgeOffset + channel];
+          albedo[targetOffset + channel] = Math.round(edgeValue + (average[channel] - edgeValue) * blend);
+        }
+      }
+    }
+  };
+  if (firstFilledRow > 0) fillEmptyPolarRows(firstFilledRow, firstFilledRow - 1, -1, -1);
+  if (lastFilledRow < height - 1) fillEmptyPolarRows(lastFilledRow, lastFilledRow + 1, height, 1);
+  return missing;
+}
+
+async function decodeAirlessAlbedo(
+  path: string,
+  width: number,
+  height: number,
+  fillPolarVoids = false,
+): Promise<Uint8Array> {
+  const result = await sharp(path, { limitInputPixels: false, sequentialRead: true })
+    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
+    .toColourspace('srgb')
+    .removeAlpha()
+    .raw({ depth: 'uchar' })
+    .toBuffer({ resolveWithObject: true });
+  if (result.info.channels !== 3 || result.info.width !== width || result.info.height !== height) {
+    throw new Error(`Airless albedo decode must produce ${width}x${height} RGB8`);
+  }
+  const albedo = new Uint8Array(result.data);
+  if (fillPolarVoids) {
+    const missing = fillPolarObservationVoids(albedo, width, height);
+    const softened = await sharp(Buffer.from(albedo), { raw: { width, height, channels: 3 } })
+      .blur(18)
+      .raw()
+      .toBuffer();
+    for (let pixel = 0; pixel < missing.length; pixel++) {
+      if (!missing[pixel]) continue;
+      const offset = pixel * 3;
+      albedo[offset] = softened[offset];
+      albedo[offset + 1] = softened[offset + 1];
+      albedo[offset + 2] = softened[offset + 2];
+    }
+  }
+  return albedo;
+}
+
+async function pallaHeights(width: number, height: number): Promise<Float32Array> {
+  const result = await sharp(airlessSources.palla.heightPath, { limitInputPixels: false, sequentialRead: true })
+    .toColourspace('grey16')
+    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
+    .raw({ depth: 'ushort' })
+    .toBuffer({ resolveWithObject: true });
+  if (result.info.channels !== 1 || result.data.length !== width * height * 2) {
+    throw new Error(`Palla LOLA decode must produce ${width}x${height} unsigned-16 elevations`);
+  }
+  const encoded = new Uint16Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 2);
+  const heights = new Float32Array(encoded.length);
+  for (let index = 0; index < encoded.length; index++) heights[index] = (encoded[index] - 20_000) * 0.5;
+  return heights;
+}
+
+function proceduralHeights(body: ReturnType<Universe['get']>, width: number, height: number): Float32Array {
+  const heights = new Float32Array(width * height);
+  const direction = new Vec3();
+  for (let y = 0; y < height; y++) {
+    const latitude = (0.5 - (y + 0.5) / height) * Math.PI;
+    const cosLatitude = Math.cos(latitude);
+    for (let x = 0; x < width; x++) {
+      const longitude = ((x + 0.5) / width) * Math.PI * 2 - Math.PI;
+      direction.set(cosLatitude * Math.cos(longitude), cosLatitude * Math.sin(longitude), Math.sin(latitude));
+      const surface = solidHeight(body, direction);
+      if (surface.kind !== 'solid') throw new Error(`${body.id} must retain solid terrain authority`);
+      heights[y * width + x] = surface.height;
+    }
+  }
+  return heights;
+}
+
+async function compileAirlessBody(
+  bodyId: 'palla' | 'wisp',
+  universe: Universe,
+  tiersToWrite: ReadonlySet<CompiledTier>,
+): Promise<unknown[]> {
+  const body = universe.get(bodyId);
+  const source = airlessSources[bodyId];
+  const packs: unknown[] = [];
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    console.log(`compiling ${bodyId}/${tier} at ${width}x${height}`);
+    const [albedo, heights] = await Promise.all([
+      decodeAirlessAlbedo(source.albedoPath, width, height, bodyId === 'wisp'),
+      bodyId === 'palla' ? pallaHeights(width, height) : Promise.resolve(proceduralHeights(body, width, height)),
+    ]);
+    const maps = generateAirlessGlobalMaps({ width, height, radius: body.radius, albedo, heights });
+    const compiled = await writeTier(bodyId, tier, width, height, width, height, maps);
+    packs.push(compiled.pack);
+  }
+  return packs;
 }
 
 const recipeFile = JSON.parse(readFileSync(recipesPath, 'utf8')) as { schemaVersion: number; recipes: RecipeRecord[] };
@@ -240,6 +546,8 @@ const bodies = [...universe.bodies.values()].map((body) => {
 }).sort((a, b) => a.bodyId.localeCompare(b.bodyId));
 
 let veyraCanonical = (JSON.parse(readFileSync(outputPath, 'utf8')) as Record<string, any>).veyraCanonical;
+const generatedPacks: Record<string, any>[] = [];
+const generatedSources: Record<string, any>[] = [];
 
 // Physical scatter compiles from the canonical quantized height buffer with an
 // integer PRNG; it is platform-deterministic and never touches GPU textures.
@@ -275,7 +583,8 @@ if (write) {
 }
 
 if (writeGlobal) {
-  const global = await compileVeyraGlobal(universe);
+  const global = await compileVeyraGlobal(universe, targetTiers);
+  generatedPacks.push(...global.packs as Record<string, any>[]);
   const veyraRecipe = recipeForBody(universe.get('veyra'));
   const identitySha256 = sha256(Buffer.from(JSON.stringify([
     compilerVersion,
@@ -319,7 +628,7 @@ if (writeGlobal) {
       byteOrder: 'little-endian',
     },
   };
-  manifest.sources = [{
+  generatedSources.push({
     id: 'natural-earth-ii-3.2.0',
     url: 'https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip',
     author: 'Natural Earth',
@@ -332,14 +641,36 @@ if (writeGlobal) {
     sourceDimensions: [16200, 8100],
     transformations: ['body-fixed color reprojection and biome-aware recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'independent logical RG Lanczos3 tier resampling', 'truecolor fallback encoding', 'BasisLZ and UASTC KTX2 encoding'],
     bodies: ['veyra'], channels: ['albedo'],
-  }];
+  });
   manifest.canonicalArtifacts = [heightArtifact, scatterArtifact];
   manifest.budgets.rendererBaseGpuBytes = {
     low: 64 * 1024 * 1024,
     medium: 96 * 1024 * 1024,
     high: 128 * 1024 * 1024,
   };
-  manifest.packs = global.packs;
+}
+
+if (write && !fingerprintsOnly) {
+  for (const bodyId of ['palla', 'wisp'] as const) {
+    if (!targetBodies.has(bodyId)) continue;
+    generatedPacks.push(...await compileAirlessBody(bodyId, universe, targetTiers) as Record<string, any>[]);
+    generatedSources.push(...airlessSources[bodyId].sources as unknown as Record<string, any>[]);
+  }
+}
+
+if (write && generatedPacks.length > 0) {
+  const replacedPacks = new Set(generatedPacks.map((pack) => `${pack.bodyId}/${pack.tier}`));
+  manifest.packs = [
+    ...manifest.packs.filter((pack: Record<string, any>) => !replacedPacks.has(`${pack.bodyId}/${pack.tier}`)),
+    ...generatedPacks,
+  ].sort((left: Record<string, any>, right: Record<string, any>) =>
+    left.bodyId.localeCompare(right.bodyId) ||
+    Object.keys(tierDimensions).indexOf(left.tier) - Object.keys(tierDimensions).indexOf(right.tier));
+  const sourceIds = new Set(generatedSources.map((source) => source.id));
+  manifest.sources = [
+    ...manifest.sources.filter((source: Record<string, any>) => !sourceIds.has(source.id)),
+    ...generatedSources,
+  ].sort((left: Record<string, any>, right: Record<string, any>) => left.id.localeCompare(right.id));
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 const output = `${JSON.stringify({

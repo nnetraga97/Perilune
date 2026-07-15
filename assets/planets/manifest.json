@@ -39,6 +39,109 @@
   },
   "sources": [
     {
+      "id": "nasa-lola-palla-height",
+      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
+      "author": "NASA Scientific Visualization Studio and LOLA",
+      "license": "NASA",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA LOLA; used to derive fictional moon Palla normals and material response",
+      "checksumSha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+      "localPath": "sources/nasa-lro-palla/ldem_16_uint.tif",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        5760,
+        2880
+      ],
+      "transformations": [
+        "0.5 meter unsigned LOLA elevation decode",
+        "body-space oct normal derivation",
+        "UASTC KTX2 encoding"
+      ],
+      "bodies": [
+        "palla"
+      ],
+      "channels": [
+        "normal",
+        "material"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      }
+    },
+    {
+      "id": "nasa-lro-palla-color-8k",
+      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_8k.tif",
+      "author": "NASA Scientific Visualization Studio and LRO",
+      "license": "NASA",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA LRO/LOLA; used for fictional moon Palla without recoloring",
+      "checksumSha256": "db7808e878b6a55eb409bb231eab8deb477f84b5c9d7396d76ff73e5d54992d9",
+      "localPath": "sources/nasa-lro-palla/lroc_color_16bit_srgb_8k.tif",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        8192,
+        4096
+      ],
+      "transformations": [
+        "Lanczos3 tier resampling",
+        "RGB8 fallback and BasisLZ KTX2 encoding"
+      ],
+      "bodies": [
+        "palla"
+      ],
+      "channels": [
+        "albedo"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      }
+    },
+    {
+      "id": "nasa-osiris-rex-wisp-albedo",
+      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a005000/a005069/Bennu_global_ShapeV20_GndControl_ROLOphase_ALBEDO_8bit_v6.tif",
+      "author": "NASA Scientific Visualization Studio and OSIRIS-REx",
+      "license": "NASA",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA OSIRIS-REx Bennu albedo; used for fictional moon Wisp without recoloring",
+      "checksumSha256": "71bfeecce5615a5602d16d176c4cc17cc2550b2dc8c7cdac1332dea8d9f3da36",
+      "localPath": "sources/nasa-osiris-rex-wisp/Bennu_global_ShapeV20_GndControl_ROLOphase_ALBEDO_8bit_v6.tif",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        25134,
+        12568
+      ],
+      "transformations": [
+        "Lanczos3 tier resampling",
+        "grayscale-to-RGB channel expansion",
+        "polar no-observation fill from adjacent source pixels",
+        "procedural-authority oct normal derivation",
+        "BasisLZ and UASTC KTX2 encoding"
+      ],
+      "bodies": [
+        "wisp"
+      ],
+      "channels": [
+        "albedo",
+        "normal",
+        "material"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      }
+    },
+    {
       "id": "natural-earth-ii-3.2.0",
       "url": "https://naturalearth.s3.amazonaws.com/10m_raster/NE2_LR_LC.zip",
       "author": "Natural Earth",
@@ -69,6 +172,73 @@
     }
   ],
   "packs": [
+    {
+      "bodyId": "palla",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 4419434,
+      "transientBytes": 37748736,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/palla/medium/albedo.ktx2",
+          "fallbackPath": "generated/palla/medium/albedo.webp",
+          "packageChecksumSha256": "cab52206a0f2eda7decf598c2c8af56123a4e74d8a43dc1221757ed602383db9",
+          "fallbackChecksumSha256": "cdb0f9cc790fd52d9f51666d1bbb8fbe69922f10408c0e751600b371682251d9",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        },
+        {
+          "name": "normal",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/palla/medium/normal.ktx2",
+          "fallbackPath": "generated/palla/medium/normal.png",
+          "packageChecksumSha256": "e8640130eb46a68c02f237d0efa92b24a8942421f17eb0663497efdbda408e5f",
+          "fallbackChecksumSha256": "bbf47f5b3bd877f2f035c2e3177ed951530b3b50e5a3fb492369bd81922a495e",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 2796240,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb-rg",
+          "transcodeTargets": [
+            "etc2-rgba",
+            "bc5-rg",
+            "astc-rgba"
+          ],
+          "mipmapped": true
+        },
+        {
+          "name": "material",
+          "colorSpace": "linear",
+          "logicalFormat": "RGBA8",
+          "packagePath": "generated/palla/medium/material.ktx2",
+          "fallbackPath": "generated/palla/medium/material.png",
+          "packageChecksumSha256": "a5ae63a9d903383f6bce8d05a0be5b33743db35d302ed20670fd700873562e8f",
+          "fallbackChecksumSha256": "b9791c7db1a33967df855ece8b513f391f8322b99732b73e9c492d51406431b9",
+          "gpuFormat": "bc3-rgba",
+          "gpuBytes": 2796240,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgba",
+          "transcodeTargets": [
+            "etc2-rgba",
+            "bc3-rgba",
+            "astc-rgba"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
     {
       "bodyId": "veyra",
       "tier": "low",
@@ -321,6 +491,73 @@
           "transcodeTargets": [
             "etc2-rgba",
             "bc5-rg",
+            "astc-rgba"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "wisp",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 4245838,
+      "transientBytes": 37748736,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/wisp/medium/albedo.ktx2",
+          "fallbackPath": "generated/wisp/medium/albedo.webp",
+          "packageChecksumSha256": "bb1e10316bf57ab8c881f56f1a08504b01c5e898a06bc455fac97b3e06a91862",
+          "fallbackChecksumSha256": "5bf2754fbd071d278f54a19fda0ed37b5d940a3ea32b5c697e4a998ef5ea20f6",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        },
+        {
+          "name": "normal",
+          "colorSpace": "linear",
+          "logicalFormat": "RG8",
+          "packagePath": "generated/wisp/medium/normal.ktx2",
+          "fallbackPath": "generated/wisp/medium/normal.png",
+          "packageChecksumSha256": "091284d1a1609d5a8702f231f2b814b68d8c18c761e93140d9e7aa47176ebff3",
+          "fallbackChecksumSha256": "791d8e94c44f303cadb5b096af3aa4730bb9fc897976d6bde52fd0b113c8572a",
+          "gpuFormat": "bc5-rg",
+          "gpuBytes": 2796240,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb-rg",
+          "transcodeTargets": [
+            "etc2-rgba",
+            "bc5-rg",
+            "astc-rgba"
+          ],
+          "mipmapped": true
+        },
+        {
+          "name": "material",
+          "colorSpace": "linear",
+          "logicalFormat": "RGBA8",
+          "packagePath": "generated/wisp/medium/material.ktx2",
+          "fallbackPath": "generated/wisp/medium/material.png",
+          "packageChecksumSha256": "15a0222ba2dc1bfdf88bcf2531441a31e187a5ed4cde3315121b5bf643830c62",
+          "fallbackChecksumSha256": "1df6fc0cb8fc2b2131f57645486dc6751587da110a65dfc8f316cd4cc1bf6c19",
+          "gpuFormat": "bc3-rgba",
+          "gpuBytes": 2796240,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgba",
+          "transcodeTargets": [
+            "etc2-rgba",
+            "bc3-rgba",
             "astc-rgba"
           ],
           "mipmapped": true

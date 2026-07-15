@@ -612,7 +612,10 @@ describe('planet asset loading boundary', () => {
     expect(checkedManifest.packs[0]).toMatchObject({ width: 2048, height: 1024 });
     expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
-    expect(checkPlanetManifest(checkedPlanetArtifact).packs).toHaveLength(3);
+    const production = checkPlanetManifest(checkedPlanetArtifact);
+    expect(production.packs).toHaveLength(5);
+    expect(production.hasPack('palla', 'medium')).toBe(true);
+    expect(production.hasPack('wisp', 'medium')).toBe(true);
   });
 
   test('accepts validator-authorized zero resource values', () => {

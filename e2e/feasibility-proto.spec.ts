@@ -224,7 +224,7 @@ test('combined planet feasibility scene is measurable and stable', async ({ page
   expect(result.telemetry.rendererTextureCount).toBeLessThanOrEqual(result.telemetry.accountedTextureCount);
   expect(result.transfer.applicationTransferBytes > 0 || result.transfer.applicationEncodedBytes > 0).toBe(true);
   expect(result.transfer).toMatchObject({
-    manifestPackCount: 3,
+    manifestPackCount: 5,
     selectedPackCount: 1,
   });
   expect(result.transfer.bodyPackCompressedBytes).toBeGreaterThan(0);
