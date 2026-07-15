@@ -38,9 +38,7 @@ import { SrbSmokePool } from './srbSmoke';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
-const _bodyVel = new Vec3();
 const _vesselAbs = new Vec3();
-const _vesselVel = new Vec3();
 const _rel = new Vec3();
 const _camBF = new Vec3();
 const _surfaceAnchorBF = new Vec3();
@@ -59,6 +57,7 @@ const _craftUp = new Vec3();
 const _chaseForward = new Vec3();
 const _chaseRight = new Vec3();
 const _cameraFromBody = new Vec3();
+const _cameraBodyRelative = new Vec3();
 const _freeUp = new Vec3(0, 0, 1);
 const _cameraVelocity = new Vec3();
 const _renderOffset = new THREE.Vector3();
@@ -66,7 +65,7 @@ const _previousCameraRotation = new THREE.Quaternion();
 const _targetCameraRotation = new THREE.Quaternion();
 const _skyColor = new THREE.Color();
 const _smokeNozzleRelative = new THREE.Vector3();
-const _smokeNozzleAbsolute = new THREE.Vector3();
+const _smokeNozzleBodyRelative = new THREE.Vector3();
 const _smokeDirection = new THREE.Vector3();
 const _smokeUp = new THREE.Vector3();
 const _smokeQuaternion = new THREE.Quaternion();
@@ -580,6 +579,18 @@ export class WorldScene {
     return group ? group.children.length : 0;
   }
 
+  /** Read-only live effect state used by browser regressions and diagnostics. */
+  plumeStateForPart(key: number): { visible: boolean; burning: boolean; power: number } | null {
+    if (this.activeVesselId === null) return null;
+    const group = this.vesselVisuals.get(this.activeVesselId)?.plumes.get(key);
+    if (!group) return null;
+    return {
+      visible: group.visible,
+      burning: group.userData.burning === true,
+      power: Number(group.userData.power ?? 0),
+    };
+  }
+
   /** Drop visuals of vessels that no longer exist. */
   private pruneVessels(game: GameState): void {
     const alive = new Set(game.vessels.map((v) => v.runtime.id));
@@ -619,7 +630,7 @@ export class WorldScene {
    * Update the whole scene for this frame.
    * Returns the camera's absolute position for other systems (map etc).
    */
-  update(game: GameState, dt: number): void {
+  update(game: GameState, dt: number, smokeDt = dt): void {
     const active = game.active;
     this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
@@ -697,8 +708,13 @@ export class WorldScene {
     game.universe.absolutePosition(body, t, _bodyAbs);
     _vesselAbs.copy(_bodyAbs).add(v.pos);
     _camAbs.copy(_vesselAbs).add(camOffset);
+    _cameraBodyRelative.copy(v.pos).add(camOffset);
     this.effectTime += Math.min(1 / 15, Math.max(0, dt));
-    this.srbSmoke.beginFrame(dt, _camAbs);
+    // Keep near-vessel particles in the active body's inertial frame. Root-frame
+    // orbital velocity is common to both camera and craft, and retaining it in
+    // the particle integrator magnifies a dropped frame into kilometre-scale
+    // smoke jumps.
+    this.srbSmoke.beginFrame(smokeDt, _cameraBodyRelative);
 
     // Keep star direction in f64 until the final camera-relative conversion.
     game.universe.absolutePosition(game.universe.root, t, _starAbs);
@@ -828,10 +844,10 @@ export class WorldScene {
       const vis = this.visualFor(gv);
       if (gv.regime === 'rails' && gv !== active) {
         game.railsPosition(gv, _tmp);
-        game.universe.absolutePosition(vesselBody, t, _bodyAbs, _bodyVel);
+        game.universe.absolutePosition(vesselBody, t, _bodyAbs);
         _vesselAbs.copy(_bodyAbs).add(_tmp);
       } else {
-        game.universe.absolutePosition(vesselBody, t, _bodyAbs, _bodyVel);
+        game.universe.absolutePosition(vesselBody, t, _bodyAbs);
         _vesselAbs.copy(_bodyAbs).add(rv.pos);
       }
       Vec3.sub(_vesselAbs, _camAbs, _rel);
@@ -862,8 +878,7 @@ export class WorldScene {
         rv.crossfeedIndex,
         this.effectTime,
       );
-      _vesselVel.copy(_bodyVel).add(rv.vel);
-      this.emitSrbSmoke(gv, vis, pressureFrac, _vesselVel);
+      this.emitSrbSmoke(gv, vis, pressureFrac, rv.vel);
     }
     this.srbSmoke.endFrame();
 
@@ -918,16 +933,16 @@ export class WorldScene {
       for (let nozzleIndex = 0; nozzleIndex < group.children.length; nozzleIndex++) {
         const nozzle = group.children[nozzleIndex];
         nozzle.getWorldPosition(_smokeNozzleRelative);
-        _smokeNozzleAbsolute.set(
-          _smokeNozzleRelative.x + _camAbs.x,
-          _smokeNozzleRelative.y + _camAbs.y,
-          _smokeNozzleRelative.z + _camAbs.z,
+        _smokeNozzleBodyRelative.set(
+          _smokeNozzleRelative.x + _cameraBodyRelative.x,
+          _smokeNozzleRelative.y + _cameraBodyRelative.y,
+          _smokeNozzleRelative.z + _cameraBodyRelative.z,
         );
         nozzle.getWorldQuaternion(_smokeQuaternion);
         _smokeDirection.set(0, -1, 0).applyQuaternion(_smokeQuaternion).normalize();
         this.srbSmoke.emit({
           emitterId: `${gv.runtime.id}:${partKey}:${nozzleIndex}`,
-          position: _smokeNozzleAbsolute,
+          position: _smokeNozzleBodyRelative,
           direction: _smokeDirection,
           inheritedVelocity,
           up: _smokeUp,

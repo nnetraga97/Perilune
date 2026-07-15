@@ -340,6 +340,8 @@ class PeriluneGame {
       screen: () => this.screen,
       partVisualSource: (key: number) => this.editor.visualSourceForPart(key),
       plumeCount: (key: number) => this.world.plumeCountForPart(key),
+      plumeState: (key: number) => this.world.plumeStateForPart(key),
+      smokeParticleCount: () => this.world.smokeParticleCount(),
       partCount: () => this.editor.craft.parts.length,
       stageCount: () => this.editor.craft.stages.length,
       parts: () => this.editor.craft.parts.map((p) => ({ defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),
@@ -1091,7 +1093,7 @@ class PeriluneGame {
           this.gpuProfiler.submit('map', () => this.ctx.renderer.render(this.map.scene, this.map.camera));
         }
       } else {
-        this.world.update(this.game, dt);
+        this.world.update(this.game, dt, this.paused ? 0 : realDt);
         if (!this.ctx.renderPaused) {
           this.gpuProfiler.submit('flight', () => this.ctx.renderer.render(this.world.scene, this.world.camera));
         }

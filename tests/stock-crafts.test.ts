@@ -4,6 +4,9 @@ import { partById } from '../src/content/parts';
 import { validateCraftFile } from '../src/save/persistence';
 import { deriveInterstageShroud } from '../src/sim/interstage';
 import { buildAutoStages } from '../src/sim/vessel';
+import { evaluateStructure } from '../src/sim/structure';
+import { Vec3 } from '../src/core/vec3';
+import { GameState, PHYSICS_DT } from '../src/sim/state';
 
 describe('built-in craft library', () => {
   it('exposes the Wayfarer as a fresh, structurally valid 21-part craft', () => {
@@ -70,6 +73,28 @@ describe('built-in craft library', () => {
       ['dec-radial', 'dec-radial'],
       ['dec-interstage-ms', 'eng-colt'],
     ]);
+  });
+
+  it('keeps both Torch boosters latched through launch loads and releases them on command', () => {
+    const craft = createWayfarerDemonstrator();
+    const launchLoad = evaluateStructure(craft, new Vec3(0, 40, 0), 0, 0);
+    expect(launchLoad.failures).toEqual([]);
+    expect(launchLoad.maxUtilization).toBeLessThan(0.8);
+
+    const game = new GameState();
+    const vessel = game.spawnOnPad(craft, craft.name);
+    vessel.runtime.controls.throttle = 1;
+    expect(game.fireStage(vessel)).toBe(true);
+    for (let frame = 0; frame < 60; frame++) game.update(PHYSICS_DT);
+
+    expect(vessel.runtime.craft.parts.filter((part) => part.defId === 'srb-torch')).toHaveLength(2);
+    expect(vessel.runtime.events.some((event) => event.text.includes('Structural failure'))).toBe(false);
+
+    expect(game.fireStage(vessel)).toBe(true);
+    expect(vessel.runtime.craft.parts.some((part) => part.defId === 'srb-torch')).toBe(false);
+    expect(game.vessels.filter((candidate) => (
+      candidate.runtime.craft.parts.some((part) => part.defId === 'srb-torch')
+    ))).toHaveLength(2);
   });
 
   it('derives the fitted M-to-S envelope through the upper-stage Colt engine', () => {

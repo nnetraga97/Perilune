@@ -140,6 +140,12 @@ describe('buildVesselVisual', () => {
     expect(plume.userData.burning).toBe(true);
     expect(flame.children).toHaveLength(3);
     expect(flame.children.every((child) => child instanceof THREE.Mesh)).toBe(true);
+    for (const child of flame.children) {
+      const mesh = child as THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+      expect(mesh.renderOrder).toBeGreaterThan(40);
+      expect(mesh.material.vertexShader).toContain('#include <logdepthbuf_vertex>');
+      expect(mesh.material.fragmentShader).toContain('#include <logdepthbuf_fragment>');
+    }
     disposeVesselVisual(visual);
   });
 });

@@ -55,6 +55,15 @@ function jointRadiusOf(child: PartInstance, parent: PartInstance): number {
   return Math.min(cr, pr);
 }
 
+/** Reinforced fittings strengthen both faces of the connection they bridge. */
+function jointStrengthMultiplier(child: PartInstance, parent: PartInstance): number {
+  return Math.max(
+    1,
+    defOf(child).jointStrengthMultiplier ?? 1,
+    defOf(parent).jointStrengthMultiplier ?? 1,
+  );
+}
+
 /**
  * Evaluate joint loads for the craft as a rigid body undergoing:
  * @param properAccel proper acceleration (thrust+aero)/mass, craft frame (m/s^2)
@@ -126,25 +135,45 @@ export function evaluateStructure(
 
   for (const n of order) {
     if (n.part.parentKey === null) continue;
+    const parent = byKey.get(n.part.parentKey)!;
     const r = n.jointRadius;
     const area = Math.PI * r * r;
     const isSurface = n.part.attach === 'surface';
-    const axialLimit = area * (isSurface ? SURFACE_STRENGTH : STACK_STRENGTH);
+    const strengthMultiplier = jointStrengthMultiplier(n.part, parent.part);
+    const axialLimit = area * (isSurface ? SURFACE_STRENGTH : STACK_STRENGTH) * strengthMultiplier;
     const bendingLimit = axialLimit * BENDING_FACTOR * Math.max(r, 0.1);
 
-    // Inertial load: subtree mass × proper acceleration.
-    const axialForce = n.subtreeMass * accelMag;
+    // A joint cut has two sides. Loading only the child subtree makes the
+    // answer depend on which part is the craft root, and severely overstates
+    // loads near a pod-rooted rocket's upper stage. Use the lighter supported
+    // side as the conservative root-independent approximation.
+    const totalMass = root.subtreeMass;
+    const oppositeMass = Math.max(0, totalMass - n.subtreeMass);
+    const useOpposite = oppositeMass > 0 && oppositeMass < n.subtreeMass;
+    const supportedMass = useOpposite ? oppositeMass : n.subtreeMass;
+    const axialForce = supportedMass * accelMag;
 
     // Aero side load: q × (frontal-ish area of subtree) × sin(aoa),
     // acting at the subtree CoM lever arm from the joint.
-    const parent = byKey.get(n.part.parentKey)!;
     const jointPos = _lever.set(
       (n.part.position.x + parent.part.position.x) / 2,
       (n.part.position.y + parent.part.position.y) / 2,
       (n.part.position.z + parent.part.position.z) / 2,
     );
-    const leverArm = Math.max(0.1, n.subtreeCom.distanceTo(jointPos));
-    const sideArea = Math.sqrt(n.subtreeMass) * 0.05; // crude area proxy from mass
+    let supportedComX = n.subtreeCom.x;
+    let supportedComY = n.subtreeCom.y;
+    let supportedComZ = n.subtreeCom.z;
+    if (useOpposite) {
+      supportedComX = (root.subtreeCom.x * totalMass - n.subtreeCom.x * n.subtreeMass) / oppositeMass;
+      supportedComY = (root.subtreeCom.y * totalMass - n.subtreeCom.y * n.subtreeMass) / oppositeMass;
+      supportedComZ = (root.subtreeCom.z * totalMass - n.subtreeCom.z * n.subtreeMass) / oppositeMass;
+    }
+    const leverArm = Math.max(0.1, Math.hypot(
+      supportedComX - jointPos.x,
+      supportedComY - jointPos.y,
+      supportedComZ - jointPos.z,
+    ));
+    const sideArea = Math.sqrt(supportedMass) * 0.05; // crude area proxy from mass
     const sideForce = dynamicPressure * sideArea * aoaSin;
     const bendingMoment = sideForce * leverArm + axialForce * 0.02 * leverArm;
 

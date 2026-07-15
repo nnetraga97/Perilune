@@ -37,11 +37,13 @@ function makePlumeGeometry(
 }
 
 const vertexShader = /* glsl */ `
+  #include <common>
   uniform float uTime;
   uniform float uTurbulence;
   varying float vAxial;
   varying float vPulse;
   varying vec2 vUv;
+  #include <logdepthbuf_pars_vertex>
 
   float hash21(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -59,10 +61,12 @@ const vertexShader = /* glsl */ `
     float flutter = sin(phase * 0.71) * cos(phase * 1.13 + uv.x * 12.0);
     displaced.xz *= 1.0 + flutter * uTurbulence * smoothstep(0.08, 1.0, vAxial);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+    #include <logdepthbuf_vertex>
   }
 `;
 
 const fragmentShader = /* glsl */ `
+  #include <common>
   uniform float uTime;
   uniform vec3 uHotColor;
   uniform vec3 uCoolColor;
@@ -72,6 +76,7 @@ const fragmentShader = /* glsl */ `
   varying float vAxial;
   varying float vPulse;
   varying vec2 vUv;
+  #include <logdepthbuf_pars_fragment>
 
   float hash21(vec2 p) {
     p = fract(p * vec2(234.34, 435.345));
@@ -96,6 +101,7 @@ const fragmentShader = /* glsl */ `
     color += uHotColor * shocks * 1.5;
     float alpha = uOpacity * ignition * tip * turbulence * (1.0 + shocks * 0.65);
     if (alpha < 0.01) discard;
+    #include <logdepthbuf_fragment>
     gl_FragColor = vec4(color, alpha);
   }
 `;
@@ -157,7 +163,13 @@ export function buildEnginePlumeLayers(baseScale: number, solid: boolean): Engin
     new THREE.Mesh(sharedGeometries.core, materials[2]),
   );
   group.traverse((object) => {
-    if (object instanceof THREE.Mesh) object.frustumCulled = false;
+    if (object instanceof THREE.Mesh) {
+      object.frustumCulled = false;
+      // Atmosphere is a late transparent full-screen pass (order 40). Engine
+      // light is local to the vessel and must composite after aerial haze or a
+      // bright daytime sky washes the effect out completely.
+      object.renderOrder = 51;
+    }
   });
   group.userData.effectLayer = 'flame';
   return { group, baseScale };

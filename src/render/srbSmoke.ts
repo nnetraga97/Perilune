@@ -1,7 +1,8 @@
 /**
- * One scene-wide SRB smoke pool. Particles are simulated in f64 absolute space
- * and only converted to camera-relative f32 coordinates for the GPU, so the
- * trail remains stable while both the vessel and floating origin move.
+ * One scene-wide SRB smoke pool. Particles are simulated in a stable f64
+ * body-centered inertial frame and only converted to camera-relative f32
+ * coordinates for the GPU, so the trail remains stable while the vessel and
+ * floating origin move without inheriting the body's root-frame orbital speed.
  */
 import * as THREE from 'three';
 import type { QualityTier, VectorCoordinates } from './bodyRenderer';
@@ -31,12 +32,14 @@ export interface SrbSmokeEmission {
 }
 
 const smokeVertexShader = /* glsl */ `
+  #include <common>
   attribute float aSize;
   attribute float aLife;
   attribute float aSeed;
   uniform float uPointSizeLimit;
   varying float vLife;
   varying float vSeed;
+  #include <logdepthbuf_pars_vertex>
 
   void main() {
     vLife = aLife;
@@ -45,12 +48,15 @@ const smokeVertexShader = /* glsl */ `
     float expansion = 1.0 + aLife * 2.45;
     gl_PointSize = min(uPointSizeLimit, aSize * expansion * (430.0 / max(1.0, -mvPosition.z)));
     gl_Position = projectionMatrix * mvPosition;
+    #include <logdepthbuf_vertex>
   }
 `;
 
 const smokeFragmentShader = /* glsl */ `
+  #include <common>
   varying float vLife;
   varying float vSeed;
+  #include <logdepthbuf_pars_fragment>
 
   void main() {
     vec2 p = gl_PointCoord - 0.5;
@@ -65,6 +71,7 @@ const smokeFragmentShader = /* glsl */ `
     if (alpha < 0.008) discard;
     vec3 warmGrey = mix(vec3(0.27, 0.255, 0.235), vec3(0.68, 0.66, 0.62), fract(vSeed * 7.13));
     vec3 color = mix(warmGrey * 0.78, warmGrey, smoothstep(0.0, 0.45, vLife));
+    #include <logdepthbuf_fragment>
     gl_FragColor = vec4(color, alpha);
   }
 `;
@@ -115,7 +122,9 @@ export class SrbSmokePool {
     this.points = new THREE.Points(new THREE.BufferGeometry(), material);
     this.points.name = 'srb-world-smoke';
     this.points.frustumCulled = false;
-    this.points.renderOrder = 6;
+    // Draw after atmosphere/cloud shells (orders <= 40), but before the bright
+    // flame layers, while preserving opaque hull/terrain depth testing.
+    this.points.renderOrder = 50;
     this.allocate(this.budget.capacity);
   }
 
@@ -129,7 +138,9 @@ export class SrbSmokePool {
   }
 
   beginFrame(dt: number, cameraAbsolute: Readonly<VectorCoordinates>): void {
-    this.frameDt = Math.min(1 / 15, Math.max(0, dt));
+    // Match the simulation/camera time exactly. Capping this independently
+    // causes co-moving smoke to lag sideways whenever a render frame stalls.
+    this.frameDt = Math.max(0, dt);
     this.frameSpawnRemaining = Math.ceil(this.budget.maxSpawnRate * this.frameDt) + this.budget.ignitionHeadroom;
     this.cameraX = cameraAbsolute.x;
     this.cameraY = cameraAbsolute.y;

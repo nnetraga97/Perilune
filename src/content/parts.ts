@@ -86,6 +86,8 @@ export interface PartDef {
   crossfeed: boolean;
   maxTemp: number; // K
   crashTolerance: number; // m/s
+  /** Multiplies the structural rating of joints touching this reinforced fitting. */
+  jointStrengthMultiplier?: number;
   resources?: Partial<Record<ResourceId, number>>;
   engine?: EngineDef;
   rcs?: { thrust: number };
@@ -516,6 +518,7 @@ export const PARTS: PartDef[] = [
     crossfeed: false,
     maxTemp: 1700,
     crashTolerance: 9,
+    jointStrengthMultiplier: 10,
     decoupler: { ejection: 500, mode: 'decoupler', radial: true },
     color: '#e2b13c',
     accent: '#3f4750',

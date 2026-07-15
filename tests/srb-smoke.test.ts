@@ -6,6 +6,14 @@ const down = { x: 0, y: -1, z: 0 };
 const up = { x: 0, y: 1, z: 0 };
 
 describe('SrbSmokePool', () => {
+  it('composites after atmosphere with logarithmic depth support', () => {
+    const pool = new SrbSmokePool('medium');
+    expect(pool.points.renderOrder).toBeGreaterThan(40);
+    expect(pool.points.material.vertexShader).toContain('#include <logdepthbuf_vertex>');
+    expect(pool.points.material.fragmentShader).toContain('#include <logdepthbuf_fragment>');
+    pool.dispose();
+  });
+
   it('does not emit smoke in vacuum', () => {
     const pool = new SrbSmokePool('medium');
     pool.beginFrame(1 / 60, origin);
@@ -48,7 +56,7 @@ describe('SrbSmokePool', () => {
     pool.dispose();
   });
 
-  it('preserves inherited root-frame velocity under a moving camera', () => {
+  it('preserves inherited reference-frame velocity under a moving camera', () => {
     const pool = new SrbSmokePool('medium');
     const inheritedSpeed = 30_000;
     pool.beginFrame(1 / 60, origin);
@@ -70,6 +78,30 @@ describe('SrbSmokePool', () => {
     const positions = pool.points.geometry.getAttribute('position').array;
     for (let index = 0; index < pool.particleCount(); index++) {
       expect(Math.abs(positions[index * 3])).toBeLessThan(10);
+    }
+    pool.dispose();
+  });
+
+  it('tracks a co-moving camera through a long frame without a lateral jump', () => {
+    const pool = new SrbSmokePool('medium');
+    const inheritedSpeed = 100;
+    pool.beginFrame(0.2, origin);
+    pool.emit({
+      emitterId: 'stalled-frame:v:0',
+      position: origin,
+      direction: down,
+      inheritedVelocity: { x: inheritedSpeed, y: 0, z: 0 },
+      up,
+      pressureFrac: 1,
+      plumeScale: 1,
+    });
+    pool.endFrame();
+
+    pool.beginFrame(0.2, { x: inheritedSpeed * 0.2, y: 0, z: 0 });
+    pool.endFrame();
+    const positions = pool.points.geometry.getAttribute('position').array;
+    for (let index = 0; index < pool.particleCount(); index++) {
+      expect(Math.abs(positions[index * 3])).toBeLessThan(2);
     }
     pool.dispose();
   });
