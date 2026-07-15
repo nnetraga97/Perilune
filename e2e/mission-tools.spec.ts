@@ -8,7 +8,7 @@ test('mission windows connect alarms, transfers, targets, and maneuver sketches'
   const pod = page.locator('.ed-part', { hasText: 'Voyager Pod' });
   await pod.dragTo(page.locator('#game-canvas'), { targetPosition: { x: 640, y: 400 } });
   await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(1);
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__.screen() === 'flight');
 
   await page.getByRole('button', { name: 'Alarms', exact: true }).click();
@@ -29,4 +29,11 @@ test('mission windows connect alarms, transfers, targets, and maneuver sketches'
 
   await page.getByRole('button', { name: 'Fleet', exact: true }).click();
   await expect(page.locator('.fleet-row .fleet-name')).toHaveValue('Untitled Craft');
+  const pallaTarget = page.locator('.body-row', { hasText: 'Palla' });
+  await expect(pallaTarget.getByRole('button', { name: 'Orbit', exact: true })).toBeVisible();
+  await pallaTarget.getByRole('button', { name: 'Orbit', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.activeBody())).toBe('palla');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.situation())).toBe('orbit');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.target())).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.orbit()?.eccentricity ?? 1)).toBeLessThan(1e-8);
 });

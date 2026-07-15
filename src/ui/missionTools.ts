@@ -8,6 +8,7 @@ export interface MissionToolCallbacks {
   onSwitchVessel(vesselId: string): void;
   onSketchNode(plan: TransferPlan): void;
   onSetTarget(bodyId: string | null): void;
+  onOrbitTarget(bodyId: string): void;
   onFocusBody(bodyId: string): void;
   onRenameVessel(vesselId: string, name: string): void;
   onTerminateVessel(vesselId: string): void;
@@ -283,7 +284,7 @@ export class MissionTools {
   private updateFleet(): void {
     if (!this.fleetList || !this.bodyList) return;
     const game = this.game();
-    const signature = `${game.activeVesselId}:${game.active?.target}:${this.showDebris}:${game.vessels.map((vessel) => `${vessel.runtime.id}:${vessel.runtime.name}:${vessel.runtime.situation}:${vessel.runtime.isDebris}`).join('|')}`;
+    const signature = `${game.activeVesselId}:${game.active?.target}:${this.showDebris}:${game.vessels.map((vessel) => `${vessel.runtime.id}:${vessel.runtime.name}:${vessel.runtime.bodyId}:${vessel.runtime.situation}:${vessel.runtime.isDebris}`).join('|')}`;
     if (signature === this.fleetSignature) return;
     this.fleetSignature = signature;
     this.bodyList.innerHTML = '';
@@ -300,6 +301,10 @@ export class MissionTools {
       const target = el('button', 'hud-btn', row, targeted ? 'Clear' : 'Target');
       target.classList.toggle('active', targeted);
       target.onclick = () => this.callbacks.onSetTarget(targeted ? null : body.id);
+      if (targeted) {
+        const orbit = el('button', 'hud-btn', row, 'Orbit');
+        orbit.onclick = () => this.callbacks.onOrbitTarget(body.id);
+      }
     }
 
     this.fleetList.innerHTML = '';

@@ -269,6 +269,11 @@ class PeriluneGame {
       onSetTarget: (bodyId) => {
         if (this.game.active) this.game.active.target = bodyId;
       },
+      onOrbitTarget: (bodyId) => {
+        if (this.game.placeActiveInOrbit(bodyId)) {
+          this.hud.setMissionStart(this.game.time);
+        }
+      },
       onFocusBody: (bodyId) => {
         this.map.focusBody(bodyId);
         if (!this.map.visible) this.toggleMap();

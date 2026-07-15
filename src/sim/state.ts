@@ -283,6 +283,65 @@ export class GameState {
     return gv;
   }
 
+  /** Move the currently controlled craft into a safe circular equatorial orbit. */
+  placeActiveInOrbit(bodyId: string): boolean {
+    const gv = this.active;
+    if (!gv) return false;
+    const body = this.universe.get(bodyId);
+    if (body.def.isStar) return false;
+
+    // Resolve the old rails/landed pose before changing the vessel's primary.
+    this.setWarp(0, false);
+
+    const v = gv.runtime;
+    const atmosphereTop = body.def.atmosphere?.height ?? 0;
+    const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
+    const clearance = Math.max(atmosphereTop, terrainTop);
+    const margin = Math.max(10_000, body.radius * 0.02);
+    const preferredAltitude = Math.max(body.radius * 0.1, clearance + margin);
+    const soiAltitudeLimit = Number.isFinite(body.soiRadius)
+      ? body.soiRadius * 0.25 - body.radius
+      : preferredAltitude;
+    const altitude = Math.min(preferredAltitude, soiAltitudeLimit);
+    if (!(altitude > clearance)) return false;
+
+    const radius = body.radius + altitude;
+    const speed = Math.sqrt(body.mu / radius);
+    const previousPhase = Math.atan2(v.pos.y, v.pos.x);
+    const phase = Number.isFinite(previousPhase) ? previousPhase : 0;
+    const cosPhase = Math.cos(phase);
+    const sinPhase = Math.sin(phase);
+
+    v.bodyId = body.id;
+    v.pos.set(radius * cosPhase, radius * sinPhase, 0);
+    v.vel.set(-speed * sinPhase, speed * cosPhase, 0);
+    v.att.setLookRotation(new Vec3(0, 0, 1), v.vel);
+    v.angVel.set(0, 0, 0);
+    v.landedBodyFixed = null;
+    v.situation = 'orbit';
+    v.controls.pitch = 0;
+    v.controls.yaw = 0;
+    v.controls.roll = 0;
+    v.controls.throttle = 0;
+    v.controls.translate.set(0, 0, 0);
+    v.controls.wheelDrive = 0;
+    v.controls.wheelSteer = 0;
+    v.controls.brake = false;
+    v.properAccel = 0;
+    v.stepResult.destroyedParts.length = 0;
+    v.stepResult.crashed = false;
+    v.stepResult.crashSpeed = 0;
+    v.stepResult.terminalFailure = null;
+    gv.regime = 'active';
+    gv.rails.elements = null;
+    gv.rails.landedPos = null;
+    gv.rails.landedAtt = null;
+    gv.target = null;
+    this.lastDestruction = null;
+    logEvent(v, this.time, `Placed in orbit around ${body.name}`);
+    return true;
+  }
+
   /** Fire the next stage of a vessel. Returns true if something fired. */
   fireStage(gv: GameVessel): boolean {
     const v = gv.runtime;
