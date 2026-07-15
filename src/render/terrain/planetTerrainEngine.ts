@@ -21,6 +21,7 @@ import {
   terrainTileBoundingSphere,
   terrainNeighborDepthViolations,
   type TerrainSelectionFrame,
+  type TerrainSelectionResult,
   type TerrainVisibilityPredicate,
 } from './terrainSelection';
 import { screenSpaceErrorPixels } from './terrainPolicy';
@@ -34,6 +35,7 @@ export interface PlanetTerrainFrame extends TerrainSelectionFrame {
   readonly framePressure: boolean;
   readonly generation: number;
   readonly visible?: TerrainVisibilityPredicate;
+  readonly visibilitySignature?: string;
   readonly diagnosticContext?: RenderDiagnosticContext & { readonly terrainRequested: boolean };
 }
 
@@ -59,6 +61,11 @@ export interface PlanetTerrainEngineStats {
   readonly coverageReady: boolean;
   readonly scheduleMs: number;
   readonly installMs: number;
+  readonly selectionMs: number;
+  readonly balanceMs: number;
+  readonly selectionPasses: number;
+  readonly selectionReused: boolean;
+  readonly selectionInvalidation: string | null;
   readonly geometryBytes: number;
   readonly reservedBytes: number;
   readonly queued: number;
@@ -78,6 +85,49 @@ interface InstalledChunk {
   readonly tile: TerrainTileDescriptor;
   readonly mesh: THREE.Mesh;
   readonly origin: readonly [number, number, number];
+}
+
+interface CachedTerrainSelection {
+  readonly cameraBodyFixed: VectorCoordinates;
+  readonly cameraBodyFixedVelocity: VectorCoordinates;
+  readonly viewDirectionBodyFixed?: VectorCoordinates;
+  readonly viewMarginRadians?: number;
+  readonly verticalFovRadians: number;
+  readonly drawingBufferHeight: number;
+  readonly visibilitySignature?: string;
+  readonly selectionQuality: TerrainQualityPolicy;
+  readonly selected: TerrainSelectionResult;
+  readonly balanced: readonly TerrainTileDescriptor[];
+  readonly predicted: TerrainSelectionResult;
+  readonly balanceViolations: readonly string[];
+  readonly selectionMs: number;
+  readonly balanceMs: number;
+  readonly selectionPasses: number;
+}
+
+function copyVector(value: Readonly<VectorCoordinates>): VectorCoordinates {
+  return Object.freeze({ x: value.x, y: value.y, z: value.z });
+}
+
+function vectorDistanceSquared(a: Readonly<VectorCoordinates>, b: Readonly<VectorCoordinates>): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function directionChanged(
+  previous: Readonly<VectorCoordinates> | undefined,
+  next: Readonly<VectorCoordinates> | undefined,
+): boolean {
+  if (!previous || !next) return previous !== next;
+  const previousLength = Math.hypot(previous.x, previous.y, previous.z);
+  const nextLength = Math.hypot(next.x, next.y, next.z);
+  if (previousLength < 1e-9 || nextLength < 1e-9) return previousLength !== nextLength;
+  const cosine = (
+    previous.x * next.x + previous.y * next.y + previous.z * next.z
+  ) / (previousLength * nextLength);
+  return cosine < Math.cos(THREE.MathUtils.degToRad(0.25));
 }
 
 class InlineTerrainExecutor implements TerrainSchedulerExecutor {
@@ -145,7 +195,7 @@ export class PlanetTerrainEngine {
   private readonly chunks = new Map<string, InstalledChunk>();
   private readonly residency: TerrainResidencyManager;
   private readonly scheduler: TerrainRequestScheduler;
-  private readonly transitions = new TerrainLodTransitionManager();
+  private readonly transitions: TerrainLodTransitionManager;
   private readonly dither: TerrainLodDitherBinding;
   private readonly workerPool?: TerrainChunkWorkerPool;
   private readonly ownsWorkerPool: boolean;
@@ -169,9 +219,12 @@ export class PlanetTerrainEngine {
   private pendingSince: number | null = null;
   private lastCompletionAt: number | null = null;
   private stallReported = false;
+  private cachedSelection: CachedTerrainSelection | null = null;
   stats: PlanetTerrainEngineStats = Object.freeze({
     frame: 0, chunks: 0, visible: 0, triangles: 0, coverageGaps: 0,
     rootsReady: false, coverageReady: false, scheduleMs: 0, installMs: 0,
+    selectionMs: 0, balanceMs: 0, selectionPasses: 0, selectionReused: false,
+    selectionInvalidation: 'cold',
     geometryBytes: 0, reservedBytes: 0,
     queued: 0, building: 0, ready: 0, failed: 0,
     allocationBytes: 0, protectedBytes: 0, desiredLeaves: 0, renderedLeaves: 0,
@@ -188,6 +241,10 @@ export class PlanetTerrainEngine {
     this.diagnostics = options.diagnostics;
     this.diagnosticSource = options.diagnosticSource ?? `terrain:${options.provider.bodyId}`;
     this.residency = new TerrainResidencyManager(options.terrainAllocationBytes, options.quality.softResidencyRatio);
+    this.transitions = new TerrainLodTransitionManager(
+      options.quality.normalTransitionSeconds,
+      options.quality.pressureTransitionSeconds,
+    );
     const executor = options.workerPool ?? new InlineTerrainExecutor(options.provider);
     this.scheduler = new TerrainRequestScheduler(executor, this.residency);
     this.dither = installTerrainLodDither(this.material);
@@ -235,23 +292,38 @@ export class PlanetTerrainEngine {
     }
     const installMs = Math.max(0, this.now() - installStarted);
 
-    let selectionQuality = this.quality;
-    let selected = selectTerrainDetail(
-      this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
-    );
-    let balanced = balanceTerrainLeaves(this.provider, selected.leaves);
-    // Neighbor balancing may add leaves after the selector reaches its own
-    // budget. Tighten selection until the final balanced set respects the
-    // quality-tier cap instead of allowing an unbounded first-paint target.
-    for (let attempts = 0; balanced.length > this.quality.maximumDesiredLeaves && attempts < 4; attempts++) {
-      const reducedLimit = Math.max(24, Math.floor(selectionQuality.maximumDesiredLeaves * 0.7));
-      selectionQuality = Object.freeze({ ...this.quality, maximumDesiredLeaves: reducedLimit });
-      selected = selectTerrainDetail(
-        this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
-      );
-      balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    let selection = this.cachedSelection;
+    const selectionInvalidation = selection === null
+      ? 'cold'
+      : this.selectionInvalidationReason(selection, frame);
+    const selectionReused = selectionInvalidation === null;
+    if (!selectionReused) {
+      selection = this.computeSelection(frame);
+      this.cachedSelection = selection;
+    } else if (selection && vectorDistanceSquared(
+      selection.cameraBodyFixedVelocity, frame.cameraBodyFixedVelocity,
+    ) > 1) {
+      const speedSquared = frame.cameraBodyFixedVelocity.x ** 2
+        + frame.cameraBodyFixedVelocity.y ** 2
+        + frame.cameraBodyFixedVelocity.z ** 2;
+      selection = Object.freeze({
+        ...selection,
+        cameraBodyFixedVelocity: copyVector(frame.cameraBodyFixedVelocity),
+        predicted: speedSquared < 0.25
+          ? selection.selected
+          : selectPredictedTerrainDetail(
+              this.provider,
+              selection.selectionQuality,
+              frame,
+              this.previousSplitKeys,
+              frame.visible,
+            ),
+      });
+      this.cachedSelection = selection;
     }
-    const balanceViolations = terrainNeighborDepthViolations(balanced);
+    if (!selection) throw new Error('Terrain selection cache was not initialized');
+    const activeSelection = selection;
+    const { selectionQuality, selected, balanced, predicted, balanceViolations } = activeSelection;
     if (balanceViolations.length > 0) {
       this.diagnostics?.anomaly('terrain-neighbor-depth-violation', 'terrain', {
         count: balanceViolations.length,
@@ -293,9 +365,6 @@ export class PlanetTerrainEngine {
       for (const child of transition.childKeys) renderKeys.add(child);
     }
 
-    const predicted = selectPredictedTerrainDetail(
-      this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
-    );
     const scheduleStarted = this.now();
     const queueBudgetMs = this.quality.schedulingBudgetMs * 0.6;
     this.newRequestsThisFrame = 0;
@@ -379,6 +448,11 @@ export class PlanetTerrainEngine {
       coverageReady: coverage.completeCoverage,
       scheduleMs,
       installMs,
+      selectionMs: selectionReused ? 0 : activeSelection.selectionMs,
+      balanceMs: selectionReused ? 0 : activeSelection.balanceMs,
+      selectionPasses: selectionReused ? 0 : activeSelection.selectionPasses,
+      selectionReused,
+      selectionInvalidation,
       geometryBytes: residency.installedBytes,
       reservedBytes: residency.reservedBytes,
       queued: scheduler.queued,
@@ -404,6 +478,95 @@ export class PlanetTerrainEngine {
       immediateReplacements,
     );
     this.flushDiagnosticLifecycleBatch();
+  }
+
+  private selectionInvalidationReason(
+    cached: Readonly<CachedTerrainSelection>,
+    frame: Readonly<PlanetTerrainFrame>,
+  ): string | null {
+    if (vectorDistanceSquared(cached.cameraBodyFixed, frame.cameraBodyFixed) > 1) return 'translation';
+    if (directionChanged(cached.viewDirectionBodyFixed, frame.viewDirectionBodyFixed)) return 'direction';
+    if (Math.abs((cached.viewMarginRadians ?? 0) - (frame.viewMarginRadians ?? 0)) >= 1e-6) return 'margin';
+    if (Math.abs(cached.verticalFovRadians - frame.verticalFovRadians) >= 1e-6) return 'fov';
+    if (cached.drawingBufferHeight !== frame.drawingBufferHeight) return 'buffer';
+    if (cached.visibilitySignature !== frame.visibilitySignature) return 'frustum';
+    return null;
+  }
+
+  private computeSelection(frame: Readonly<PlanetTerrainFrame>): CachedTerrainSelection {
+    let selectionMs = 0;
+    let balanceMs = 0;
+    let selectionPasses = 0;
+    let selectionQuality = this.quality;
+    let started = this.now();
+    let selected = selectTerrainDetail(
+      this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
+    );
+    selectionMs += Math.max(0, this.now() - started);
+    selectionPasses++;
+    started = this.now();
+    let balanced = balanceTerrainLeaves(this.provider, selected.leaves);
+    balanceMs += Math.max(0, this.now() - started);
+    // Balancing adds the restricted-quadtree closure after selection. Use the
+    // measured closure size to reserve headroom, then make at most one retry.
+    // This replaces the old five-pass tighten loop that could never converge
+    // while launch-site detail bypassed the selector budget.
+    if (balanced.length > this.quality.maximumDesiredLeaves) {
+      const closureLeaves = Math.max(0, balanced.length - selected.leaves.length);
+      const reducedLimit = Math.max(
+        24,
+        this.quality.maximumDesiredLeaves - closureLeaves,
+      );
+      const nextQuality = Object.freeze({ ...this.quality, maximumDesiredLeaves: reducedLimit });
+      started = this.now();
+      const nextSelected = selectTerrainDetail(
+        this.provider, nextQuality, frame, this.previousSplitKeys, frame.visible,
+      );
+      selectionMs += Math.max(0, this.now() - started);
+      selectionPasses++;
+      started = this.now();
+      const nextBalanced = balanceTerrainLeaves(this.provider, nextSelected.leaves);
+      balanceMs += Math.max(0, this.now() - started);
+      if (nextBalanced.length < balanced.length) {
+        selectionQuality = nextQuality;
+        selected = nextSelected;
+        balanced = nextBalanced;
+      }
+      if (balanced.length > this.quality.maximumDesiredLeaves) {
+        this.diagnostics?.anomaly('terrain-desired-leaf-cap-unreachable', 'terrain', {
+          desiredLeaves: balanced.length,
+          maximumDesiredLeaves: this.quality.maximumDesiredLeaves,
+          selectionPasses,
+        }, this.diagnosticContext);
+      }
+    }
+    const speedSquared = frame.cameraBodyFixedVelocity.x ** 2
+      + frame.cameraBodyFixedVelocity.y ** 2
+      + frame.cameraBodyFixedVelocity.z ** 2;
+    const predicted = speedSquared < 0.25
+      ? selected
+      : selectPredictedTerrainDetail(
+          this.provider, selectionQuality, frame, this.previousSplitKeys, frame.visible,
+        );
+    return Object.freeze({
+      cameraBodyFixed: copyVector(frame.cameraBodyFixed),
+      cameraBodyFixedVelocity: copyVector(frame.cameraBodyFixedVelocity),
+      viewDirectionBodyFixed: frame.viewDirectionBodyFixed
+        ? copyVector(frame.viewDirectionBodyFixed)
+        : undefined,
+      viewMarginRadians: frame.viewMarginRadians,
+      verticalFovRadians: frame.verticalFovRadians,
+      drawingBufferHeight: frame.drawingBufferHeight,
+      visibilitySignature: frame.visibilitySignature,
+      selectionQuality,
+      selected,
+      balanced,
+      predicted,
+      balanceViolations: terrainNeighborDepthViolations(balanced),
+      selectionMs,
+      balanceMs,
+      selectionPasses,
+    });
   }
 
   coverageReady(): boolean { return this.stats.coverageReady; }
@@ -655,10 +818,25 @@ export class PlanetTerrainEngine {
       const wantsFiner = desiredTiles.some((tile) => (
         tile.id.depth > parent.id.depth && isDescendantOrSelf(tile, parent)
       ));
-      const wantsParentOrAncestor = desiredTiles.some((tile) => isDescendantOrSelf(parent, tile));
-      if (wantsFiner || !wantsParentOrAncestor) continue;
+      // A branch with no desired ancestor or descendant has left the
+      // conservative horizon/frustum cover. Unwind it through the same safe
+      // quartet merge path instead of retaining its deep chunks forever.
+      if (wantsFiner) continue;
       for (const child of children) stable.delete(child.key);
       stable.add(parent.key);
+    }
+
+    // A culled partial branch may not form a complete quartet (for example if
+    // it left view during a transition). It is safe to drop only deep tiles
+    // with no desired relationship and no active transition; coarse coverage
+    // remains globally available for rapid pans.
+    for (const key of [...stable]) {
+      const tile = this.records.get(key)?.tile;
+      if (!tile || tile.id.depth < 3 || transitionBlocked(tile)) continue;
+      const related = desiredTiles.some((desiredTile) => (
+        isDescendantOrSelf(desiredTile, tile) || isDescendantOrSelf(tile, desiredTile)
+      ));
+      if (!related) stable.delete(key);
     }
 
     // A newly visible root can have no relationship to the previous frame's
@@ -709,6 +887,7 @@ export class PlanetTerrainEngine {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
     this.group.remove(chunk.mesh);
+    this.dither.disposeMesh(chunk.mesh);
     chunk.mesh.geometry.dispose();
     this.chunks.delete(key);
     if (!keepResidency) this.residency.removeInstalled(key, true);
@@ -861,6 +1040,11 @@ export class PlanetTerrainEngine {
       queuedWorkers: workers?.pending ?? scheduler.queued,
       scheduleMs: this.stats.scheduleMs,
       installMs: this.stats.installMs,
+      selectionMs: this.stats.selectionMs,
+      balanceMs: this.stats.balanceMs,
+      selectionPasses: this.stats.selectionPasses,
+      selectionReused: this.stats.selectionReused,
+      selectionInvalidation: this.stats.selectionInvalidation,
       buildP99Ms: workers?.buildP99Ms ?? 0,
       visibleByDepth,
       rootsReady: coverage.rootsReady,

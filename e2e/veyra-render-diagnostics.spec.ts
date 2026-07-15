@@ -29,7 +29,7 @@ for (const tier of ['medium', 'high'] as const) {
     await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
     await page.getByRole('button', { name: 'Veyra Diagnostic Orbiter' }).click();
     await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(20);
-    await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+    await page.getByRole('button', { name: 'Launch this craft' }).click();
     await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
 
     const startup = await page.evaluate(() => window.__RENDER_DIAGNOSTICS__?.snapshot());

@@ -7,6 +7,7 @@ import { LAUNCH_PAD_FOOTPRINT_RADIUS, launchSiteBodyFixedDirection } from '../sr
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import {
   buildTerrainChunkGeometry,
+  terrainFaceToDirection,
   terrainGeometryTransferables,
   type TerrainChunkGeometryRequest,
   type TerrainChunkGeometryResult,
@@ -17,7 +18,12 @@ import {
   type WorkerLike,
 } from '../src/render/terrain/chunkWorkerPool';
 import { handleTerrainChunkWorkerRequest } from '../src/render/terrain/chunkWorker';
-import { CUBE_FACE_BASES, createTerrainTileId, type TerrainTileId } from '../src/render/terrain/tile';
+import {
+  CUBE_FACE_BASES,
+  createTerrainTileId,
+  terrainTileUvBounds,
+  type TerrainTileId,
+} from '../src/render/terrain/tile';
 import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo } from '../src/render/planet';
 
 const veyra = new GameState().universe.get('veyra');
@@ -186,6 +192,48 @@ describe('terrain chunk geometry builder', () => {
       expect(Array.from(left.normal.slice(leftVertex * 3, leftVertex * 3 + 3)))
         .toEqual(Array.from(right.normal.slice(rightVertex * 3, rightVertex * 3 + 3)));
     }
+  });
+
+  it('matches a smaller central-difference normal on named deep Veyra relief', () => {
+    // This depth-16 interior sample has substantial deterministic relief and
+    // exposed the former 1e-5 UV floor, which crossed roughly ten grid cells.
+    const tile = createTerrainTileId(0, 16, 12_345, 23_456);
+    const resolution = 33;
+    const input = request({ jobKey: 'deep-normal-reference', tile, resolution });
+    const result = buildTerrainChunkGeometry(input);
+    const rebuilt = buildTerrainChunkGeometry(structuredClone(input));
+    const { u0, v0, size } = terrainTileUvBounds(tile);
+    const cellUvSize = size / (resolution - 1);
+    const column = 2;
+    const row = 26;
+    const u = u0 + cellUvSize * column;
+    const v = v0 + cellUvSize * row;
+    const referenceEpsilon = cellUvSize / 64;
+    const recipe = input.recipe;
+
+    const surfacePoint = (sampleU: number, sampleV: number): Vec3 => {
+      const direction = terrainFaceToDirection(tile.face, sampleU, sampleV, new Vec3());
+      return direction.scale(input.radius + evaluateRecipeHeight(recipe, direction));
+    };
+    const tangentU = surfacePoint(u + referenceEpsilon, v)
+      .sub(surfacePoint(u - referenceEpsilon, v));
+    const tangentV = surfacePoint(u, v + referenceEpsilon)
+      .sub(surfacePoint(u, v - referenceEpsilon));
+    const referenceNormal = Vec3.cross(tangentU, tangentV, new Vec3()).normalize();
+    const outward = terrainFaceToDirection(tile.face, u, v, new Vec3());
+    if (referenceNormal.dot(outward) < 0) referenceNormal.negate();
+
+    const offset = (row * resolution + column) * 3;
+    const actualNormal = new Vec3(
+      result.normal[offset], result.normal[offset + 1], result.normal[offset + 2],
+    ).normalize();
+    const angularErrorDegrees = Math.acos(Math.max(-1, Math.min(1,
+      actualNormal.dot(referenceNormal),
+    ))) * 180 / Math.PI;
+
+    expect(Math.abs(evaluateRecipeHeight(recipe, outward))).toBeGreaterThan(1_000);
+    expect(angularErrorDegrees).toBeLessThan(0.001);
+    expect(bytes(rebuilt.normal)).toEqual(bytes(result.normal));
   });
 
   it('preserves raw seafloor height and matches the shared evaluator at every grid vertex', () => {

@@ -121,6 +121,11 @@ export interface TerrainDiagnosticSample extends RenderDiagnosticContext {
   readonly queuedWorkers: number;
   readonly scheduleMs: number;
   readonly installMs: number;
+  readonly selectionMs?: number;
+  readonly balanceMs?: number;
+  readonly selectionPasses?: number;
+  readonly selectionReused?: boolean;
+  readonly selectionInvalidation?: string | null;
   readonly buildP99Ms: number;
   readonly visibleByDepth?: Readonly<Record<string, number>>;
   readonly rootsReady?: boolean;
@@ -454,6 +459,11 @@ export class RenderDiagnostics implements RenderDiagnosticsPort {
         queuedWorkers: observation.queuedWorkers,
         scheduleMs: observation.scheduleMs,
         installMs: observation.installMs,
+        selectionMs: observation.selectionMs ?? 0,
+        balanceMs: observation.balanceMs ?? 0,
+        selectionPasses: observation.selectionPasses ?? 0,
+        selectionReused: observation.selectionReused ?? false,
+        selectionInvalidation: observation.selectionInvalidation ?? null,
         buildP99Ms: observation.buildP99Ms,
         rootsReady: observation.rootsReady ?? false,
         reservedBytes: observation.reservedBytes ?? 0,

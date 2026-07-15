@@ -2,21 +2,25 @@ import * as THREE from 'three';
 
 export type TerrainLodDitherRole = 'parent' | 'children';
 
+export interface TerrainLodDitherUniforms {
+  readonly role: { value: number };
+  readonly progress: { value: number };
+}
+
 export interface TerrainLodDitherBinding {
-  readonly depthMaterial: THREE.MeshDepthMaterial;
-  readonly distanceMaterial: THREE.MeshDistanceMaterial;
-  readonly uniforms: {
-    readonly role: { value: number };
-    readonly progress: { value: number };
-  };
   bindMesh(mesh: THREE.Mesh): void;
   setMeshTransition(mesh: THREE.Mesh, role: TerrainLodDitherRole | null, progress: number): void;
+  uniformsFor(mesh: THREE.Mesh): TerrainLodDitherUniforms | null;
+  disposeMesh(mesh: THREE.Mesh): void;
   dispose(): void;
 }
 
-interface MeshDitherState {
-  role: TerrainLodDitherRole | null;
-  progress: number;
+interface MeshDitherBinding {
+  readonly mesh: THREE.Mesh;
+  readonly colorMaterial: THREE.Material;
+  readonly depthMaterial: THREE.MeshDepthMaterial;
+  readonly distanceMaterial: THREE.MeshDistanceMaterial;
+  readonly uniforms: TerrainLodDitherUniforms;
 }
 
 export function terrainLodSampleVisible(
@@ -31,13 +35,13 @@ export function terrainLodSampleVisible(
 
 function patchMaterial(
   material: THREE.Material,
-  uniforms: TerrainLodDitherBinding['uniforms'],
+  uniforms: TerrainLodDitherUniforms,
   pass: string,
 ): void {
   const previousCompile = material.onBeforeCompile;
-  const previousKey = material.customProgramCacheKey.bind(material);
+  const previousKey = material.customProgramCacheKey;
   material.onBeforeCompile = (shader, renderer) => {
-    previousCompile(shader, renderer);
+    previousCompile.call(material, shader, renderer);
     shader.uniforms.uTerrainLodRole = uniforms.role;
     shader.uniforms.uTerrainLodProgress = uniforms.progress;
     shader.fragmentShader = `uniform float uTerrainLodRole;\nuniform float uTerrainLodProgress;\n${shader.fragmentShader}`;
@@ -57,54 +61,71 @@ if (uTerrainLodRole > -0.5) {
       )
       : shader.fragmentShader.replace('void main() {', `void main() {${predicate}`);
   };
-  material.customProgramCacheKey = () => `${previousKey()}:terrain-lod-dither:${pass}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:terrain-lod-dither:${pass}`;
   material.needsUpdate = true;
 }
 
-export function installTerrainLodDither(material: THREE.Material): TerrainLodDitherBinding {
-  const uniforms = Object.freeze({
-    role: { value: -1 },
-    progress: { value: 0 },
-  });
-  const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-  const distanceMaterial = new THREE.MeshDistanceMaterial();
-  patchMaterial(material, uniforms, 'color');
-  patchMaterial(depthMaterial, uniforms, 'depth');
-  patchMaterial(distanceMaterial, uniforms, 'distance');
-  const states = new WeakMap<THREE.Mesh, MeshDitherState>();
+function cloneWithShaderHooks(material: THREE.Material): THREE.Material {
+  const cloned = material.clone();
+  cloned.defines = material.defines ? { ...material.defines } : undefined;
+  // Material.copy JSON-clones userData, which strips runtime values such as
+  // Vector3 instances. Preserve those values by reference while keeping the
+  // top-level metadata object independently extensible for each chunk.
+  cloned.userData = { ...material.userData };
+  cloned.onBeforeCompile = material.onBeforeCompile;
+  cloned.customProgramCacheKey = material.customProgramCacheKey;
+  return cloned;
+}
 
-  const apply = (mesh: THREE.Mesh): void => {
-    const state = states.get(mesh) ?? { role: null, progress: 0 };
-    uniforms.role.value = state.role === null ? -1 : state.role === 'parent' ? 0 : 1;
-    uniforms.progress.value = Math.max(0, Math.min(1, state.progress));
+export function installTerrainLodDither(material: THREE.Material): TerrainLodDitherBinding {
+  const bindings = new WeakMap<THREE.Mesh, MeshDitherBinding>();
+  const owned = new Set<MeshDitherBinding>();
+
+  const release = (binding: MeshDitherBinding): void => {
+    binding.colorMaterial.dispose();
+    binding.depthMaterial.dispose();
+    binding.distanceMaterial.dispose();
+    bindings.delete(binding.mesh);
+    owned.delete(binding);
   };
 
   return Object.freeze({
-    depthMaterial,
-    distanceMaterial,
-    uniforms,
     bindMesh(mesh: THREE.Mesh) {
-      const previousRender = mesh.onBeforeRender;
-      const previousShadow = mesh.onBeforeShadow;
+      if (bindings.has(mesh)) return;
+      if (Array.isArray(mesh.material)) throw new Error('Terrain LOD dither requires one material per chunk');
+      const uniforms = Object.freeze({
+        role: { value: -1 },
+        progress: { value: 0 },
+      });
+      const colorMaterial = cloneWithShaderHooks(material);
+      const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      const distanceMaterial = new THREE.MeshDistanceMaterial();
+      patchMaterial(colorMaterial, uniforms, 'color');
+      patchMaterial(depthMaterial, uniforms, 'depth');
+      patchMaterial(distanceMaterial, uniforms, 'distance');
+      mesh.material = colorMaterial;
       mesh.customDepthMaterial = depthMaterial;
       mesh.customDistanceMaterial = distanceMaterial;
-      states.set(mesh, { role: null, progress: 0 });
-      mesh.onBeforeRender = function (...args) {
-        apply(mesh);
-        previousRender.apply(this, args);
-      };
-      mesh.onBeforeShadow = function (...args) {
-        apply(mesh);
-        previousShadow.apply(this, args);
-      };
+      const binding = Object.freeze({ mesh, colorMaterial, depthMaterial, distanceMaterial, uniforms });
+      bindings.set(mesh, binding);
+      owned.add(binding);
     },
     setMeshTransition(mesh: THREE.Mesh, role: TerrainLodDitherRole | null, progress: number) {
       if (!Number.isFinite(progress)) throw new Error(`Invalid terrain LOD dither progress ${progress}`);
-      states.set(mesh, { role, progress: Math.max(0, Math.min(1, progress)) });
+      const binding = bindings.get(mesh);
+      if (!binding) throw new Error('Terrain LOD dither mesh is not bound');
+      binding.uniforms.role.value = role === null ? -1 : role === 'parent' ? 0 : 1;
+      binding.uniforms.progress.value = Math.max(0, Math.min(1, progress));
+    },
+    uniformsFor(mesh: THREE.Mesh) {
+      return bindings.get(mesh)?.uniforms ?? null;
+    },
+    disposeMesh(mesh: THREE.Mesh) {
+      const binding = bindings.get(mesh);
+      if (binding) release(binding);
     },
     dispose() {
-      depthMaterial.dispose();
-      distanceMaterial.dispose();
+      for (const binding of [...owned]) release(binding);
     },
   });
 }

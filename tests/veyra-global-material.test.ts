@@ -114,19 +114,49 @@ describe('Veyra global coordinates and material', () => {
     fallback.dispose();
   });
 
-  it('lets terrain own an injected material and omit its legacy ocean', () => {
+  it('lets terrain own chunk material clones while retaining ownership of the injected base material', () => {
     const material = createTerrestrialGlobalMaterial(null, descriptor);
     const dispose = vi.spyOn(material, 'dispose');
     const renderer = new PlanetRenderer(veyra, PLANET_QUALITY.low, { material, oceanEnabled: false });
     const meshes = warmTerrain(renderer);
     expect(meshes.length).toBeGreaterThanOrEqual(6);
-    expect(meshes[0].material).toBe(material);
+    const firstMaterial = meshes[0].material as THREE.MeshStandardMaterial;
+    const secondMaterial = meshes[1].material as THREE.MeshStandardMaterial;
+    expect(firstMaterial).not.toBe(material);
+    expect(secondMaterial).not.toBe(firstMaterial);
+    expect(firstMaterial.customProgramCacheKey()).toBe(secondMaterial.customProgramCacheKey());
+    expect(firstMaterial.customProgramCacheKey()).toContain('terrestrial-global-v2:palette');
+    expect(firstMaterial.customProgramCacheKey()).toContain('terrain-lod-dither:color');
+    expect(firstMaterial.vertexColors).toBe(material.vertexColors);
+    expect(firstMaterial.userData.maps).toBe(material.userData.maps);
+    expect(firstMaterial.userData.terrestrialCloudLighting)
+      .toBe(material.userData.terrestrialCloudLighting);
     expect(meshes[0].geometry.getAttribute('bodyDirection').count)
       .toBe(meshes[0].geometry.getAttribute('position').count);
     expect(meshes[0].geometry.getAttribute('bodyFixedDetailAnchor').count)
       .toBe(meshes[0].geometry.getAttribute('position').count);
+
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <normal_fragment_maps>',
+    };
+    firstMaterial.onBeforeCompile(shader as never, {} as THREE.WebGLRenderer);
+    expect(shader.vertexShader).toContain('attribute vec3 bodyDirection');
+    expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('terrainLodNoise');
+    updateTerrestrialCloudLighting(material, { x: 0, y: 1, z: 0 }, 0.6);
+    expect((shader.uniforms.globalSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
+    expect(shader.uniforms.globalCloudDriftAngle.value).toBe(0.6);
+
+    const chunkDispose = vi.spyOn(firstMaterial, 'dispose');
+    const depthDispose = vi.spyOn(meshes[0].customDepthMaterial!, 'dispose');
+    const distanceDispose = vi.spyOn(meshes[0].customDistanceMaterial!, 'dispose');
     renderer.dispose();
     expect(dispose).toHaveBeenCalledOnce();
+    expect(chunkDispose).toHaveBeenCalledOnce();
+    expect(depthDispose).toHaveBeenCalledOnce();
+    expect(distanceDispose).toHaveBeenCalledOnce();
   });
 
   it('installs a per-vertex surface altitude attribute matching the evaluator', () => {
