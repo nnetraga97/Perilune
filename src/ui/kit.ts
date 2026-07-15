@@ -358,6 +358,8 @@ export function injectUiStyles(): void {
       .ed-craft-copy strong { color: #d8e2ea; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ed-craft-copy span { color: #748794; font-family: var(--ui-mono); font-size: 8.5px; }
       .ed-craft-item button { font-size: 11px; }
+      .ed-built-in-panel { border-color: #34566b; background: linear-gradient(135deg, rgba(22,48,63,0.55), rgba(10,16,22,0.2)); }
+      .ed-built-in-craft { border-left: 2px solid var(--ui-accent); padding-left: 6px; }
       .ed-part-context { position: absolute; left: 254px; bottom: 52px; width: 245px; background: rgba(8,14,20,0.97);
         border: 1px solid var(--ui-accent); padding: 8px; z-index: 42; pointer-events: auto; }
       .ed-part-context-meta { color: #7d8b96; font-family: var(--ui-mono); font-size: 9px; margin-bottom: 5px; }

@@ -36,6 +36,7 @@ import {
 import { contactSurface } from '../sim/terrain';
 import { recipeForBody } from '../sim/terrainRecipe';
 import { scatterRecipeForBody } from '../sim/scatterRecipe';
+import { sanitizeInterstageShroudSpec } from '../sim/interstage';
 
 function cloneActionGroups(groups: Readonly<ActionGroups>): ActionGroups {
   const clone: ActionGroups = {};
@@ -98,6 +99,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
           activated: p.activated,
           deployed: p.deployed,
           temperature: p.temperature,
+          interstageShroud: p.interstageShroud ? { ...p.interstageShroud } : undefined,
         })),
         stages: v.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
         actionGroups: cloneActionGroups(v.craft.actionGroups),
@@ -200,6 +202,9 @@ export function restoreGame(save: SaveGame): GameState {
           activated: p.activated,
           deployed: p.deployed,
           temperature: p.temperature,
+          interstageShroud: p.interstageShroud
+            ? sanitizeInterstageShroudSpec(p.interstageShroud) ?? undefined
+            : undefined,
         }),
       ),
       stages: sv.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
@@ -540,6 +545,10 @@ export function validateCraftFile(raw: unknown): Craft | null {
       resources[resource as ResourceId] = amount;
     }
     if (!Number.isInteger(part.symmetry)) return null;
+    const interstageShroud = part.interstageShroud === undefined
+      ? undefined
+      : sanitizeInterstageShroudSpec(part.interstageShroud);
+    if (part.interstageShroud !== undefined && !interstageShroud) return null;
     keys.add(part.key as number);
     parts.push({
       key: part.key as number,
@@ -553,6 +562,7 @@ export function validateCraftFile(raw: unknown): Craft | null {
       ...(typeof part.activated === 'boolean' ? { activated: part.activated } : {}),
       ...(typeof part.deployed === 'boolean' ? { deployed: part.deployed } : {}),
       ...(finiteNumber(part.temperature) ? { temperature: part.temperature } : {}),
+      ...(interstageShroud ? { interstageShroud } : {}),
     });
   }
   for (const part of parts) {

@@ -12,16 +12,24 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const inputs = () => loadPartAssetInputs(root);
 
 describe('validatePartAssetDocuments', () => {
-  it('accepts the committed eight-source / eight-recipe documents without branding metadata', () => {
+  it('accepts the committed external and in-project authored recipes without branding metadata', () => {
     const { sources, recipes } = inputs();
     expect(validatePartAssetDocuments(sources, recipes)).toEqual([]);
     expect(sources.sources).toHaveLength(8);
-    expect(recipes.models).toHaveLength(8);
+    expect(recipes.models).toHaveLength(16);
     // No license classification or branding-review object is required to pass.
     for (const source of sources.sources) {
       expect(source).not.toHaveProperty('license');
       expect(source).not.toHaveProperty('brandingReview');
     }
+  });
+
+  it('requires truthful original-authoring provenance when no external source is referenced', () => {
+    const { sources, recipes } = inputs();
+    const bad = clone(recipes);
+    const original = bad.models.find((model: { authoredInProject?: boolean }) => model.authoredInProject);
+    delete original.authoredInProject;
+    expect(validatePartAssetDocuments(sources, bad).some((error: string) => /authoredInProject/.test(error))).toBe(true);
   });
 
   it('rejects duplicate source IDs', () => {
@@ -73,9 +81,9 @@ describe('validatePartAssetDocuments', () => {
   it('rejects a reference-craft triangle overrun', () => {
     const { sources, recipes } = inputs();
     const bad = clone(recipes);
-    // Six wheels; inflating the wheel limit blows the 60k reference-craft ceiling.
-    const wheel = bad.models.find((m: { partId: string }) => m.partId === 'wheel-mesa');
-    wheel.triangleLimit = 11_000;
+    // Four core fins; inflating this one part blows the 70k stock-craft ceiling.
+    const fin = bad.models.find((m: { partId: string }) => m.partId === 'fin-rudder');
+    fin.triangleLimit = 20_000;
     expect(validatePartAssetDocuments(sources, bad).some((e: string) => /reference craft ceiling/.test(e))).toBe(true);
   });
 });

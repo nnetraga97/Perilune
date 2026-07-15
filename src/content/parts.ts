@@ -2,8 +2,8 @@
  * Perilune part catalog — original part designs for the Skyward Cooperative.
  *
  * Every part has procedural geometry (cylinders/cones/panels with PBR
- * materials) as its guaranteed render fallback. Eight parts additionally carry
- * a `modelAssetId` naming a checked NASA-style render model (see
+ * materials) as its guaranteed render fallback. Selected parts additionally
+ * carry a `modelAssetId` naming a checked NASA-style render model (see
  * CONTENT_PIPELINE.md); the shared part-model library swaps that model in when
  * loaded, but `PartShape` remains the sole authority for physics, mass, and
  * attachments regardless of which visual renders. Sizes: stack class
@@ -53,6 +53,8 @@ export interface DecouplerDef {
   /** Separators release every attached edge; decouplers release their payload side. */
   mode: 'decoupler' | 'separator';
   radial?: boolean;
+  /** Generate one detachable shroud from the connected stack envelopes. */
+  interstage?: boolean;
 }
 
 export interface PartDef {
@@ -210,6 +212,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-s2',
+    modelAssetId: 'procedural-tank-pod',
     name: 'PL-200 Tank',
     blurb: 'Twice the tank. Same paint budget.',
     category: 'tanks',
@@ -249,6 +252,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-m4',
+    modelAssetId: 'procedural-tank-mule',
     name: 'HV-800 Tank',
     blurb: 'Heavy-vehicle tankage. The workhorse of every launch stack.',
     category: 'tanks',
@@ -410,6 +414,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'srb-torch',
+    modelAssetId: 'procedural-srb-torch',
     name: 'SB-90 "Torch"',
     blurb: 'The big solid. Light it and hold on to your logbook.',
     category: 'engines',
@@ -462,8 +467,27 @@ export const PARTS: PartDef[] = [
     accent: '#3f4750',
   },
   {
+    id: 'dec-interstage-ms',
+    modelAssetId: 'procedural-separator',
+    name: 'Wayfarer Interstage M–S',
+    blurb: 'A single-piece separator and fitted shroud for stepping a heavy booster down to a slim upper stage.',
+    category: 'coupling',
+    massDry: 185,
+    cost: 680,
+    shape: { kind: 'cylinder', radiusTop: M, radiusBottom: M, height: 0.16 },
+    stackTop: true,
+    stackBottom: true,
+    crossfeed: false,
+    maxTemp: 1800,
+    crashTolerance: 10,
+    decoupler: { ejection: 1600, mode: 'separator', interstage: true },
+    color: '#c8cdd2',
+    accent: '#b4562e',
+  },
+  {
     id: 'dec-m',
-    name: 'Ring Separator M',
+    modelAssetId: 'procedural-separator',
+    name: 'Wayfarer Separator M',
     blurb: 'For parting with larger investments.',
     category: 'coupling',
     massDry: 120,
@@ -480,12 +504,13 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'dec-radial',
+    modelAssetId: 'procedural-radial-decoupler',
     name: 'Side Latch',
     blurb: 'Holds a booster firmly until the moment it very much does not.',
     category: 'coupling',
     massDry: 28,
     cost: 260,
-    shape: { kind: 'box', height: 0.5, width: 0.2, depth: 0.16 },
+    shape: { kind: 'box', height: 0.62, width: 0.3, depth: 0.24 },
     surfaceAttach: true,
     acceptsSurfaceAttach: true,
     crossfeed: false,
@@ -530,12 +555,13 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'nose-s',
+    modelAssetId: 'procedural-srb-nose-cone',
     name: 'Streamline Cap S',
     blurb: 'Pointy end up. Considerably improves the shouting-at-drag situation.',
     category: 'structural',
     massDry: 40,
     cost: 160,
-    shape: { kind: 'cone', radiusTop: 0.03, radiusBottom: S, height: 1.0 },
+    shape: { kind: 'cone', radiusTop: 0.03, radiusBottom: S, height: 1.3 },
     stackBottom: true,
     crossfeed: false,
     maxTemp: 2000,
@@ -596,12 +622,13 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- aero
   {
     id: 'fin-swift',
+    modelAssetId: 'procedural-fin-pod',
     name: 'Swift Fin',
     blurb: 'A fixed fin. Keeps the pointy end convinced about which way is forward.',
     category: 'aero',
     massDry: 35,
     cost: 140,
-    shape: { kind: 'panel', height: 0.85, width: 0.55, depth: 0.04 },
+    shape: { kind: 'panel', height: 0.8, width: 0.14, depth: 0.48 },
     surfaceAttach: true,
     crossfeed: false,
     maxTemp: 1800,
@@ -612,12 +639,13 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'fin-rudder',
+    modelAssetId: 'procedural-fin-mule',
     name: 'Helm Fin',
     blurb: 'A steerable fin with a small motor and a big sense of duty.',
     category: 'aero',
     massDry: 55,
     cost: 320,
-    shape: { kind: 'panel', height: 0.9, width: 0.6, depth: 0.05 },
+    shape: { kind: 'panel', height: 1.4, width: 0.22, depth: 0.8 },
     surfaceAttach: true,
     crossfeed: false,
     maxTemp: 1800,

@@ -3,8 +3,9 @@
  * Parts render with checked NASA-style models when the shared library has them
  * loaded, and otherwise fall back to procedural geometry (original industrial
  * look: matte hulls with accent bands), cached per part definition. Engine
- * plumes are additive cones scaled by throttle and ambient pressure, positioned
- * from authored nozzle anchors so multi-nozzle engines get one plume per bell.
+ * plumes use layered animated shaders scaled by throttle and ambient pressure,
+ * positioned from authored nozzle anchors so multi-nozzle engines get one
+ * plume per bell.
  */
 import * as THREE from 'three';
 import type { Craft, PartInstance } from '../sim/vessel';
@@ -13,6 +14,9 @@ import type { PartDef } from '../content/parts';
 import { engineHasFuel } from '../sim/flight';
 import type { PartModelLibrary } from './partModelLibrary';
 import type { PartEffectAnchor } from './partModelManifest';
+import { buildEnginePlumeLayers, updateEngineEffectMaterials } from './engineEffects';
+import { deriveInterstageShroud, sanitizeInterstageShroudSpec } from '../sim/interstage';
+import { buildInterstageShroud } from './interstageShroud';
 
 export type VesselVisualSource = 'model' | 'procedural';
 
@@ -84,21 +88,6 @@ function defaultPlumeAnchors(def: PartDef): readonly PartEffectAnchor[] {
   return [{ position: [0, -def.shape.height / 2, 0], rotation: [0, 0, 0, 1], scale: 1 }];
 }
 
-const plumeMaterial = new THREE.MeshBasicMaterial({
-  color: '#ffb36b',
-  transparent: true,
-  opacity: 0.75,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-});
-const plumeCoreMaterial = new THREE.MeshBasicMaterial({
-  color: '#fff3d6',
-  transparent: true,
-  opacity: 0.9,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-});
-
 interface BuiltPartMesh {
   holder: THREE.Group;
   /** Authored nozzle anchors from the imported model, or null to use the default. */
@@ -106,6 +95,7 @@ interface BuiltPartMesh {
 }
 
 function buildPartMesh(
+  craft: Craft,
   part: PartInstance,
   ownedGeometries: Set<THREE.BufferGeometry>,
   models?: PartModelLibrary,
@@ -138,6 +128,10 @@ function buildPartMesh(
     }
     holder.userData.visualSource = 'procedural' satisfies VesselVisualSource;
   }
+  const latchedShroud = sanitizeInterstageShroudSpec(part.interstageShroud);
+  const liveShroud = part.activated ? null : deriveInterstageShroud(craft, part);
+  const shroud = liveShroud ?? latchedShroud;
+  if (shroud) holder.add(buildInterstageShroud(shroud));
   holder.position.set(part.position.x, part.position.y, part.position.z);
   holder.quaternion.set(part.rotation.x, part.rotation.y, part.rotation.z, part.rotation.w);
   holder.userData.partKey = part.key;
@@ -145,23 +139,15 @@ function buildPartMesh(
 }
 
 /**
- * One nozzle plume: cones hanging below the holder origin so the holder can sit
- * directly at an authored nozzle exit. Runtime throttle/vacuum scaling is applied
- * to the holder's scale, leaving its anchor position/rotation untouched.
+ * One nozzle plume. The holder stays fixed on its authored nozzle exit while a
+ * child flame group changes length and width at runtime.
  */
-function buildPlumeHolder(baseScale: number, ownedGeometries: Set<THREE.BufferGeometry>): THREE.Group {
+function buildPlumeHolder(baseScale: number, solid: boolean): THREE.Group {
   const holder = new THREE.Group();
-  const plumeGeometry = new THREE.CylinderGeometry(0.08 * baseScale, 0.5 * baseScale, 4 * baseScale, 12, 1, true);
-  const coreGeometry = new THREE.CylinderGeometry(0.04 * baseScale, 0.22 * baseScale, 2.4 * baseScale, 10, 1, true);
-  ownedGeometries.add(plumeGeometry);
-  ownedGeometries.add(coreGeometry);
-  const plume = new THREE.Mesh(plumeGeometry, plumeMaterial);
-  const core = new THREE.Mesh(coreGeometry, plumeCoreMaterial);
-  core.position.y = 0.6 * baseScale;
-  plume.add(core);
-  // Suspend the cone below the anchor (nozzle exit) instead of centering on it.
-  plume.position.y = -2 * baseScale;
-  holder.add(plume);
+  const layers = buildEnginePlumeLayers(baseScale, solid);
+  holder.add(layers.group);
+  holder.userData.flameGroup = layers.group;
+  holder.userData.baseScale = layers.baseScale;
   return holder;
 }
 
@@ -171,21 +157,24 @@ export function buildVesselVisual(craft: Craft, models?: PartModelLibrary): Vess
   const plumes = new Map<number, THREE.Group>();
   const ownedGeometries = new Set<THREE.BufferGeometry>();
   for (const part of craft.parts) {
-    const { holder, plumeAnchors } = buildPartMesh(part, ownedGeometries, models);
+    const { holder, plumeAnchors } = buildPartMesh(craft, part, ownedGeometries, models);
     partMeshes.set(part.key, holder);
     group.add(holder);
     const def = defOf(part);
     if (def.engine) {
+      const solid = def.engine.propellant === 'solidFuel';
       const anchors = plumeAnchors && plumeAnchors.length > 0 ? plumeAnchors : defaultPlumeAnchors(def);
       const plumeGroup = new THREE.Group();
       for (const anchor of anchors) {
-        const plumeHolder = buildPlumeHolder(def.engine.plumeScale * anchor.scale, ownedGeometries);
+        const plumeHolder = buildPlumeHolder(def.engine.plumeScale * anchor.scale, solid);
         plumeHolder.position.set(anchor.position[0], anchor.position[1], anchor.position[2]);
         plumeHolder.quaternion.set(anchor.rotation[0], anchor.rotation[1], anchor.rotation[2], anchor.rotation[3]);
         plumeGroup.add(plumeHolder);
       }
       plumeGroup.visible = false;
       plumeGroup.userData.power = 0;
+      plumeGroup.userData.solid = solid;
+      plumeGroup.userData.burning = false;
       // Parent to the part holder so plumes track the part through motion and removal.
       holder.add(plumeGroup);
       plumes.set(part.key, plumeGroup);
@@ -221,6 +210,7 @@ export function syncVesselVisual(
   pressureFrac: number,
   dt = 1 / 60,
   crossfeedIndex?: ReadonlyMap<number, readonly PartInstance[]>,
+  effectTime = 0,
 ): void {
   // Remove meshes for missing parts. Plume groups parent under the part holder,
   // so disposing/removing the holder also releases their owned geometry.
@@ -236,27 +226,42 @@ export function syncVesselVisual(
     }
     visual.craftVersionSeen = craft.parts.length;
   }
-  // Plumes follow throttle; vacuum expands them. Each nozzle holder is scaled in
-  // place so its authored anchor placement is preserved.
+  updateEngineEffectMaterials(effectTime, pressureFrac);
+  // Plumes follow throttle; vacuum broadens them. Each nozzle's child flame is
+  // scaled in place so its authored anchor placement remains exact.
   for (const part of craft.parts) {
     const plumeGroup = visual.plumes.get(part.key);
     if (!plumeGroup) continue;
     const def = defOf(part);
     const solid = def.engine!.propellant === 'solidFuel';
-    const targetPower = part.activated && engineHasFuel(craft, part, crossfeedIndex) ? (solid ? 1 : throttle) : 0;
+    const airFactor = def.engine!.airBreathing
+      ? THREE.MathUtils.smoothstep(pressureFrac, 0.003, 0.04)
+      : 1;
+    const targetPower = part.activated && engineHasFuel(craft, part, crossfeedIndex)
+      ? (solid ? 1 : throttle) * airFactor
+      : 0;
     const previousPower = Number(plumeGroup.userData.power ?? 0);
     const response = targetPower > previousPower ? 18 : 7;
     let power = previousPower + (targetPower - previousPower) * (1 - Math.exp(-response * Math.max(0, dt)));
     if (Math.abs(power - targetPower) < 0.001) power = targetPower;
     plumeGroup.userData.power = power;
+    plumeGroup.userData.burning = targetPower > 0.001;
     plumeGroup.visible = power > 0.015;
-    const vacuumFlare = 1 + (1 - pressureFrac) * 1.3;
+    const pressure = THREE.MathUtils.clamp(pressureFrac, 0, 1);
+    const intensity = Math.sqrt(Math.max(0, power));
+    const radialPressure = THREE.MathUtils.lerp(1.72, 0.76, pressure);
+    const axialPressure = THREE.MathUtils.lerp(1.14, 0.84, pressure);
     for (const nozzle of plumeGroup.children) {
-      if (plumeGroup.visible) {
-        nozzle.scale.set(power * vacuumFlare, 0.6 + power * 0.7, power * vacuumFlare);
-      } else {
-        nozzle.scale.set(0, 0, 0);
-      }
+      const flame = nozzle.userData.flameGroup as THREE.Group | undefined;
+      if (!flame) continue;
+      // Retain the historical holder-collapse contract used by diagnostics and
+      // tests while keeping all authored anchor transforms untouched.
+      nozzle.scale.setScalar(plumeGroup.visible ? 1 : 0.001);
+      const baseScale = Number(nozzle.userData.baseScale ?? 1);
+      flame.visible = plumeGroup.visible;
+      const radialScale = baseScale * radialPressure * (0.14 + intensity * 0.86);
+      const axialScale = baseScale * axialPressure * (0.22 + power * 0.78);
+      flame.scale.set(radialScale, axialScale, radialScale);
     }
   }
 }
