@@ -203,6 +203,14 @@ class PeriluneGame {
         const gv = this.game.active;
         if (gv) gv.runtime.sas = m;
       },
+      onToggleSas: () => {
+        const gv = this.game.active;
+        if (gv) gv.runtime.sas = gv.runtime.sas === 'off' ? 'stability' : 'off';
+      },
+      onToggleRcs: () => {
+        const gv = this.game.active;
+        if (gv) gv.runtime.controls.rcs = !gv.runtime.controls.rcs;
+      },
       onSetWarp: (i, rails) => this.game.setWarp(i, rails),
       onExitToEditor: () => this.toEditor(),
       onToggleSystem: (partKey) => {

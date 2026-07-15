@@ -6,6 +6,9 @@ export const UTILITY_ICON_NAMES = [
 ] as const;
 export type UtilityIcon = (typeof UTILITY_ICON_NAMES)[number];
 
+export const NAVBALL_ICON_NAMES = ['prograde', 'retrograde'] as const;
+export type NavballIcon = (typeof NAVBALL_ICON_NAMES)[number];
+
 export const ICON_PATHS: Readonly<Record<UtilityIcon, readonly string[]>> = {
   science: ['M9 3h6', 'M10 3v5l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3', 'M8 14h8'],
   save: ['M5 3h12l2 2v16H5z', 'M8 3v6h8V3', 'M8 15h8v6'],
@@ -21,18 +24,52 @@ export const ICON_PATHS: Readonly<Record<UtilityIcon, readonly string[]>> = {
   log: ['M5 3h14v18H5z', 'M8 7h8M8 11h8M8 15h5'],
 };
 
-export function appendUiIcon(parent: HTMLElement, icon: UtilityIcon): SVGSVGElement {
+/**
+ * Flight-direction symbols use the same three-arm language as the markers on
+ * the navball. Retrograde rotates the arms and adds a central cross so the two
+ * remain distinguishable when colour is unavailable.
+ */
+export const NAVBALL_ICON_PATHS: Readonly<Record<NavballIcon, readonly string[]>> = {
+  prograde: [
+    'M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 1 0 0-9',
+    'M12 2.5v5',
+    'M3.8 17.2l4.4-2.55',
+    'M20.2 17.2l-4.4-2.55',
+  ],
+  retrograde: [
+    'M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 1 0 0-9',
+    'M8.9 8.9l6.2 6.2',
+    'M15.1 8.9l-6.2 6.2',
+    'M12 16.5v5',
+    'M3.8 6.8l4.4 2.55',
+    'M20.2 6.8l-4.4 2.55',
+  ],
+};
+
+function appendPathIcon(
+  parent: HTMLElement,
+  paths: readonly string[],
+  className: string,
+): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('k-icon-svg');
-  for (const d of ICON_PATHS[icon]) {
+  svg.classList.add(className);
+  for (const d of paths) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
     svg.appendChild(path);
   }
   parent.appendChild(svg);
   return svg;
+}
+
+export function appendUiIcon(parent: HTMLElement, icon: UtilityIcon): SVGSVGElement {
+  return appendPathIcon(parent, ICON_PATHS[icon], 'k-icon-svg');
+}
+
+export function appendNavballIcon(parent: HTMLElement, icon: NavballIcon): SVGSVGElement {
+  return appendPathIcon(parent, NAVBALL_ICON_PATHS[icon], 'hud-sas-icon');
 }
 
 export function iconButton(

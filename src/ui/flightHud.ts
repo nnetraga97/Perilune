@@ -13,9 +13,10 @@ import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
 import { estimateBurnTime, nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
-import { navHeading, projectNavDirection } from './navball';
+import { navHeading } from './navball';
 import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 import { el, injectUiStyles } from './kit';
+import { appendNavballIcon, type NavballIcon } from './icons';
 import type { EntryPrediction } from '../sim/entry';
 
 export interface HudCallbacks {
@@ -27,6 +28,8 @@ export interface HudCallbacks {
   onRunScience(): void;
   onRecover(): void;
   onSetSas(mode: SasMode): void;
+  onToggleSas(): void;
+  onToggleRcs(): void;
   onSetWarp(index: number, rails: boolean): void;
   onExitToEditor(): void;
   /** Toggle an ISRU system part (drill/converter) on the active vessel. */
@@ -43,10 +46,12 @@ export interface HudTelemetry {
   landingTargetDirBF: Vec3 | null;
 }
 
-const SAS_MODES: Array<{ mode: SasMode; label: string; title: string }> = [
+const NAVBALL_SIZE = 224;
+
+const SAS_MODES: Array<{ mode: SasMode; label?: string; icon?: NavballIcon; title: string }> = [
   { mode: 'stability', label: '◎', title: 'Stability assist' },
-  { mode: 'prograde', label: '⬆', title: 'Prograde' },
-  { mode: 'retrograde', label: '⬇', title: 'Retrograde' },
+  { mode: 'prograde', icon: 'prograde', title: 'Prograde' },
+  { mode: 'retrograde', icon: 'retrograde', title: 'Retrograde' },
   { mode: 'normal', label: '△', title: 'Normal' },
   { mode: 'antinormal', label: '▽', title: 'Anti-normal' },
   { mode: 'radial-out', label: '⊙', title: 'Radial out' },
@@ -93,13 +98,13 @@ export class FlightHud {
   private utEl: HTMLElement;
   private nextAlarmEl: HTMLElement;
   private warpEl: HTMLElement;
-  private throttleFill: HTMLElement;
   private gFill: HTMLElement;
   private qFill: HTMLElement;
   private atmosphereFill: HTMLElement;
   private gText: HTMLElement;
   private qText: HTMLElement;
   private atmosphereText: HTMLElement;
+  private navGEl: HTMLElement;
   private crewEl: HTMLElement;
   private cameraModeEl: HTMLElement;
   private precisionEl: HTMLElement;
@@ -110,6 +115,9 @@ export class FlightHud {
   private stageListEl: HTMLElement;
   private eventFeed: HTMLElement;
   private sasButtons = new Map<SasMode, HTMLElement>();
+  private sasMasterBtn: HTMLElement;
+  private rcsBtn: HTMLElement;
+  private sasModeEl: HTMLElement;
   private cb: HudCallbacks;
   private lastEventCount = 0;
   private recoverBtn: HTMLElement;
@@ -167,28 +175,64 @@ export class FlightHud {
     this.recoverBtn = mk('Recover', 'Recover vessel (ends flight)', cb.onRecover);
     this.recoverBtn.classList.add('hud-recover');
 
-    // ---- left cluster: navball + throttle + SAS
+    // ---- central flight instrument: navball + guidance + attached telemetry
     const left = el('div', 'hud-left', this.root);
-    const sasCol = el('div', 'hud-sas', left);
-    for (const { mode, label, title } of SAS_MODES) {
-      const b = el('button', 'hud-btn hud-sas-btn', sasCol, label);
+    const navWrap = el('div', 'hud-navwrap', left);
+
+    const speedPod = el('div', 'hud-nav-speed', navWrap);
+    this.speedModeEl = el('div', 'hud-nav-speed-mode', speedPod, 'SURFACE');
+    this.speedEl = el('div', 'hud-nav-speed-value', speedPod, '0.0 m/s');
+
+    const sasCol = el('div', 'hud-sas', navWrap);
+    el('div', 'hud-sas-heading', sasCol, 'GUIDANCE');
+    for (const { mode, label, icon, title } of SAS_MODES) {
+      const b = el('button', 'hud-btn hud-sas-btn', sasCol, label) as HTMLButtonElement;
+      b.type = 'button';
       b.title = title;
+      b.setAttribute('aria-label', title);
+      b.dataset.mode = mode;
+      if (icon) appendNavballIcon(b, icon);
       b.onclick = () => cb.onSetSas(mode);
       this.sasButtons.set(mode, b);
     }
-    const navWrap = el('div', 'hud-navwrap', left);
+
     this.navCanvas = document.createElement('canvas');
-    this.navCanvas.width = 260;
-    this.navCanvas.height = 260;
+    const navballScale = Math.min(window.devicePixelRatio || 1, 2);
+    this.navCanvas.width = NAVBALL_SIZE * navballScale;
+    this.navCanvas.height = NAVBALL_SIZE * navballScale;
+    this.navCanvas.style.width = `${NAVBALL_SIZE}px`;
+    this.navCanvas.style.height = `${NAVBALL_SIZE}px`;
     this.navCanvas.className = 'hud-navball';
+    this.navCanvas.setAttribute('role', 'img');
+    this.navCanvas.setAttribute('aria-label', 'Attitude navball');
     navWrap.appendChild(this.navCanvas);
     this.navCtx = this.navCanvas.getContext('2d')!;
-    const thrWrap = el('div', 'hud-throttle', left);
-    el('div', 'hud-throttle-label', thrWrap, 'THR');
-    const thrTrack = el('div', 'hud-throttle-track', thrWrap);
-    this.throttleFill = el('div', 'hud-throttle-fill', thrTrack);
+    this.navCtx.scale(navballScale, navballScale);
 
-    const status = el('div', 'hud-status-strip', left);
+    const navData = el('div', 'hud-nav-data', navWrap);
+    const navDatum = (label: string) => {
+      const item = el('div', 'hud-nav-datum', navData);
+      el('span', 'hud-nav-datum-label', item, label);
+      return el('strong', 'hud-nav-datum-value', item, '—');
+    };
+    this.altEl = navDatum('ALT');
+    this.vsEl = navDatum('V/S');
+    this.navGEl = navDatum('G');
+
+    const navControls = el('div', 'hud-nav-controls', navWrap);
+    this.sasMasterBtn = el('button', 'hud-nav-toggle', navControls, 'SAS');
+    this.sasMasterBtn.setAttribute('type', 'button');
+    this.sasMasterBtn.setAttribute('aria-label', 'Toggle stability assist');
+    this.sasMasterBtn.title = 'Toggle stability assist (T)';
+    this.sasMasterBtn.onclick = cb.onToggleSas;
+    this.rcsBtn = el('button', 'hud-nav-toggle', navControls, 'RCS');
+    this.rcsBtn.setAttribute('type', 'button');
+    this.rcsBtn.setAttribute('aria-label', 'Toggle reaction control system');
+    this.rcsBtn.title = 'Toggle reaction control system (R)';
+    this.rcsBtn.onclick = cb.onToggleRcs;
+    this.sasModeEl = el('div', 'hud-nav-guidance-mode', navControls, 'MANUAL');
+
+    const status = el('div', 'hud-status-strip', navWrap);
     const statusGauge = (label: string) => {
       const row = el('div', 'hud-status-row', status);
       el('span', 'hud-status-key', row, label);
@@ -205,18 +249,6 @@ export class FlightHud {
     this.precisionEl.style.display = 'none';
     this.actionGroupEl = el('div', 'hud-action-group', status, '');
     this.actionGroupEl.style.display = 'none';
-
-    // ---- speed/alt readouts above navball
-    const readouts = el('div', 'hud-readouts', left);
-    const spdBox = el('div', 'hud-readout', readouts);
-    this.speedModeEl = el('div', 'hud-readout-label', spdBox, 'SURFACE');
-    this.speedEl = el('div', 'hud-readout-value', spdBox, '0 m/s');
-    const altBox = el('div', 'hud-readout', readouts);
-    el('div', 'hud-readout-label', altBox, 'ALTITUDE');
-    this.altEl = el('div', 'hud-readout-value', altBox, '0 m');
-    const vsBox = el('div', 'hud-readout', readouts);
-    el('div', 'hud-readout-label', vsBox, 'V/S');
-    this.vsEl = el('div', 'hud-readout-value', vsBox, '0');
 
     // ---- right: orbit info + resources + staging
     const right = el('div', 'hud-right', this.root);
@@ -312,6 +344,7 @@ export class FlightHud {
     this.altEl.textContent = fmtDistance(alt);
     const vs = v.vel.dot(new Vec3().copy(v.pos).normalize());
     this.vsEl.textContent = `${vs > 0 ? '+' : ''}${vs.toFixed(1)} m/s`;
+    this.navGEl.textContent = `${(v.properAccel / G0).toFixed(2)} g`;
 
     this.metEl.textContent = `T+ ${fmtTime(game.time - this.missionStart)}`;
     this.utEl.textContent = `UT ${fmtTime(game.time)}`;
@@ -354,8 +387,7 @@ export class FlightHud {
     }
     this.updateEntryCard(body.radius, game.time, telemetry.entryPrediction, telemetry.landingTargetDirBF);
 
-    // Throttle + gauges.
-    this.throttleFill.style.height = `${(v.controls.throttle * 100).toFixed(0)}%`;
+    // Flight-load gauges. Throttle is rendered directly on the navball bezel.
     if (this.peakQVesselId !== v.id) {
       this.peakQVesselId = v.id;
       this.peakQ = 0;
@@ -394,6 +426,12 @@ export class FlightHud {
     for (const [mode, btn] of this.sasButtons) {
       btn.classList.toggle('active', v.sas === mode);
     }
+    const sasActive = v.sas !== 'off';
+    this.sasMasterBtn.classList.toggle('active', sasActive);
+    this.sasMasterBtn.setAttribute('aria-pressed', `${sasActive}`);
+    this.rcsBtn.classList.toggle('active', v.controls.rcs);
+    this.rcsBtn.setAttribute('aria-pressed', `${v.controls.rcs}`);
+    this.sasModeEl.textContent = sasActive ? v.sas.replace('-', ' ').toUpperCase() : 'MANUAL';
 
     // Staging list (re-render only when it changes).
     const stageSig = `${v.id}:${v.currentStage}:${Math.floor(game.time * 2)}:${v.craft.stages.map((s) => s.partKeys.join('.')).join('|')}`;
@@ -631,8 +669,8 @@ export class FlightHud {
     const gv = game.active!;
     const v = gv.runtime;
     const ctx = this.navCtx;
-    const W = this.navCanvas.width;
-    const R = W / 2 - 6;
+    const W = NAVBALL_SIZE;
+    const R = W / 2 - 12;
     const cx = W / 2;
     const cy = W / 2;
 
@@ -659,53 +697,257 @@ export class FlightHud {
       horizonRight.normalize();
       roll = Math.atan2(-right.dot(up), right.dot(horizonRight) * -1);
     }
+    const pitchDeg = (pitch * 180) / Math.PI;
+    const rollDeg = (roll * 180) / Math.PI;
+    const headingDeg = ((heading * 180) / Math.PI + 360) % 360;
 
     ctx.clearRect(0, 0, W, W);
+
+    // Deep inset bezel beneath the moving attitude sphere.
+    const bezel = ctx.createRadialGradient(cx, cy - 10, R * 0.76, cx, cy, R + 12);
+    bezel.addColorStop(0, '#243642');
+    bezel.addColorStop(0.74, '#101c25');
+    bezel.addColorStop(1, '#050a0e');
+    ctx.fillStyle = bezel;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + 11, 0, Math.PI * 2);
+    ctx.fill();
+
+    const projectSphereComponents = (dx: number, dy: number, dz: number) => ({
+      x: cx + (dx * right.x + dy * right.y + dz * right.z) * R,
+      y: cy - (dx * screenUp.x + dy * screenUp.y + dz * screenUp.z) * R,
+      forward: dx * nose.x + dy * nose.y + dz * nose.z,
+    });
+    const projectSphereDirection = (dir: Readonly<Vec3>) => {
+      let x = Vec3.dot(dir, right);
+      let y = -Vec3.dot(dir, screenUp);
+      const forward = Vec3.dot(dir, nose);
+      if (forward < 0) {
+        const planeLength = Math.hypot(x, y);
+        if (planeLength > 1e-8) {
+          x /= planeLength;
+          y /= planeLength;
+        }
+      }
+      return { x, y, behind: forward < 0 };
+    };
+
+    // Fill the projected hemisphere analytically. The horizon is the actual up=0
+    // great circle, including its curved cap when the craft looks toward a pole.
+    const noseUp = Vec3.dot(nose, up);
+    const rightUp = Vec3.dot(right, up);
+    const screenUpUp = Vec3.dot(screenUp, up);
+    const skyColor = '#397f99';
+    const groundColor = '#916a43';
+    ctx.fillStyle = noseUp >= 0 ? skyColor : groundColor;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    const horizonX = rightUp;
+    const horizonY = -screenUpUp;
+    const horizonPlaneLength = Math.hypot(horizonX, horizonY);
+    if (horizonPlaneLength > 1e-6) {
+      ctx.beginPath();
+      for (let step = 0; step <= 48; step++) {
+        const edgeAxis = -1 + (step / 48) * 2;
+        const curve = Math.sqrt(Math.max(0, 1 - edgeAxis * edgeAxis));
+        const towardHorizon = -noseUp * curve;
+        const sphereX = (horizonX * towardHorizon - horizonY * edgeAxis) / horizonPlaneLength;
+        const sphereY = (horizonY * towardHorizon + horizonX * edgeAxis) / horizonPlaneLength;
+        if (step === 0) ctx.moveTo(cx + sphereX * R, cy + sphereY * R);
+        else ctx.lineTo(cx + sphereX * R, cy + sphereY * R);
+      }
+      const horizonAngle = Math.atan2(horizonY, horizonX);
+      ctx.arc(
+        cx,
+        cy,
+        R,
+        horizonAngle + Math.PI / 2,
+        horizonAngle - Math.PI / 2,
+        noseUp < 0,
+      );
+      ctx.closePath();
+      ctx.fillStyle = noseUp >= 0 ? groundColor : skyColor;
+      ctx.fill();
+    }
+
+    const horizonDirection = (latitude: number, longitude: number) => {
+      const cosLatitude = Math.cos(latitude);
+      const northAmount = cosLatitude * Math.cos(longitude);
+      const eastAmount = cosLatitude * Math.sin(longitude);
+      const upAmount = Math.sin(latitude);
+      return {
+        x: east.x * eastAmount + north.x * northAmount + up.x * upAmount,
+        y: east.y * eastAmount + north.y * northAmount + up.y * upAmount,
+        z: east.z * eastAmount + north.z * northAmount + up.z * upAmount,
+      };
+    };
+    const strokeLatitude = (latitude: number, color: string, width: number) => {
+      ctx.beginPath();
+      let drawing = false;
+      for (let longitudeDeg = 0; longitudeDeg <= 360; longitudeDeg += 4) {
+        const direction = horizonDirection(latitude, (longitudeDeg * Math.PI) / 180);
+        const projected = projectSphereComponents(direction.x, direction.y, direction.z);
+        if (projected.forward < 0) {
+          drawing = false;
+          continue;
+        }
+        if (drawing) ctx.lineTo(projected.x, projected.y);
+        else ctx.moveTo(projected.x, projected.y);
+        drawing = true;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    };
+    const strokeLongitude = (longitude: number, color: string, width: number) => {
+      ctx.beginPath();
+      let drawing = false;
+      for (let latitudeDeg = -90; latitudeDeg <= 90; latitudeDeg += 3) {
+        const direction = horizonDirection((latitudeDeg * Math.PI) / 180, longitude);
+        const projected = projectSphereComponents(direction.x, direction.y, direction.z);
+        if (projected.forward < 0) {
+          drawing = false;
+          continue;
+        }
+        if (drawing) ctx.lineTo(projected.x, projected.y);
+        else ctx.moveTo(projected.x, projected.y);
+        drawing = true;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    };
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 1, 0, Math.PI * 2);
+    ctx.clip();
+    for (let latitudeDeg = -60; latitudeDeg <= 60; latitudeDeg += 30) {
+      if (latitudeDeg === 0) continue;
+      strokeLatitude(
+        (latitudeDeg * Math.PI) / 180,
+        'rgba(232, 240, 239, 0.3)',
+        0.8,
+      );
+    }
+    // Horizon gets a dark keyline beneath a bright great-circle reference.
+    strokeLatitude(0, 'rgba(4, 10, 14, 0.7)', 3.4);
+    strokeLatitude(0, 'rgba(238, 243, 240, 0.88)', 1.1);
+    for (let longitudeDeg = 0; longitudeDeg < 360; longitudeDeg += 45) {
+      const primary = longitudeDeg === 0 || longitudeDeg === 180;
+      strokeLongitude(
+        (longitudeDeg * Math.PI) / 180,
+        primary ? 'rgba(226, 177, 60, 0.52)' : 'rgba(219, 233, 235, 0.14)',
+        primary ? 1 : 0.55,
+      );
+    }
+
+    // Sparse printed references rotate with the sphere instead of sliding or swapping.
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.font = '700 8px ui-monospace, SFMono-Regular, Menlo, monospace';
+    for (let longitudeDeg = 0; longitudeDeg < 360; longitudeDeg += 30) {
+      const direction = horizonDirection(0, (longitudeDeg * Math.PI) / 180);
+      const projected = projectSphereComponents(direction.x, direction.y, direction.z);
+      if (projected.forward < 0.08) continue;
+      const label = longitudeDeg === 0 ? 'N' : longitudeDeg === 90 ? 'E' : longitudeDeg === 180 ? 'S' : longitudeDeg === 270 ? 'W' : `${longitudeDeg / 10}`.padStart(2, '0');
+      ctx.globalAlpha = Math.min(1, projected.forward * 3);
+      ctx.fillStyle = longitudeDeg === 0 ? '#ffd65a' : 'rgba(236, 243, 241, 0.78)';
+      ctx.fillText(label, projected.x, projected.y + 8);
+    }
+    for (const latitudeDeg of [-60, -30, 30, 60]) {
+      for (const longitudeDeg of [0, 180]) {
+        const direction = horizonDirection((latitudeDeg * Math.PI) / 180, (longitudeDeg * Math.PI) / 180);
+        const projected = projectSphereComponents(direction.x, direction.y, direction.z);
+        if (projected.forward < 0.08) continue;
+        ctx.globalAlpha = Math.min(1, projected.forward * 3);
+        ctx.fillStyle = 'rgba(236, 243, 241, 0.72)';
+        ctx.fillText(`${Math.abs(latitudeDeg)}`, projected.x + 10, projected.y);
+      }
+    }
+    const drawPole = (direction: Readonly<Vec3>, label: string) => {
+      const projected = projectSphereComponents(direction.x, direction.y, direction.z);
+      if (projected.forward < 0.01) return;
+      ctx.globalAlpha = Math.min(1, projected.forward * 4);
+      ctx.strokeStyle = 'rgba(240, 244, 241, 0.84)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(projected.x, projected.y, 3.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(240, 244, 241, 0.84)';
+      ctx.fillText(label, projected.x + 15, projected.y);
+    };
+    drawPole(up, '+90');
+    drawPole(new Vec3().copy(up).negate(), '−90');
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Glass shading creates a sphere without obscuring the flight references.
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
     ctx.clip();
-
-    // Sky/ground split with pitch offset + roll rotation.
-    ctx.translate(cx, cy);
-    ctx.rotate(roll);
-    const pitchPx = (pitch / (Math.PI / 2)) * R * 1.4;
-    ctx.fillStyle = '#2c5f7d';
-    ctx.fillRect(-W, -W * 2 + pitchPx, W * 2, W * 2); // sky
-    ctx.fillStyle = '#7d5a34';
-    ctx.fillRect(-W, pitchPx, W * 2, W * 2); // ground
-    ctx.strokeStyle = '#e8ecef';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-R, pitchPx);
-    ctx.lineTo(R, pitchPx);
-    ctx.stroke();
-    // Pitch ladder.
-    ctx.strokeStyle = 'rgba(232,236,239,0.55)';
-    ctx.fillStyle = 'rgba(232,236,239,0.8)';
-    ctx.lineWidth = 1;
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'center';
-    for (let deg = -80; deg <= 80; deg += 20) {
-      if (deg === 0) continue;
-      const y = pitchPx - (deg / 90) * R * 1.4;
-      if (Math.abs(y) > R) continue;
-      ctx.beginPath();
-      ctx.moveTo(-26, y);
-      ctx.lineTo(26, y);
-      ctx.stroke();
-      ctx.fillText(`${Math.abs(deg)}`, 38, y + 3);
-    }
+    const glass = ctx.createRadialGradient(cx - R * 0.34, cy - R * 0.42, R * 0.08, cx, cy, R);
+    glass.addColorStop(0, 'rgba(255, 255, 255, 0.13)');
+    glass.addColorStop(0.38, 'rgba(255, 255, 255, 0.015)');
+    glass.addColorStop(0.78, 'rgba(3, 8, 12, 0.08)');
+    glass.addColorStop(1, 'rgba(2, 7, 10, 0.46)');
+    ctx.fillStyle = glass;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
     ctx.restore();
 
     // Full flight marker set projected into view space.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 2, 0, Math.PI * 2);
+    ctx.clip();
+    const drawDirectionMarker = (dir: Vec3, color: string, kind: NavballIcon) => {
+      const marker = projectSphereDirection(dir);
+      const px = cx + marker.x * (R - 15);
+      const py = cy + marker.y * (R - 15);
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.globalAlpha = marker.behind ? 0.35 : 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = 'rgba(3, 9, 13, 0.9)';
+      ctx.shadowBlur = 3;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+      if (kind === 'prograde') {
+        ctx.moveTo(0, -7);
+        ctx.lineTo(0, -12);
+        ctx.moveTo(-6.1, 3.5);
+        ctx.lineTo(-10.4, 6);
+        ctx.moveTo(6.1, 3.5);
+        ctx.lineTo(10.4, 6);
+      } else {
+        ctx.moveTo(-4.2, -4.2);
+        ctx.lineTo(4.2, 4.2);
+        ctx.moveTo(4.2, -4.2);
+        ctx.lineTo(-4.2, 4.2);
+        ctx.moveTo(0, 7);
+        ctx.lineTo(0, 12);
+        ctx.moveTo(-6.1, -3.5);
+        ctx.lineTo(-10.4, -6);
+        ctx.moveTo(6.1, -3.5);
+        ctx.lineTo(10.4, -6);
+      }
+      ctx.stroke();
+      ctx.restore();
+    };
     const drawMarker = (dir: Vec3, color: string, glyph: string) => {
-      const marker = projectNavDirection(dir, nose, right, screenUp);
-      const px = cx + marker.x * R * 0.92;
-      const py = cy + marker.y * R * 0.92;
+      const marker = projectSphereDirection(dir);
+      const px = cx + marker.x * (R - 15);
+      const py = cy + marker.y * (R - 15);
       ctx.globalAlpha = marker.behind ? 0.35 : 1;
       ctx.fillStyle = color;
-      ctx.font = 'bold 16px monospace';
+      ctx.font = '700 15px ui-monospace, SFMono-Regular, Menlo, monospace';
       ctx.textAlign = 'center';
       ctx.fillText(glyph, px, py + 5);
       ctx.globalAlpha = 1;
@@ -720,8 +962,8 @@ export class FlightHud {
     }
     if (velRef.lengthSq() > 1) {
       const pro = velRef.normalize();
-      drawMarker(pro, '#c8e86b', '⊕');
-      drawMarker(new Vec3().copy(pro).negate(), '#e8a06b', '⊖');
+      drawDirectionMarker(pro, '#c8e86b', 'prograde');
+      drawDirectionMarker(new Vec3().copy(pro).negate(), '#e8a06b', 'retrograde');
     }
     const radial = v.pos.clone().normalize();
     const normal = Vec3.cross(v.pos, v.vel, new Vec3()).normalize();
@@ -742,7 +984,7 @@ export class FlightHud {
       ctx.strokeStyle = eta <= burnDuration / 2 ? '#e2b13c' : '#6bd0e8';
       ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.arc(cx, cy, R - 4, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      ctx.arc(cx, cy, R - 7, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
       ctx.stroke();
     }
     if (gv.target) {
@@ -752,46 +994,159 @@ export class FlightHud {
       targetDirection.sub(v.pos);
       if (targetDirection.lengthSq() > 1) drawMarker(targetDirection.normalize(), '#ef7dc2', 'T');
     }
+    ctx.restore();
 
-    // Bezel + heading.
-    ctx.strokeStyle = '#3a4f61';
-    ctx.lineWidth = 3;
+    // Machined bezel rings and bank-angle references.
+    ctx.strokeStyle = '#0b151c';
+    ctx.lineWidth = 9;
     ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.arc(cx, cy, R + 5, 0, Math.PI * 2);
     ctx.stroke();
-    // Center reticle.
-    ctx.strokeStyle = '#ffd75e';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#587181';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(cx - 16, cy);
-    ctx.lineTo(cx - 5, cy);
-    ctx.lineTo(cx, cy + 5);
-    ctx.lineTo(cx + 5, cy);
-    ctx.lineTo(cx + 16, cy);
+    ctx.arc(cx, cy, R + 1, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#d8e2ea';
-    ctx.font = '11px monospace';
-    ctx.textAlign = 'center';
-    const headingDeg = ((heading * 180) / Math.PI + 360) % 360;
-    ctx.fillStyle = 'rgba(6,12,18,0.88)';
-    ctx.fillRect(cx - 58, 2, 116, 24);
-    ctx.strokeStyle = '#6f8798';
-    ctx.lineWidth = 1;
-    for (let offset = -40; offset <= 40; offset += 10) {
-      const x = cx + offset * 1.15;
+
+    ctx.strokeStyle = '#8ca0ab';
+    ctx.lineCap = 'butt';
+    for (let deg = -60; deg <= 60; deg += 15) {
+      const angle = ((deg - 90) * Math.PI) / 180;
+      const outer = R - 1;
+      const inner = outer - (deg % 30 === 0 ? 9 : 5);
+      ctx.lineWidth = deg === 0 ? 1.8 : 1;
       ctx.beginPath();
-      ctx.moveTo(x, 18);
-      ctx.lineTo(x, offset % 20 === 0 ? 23 : 21);
+      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+      ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
       ctx.stroke();
     }
-    ctx.fillStyle = '#d8e2ea';
-    ctx.fillText(`${headingDeg.toFixed(0).padStart(3, '0')}°`, cx, 14);
-    // Fixed roll/level cue above the reticle.
-    ctx.strokeStyle = '#ffd75e';
+
+    // Throttle follows the left bezel: empty at the lower stop, full at the upper stop.
+    const throttleStart = (130 * Math.PI) / 180;
+    const throttleEnd = (230 * Math.PI) / 180;
+    const throttleRadius = R + 6;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(9, 18, 24, 0.92)';
+    ctx.lineWidth = 8;
     ctx.beginPath();
-    ctx.moveTo(cx - 12, cy - 25);
-    ctx.lineTo(cx, cy - 31);
-    ctx.lineTo(cx + 12, cy - 25);
+    ctx.arc(cx, cy, throttleRadius, throttleStart, throttleEnd);
     ctx.stroke();
+    ctx.strokeStyle = '#526c7b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, throttleRadius, throttleStart, throttleEnd);
+    ctx.stroke();
+    if (v.controls.throttle > 0.002) {
+      ctx.strokeStyle = '#e2b13c';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(
+        cx,
+        cy,
+        throttleRadius,
+        throttleStart,
+        throttleStart + (throttleEnd - throttleStart) * v.controls.throttle,
+      );
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#78909e';
+    ctx.lineCap = 'butt';
+    for (let step = 0; step <= 4; step++) {
+      const angle = throttleStart + ((throttleEnd - throttleStart) * step) / 4;
+      const inner = throttleRadius - 5;
+      const outer = throttleRadius + 4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+      ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+      ctx.stroke();
+    }
+    ctx.font = '7px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#78909e';
+    ctx.fillText('THR', cx - R + 24, cy + 54);
+    ctx.font = '700 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = '#e5edf0';
+    ctx.fillText(`${(v.controls.throttle * 100).toFixed(0)}%`, cx - R + 24, cy + 65);
+
+    // Center reticle.
+    ctx.strokeStyle = 'rgba(5, 8, 10, 0.72)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 21, cy);
+    ctx.lineTo(cx - 7, cy);
+    ctx.lineTo(cx, cy + 6);
+    ctx.lineTo(cx + 7, cy);
+    ctx.lineTo(cx + 21, cy);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd65a';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    // Heading tape is fixed to the case while the attitude sphere rotates below it.
+    const tapeX = cx - 64;
+    const tapeY = 29;
+    const tapeW = 128;
+    const tapeH = 29;
+    ctx.fillStyle = 'rgba(5, 12, 17, 0.95)';
+    ctx.beginPath();
+    ctx.roundRect(tapeX, tapeY, tapeW, tapeH, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#536d7c';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    for (let offset = -40; offset <= 40; offset += 10) {
+      const x = cx + offset * 1.28;
+      ctx.beginPath();
+      ctx.moveTo(x, tapeY + 20);
+      ctx.lineTo(x, tapeY + (offset % 20 === 0 ? 27 : 24));
+      ctx.stroke();
+    }
+    const headingLabel = (degrees: number) => `${Math.round(((degrees + 360) % 360) / 10) % 36}`.padStart(2, '0');
+    ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#7f99a8';
+    ctx.fillText(headingLabel(headingDeg - 30), cx - 38, tapeY + 13);
+    ctx.fillText(headingLabel(headingDeg + 30), cx + 38, tapeY + 13);
+    ctx.font = '700 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = '#d8e2ea';
+    ctx.fillText(`${headingDeg.toFixed(0).padStart(3, '0')}°`, cx, tapeY + 12);
+    ctx.fillStyle = '#ffd65a';
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, tapeY + tapeH + 1);
+    ctx.lineTo(cx + 4, tapeY + tapeH + 1);
+    ctx.lineTo(cx, tapeY + tapeH + 6);
+    ctx.closePath();
+    ctx.fill();
+
+    // Fixed roll/level cue above the reticle.
+    ctx.strokeStyle = 'rgba(5, 8, 10, 0.72)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 13, cy - 28);
+    ctx.lineTo(cx, cy - 35);
+    ctx.lineTo(cx + 13, cy - 28);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd65a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Fixed digital attitude strip: precise numbers complement the moving ladder.
+    ctx.fillStyle = 'rgba(5, 12, 17, 0.8)';
+    ctx.beginPath();
+    ctx.roundRect(cx - 74, cy + R - 29, 148, 20, 4);
+    ctx.fill();
+    ctx.font = '8px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#75909f';
+    ctx.textAlign = 'left';
+    ctx.fillText('PITCH', cx - 66, cy + R - 19);
+    ctx.fillText('ROLL', cx + 9, cy + R - 19);
+    ctx.font = '700 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = '#d8e2ea';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${pitchDeg >= 0 ? '+' : ''}${pitchDeg.toFixed(0)}°`, cx - 8, cy + R - 19);
+    ctx.fillText(`${rollDeg >= 0 ? '+' : ''}${rollDeg.toFixed(0)}°`, cx + 66, cy + R - 19);
   }
 }
