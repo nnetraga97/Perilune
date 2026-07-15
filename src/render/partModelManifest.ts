@@ -2,22 +2,25 @@ import { canonicalJson, sha256Utf8 } from './checkedManifestDigest';
 
 /** Approved runtime ceilings; mirrors scripts/lib/part-asset-schema.mjs. */
 const PART_ASSET_BUDGET_CEILINGS = Object.freeze({
-  totalTriangleLimit: 30_000,
+  totalTriangleLimit: 64_000,
   totalTransferBytes: 6 * 1024 * 1024,
   totalGpuBytes: 32 * 1024 * 1024,
 });
 
-const REFERENCE_CRAFT_TRIANGLE_LIMIT = 60_000;
+const REFERENCE_CRAFT_TRIANGLE_LIMIT = 70_000;
 
 const REFERENCE_CRAFT_COPIES: Readonly<Record<string, number>> = Object.freeze({
   'pod-voyager': 1,
-  'leg-lander': 4,
   'eng-colt': 1,
-  'ant-dish': 1,
-  'wheel-mesa': 6,
   'eng-mule': 1,
-  'tank-s4': 1,
-  'chute-main': 1,
+  'tank-m4': 2,
+  'tank-s2': 1,
+  'dec-interstage-ms': 1,
+  'fin-rudder': 4,
+  'fin-swift': 4,
+  'dec-radial': 2,
+  'srb-torch': 2,
+  'nose-s': 2,
 });
 
 const SHA256 = /^[a-f0-9]{64}$/;

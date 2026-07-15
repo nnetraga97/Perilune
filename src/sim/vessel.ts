@@ -19,6 +19,14 @@ export const G0 = 9.80665;
 
 export type AttachKind = 'root' | 'stack-top' | 'stack-bottom' | 'surface';
 
+/** Resolved one-piece interstage envelope in separator-local craft coordinates. */
+export interface InterstageShroudSpec {
+  lowerRadius: number;
+  upperRadius: number;
+  lowerY: number;
+  upperY: number;
+}
+
 export interface PartInstance {
   /** Unique within the craft. */
   key: number;
@@ -37,6 +45,8 @@ export interface PartInstance {
   activated?: boolean;
   deployed?: boolean;
   temperature?: number;
+  /** Latched before separation so the detached separator keeps its shroud. */
+  interstageShroud?: InterstageShroudSpec;
 }
 
 export interface Stage {
@@ -204,10 +214,20 @@ export function childrenOf(craft: Craft, key: number): PartInstance[] {
   return craft.parts.filter((p) => p.parentKey === key);
 }
 
-/** Build stages by attachment-tree separation level, not screen position. */
+/** Only parts with a one-shot stage action belong in the staging editor. */
+export function isStageablePart(part: PartInstance | PartDef): boolean {
+  const def = 'defId' in part ? defOf(part) : part;
+  return Boolean(def.engine || def.decoupler || def.parachute);
+}
+
+/**
+ * Build stages from the attachment graph, from the lowest serial assembly up.
+ * Radial couplings do not create a new serial depth: their engines ignite with
+ * the core at that depth, then their latches release in the following event.
+ */
 export function buildAutoStages(craft: Craft): Stage[] {
   const byKey = new Map(craft.parts.map((p) => [p.key, p]));
-  const decouplersAbove = (part: PartInstance): number => {
+  const stackSeparatorsAbove = (part: PartInstance): number => {
     let count = 0;
     let parentKey = part.parentKey;
     const visited = new Set<number>();
@@ -215,33 +235,35 @@ export function buildAutoStages(craft: Craft): Stage[] {
       visited.add(parentKey);
       const parent = byKey.get(parentKey);
       if (!parent) break;
-      if (defOf(parent).decoupler) count++;
+      const coupling = defOf(parent).decoupler;
+      if (coupling && !coupling.radial) count++;
       parentKey = parent.parentKey;
     }
     return count;
   };
-  const groups = new Map<number, { decouplers: number[]; engines: number[] }>();
+  const groups = new Map<number, { stackCouplings: number[]; engines: number[]; radialCouplings: number[] }>();
   const groupAt = (level: number) => {
     let group = groups.get(level);
     if (!group) {
-      group = { decouplers: [], engines: [] };
+      group = { stackCouplings: [], engines: [], radialCouplings: [] };
       groups.set(level, group);
     }
     return group;
   };
   for (const part of craft.parts) {
     const def = defOf(part);
-    const level = decouplersAbove(part);
+    const level = stackSeparatorsAbove(part);
     if (def.engine) groupAt(level).engines.push(part.key);
-    if (def.decoupler) groupAt(level).decouplers.push(part.key);
+    if (def.decoupler?.radial) groupAt(level).radialCouplings.push(part.key);
+    else if (def.decoupler) groupAt(level).stackCouplings.push(part.key);
   }
-  const stages = [...groups.keys()]
-    .sort((a, b) => b - a)
-    .map((level) => {
-      const group = groups.get(level)!;
-      return { partKeys: [...group.decouplers, ...group.engines] };
-    })
-    .filter((stage) => stage.partKeys.length > 0);
+  const stages: Stage[] = [];
+  for (const level of [...groups.keys()].sort((a, b) => b - a)) {
+    const group = groups.get(level)!;
+    const propulsion = [...group.stackCouplings, ...group.engines];
+    if (propulsion.length) stages.push({ partKeys: propulsion });
+    if (group.radialCouplings.length) stages.push({ partKeys: group.radialCouplings });
+  }
   const recovery = craft.parts.filter((p) => defOf(p).parachute).map((p) => p.key);
   if (recovery.length) stages.push({ partKeys: recovery });
   return stages;

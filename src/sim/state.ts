@@ -43,6 +43,7 @@ import {
 } from './bodyOrientation';
 import { launchSiteDirection } from './launchSite';
 import { preferredOrbitAltitude } from './orbitPlacement';
+import { snapshotInterstageShrouds } from './interstage';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -358,6 +359,7 @@ export class GameState {
         fired = true;
         logEvent(v, this.time, `${def.name} ignition`);
       } else if (def.decoupler) {
+        p.activated = true;
         decouplersToFire.push(p);
         fired = true;
       } else if (def.parachute) {
@@ -566,6 +568,10 @@ export class GameState {
     };
     const crewBefore = [...v.crew];
     const sourceCraft = v.craft;
+    // Partitioning severs the graph edges used to derive a fitted interstage.
+    // Latch its finite dimensions first so the one-piece separator debris keeps
+    // the same shell after staging, structural failure, or any other split path.
+    snapshotInterstageShrouds(sourceCraft);
     const sourceParts = [...sourceCraft.parts];
     const sourceStages = sourceCraft.stages;
     const sourceActionGroups = sourceCraft.actionGroups;

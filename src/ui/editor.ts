@@ -21,6 +21,7 @@ import {
   type PartAction,
   removeSubtree,
   buildAutoStages,
+  isStageablePart,
 } from '../sim/vessel';
 import { PARTS, PartDef, partById } from '../content/parts';
 import { buildAeroModel } from '../sim/aero';
@@ -29,6 +30,7 @@ import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisual
 import type { PartModelLibrary } from '../render/partModelLibrary';
 import { deleteCraftFile, listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 import { el, injectUiStyles } from './kit';
+import { BUILT_IN_CRAFTS } from '../content/crafts';
 
 interface StackNodeSpot {
   parentKey: number;
@@ -277,7 +279,9 @@ export class Editor {
     const addStage = el('button', 'hud-btn', stageBtns, '+ Stage');
     addStage.onclick = () => {
       this.pushHistory();
-      this.craft.stages.push({ partKeys: [] });
+      // stages[0] fires first and is displayed at the bottom of the stack.
+      // Insert there so existing display numbers do not change.
+      this.craft.stages.unshift({ partKeys: [] });
       this.statsDirty = true;
     };
     this.stagesEl = el('div', '', stagePanel);
@@ -285,6 +289,12 @@ export class Editor {
     const warnPanel = el('div', 'ed-panel', right);
     warnPanel.innerHTML = '<h3>ADVISOR</h3>';
     this.warningsEl = el('div', '', warnPanel);
+
+    const builtInPanel = el('div', 'ed-panel ed-built-in-panel', right);
+    builtInPanel.innerHTML = '<h3>BUILT-IN CRAFT</h3>';
+    const builtInList = el('div', 'ed-craft-list', builtInPanel);
+    builtInList.dataset.section = 'built-in-crafts';
+    this.renderBuiltInCraftList(builtInList);
 
     const craftPanel = el('div', 'ed-panel', right);
     craftPanel.innerHTML = '<h3>SAVED CRAFT</h3>';
@@ -298,6 +308,28 @@ export class Editor {
       'drag parts to build · drag stage chips to reorder · Ctrl+Z/Y history · C angle snap · X symmetry · ? controls',
     );
     return utilityHost;
+  }
+
+  private renderBuiltInCraftList(parent: HTMLElement): void {
+    for (const definition of BUILT_IN_CRAFTS) {
+      const craft = definition.create();
+      const row = el('div', 'ed-craft-item ed-built-in-craft', parent);
+      row.dataset.craftId = definition.id;
+      const copy = el('div', 'ed-craft-copy', row);
+      el('strong', '', copy, definition.name);
+      const analysis = analyzeCraft(craft, 9.42, 101_325);
+      el('span', '', copy, `${craft.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
+      const load = el('button', 'hud-btn', row, 'Load');
+      load.setAttribute('aria-label', `Load built-in craft ${definition.name}`);
+      load.title = definition.description;
+      load.onclick = () => this.loadCraft(definition.create());
+    }
+  }
+
+  private loadCraft(craft: Craft): void {
+    this.pushHistory();
+    this.restoreCraftSnapshot(craft);
+    this.fitCamera();
   }
 
   private async refreshCraftList(): Promise<void> {
@@ -316,14 +348,7 @@ export class Editor {
       loadBtn.title = `Load ${name}`;
       loadBtn.onclick = async () => {
         const c = await readCraftFile(name);
-        if (c) {
-          this.pushHistory();
-          this.craft = c;
-          this.nameInput.value = c.name;
-          this.selectedKey = null;
-          this.statsDirty = true;
-          this.rebuildVisual();
-        }
+        if (c) this.loadCraft(c);
       };
       const duplicate = el('button', 'k-window-btn', row, '⧉');
       duplicate.title = 'Duplicate';
@@ -1026,7 +1051,10 @@ export class Editor {
       this.selectionHelper.geometry.dispose();
       this.selectionHelper = null;
     }
-    if (this.visual) this.scene.remove(this.visual.group);
+    if (this.visual) {
+      this.scene.remove(this.visual.group);
+      disposeVesselVisual(this.visual);
+    }
     this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
     const canLaunch = this.craft.parts.length > 0;
@@ -1144,7 +1172,9 @@ export class Editor {
     el('div', 'ed-stage-title', unstaged, 'UNSTAGED');
     const unstagedParts = el('div', 'ed-stage-parts', unstaged);
     this.addStageDropTarget(unstaged, null);
-    for (const part of this.craft.parts.filter((candidate) => !assigned.has(candidate.key))) {
+    for (const part of this.craft.parts.filter((candidate) => (
+      isStageablePart(candidate) && !assigned.has(candidate.key)
+    ))) {
       this.renderStagePart(unstagedParts, part);
     }
     [...this.craft.stages].map((stage, index) => ({ stage, index })).reverse().forEach(({ stage, index: i }) => {
@@ -1166,11 +1196,15 @@ export class Editor {
         this.statsDirty = true;
       };
       const parts = el('div', 'ed-stage-parts', div);
+      let renderedParts = 0;
       for (const key of stage.partKeys) {
         const part = craftPart(this.craft, key);
-        if (part) this.renderStagePart(parts, part);
+        if (part && isStageablePart(part)) {
+          this.renderStagePart(parts, part);
+          renderedParts++;
+        }
       }
-      if (!stage.partKeys.length) el('span', 'ed-part-info', parts, 'drop staged parts here');
+      if (!renderedParts) el('span', 'ed-part-info', parts, 'drop staged parts here');
     });
   }
 
@@ -1201,6 +1235,8 @@ export class Editor {
       if (rawPart) {
         const key = Number(rawPart);
         if (!Number.isInteger(key)) return;
+        const part = craftPart(this.craft, key);
+        if (!part || !isStageablePart(part)) return;
         this.pushHistory();
         for (const stage of this.craft.stages) stage.partKeys = stage.partKeys.filter((candidate) => candidate !== key);
         if (targetIndex !== null) this.craft.stages[targetIndex].partKeys.push(key);

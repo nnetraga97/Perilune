@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "budgets": {
-    "totalTriangleLimit": 30000,
+    "totalTriangleLimit": 64000,
     "totalTransferBytes": 6291456,
     "totalGpuBytes": 33554432
   },
@@ -145,6 +145,128 @@
       "visualBounds": {
         "min": [-0.306, -0.179, -0.306],
         "max": [0.306, 0.179, 0.306]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-tank-mule",
+      "partId": "tank-m4",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-tank-mule.glb",
+      "outputPath": "generated/procedural-tank-mule.glb",
+      "triangleLimit": 9000,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.275, -0.97, -1.275],
+        "max": [1.275, 0.97, 1.275]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-tank-pod",
+      "partId": "tank-s2",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-tank-pod.glb",
+      "outputPath": "generated/procedural-tank-pod.glb",
+      "triangleLimit": 9000,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.615, -0.92, -0.615],
+        "max": [0.615, 0.92, 0.615]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-separator",
+      "partId": "dec-interstage-ms",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-separator.glb",
+      "outputPath": "generated/procedural-separator.glb",
+      "triangleLimit": 6500,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.275, -0.09, -1.275],
+        "max": [1.275, 0.09, 1.275]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-fin-mule",
+      "partId": "fin-rudder",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-fin-mule.glb",
+      "outputPath": "generated/procedural-fin-mule.glb",
+      "triangleLimit": 800,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.12, -0.71, -0.42],
+        "max": [0.12, 0.71, 0.42]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-fin-pod",
+      "partId": "fin-swift",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-fin-pod.glb",
+      "outputPath": "generated/procedural-fin-pod.glb",
+      "triangleLimit": 800,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.08, -0.41, -0.25],
+        "max": [0.08, 0.41, 0.25]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-radial-decoupler",
+      "partId": "dec-radial",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-radial-decoupler.glb",
+      "outputPath": "generated/procedural-radial-decoupler.glb",
+      "triangleLimit": 1800,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.16, -0.34, -0.13],
+        "max": [0.16, 0.31, 0.13]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-srb-torch",
+      "partId": "srb-torch",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-srb-torch.glb",
+      "outputPath": "generated/procedural-srb-torch.glb",
+      "triangleLimit": 4200,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.615, -2.72, -0.615],
+        "max": [0.615, 2.72, 0.615]
+      },
+      "plumeAnchors": [
+        { "position": [0, -2.7, 0], "rotation": [0, 0, 0, 1], "scale": 1 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "procedural-srb-nose-cone",
+      "partId": "nose-s",
+      "authoredInProject": true,
+      "authoringPath": "authoring/procedural-srb-nose-cone.glb",
+      "outputPath": "generated/procedural-srb-nose-cone.glb",
+      "triangleLimit": 1800,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.625, -0.66, -0.625],
+        "max": [0.625, 0.66, 0.625]
       },
       "plumeAnchors": [],
       "animationPolicy": "none"

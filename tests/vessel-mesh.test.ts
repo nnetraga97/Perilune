@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { addPart, createCraft } from '../src/sim/vessel';
 import { PARTS, partById } from '../src/content/parts';
-import { buildVesselVisual } from '../src/render/vesselMesh';
+import { buildVesselVisual, disposeVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import type { PartModelLibrary, InstantiatedPartModel } from '../src/render/partModelLibrary';
 import type { PartEffectAnchor } from '../src/render/partModelManifest';
 
@@ -15,11 +15,21 @@ const EXPECTED_MODEL_IDS: Record<string, string> = {
   'eng-mule': 'shuttle-mule-engine',
   'tank-s4': 'shuttle-pl400-tank',
   'chute-main': 'orion-homecoming-housing',
+  'tank-m4': 'procedural-tank-mule',
+  'tank-s2': 'procedural-tank-pod',
+  'dec-m': 'procedural-separator',
+  'dec-interstage-ms': 'procedural-separator',
+  'fin-rudder': 'procedural-fin-mule',
+  'fin-swift': 'procedural-fin-pod',
+  'dec-radial': 'procedural-radial-decoupler',
+  'srb-torch': 'procedural-srb-torch',
+  'nose-s': 'procedural-srb-nose-cone',
 };
 
 const ANCHOR_COUNTS: Record<string, number> = {
   'shuttle-mule-engine': 3,
   'apollo-colt-engine': 1,
+  'procedural-srb-torch': 1,
 };
 
 function anchor(): PartEffectAnchor {
@@ -52,7 +62,7 @@ function meshCount(object: THREE.Object3D): number {
 }
 
 describe('part definitions', () => {
-  it('carry the exact model IDs and only on the eight scoped parts', () => {
+  it('carry the exact model IDs and only on checked-model parts', () => {
     for (const [partId, assetId] of Object.entries(EXPECTED_MODEL_IDS)) {
       expect(partById(partId)?.modelAssetId).toBe(assetId);
     }
@@ -113,5 +123,29 @@ describe('buildVesselVisual', () => {
     const visual = buildVesselVisual(craft);
     expect(visual.partMeshes.get(eng.key)!.userData.visualSource).toBe('procedural');
     expect(visual.plumes.get(eng.key)!.children).toHaveLength(1);
+  });
+
+  it('renders a layered SRB flame at full power even when vessel throttle is zero', () => {
+    const craft = createCraft('solid');
+    const booster = addPart(craft, 'srb-flare', null, 'root', { x: 0, y: 0, z: 0 });
+    booster.activated = true;
+    const visual = buildVesselVisual(craft);
+
+    syncVesselVisual(visual, craft, 0, 1, 1 / 30);
+
+    const plume = visual.plumes.get(booster.key)!;
+    const nozzle = plume.children[0];
+    const flame = nozzle.userData.flameGroup as THREE.Group;
+    expect(plume.visible).toBe(true);
+    expect(plume.userData.burning).toBe(true);
+    expect(flame.children).toHaveLength(3);
+    expect(flame.children.every((child) => child instanceof THREE.Mesh)).toBe(true);
+    for (const child of flame.children) {
+      const mesh = child as THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+      expect(mesh.renderOrder).toBeGreaterThan(40);
+      expect(mesh.material.vertexShader).toContain('#include <logdepthbuf_vertex>');
+      expect(mesh.material.fragmentShader).toContain('#include <logdepthbuf_fragment>');
+    }
+    disposeVesselVisual(visual);
   });
 });

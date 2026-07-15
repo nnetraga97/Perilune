@@ -34,6 +34,7 @@ import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { checkPlanetManifest, PlanetAssetLoader, type CheckedPlanetManifest } from './planetAssetLoader';
 import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
+import { SrbSmokePool } from './srbSmoke';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -56,12 +57,18 @@ const _craftUp = new Vec3();
 const _chaseForward = new Vec3();
 const _chaseRight = new Vec3();
 const _cameraFromBody = new Vec3();
+const _cameraBodyRelative = new Vec3();
 const _freeUp = new Vec3(0, 0, 1);
 const _cameraVelocity = new Vec3();
 const _renderOffset = new THREE.Vector3();
 const _previousCameraRotation = new THREE.Quaternion();
 const _targetCameraRotation = new THREE.Quaternion();
 const _skyColor = new THREE.Color();
+const _smokeNozzleRelative = new THREE.Vector3();
+const _smokeNozzleBodyRelative = new THREE.Vector3();
+const _smokeDirection = new THREE.Vector3();
+const _smokeUp = new THREE.Vector3();
+const _smokeQuaternion = new THREE.Quaternion();
 interface MutableVectorCoordinates { x: number; y: number; z: number }
 interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: number }
 interface MutableBodyRenderFrame {
@@ -167,6 +174,7 @@ export class WorldScene {
   private readonly checkedPlanetManifest: CheckedPlanetManifest;
   private readonly planetAssetLoader: PlanetAssetLoader;
   private vesselVisuals = new Map<string, VesselVisual>();
+  private readonly srbSmoke: SrbSmokePool;
   private readonly launchSite: THREE.Group;
   private quality: QualityTier;
   private readonly diagnostics: RenderDiagnosticsPort;
@@ -183,6 +191,7 @@ export class WorldScene {
   private readonly renderSet = new Set<string>();
   private readonly sampledBodyIds = new Set<string>();
   private readonly considerBodies: Body[] = [];
+  private effectTime = 0;
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -239,6 +248,7 @@ export class WorldScene {
   ) {
     this.quality = options.quality;
     this.diagnostics = options.diagnostics;
+    this.srbSmoke = new SrbSmokePool(this.quality);
     this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
     this.diagnostics.record({
       subsystem: 'renderer',
@@ -282,6 +292,7 @@ export class WorldScene {
     this.scene.add(this.starfield);
     this.launchSite = this.buildLaunchSite();
     this.scene.add(this.launchSite);
+    this.scene.add(this.srbSmoke.points);
     this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
     this.scene.add(this.ambient);
   }
@@ -310,6 +321,7 @@ export class WorldScene {
       ? q
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
     this.quality = tier;
+    this.srbSmoke?.setQuality(tier);
     for (const [bodyId, manager] of this.bodyRendererManagers) {
       if (manager.current()?.quality === tier) continue;
       void manager.replaceQuality(tier).then(() => {
@@ -340,6 +352,9 @@ export class WorldScene {
   }
 
   qualityTier(): QualityTier { return this.quality; }
+
+  /** Read-only diagnostics probe for the single pooled SRB smoke draw call. */
+  smokeParticleCount(): number { return this.srbSmoke.particleCount(); }
 
   renderStats(): Readonly<WorldRendererStats> {
     const body = this.planetStats();
@@ -564,6 +579,18 @@ export class WorldScene {
     return group ? group.children.length : 0;
   }
 
+  /** Read-only live effect state used by browser regressions and diagnostics. */
+  plumeStateForPart(key: number): { visible: boolean; burning: boolean; power: number } | null {
+    if (this.activeVesselId === null) return null;
+    const group = this.vesselVisuals.get(this.activeVesselId)?.plumes.get(key);
+    if (!group) return null;
+    return {
+      visible: group.visible,
+      burning: group.userData.burning === true,
+      power: Number(group.userData.power ?? 0),
+    };
+  }
+
   /** Drop visuals of vessels that no longer exist. */
   private pruneVessels(game: GameState): void {
     const alive = new Set(game.vessels.map((v) => v.runtime.id));
@@ -594,6 +621,7 @@ export class WorldScene {
     }
     this.vesselVisuals.clear();
     this.activeVesselId = null;
+    this.srbSmoke.clear();
     this.lastBodyFrames.clear();
     this.setFlightTerrainOwner(null);
   }
@@ -602,12 +630,13 @@ export class WorldScene {
    * Update the whole scene for this frame.
    * Returns the camera's absolute position for other systems (map etc).
    */
-  update(game: GameState, dt: number): void {
+  update(game: GameState, dt: number, smokeDt = dt): void {
     const active = game.active;
     this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
       this.setFlightTerrainOwner(null);
       this.lastBodyFrames?.clear();
+      this.srbSmoke?.clear();
       return;
     }
     const v = active.runtime;
@@ -679,6 +708,13 @@ export class WorldScene {
     game.universe.absolutePosition(body, t, _bodyAbs);
     _vesselAbs.copy(_bodyAbs).add(v.pos);
     _camAbs.copy(_vesselAbs).add(camOffset);
+    _cameraBodyRelative.copy(v.pos).add(camOffset);
+    this.effectTime += Math.min(1 / 15, Math.max(0, dt));
+    // Keep near-vessel particles in the active body's inertial frame. Root-frame
+    // orbital velocity is common to both camera and craft, and retaining it in
+    // the particle integrator magnifies a dropped frame into kilometre-scale
+    // smoke jumps.
+    this.srbSmoke.beginFrame(smokeDt, _cameraBodyRelative);
 
     // Keep star direction in f64 until the final camera-relative conversion.
     game.universe.absolutePosition(game.universe.root, t, _starAbs);
@@ -802,15 +838,16 @@ export class WorldScene {
     this.pruneVessels(game);
     for (const gv of game.vessels) {
       const rv = gv.runtime;
+      const vesselBody = this.bodyOf(game, gv);
       const sameSystem = rv.bodyId === v.bodyId;
       if (!sameSystem && gv !== active) continue; // render only local vessels
       const vis = this.visualFor(gv);
       if (gv.regime === 'rails' && gv !== active) {
         game.railsPosition(gv, _tmp);
-        game.universe.absolutePosition(this.bodyOf(game, gv), t, _bodyAbs);
+        game.universe.absolutePosition(vesselBody, t, _bodyAbs);
         _vesselAbs.copy(_bodyAbs).add(_tmp);
       } else {
-        game.universe.absolutePosition(this.bodyOf(game, gv), t, _bodyAbs);
+        game.universe.absolutePosition(vesselBody, t, _bodyAbs);
         _vesselAbs.copy(_bodyAbs).add(rv.pos);
       }
       Vec3.sub(_vesselAbs, _camAbs, _rel);
@@ -830,10 +867,20 @@ export class WorldScene {
 
       const pressureFrac = Math.min(
         1,
-        this.bodyOf(game, gv).pressureAt(rv.pos.length() - this.bodyOf(game, gv).radius) / 101_325,
+        vesselBody.pressureAt(rv.pos.length() - vesselBody.radius) / 101_325,
       );
-      syncVesselVisual(vis, rv.craft, rv.controls.throttle, pressureFrac, dt, rv.crossfeedIndex);
+      syncVesselVisual(
+        vis,
+        rv.craft,
+        rv.controls.throttle,
+        pressureFrac,
+        dt,
+        rv.crossfeedIndex,
+        this.effectTime,
+      );
+      this.emitSrbSmoke(gv, vis, pressureFrac, rv.vel);
     }
+    this.srbSmoke.endFrame();
 
     // ---- camera orientation: look at the active vessel.
     const previousCameraRotation = _previousCameraRotation.copy(this.camera.quaternion);
@@ -869,6 +916,43 @@ export class WorldScene {
     return game.universe.get(gv.runtime.bodyId);
   }
 
+  private emitSrbSmoke(
+    gv: GameVessel,
+    visual: VesselVisual,
+    pressureFrac: number,
+    inheritedVelocity: Readonly<Vec3>,
+  ): void {
+    const burningGroups = [...visual.plumes.entries()].filter(([, group]) => (
+      group.userData.solid === true && group.userData.burning === true
+    ));
+    if (burningGroups.length === 0) return;
+    visual.group.updateMatrixWorld(true);
+    const radial = gv.runtime.pos;
+    _smokeUp.set(radial.x, radial.y, radial.z).normalize();
+    for (const [partKey, group] of burningGroups) {
+      for (let nozzleIndex = 0; nozzleIndex < group.children.length; nozzleIndex++) {
+        const nozzle = group.children[nozzleIndex];
+        nozzle.getWorldPosition(_smokeNozzleRelative);
+        _smokeNozzleBodyRelative.set(
+          _smokeNozzleRelative.x + _cameraBodyRelative.x,
+          _smokeNozzleRelative.y + _cameraBodyRelative.y,
+          _smokeNozzleRelative.z + _cameraBodyRelative.z,
+        );
+        nozzle.getWorldQuaternion(_smokeQuaternion);
+        _smokeDirection.set(0, -1, 0).applyQuaternion(_smokeQuaternion).normalize();
+        this.srbSmoke.emit({
+          emitterId: `${gv.runtime.id}:${partKey}:${nozzleIndex}`,
+          position: _smokeNozzleBodyRelative,
+          direction: _smokeDirection,
+          inheritedVelocity,
+          up: _smokeUp,
+          pressureFrac,
+          plumeScale: Number(nozzle.userData.baseScale ?? 1),
+        });
+      }
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.diagnostics.record({
@@ -897,6 +981,8 @@ export class WorldScene {
       disposeVesselVisual(visual);
     }
     this.vesselVisuals.clear();
+    this.scene.remove(this.srbSmoke.points);
+    this.srbSmoke.dispose();
     disposeOwnedGroup(this.launchSite);
     this.starfield.geometry.dispose();
     const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];

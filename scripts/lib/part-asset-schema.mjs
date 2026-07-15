@@ -5,12 +5,12 @@ import { canonicalJson, sha256Bytes } from './canonical-json.mjs';
 export { canonicalJson } from './canonical-json.mjs';
 
 export const PART_ASSET_BUDGET_CEILINGS = Object.freeze({
-  totalTriangleLimit: 30_000,
+  totalTriangleLimit: 64_000,
   totalTransferBytes: 6 * 1024 * 1024,
   totalGpuBytes: 32 * 1024 * 1024,
 });
 
-export const REFERENCE_CRAFT_TRIANGLE_LIMIT = 60_000;
+export const REFERENCE_CRAFT_TRIANGLE_LIMIT = 70_000;
 
 const PART_TEXTURE_LIMITS = Object.freeze({
   'pod-voyager': 1024,
@@ -21,19 +21,30 @@ const PART_TEXTURE_LIMITS = Object.freeze({
   'eng-mule': 512,
   'tank-s4': 1024,
   'chute-main': 512,
+  'tank-m4': 512,
+  'tank-s2': 512,
+  'dec-interstage-ms': 512,
+  'fin-rudder': 512,
+  'fin-swift': 512,
+  'dec-radial': 512,
+  'srb-torch': 512,
+  'nose-s': 512,
 });
 
 const SCOPED_PART_IDS = new Set(Object.keys(PART_TEXTURE_LIMITS));
 
 const REFERENCE_CRAFT_COPIES = Object.freeze({
   'pod-voyager': 1,
-  'leg-lander': 4,
   'eng-colt': 1,
-  'ant-dish': 1,
-  'wheel-mesa': 6,
   'eng-mule': 1,
-  'tank-s4': 1,
-  'chute-main': 1,
+  'tank-m4': 2,
+  'tank-s2': 1,
+  'dec-interstage-ms': 1,
+  'fin-rudder': 4,
+  'fin-swift': 4,
+  'dec-radial': 2,
+  'srb-torch': 2,
+  'nose-s': 2,
 });
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -142,7 +153,13 @@ function validateRecipe(recipe, sourceIds, errors) {
   const recipeSourceIds = Array.isArray(recipe?.sourceIds)
     ? recipe.sourceIds
     : typeof recipe?.sourceId === 'string' ? [recipe.sourceId] : [];
-  if (recipeSourceIds.length === 0) errors.push(`${label} must reference at least one sourceId`);
+  const authoredInProject = recipe?.authoredInProject === true;
+  if (recipeSourceIds.length === 0 && !authoredInProject) {
+    errors.push(`${label} must reference at least one sourceId or declare authoredInProject`);
+  }
+  if (recipeSourceIds.length > 0 && authoredInProject) {
+    errors.push(`${label} cannot combine sourceIds with authoredInProject`);
+  }
   for (const sourceId of recipeSourceIds) {
     requireIdentifier(sourceId, `${label} sourceId`, errors);
     if (!sourceIds.has(sourceId)) errors.push(`${label} references unknown sourceId ${sourceId}`);

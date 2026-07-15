@@ -11,7 +11,8 @@
  */
 import type { Vec3Like } from '../core/vec3';
 import type { QuatLike } from '../core/quat';
-import type { ActionGroups, Craft, Stage, PartInstance } from '../sim/vessel';
+import type { ActionGroups, Craft, Stage, PartInstance, InterstageShroudSpec } from '../sim/vessel';
+import { sanitizeInterstageShroudSpec } from '../sim/interstage';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 
@@ -46,6 +47,7 @@ export interface SavedPart {
   activated?: boolean;
   deployed?: boolean;
   temperature?: number;
+  interstageShroud?: InterstageShroudSpec;
 }
 
 export interface SavedCraft {
@@ -139,6 +141,7 @@ export function validateSave(raw: unknown): raw is SaveGame {
     for (const p of v.craft.parts) {
       if (typeof p.defId !== 'string' || typeof p.key !== 'number') return false;
       if (!p.position || !Number.isFinite(p.position.x)) return false;
+      if (p.interstageShroud !== undefined && !sanitizeInterstageShroudSpec(p.interstageShroud)) return false;
     }
     if (!v.pos || !Number.isFinite(v.pos.x) || !Number.isFinite(v.vel?.x ?? NaN)) return false;
     if ((s.saveVersion ?? 0) >= 4) {

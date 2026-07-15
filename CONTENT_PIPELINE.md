@@ -92,12 +92,14 @@ Public-Domain, and CC-BY-4.0. NASA/JPL records require the additional case
 review fields enforced by the validator. SA, NC, ND, unknown, and ambiguous
 licenses fail validation.
 
-## NASA-style part models
+## Checked part models
 
-Eight parts (`pod-voyager`, `leg-lander`, `eng-colt`, `ant-dish`, `wheel-mesa`,
-`eng-mule`, `tank-s4`, `chute-main`) render an optional checked model on top of
-their guaranteed procedural fallback. The authoring path is explicit and never
-runs during `prebuild`:
+Sixteen parts render an optional checked model on top of their guaranteed
+procedural fallback. The original imported set is `pod-voyager`, `leg-lander`,
+`eng-colt`, `ant-dish`, `wheel-mesa`, `eng-mule`, `tank-s4`, and `chute-main`.
+The in-project authored set is `tank-m4`, `tank-s2`, `dec-interstage-ms`,
+`fin-rudder`, `fin-swift`, `dec-radial`, `srb-torch`, and `nose-s`. The
+authoring path is explicit and never runs during `prebuild`:
 
 ```bash
 npm run fetch:part-sources
@@ -109,8 +111,9 @@ npm run build
 
 `fetch:part-sources` downloads each checksum-pinned NASA-3D-Resources source to
 the ignored `assets/parts/sources/` directory and verifies its SHA-256 before
-use; those downloads are never committed. The reviewed Blender intermediates in
-`assets/parts/authoring/*.glb` and the compiled runtime assets in
+use; those downloads are never committed. In-project assets instead declare
+`authoredInProject: true` and cannot also claim an imported `sourceId`. The
+reviewed Blender intermediates in `assets/parts/authoring/*.glb` and the compiled runtime assets in
 `assets/parts/generated/*.glb` **are** committed, along with the opaque
 `src/generated/checked-part-manifest.json` boundary that the runtime validates
 and brands before loading. `sync:renderer-assets` copies only checksum-verified
