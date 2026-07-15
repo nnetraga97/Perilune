@@ -131,6 +131,8 @@ export class LegacyBodyRenderer implements BodyRenderer {
           {
             verticalFovRadians: frame.verticalFovRadians,
             drawingBufferHeight: frame.drawingBufferHeight,
+            viewDirectionBodyFixed: frame.cameraViewDirectionBodyFixed,
+            bodyFixedFrustum: frame.bodyFixedFrustum,
             deltaSeconds: frame.deltaSeconds,
             framePressure: frame.framePressure,
           },

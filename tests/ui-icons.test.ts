@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ICON_PATHS, UTILITY_ICON_NAMES } from '../src/ui/icons';
+import { ICON_PATHS, NAVBALL_ICON_NAMES, NAVBALL_ICON_PATHS, UTILITY_ICON_NAMES } from '../src/ui/icons';
 
 const kitSource = readFileSync(new URL('../src/ui/kit.ts', import.meta.url), 'utf8');
 
@@ -34,5 +34,14 @@ describe('utility icon registry', () => {
     );
     expect(kitSource).toMatch(/\.hud-events\s*\{[^}]*top:\s*88px;/s);
     expect(kitSource).toMatch(/@media \(max-width:820px\), \(pointer:coarse\)\s*\{[\s\S]*?\.k-icon-btn\s*\{[^}]*width:42px;[^}]*height:42px;/);
+  });
+});
+
+describe('navball direction icon registry', () => {
+  it('provides distinct vector symbols for prograde and retrograde', () => {
+    expect(NAVBALL_ICON_NAMES).toEqual(['prograde', 'retrograde']);
+    expect(NAVBALL_ICON_PATHS.prograde.length).toBeGreaterThan(0);
+    expect(NAVBALL_ICON_PATHS.retrograde.length).toBeGreaterThan(NAVBALL_ICON_PATHS.prograde.length);
+    expect(NAVBALL_ICON_PATHS.retrograde).not.toEqual(NAVBALL_ICON_PATHS.prograde);
   });
 });

@@ -33,6 +33,11 @@ describe('terrain LOD transition state', () => {
     pressure.request(request('split'));
     expect(pressure.advance(0.1, true, 1)[0].progress).toBeCloseTo(0.5, 12);
     expect(pressure.advance(0.1, true, 2)[0].state).toBe('release-pending');
+
+    const configured = new TerrainLodTransitionManager(1, 0.5);
+    configured.request(request('split'));
+    expect(configured.advance(0.25, false, 1)[0].progress).toBeCloseTo(0.25, 12);
+    expect(configured.advance(0.125, true, 2)[0].progress).toBeCloseTo(0.5, 12);
   });
 
   it('reverses from current progress while retaining transition identity', () => {

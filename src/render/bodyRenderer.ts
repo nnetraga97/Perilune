@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BodyRendererKind } from '../content/bodyVisuals';
+import type { BodyFixedFrustumPlane } from './terrain/terrainFrustum';
 
 export type QualityTier = 'low' | 'medium' | 'high';
 
@@ -20,6 +21,10 @@ export interface QuaternionCoordinates extends VectorCoordinates { readonly w: n
 export interface BodyRenderFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
   readonly cameraBodyFixed: VectorCoordinates;
+  /** Camera forward direction in rotating body-fixed coordinates. */
+  readonly cameraViewDirectionBodyFixed?: VectorCoordinates;
+  /** Finalized camera frustum expressed in rotating body-fixed coordinates. */
+  readonly bodyFixedFrustum?: readonly BodyFixedFrustumPlane[];
   /**
    * Active surface focus in rotating body-fixed coordinates. Near-surface
    * fallbacks use this authority instead of assuming the reference radius is
@@ -61,6 +66,9 @@ export interface BodyRendererStats {
   /** Terrain worker scheduling and chunk-install cost (ms) for the perf overlay. */
   readonly terrainScheduleMs?: number;
   readonly terrainInstallMs?: number;
+  readonly terrainSelectionMs?: number;
+  readonly terrainBalanceMs?: number;
+  readonly terrainSelectionReused?: boolean;
   /** Renderer-owned surface resource bytes by category. */
   readonly scatterBytes?: number;
   readonly effectBytes?: number;

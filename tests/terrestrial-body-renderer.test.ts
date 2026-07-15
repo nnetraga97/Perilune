@@ -73,7 +73,7 @@ describe('TerrestrialBodyRenderer integration', () => {
     renderer.dispose();
   });
 
-  it('reports the existing compact-to-terrain presentation without changing its result', () => {
+  it('reports the existing compact-to-terrain presentation without changing its result', async () => {
     let now = 0;
     const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => now++ });
     const veyra = body('veyra');
@@ -81,9 +81,13 @@ describe('TerrestrialBodyRenderer integration', () => {
       body: veyra, caps, quality: 'medium', diagnostics,
     }) as TerrestrialBodyRenderer;
     const approach = { cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 }, altitude: 1_000 };
-    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    await vi.waitFor(() => {
+      renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+      const states = diagnostics.snapshot().entries
+        .filter((entry) => entry.event === 'presentation-state')
+        .map((entry) => entry.data.state);
+      expect(states).toContain('fading');
+    }, { timeout: 2_000, interval: 10 });
     renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0.35 }));
     const states = diagnostics.snapshot().entries
       .filter((entry) => entry.event === 'presentation-state')

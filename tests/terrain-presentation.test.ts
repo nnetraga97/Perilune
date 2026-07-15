@@ -50,17 +50,18 @@ describe('shared terrain presentation band', () => {
     expect(band.orbitalAltitude).toBeGreaterThan(band.prewarmAltitude);
   });
 
-  it('keeps Veyra on its compact globe in orbit and enables terrain on approach', () => {
+  it('keeps Veyra on its compact globe in orbit and enables terrain on approach', async () => {
     const candidate = body('veyra');
     const band = terrainPresentationBand(candidate);
     const renderer = new TerrestrialBodyRenderer(candidate, bodyMaterialDescriptor(candidate), caps, 'medium');
     renderer.update(frame(candidate, band.orbitalAltitude));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
     expect(renderer.root.getObjectByName('terrestrial-compact:veyra')?.visible).toBe(true);
-    renderer.update(frame(candidate, band.visibleAltitude - 1));
-    renderer.update(frame(candidate, band.visibleAltitude - 1));
-    renderer.update(frame(candidate, band.visibleAltitude - 1));
-    renderer.update({ ...frame(candidate, band.visibleAltitude - 1), deltaSeconds: 0.35 });
+    await vi.waitFor(() => {
+      renderer.update(frame(candidate, band.visibleAltitude - 1));
+      renderer.update({ ...frame(candidate, band.visibleAltitude - 1), deltaSeconds: 0.35 });
+      expect(renderer.stats().terrainActive).toBe(true);
+    }, { timeout: 2_000, interval: 10 });
     expect(renderer.stats().terrainActive).toBe(true);
     renderer.dispose();
   });

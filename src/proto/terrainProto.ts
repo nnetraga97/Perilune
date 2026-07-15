@@ -17,6 +17,7 @@ import { createRenderContext } from '../render/context';
 import { PerfOverlay } from '../ui/perfOverlay';
 import { makeStarfield } from '../render/starfield';
 import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
+import { bodyFixedFrustumPlanes, type BodyFixedFrustumPlane } from '../render/terrain/terrainFrustum';
 
 export async function runTerrainProto(): Promise<void> {
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -56,6 +57,10 @@ export async function runTerrainProto(): Promise<void> {
   const originWorld = new Vec3();
   const up = new THREE.Vector3();
   const lookTarget = new THREE.Vector3();
+  const viewThree = new THREE.Vector3();
+  const viewWorld = new Vec3();
+  const viewBodyFixed = new Vec3();
+  const frustumScratch: BodyFixedFrustumPlane[] = [];
 
   const start = performance.now();
   let last = start;
@@ -91,10 +96,6 @@ export async function runTerrainProto(): Promise<void> {
 
     // Floating origin: camera at scene origin; planet center at -camPos.
     originWorld.set(-camPos.x, -camPos.y, -camPos.z);
-    planet.update(camBodyFixed, bodyOrientation(veyra, t, bodyQ), originWorld);
-    perf.setExtra('chunks', planet.stats.visible);
-    perf.setExtra('alt', `${(alt / 1000).toFixed(2)} km`);
-    perf.endSim(simStart);
 
     // Aim: during descent look ahead along travel; when low, look at horizon.
     camera.position.set(0, 0, 0);
@@ -109,6 +110,30 @@ export async function runTerrainProto(): Promise<void> {
     );
     camera.up.copy(up);
     camera.lookAt(lookTarget);
+    camera.updateMatrixWorld(true);
+    camera.getWorldDirection(viewThree);
+    viewWorld.set(viewThree.x, viewThree.y, viewThree.z);
+    inertialToBodyFixed(veyra, t, viewWorld, viewBodyFixed).normalize();
+    bodyOrientation(veyra, t, bodyQ);
+    const frustum = bodyFixedFrustumPlanes(camera, bodyQ, originWorld, frustumScratch);
+    planet.update(
+      camBodyFixed,
+      bodyQ,
+      originWorld,
+      { x: 0, y: 0, z: 0 },
+      { terrainRequested: true },
+      {
+        verticalFovRadians: THREE.MathUtils.degToRad(camera.fov),
+        drawingBufferHeight: renderer.domElement.height,
+        viewDirectionBodyFixed: viewBodyFixed,
+        bodyFixedFrustum: frustum,
+        deltaSeconds: Math.min(0.1, dtMs / 1_000),
+        framePressure: dtMs > 33,
+      },
+    );
+    perf.setExtra('chunks', planet.stats.visible);
+    perf.setExtra('alt', `${(alt / 1000).toFixed(2)} km`);
+    perf.endSim(simStart);
 
     const renderStart = performance.now();
     renderer.render(scene, camera);

@@ -35,6 +35,7 @@ import { checkPlanetManifest, PlanetAssetLoader, type CheckedPlanetManifest } fr
 import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { SrbSmokePool } from './srbSmoke';
+import { bodyFixedFrustumPlanes, type BodyFixedFrustumPlane } from './terrain/terrainFrustum';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -60,6 +61,9 @@ const _cameraFromBody = new Vec3();
 const _cameraBodyRelative = new Vec3();
 const _freeUp = new Vec3(0, 0, 1);
 const _cameraVelocity = new Vec3();
+const _cameraViewDirectionBF = new Vec3();
+const _cameraForwardThree = new THREE.Vector3();
+const _cameraForwardWorld = new Vec3();
 const _renderOffset = new THREE.Vector3();
 const _previousCameraRotation = new THREE.Quaternion();
 const _targetCameraRotation = new THREE.Quaternion();
@@ -74,6 +78,8 @@ interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: num
 interface MutableBodyRenderFrame {
   cameraRelativeOrigin: MutableVectorCoordinates;
   cameraBodyFixed: MutableVectorCoordinates;
+  cameraViewDirectionBodyFixed: MutableVectorCoordinates;
+  bodyFixedFrustum: BodyFixedFrustumPlane[];
   surfaceAnchorBodyFixed?: MutableVectorCoordinates;
   cameraBodyFixedVelocity: MutableVectorCoordinates;
   verticalFovRadians: number;
@@ -703,7 +709,6 @@ export class WorldScene {
         }
       }
     }
-
     // Absolute camera position: vessel absolute + offset.
     game.universe.absolutePosition(body, t, _bodyAbs);
     _vesselAbs.copy(_bodyAbs).add(v.pos);
@@ -715,6 +720,21 @@ export class WorldScene {
     // the particle integrator magnifies a dropped frame into kilometre-scale
     // smoke jumps.
     this.srbSmoke.beginFrame(smokeDt, _cameraBodyRelative);
+
+    // Finalize this frame's rendered camera before any body performs terrain
+    // selection. Frustum culling and selection reuse must describe the same
+    // smoothed camera pose that WebGL renders below.
+    const previousCameraRotation = _previousCameraRotation.copy(this.camera.quaternion);
+    this.camera.position.set(0, 0, 0);
+    this.camera.up.set(cameraUp.x, cameraUp.y, cameraUp.z);
+    this.camera.lookAt(-camOffset.x, -camOffset.y, -camOffset.z);
+    if (this.cameraSmoothing && dt > 0) {
+      const targetCameraRotation = _targetCameraRotation.copy(this.camera.quaternion);
+      this.camera.quaternion.copy(previousCameraRotation).slerp(targetCameraRotation, 1 - Math.exp(-dt * 12));
+    }
+    this.camera.updateMatrixWorld(true);
+    this.camera.getWorldDirection(_cameraForwardThree);
+    _cameraForwardWorld.set(_cameraForwardThree.x, _cameraForwardThree.y, _cameraForwardThree.z);
 
     // Keep star direction in f64 until the final camera-relative conversion.
     game.universe.absolutePosition(game.universe.root, t, _starAbs);
@@ -746,6 +766,7 @@ export class WorldScene {
       renderSet.add(b.id);
       _tmp.copy(_camAbs).sub(_bodyAbs);
       inertialToBodyFixed(b, t, _tmp, _camBF);
+      inertialToBodyFixed(b, t, _cameraForwardWorld, _cameraViewDirectionBF).normalize();
       const surfaceAnchorBodyFixed = b.id === body.id
         ? inertialToBodyFixed(b, t, v.pos, _surfaceAnchorBF)
         : undefined;
@@ -762,6 +783,8 @@ export class WorldScene {
         stableFrame = {
           cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
           cameraBodyFixed: { x: 0, y: 0, z: 0 },
+          cameraViewDirectionBodyFixed: { x: 0, y: 0, z: -1 },
+          bodyFixedFrustum: [],
           cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
           verticalFovRadians: 0,
           drawingBufferHeight: 0,
@@ -777,6 +800,8 @@ export class WorldScene {
       }
       copyCoordinates(stableFrame.cameraRelativeOrigin, _rel);
       copyCoordinates(stableFrame.cameraBodyFixed, _camBF);
+      copyCoordinates(stableFrame.cameraViewDirectionBodyFixed, _cameraViewDirectionBF);
+      bodyFixedFrustumPlanes(this.camera, _bodyQ, _rel, stableFrame.bodyFixedFrustum);
       copyCoordinates(stableFrame.cameraBodyFixedVelocity, _cameraVelocity);
       if (surfaceAnchorBodyFixed) {
         stableFrame.surfaceAnchorBodyFixed ??= { x: 0, y: 0, z: 0 };
@@ -881,16 +906,6 @@ export class WorldScene {
       this.emitSrbSmoke(gv, vis, pressureFrac, rv.vel);
     }
     this.srbSmoke.endFrame();
-
-    // ---- camera orientation: look at the active vessel.
-    const previousCameraRotation = _previousCameraRotation.copy(this.camera.quaternion);
-    this.camera.position.set(0, 0, 0);
-    this.camera.up.set(cameraUp.x, cameraUp.y, cameraUp.z);
-    this.camera.lookAt(-camOffset.x, -camOffset.y, -camOffset.z);
-    if (this.cameraSmoothing && dt > 0) {
-      const targetCameraRotation = _targetCameraRotation.copy(this.camera.quaternion);
-      this.camera.quaternion.copy(previousCameraRotation).slerp(targetCameraRotation, 1 - Math.exp(-dt * 12));
-    }
 
     // ---- atmosphere tint: fade background + fog by altitude.
     const alt = v.pos.length() - body.radius;

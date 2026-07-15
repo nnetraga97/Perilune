@@ -62,7 +62,7 @@ test('stationary Veyra launch anchors its fallback and establishes terrain witho
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
   await page.getByRole('button', { name: 'Veyra Diagnostic Orbiter' }).click();
   await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(2);
-  await page.getByRole('button', { name: '▲ LAUNCH' }).click();
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
 
   await expect.poll(
@@ -82,6 +82,27 @@ test('stationary Veyra launch anchors its fallback and establishes terrain witho
     async () => (await padRenderSnapshot(page)).transition?.state,
     { timeout: 5_000 },
   ).toBe('terrain');
+  await expect.poll(
+    async () => (await padRenderSnapshot(page)).terrain?.pending,
+    { timeout: 30_000, intervals: [100, 250, 500, 1_000] },
+  ).toBe(0);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const heapStart = await page.evaluate(() => (
+    (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0
+  ));
+  await page.waitForTimeout(30_000);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const heapEnd = await page.evaluate(() => (
+    (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0
+  ));
+  if (heapStart > 0 && heapEnd > 0) expect(heapEnd - heapStart).toBeLessThan(30 * 1024 * 1024);
+  const settled = await padRenderSnapshot(page);
+  expect(
+    settled.terrain?.selectionReused,
+    `selection invalidation: ${String(settled.terrain?.selectionInvalidation)}`,
+  ).toBe(true);
+  expect(settled.terrain?.oldestPendingAgeMs as number).toBeLessThanOrEqual(5_000);
 
   await page.locator('#game-canvas').hover();
   for (let index = 0; index < 40; index++) await page.mouse.wheel(0, 120);
@@ -92,10 +113,15 @@ test('stationary Veyra launch anchors its fallback and establishes terrain witho
   ).toBe(true);
   const zoomed = await padRenderSnapshot(page);
   expect(zoomed.transition?.state).toBe('terrain');
+  expect(zoomed.terrain?.desiredLeaves as number).toBeLessThanOrEqual(640);
+  expect(zoomed.terrain?.balanceViolations).toBe(0);
+  expect(zoomed.terrain?.selectionPasses as number).toBeLessThanOrEqual(2);
   expect(zoomed.anomalies).not.toEqual(expect.arrayContaining([
     'terrain-coverage-readiness-lost',
     'transition-coverage-readiness-lost',
     'transition-rollback-without-request-change',
     'transition-zero-visible-coverage',
+    'terrain-desired-leaf-cap-unreachable',
+    'terrain-neighbor-depth-violation',
   ]));
 });

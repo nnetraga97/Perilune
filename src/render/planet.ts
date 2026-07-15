@@ -10,6 +10,11 @@ import { PlanetTerrainEngine } from './terrain/planetTerrainEngine';
 import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from './terrain/terrainPolicy';
 import { createBodySurfaceProvider } from './terrain/surfaceProvider';
 import {
+  terrainFrustumPredicate,
+  terrainFrustumSignature,
+  type BodyFixedFrustumPlane,
+} from './terrain/terrainFrustum';
+import {
   createTerrainTileId,
   parseTerrainTileKey,
   terrainTileChildren,
@@ -39,6 +44,8 @@ export const PLANET_QUALITY: Readonly<Record<'low' | 'medium' | 'high', PlanetQu
 export interface PlanetRenderProjection {
   readonly verticalFovRadians: number;
   readonly drawingBufferHeight: number;
+  readonly viewDirectionBodyFixed?: VectorCoordinates;
+  readonly bodyFixedFrustum?: readonly BodyFixedFrustumPlane[];
   readonly deltaSeconds: number;
   readonly framePressure: boolean;
 }
@@ -78,6 +85,10 @@ export interface PlanetRendererStats {
   overlapChunks: number;
   scheduleMs: number;
   installMs: number;
+  selectionMs: number;
+  balanceMs: number;
+  selectionPasses: number;
+  selectionReused: boolean;
   geometryBytes: number;
 }
 
@@ -196,6 +207,7 @@ export class PlanetRenderer {
   stats: PlanetRendererStats = {
     chunks: 0, visible: 0, built: 0, triangles: 0, coverageGaps: 0,
     overlapChunks: 0, scheduleMs: 0, installMs: 0, geometryBytes: 0,
+    selectionMs: 0, balanceMs: 0, selectionPasses: 0, selectionReused: false,
   };
 
   constructor(
@@ -288,6 +300,7 @@ export class PlanetRenderer {
     this.engine.update({
       cameraBodyFixed,
       cameraBodyFixedVelocity,
+      viewDirectionBodyFixed: projection.viewDirectionBodyFixed,
       cameraRelativeOrigin,
       orientation,
       verticalFovRadians: projection.verticalFovRadians,
@@ -296,6 +309,12 @@ export class PlanetRenderer {
       framePressure: projection.framePressure,
       generation: this.engine.provider.generation,
       diagnosticContext,
+      visible: projection.bodyFixedFrustum
+        ? terrainFrustumPredicate(projection.bodyFixedFrustum, cameraBodyFixed)
+        : undefined,
+      visibilitySignature: projection.bodyFixedFrustum
+        ? terrainFrustumSignature(projection.bodyFixedFrustum)
+        : undefined,
     });
     this.engine.group.visible = this.terrainVisible;
     if (this.ocean) {
@@ -313,6 +332,10 @@ export class PlanetRenderer {
       overlapChunks: 0,
       scheduleMs: current.scheduleMs,
       installMs: current.installMs,
+      selectionMs: current.selectionMs,
+      balanceMs: current.balanceMs,
+      selectionPasses: current.selectionPasses,
+      selectionReused: current.selectionReused,
       geometryBytes: current.geometryBytes,
     });
     void this.diagnostics;

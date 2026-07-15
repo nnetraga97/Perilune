@@ -64,7 +64,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'The gravity turn',
-    text: 'Around 100 m/s, tip slightly east (D key) and follow the prograde marker ⊕ on the navball. Aim to leave the atmosphere at a shallow angle.',
+    text: 'Around 100 m/s, tip slightly east (D key) and follow the green three-arm prograde marker on the navball. Aim to leave the atmosphere at a shallow angle.',
     done: (ctx) => {
       const gv = ctx.game?.active;
       if (!gv) return false;
@@ -102,7 +102,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'Come home',
-    text: 'Point retrograde ⊖ and burn until periapsis drops below 30 km. Ride the atmosphere down — the chute arms with your last stage (SPACE).',
+    text: 'Point toward the orange crossed retrograde marker and burn until periapsis drops below 30 km. Ride the atmosphere down — the chute arms with your last stage (SPACE).',
     done: (ctx) => {
       const s = ctx.game?.active?.runtime.situation;
       return s === 'landed' || s === 'splashed';

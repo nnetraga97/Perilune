@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { AUREN_SYSTEM } from '../src/content/system';
 import { Body } from '../src/sim/universe';
-import { createBodySurfaceProvider } from '../src/render/terrain/surfaceProvider';
-import { createTerrainTileId, edgeNeighbor, terrainTileParent } from '../src/render/terrain/tile';
+import {
+  createBodySurfaceProvider,
+  type PlanetSurfaceProvider,
+  type TerrainTileDescriptor,
+} from '../src/render/terrain/surfaceProvider';
+import {
+  createTerrainTileId,
+  edgeNeighbor,
+  terrainTileKey,
+  terrainTileParent,
+  type TerrainTileEdge,
+} from '../src/render/terrain/tile';
 import {
   TERRAIN_QUALITY_POLICY,
   distanceToTerrainBoundingSphereMeters,
@@ -10,9 +20,15 @@ import {
   screenSpaceErrorPixels,
 } from '../src/render/terrain/terrainPolicy';
 import {
+  LAUNCH_PAD_MAX_LOD_STREAM_DISTANCE,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
+} from '../src/sim/launchSite';
+import {
   balanceTerrainLeaves,
   selectPredictedTerrainDetail,
   selectTerrainDetail,
+  terrainTileHorizonCulled,
   terrainNeighborDepthViolations,
 } from '../src/render/terrain/terrainSelection';
 
@@ -26,6 +42,36 @@ function flatProvider(maximumDepth = 5) {
     gridResolution: 9,
     maximumDepth,
   });
+}
+
+function veyraProvider(gridResolution: number) {
+  const definition = structuredClone(AUREN_SYSTEM.find((candidate) => candidate.id === 'veyra')!);
+  return createBodySurfaceProvider(new Body(definition, null), { generation: 1, gridResolution });
+}
+
+const launchSiteDirection = Object.freeze({
+  x: Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON),
+  y: Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON),
+  z: Math.sin(LAUNCH_SITE_LAT),
+});
+
+function launchSiteFrame(provider: ReturnType<typeof veyraProvider>, distanceMeters: number) {
+  const radius = provider.radiusMeters + distanceMeters;
+  return {
+    cameraBodyFixed: {
+      x: launchSiteDirection.x * radius,
+      y: launchSiteDirection.y * radius,
+      z: launchSiteDirection.z * radius,
+    },
+    cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
+    viewDirectionBodyFixed: {
+      x: -launchSiteDirection.x,
+      y: -launchSiteDirection.y,
+      z: -launchSiteDirection.z,
+    },
+    verticalFovRadians: Math.PI / 3,
+    drawingBufferHeight: 1_080,
+  };
 }
 
 describe('terrain quality policy', () => {
@@ -182,8 +228,68 @@ describe('desired terrain traversal', () => {
   });
 });
 
+describe('launch-site detail budget', () => {
+  for (const tier of ['low', 'medium', 'high'] as const) {
+    it(`keeps ${tier} selection within its exact planned-leaf budget`, () => {
+      const quality = TERRAIN_QUALITY_POLICY[tier];
+      const provider = veyraProvider(quality.gridResolution);
+      const selected = selectTerrainDetail(provider, quality, launchSiteFrame(provider, 500));
+      expect(selected.leaves.length).toBeLessThanOrEqual(quality.maximumDesiredLeaves);
+      expect(Math.max(...selected.leaves.map((tile) => tile.id.depth))).toBeGreaterThanOrEqual(14);
+      expect(terrainNeighborDepthViolations(balanceTerrainLeaves(provider, selected.leaves))).toEqual([]);
+    });
+  }
+
+  it('stops pad-only forcing outside the measured streaming range', () => {
+    const quality = TERRAIN_QUALITY_POLICY.high;
+    const provider = veyraProvider(quality.gridResolution);
+    const near = selectTerrainDetail(
+      provider, quality, launchSiteFrame(provider, LAUNCH_PAD_MAX_LOD_STREAM_DISTANCE - 1),
+    );
+    const far = selectTerrainDetail(
+      provider, quality, launchSiteFrame(provider, LAUNCH_PAD_MAX_LOD_STREAM_DISTANCE + 1),
+    );
+    expect(Math.max(...near.leaves.map((tile) => tile.id.depth)))
+      .toBeGreaterThan(Math.max(...far.leaves.map((tile) => tile.id.depth)));
+  });
+});
+
 describe('restricted planetary quadtree balancing', () => {
   const edges = ['west', 'east', 'south', 'north'] as const;
+
+  const referenceBalance = (
+    provider: Readonly<PlanetSurfaceProvider>,
+    input: readonly TerrainTileDescriptor[],
+  ): readonly TerrainTileDescriptor[] => {
+    const leaves = new Map(input.map((tile) => [tile.key, tile]));
+    for (let pass = 0; pass <= provider.maximumDepth * 8 + 8; pass++) {
+      const splitNeighbors = new Map<string, TerrainTileDescriptor>();
+      for (const tile of [...leaves.values()].sort((a, b) => (
+        b.id.depth - a.id.depth || a.key.localeCompare(b.key)
+      ))) {
+        for (const edge of edges as readonly TerrainTileEdge[]) {
+          let candidate: ReturnType<typeof edgeNeighbor> | null = edgeNeighbor(tile.id, edge);
+          let neighbor: TerrainTileDescriptor | undefined;
+          while (candidate) {
+            neighbor = leaves.get(terrainTileKey(candidate));
+            if (neighbor) break;
+            candidate = terrainTileParent(candidate);
+          }
+          if (neighbor && tile.id.depth - neighbor.id.depth > 1) {
+            splitNeighbors.set(neighbor.key, neighbor);
+          }
+        }
+      }
+      if (splitNeighbors.size === 0) {
+        return Object.freeze([...leaves.values()].sort((a, b) => a.key.localeCompare(b.key)));
+      }
+      for (const neighbor of [...splitNeighbors.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+        if (!leaves.delete(neighbor.key)) continue;
+        for (const child of provider.children(neighbor)) leaves.set(child.key, child);
+      }
+    }
+    throw new Error('Test reference terrain balancer did not converge');
+  };
 
   it('repairs depth differences across every cube-face seam', () => {
     const provider = flatProvider(6);
@@ -211,5 +317,63 @@ describe('restricted planetary quadtree balancing', () => {
     expect(terrainNeighborDepthViolations(balanced)).toEqual([]);
     expect(balanceTerrainLeaves(provider, balanced).map((tile) => tile.key))
       .toEqual(balanced.map((tile) => tile.key));
+  });
+
+  it('matches the fixed-point reference for deterministic randomized covers', () => {
+    const provider = flatProvider(8);
+    let seed = 0x5eedc0de;
+    const random = (): number => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed / 0x1_0000_0000;
+    };
+
+    for (let sample = 0; sample < 200; sample++) {
+      let leaves = Array.from(
+        { length: 6 },
+        (_, face) => provider.rootTile(face as 0 | 1 | 2 | 3 | 4 | 5),
+      );
+      const splitCount = 8 + Math.floor(random() * 64);
+      for (let split = 0; split < splitCount; split++) {
+        const candidates = leaves.filter((tile) => tile.id.depth < provider.maximumDepth);
+        if (candidates.length === 0) break;
+        const selected = candidates[Math.floor(random() * candidates.length)];
+        leaves = leaves.filter((tile) => tile.key !== selected.key);
+        leaves.push(...provider.children(selected));
+      }
+
+      const optimized = balanceTerrainLeaves(provider, leaves).map((tile) => tile.key);
+      const reference = referenceBalance(provider, leaves).map((tile) => tile.key);
+      expect(optimized, `randomized cover ${sample}`).toEqual(reference);
+    }
+  });
+});
+
+describe('low-altitude horizon culling', () => {
+  it('culls a deep far-side bound one meter above the surface', () => {
+    const provider = flatProvider(6);
+    const tile = provider.tile(createTerrainTileId(1, 4, 8, 8));
+    expect(terrainTileHorizonCulled(provider, tile, {
+      center: { x: -provider.radiusMeters, y: 0, z: 0 },
+      radius: 5,
+      angularRadius: 0.01,
+    }, { x: provider.radiusMeters + 1, y: 0, z: 0 })).toBe(true);
+  });
+
+  it('keeps near-side bounds, coarse coverage, and a camera inside the occluder', () => {
+    const provider = flatProvider(6);
+    const deep = provider.tile(createTerrainTileId(0, 4, 8, 8));
+    const coarse = provider.tile(createTerrainTileId(1, 1, 0, 0));
+    const farBounds = {
+      center: { x: -provider.radiusMeters, y: 0, z: 0 }, radius: 5, angularRadius: 0.01,
+    };
+    expect(terrainTileHorizonCulled(provider, deep, {
+      center: { x: provider.radiusMeters, y: 0, z: 0 }, radius: 5, angularRadius: 0.01,
+    }, { x: provider.radiusMeters + 1, y: 0, z: 0 })).toBe(false);
+    expect(terrainTileHorizonCulled(
+      provider, coarse, farBounds, { x: provider.radiusMeters + 1, y: 0, z: 0 },
+    )).toBe(false);
+    expect(terrainTileHorizonCulled(
+      provider, deep, farBounds, { x: provider.radiusMeters - 1, y: 0, z: 0 },
+    )).toBe(false);
   });
 });

@@ -210,6 +210,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         {
           verticalFovRadians: frame.verticalFovRadians,
           drawingBufferHeight: frame.drawingBufferHeight,
+          viewDirectionBodyFixed: frame.cameraViewDirectionBodyFixed,
+          bodyFixedFrustum: frame.bodyFixedFrustum,
           deltaSeconds: frame.deltaSeconds,
           framePressure: frame.framePressure,
         },
@@ -332,6 +334,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       collisions: 0,
       terrainScheduleMs: this.terrain.stats.scheduleMs,
       terrainInstallMs: this.terrain.stats.installMs,
+      terrainSelectionMs: this.terrain.stats.selectionMs,
+      terrainBalanceMs: this.terrain.stats.balanceMs,
+      terrainSelectionReused: this.terrain.stats.selectionReused,
       scatterBytes: 0,
       effectBytes: 0,
     });

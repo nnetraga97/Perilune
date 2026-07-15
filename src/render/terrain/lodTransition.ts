@@ -57,6 +57,18 @@ export class TerrainLodTransitionManager {
   private readonly transitions = new Map<string, MutableTransition>();
   private nextId = 1;
 
+  constructor(
+    private readonly normalDurationSeconds = 0.35,
+    private readonly pressureDurationSeconds = 0.2,
+  ) {
+    if (!Number.isFinite(normalDurationSeconds) || normalDurationSeconds < 0) {
+      throw new Error(`Invalid normal terrain transition duration ${normalDurationSeconds}`);
+    }
+    if (!Number.isFinite(pressureDurationSeconds) || pressureDurationSeconds < 0) {
+      throw new Error(`Invalid pressure terrain transition duration ${pressureDurationSeconds}`);
+    }
+  }
+
   request(request: Readonly<TerrainLodTransitionRequest>): 'waiting' | 'started' | 'retained' | 'reversed' | 'serialized' {
     validateRequest(request);
     const existing = this.transitions.get(request.parentKey);
@@ -96,7 +108,7 @@ export class TerrainLodTransitionManager {
         }
         continue;
       }
-      const duration = framePressure ? 0.2 : 0.35;
+      const duration = framePressure ? this.pressureDurationSeconds : this.normalDurationSeconds;
       const amount = duration > 0 ? deltaSeconds / duration : 1;
       transition.progress = Math.max(0, Math.min(
         1,

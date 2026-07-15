@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { AUREN_SYSTEM } from '../src/content/system';
 import { Body } from '../src/sim/universe';
 import { PlanetTerrainEngine, type PlanetTerrainFrame } from '../src/render/terrain/planetTerrainEngine';
-import { type TerrainQualityPolicy } from '../src/render/terrain/terrainPolicy';
+import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from '../src/render/terrain/terrainPolicy';
+import { LAUNCH_SITE_LAT, LAUNCH_SITE_LON } from '../src/sim/launchSite';
 import { createBodySurfaceProvider } from '../src/render/terrain/surfaceProvider';
 import {
   TerrainChunkWorkerPool,
@@ -45,6 +46,34 @@ function provider(generation = 1, maximumDepth = 2) {
     gridResolution: 5,
     maximumDepth,
   });
+}
+
+function veyraProvider(gridResolution: number) {
+  const definition = structuredClone(AUREN_SYSTEM.find((candidate) => candidate.id === 'veyra')!);
+  return createBodySurfaceProvider(new Body(definition, null), { generation: 1, gridResolution });
+}
+
+function veyraPadFrame(surface: ReturnType<typeof veyraProvider>): PlanetTerrainFrame {
+  const direction = {
+    x: Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON),
+    y: Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON),
+    z: Math.sin(LAUNCH_SITE_LAT),
+  };
+  const distance = surface.radiusMeters + 500;
+  return {
+    ...frame(),
+    cameraBodyFixed: {
+      x: direction.x * distance,
+      y: direction.y * distance,
+      z: direction.z * distance,
+    },
+    cameraRelativeOrigin: {
+      x: -direction.x * distance,
+      y: -direction.y * distance,
+      z: -direction.z * distance,
+    },
+    viewDirectionBodyFixed: { x: -direction.x, y: -direction.y, z: -direction.z },
+  };
 }
 
 function frame(
@@ -94,6 +123,58 @@ class ManualWorker implements WorkerLike {
 }
 
 describe('PlanetTerrainEngine', () => {
+  it('bounds the final balanced Veyra pad cover in at most two passes', () => {
+    for (const tier of ['low', 'medium', 'high'] as const) {
+      const quality = TERRAIN_QUALITY_POLICY[tier];
+      const surface = veyraProvider(quality.gridResolution);
+      const engine = new PlanetTerrainEngine({
+        provider: surface,
+        quality,
+        material: new THREE.MeshBasicMaterial(),
+        terrainAllocationBytes: 128 * 1024 * 1024,
+      });
+      engine.update(veyraPadFrame(surface));
+      expect(engine.stats.desiredLeaves, tier).toBeLessThanOrEqual(quality.maximumDesiredLeaves);
+      expect(engine.stats.selectionPasses, tier).toBeLessThanOrEqual(2);
+      expect(engine.stats.balanceViolations, tier).toBe(0);
+      engine.dispose();
+    }
+  });
+
+  it('reuses selection while queued work continues and invalidates on camera movement', () => {
+    const worker = new ManualWorker();
+    const pool = new TerrainChunkWorkerPool({ size: 1, workerFactory: () => worker });
+    const engine = new PlanetTerrainEngine({
+      provider: provider(1, 4),
+      quality: policy(),
+      material: new THREE.MeshBasicMaterial(),
+      terrainAllocationBytes: 1_000_000,
+      workerPool: pool,
+    });
+    engine.update({ ...frame(), visible: () => true, visibilitySignature: 'stable-view' });
+    expect(engine.stats.selectionReused).toBe(false);
+    expect(engine.stats.queued + engine.stats.building).toBeGreaterThan(0);
+    engine.update({ ...frame(), visible: () => true, visibilitySignature: 'stable-view' });
+    expect(engine.stats.selectionReused).toBe(true);
+    expect(engine.stats.selectionPasses).toBe(0);
+    engine.update({
+      ...frame(),
+      cameraBodyFixedVelocity: { x: 25, y: 0, z: 0 },
+      visible: () => true,
+      visibilitySignature: 'stable-view',
+    });
+    expect(engine.stats.selectionReused).toBe(true);
+    expect(engine.stats.selectionPasses).toBe(0);
+    engine.update({
+      ...frame(1, { x: 1_160, y: 0, z: 0 }),
+      visible: () => true,
+      visibilitySignature: 'stable-view',
+    });
+    expect(engine.stats.selectionReused).toBe(false);
+    pool.dispose();
+    engine.dispose();
+  });
+
   it('establishes and permanently retains all six roots before reporting readiness', () => {
     const surface = provider(1, 2);
     const diagnostics = new RenderDiagnostics({
@@ -279,6 +360,42 @@ describe('PlanetTerrainEngine', () => {
     expect(latest?.desiredMaximumDepth).toBeGreaterThan(2);
     expect(latest?.pending).toBe(0);
     expect(latest?.renderedMaximumDepth).toBeGreaterThan(2);
+    expect(engine.stats.coverageGaps).toBe(0);
+    engine.dispose();
+  });
+
+  it('unwinds deep rendered chunks after their region leaves the visibility cover', () => {
+    const engine = new PlanetTerrainEngine({
+      provider: provider(1, 4),
+      quality: policy({
+        maximumDesiredLeaves: 128,
+        submissionsPerFrame: 16,
+        installationBudgetMs: 20,
+      }),
+      material: new THREE.MeshBasicMaterial(),
+      terrainAllocationBytes: 4_000_000,
+    });
+    const input = { ...frame(), deltaSeconds: 0.1, visibilitySignature: 'all' };
+    for (let iteration = 0; iteration < 240; iteration++) engine.update(input);
+    const deepVisible = engine.group.children.filter((child) => (
+      child.visible && Number(child.userData.terrainTileId?.depth) >= 3
+    ));
+    expect(deepVisible.length).toBeGreaterThan(0);
+    const hiddenFace = Number(deepVisible[0].userData.terrainTileId.face);
+    const culled = {
+      ...input,
+      visibilitySignature: `hide-deep-face-${hiddenFace}`,
+      visible: (tile: { id: { face: number; depth: number } }) => (
+        tile.id.depth < 3 || tile.id.face !== hiddenFace
+      ),
+    } as PlanetTerrainFrame;
+    for (let iteration = 0; iteration < 120; iteration++) engine.update(culled);
+    const remaining = engine.group.children.filter((child) => (
+      child.visible
+      && Number(child.userData.terrainTileId?.face) === hiddenFace
+      && Number(child.userData.terrainTileId?.depth) >= 3
+    ));
+    expect(remaining).toEqual([]);
     expect(engine.stats.coverageGaps).toBe(0);
     engine.dispose();
   });

@@ -66,6 +66,8 @@ export interface BodySurfaceProviderOptions {
   readonly maximumDepth?: number;
 }
 
+const MAX_DESCRIPTOR_CACHE_ENTRIES = 50_000;
+
 function freezeRecipe(recipe: Readonly<BodyFeatureRecipe>): BodyFeatureRecipe {
   return Object.freeze({
     ...recipe,
@@ -169,13 +171,21 @@ export function createBodySurfaceProvider(
     }
     const key = terrainTileKey(validatedId);
     const cached = descriptorCache.get(key);
-    if (cached) return cached;
+    if (cached) {
+      descriptorCache.delete(key);
+      descriptorCache.set(key, cached);
+      return cached;
+    }
     const created = Object.freeze({
       id: validatedId,
       key,
       uvBounds: terrainTileUvBounds(validatedId),
       geometricErrorMeters: errors[validatedId.depth],
     });
+    if (descriptorCache.size >= MAX_DESCRIPTOR_CACHE_ENTRIES) {
+      const oldest = descriptorCache.keys().next().value as string | undefined;
+      if (oldest !== undefined) descriptorCache.delete(oldest);
+    }
     descriptorCache.set(key, created);
     return created;
   };

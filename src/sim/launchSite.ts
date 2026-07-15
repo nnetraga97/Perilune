@@ -16,8 +16,10 @@ export const LAUNCH_PAD_TERRAIN_CLEARANCE = 0.25;
 /** Flat authored terrain around the pad, with a broad graded approach. */
 export const LAUNCH_PAD_TERRAIN_FLAT_RADIUS = 80;
 export const LAUNCH_PAD_TERRAIN_BLEND_RADIUS = 450;
-/** Radius that is guaranteed maximum terrain LOD while the site is rendered. */
+/** Radius around the pad prioritized for resolution-appropriate terrain detail. */
 export const LAUNCH_PAD_MAX_LOD_RADIUS = 40;
+/** Maximum camera-to-site distance that reserves prioritized terrain detail for the pad. */
+export const LAUNCH_PAD_MAX_LOD_STREAM_DISTANCE = 20_000;
 
 /** Cape Skyward surface normal in the rotating body-fixed frame. */
 export function launchSiteBodyFixedDirection(out: Vec3): Vec3 {

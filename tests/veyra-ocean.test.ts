@@ -14,10 +14,12 @@ function maskTexture(): THREE.DataTexture {
 }
 
 describe('Veyra ocean', () => {
-  it('owns an exact datum sphere while leaving negative terrain authoritative', () => {
+  it('owns an exact-datum cap while leaving negative terrain authoritative', () => {
     const ocean = new TerrestrialOcean(veyra, 'medium', maskTexture());
     expect(ocean.datumRadius).toBe(veyra.radius);
     expect(ocean.mesh.scale.toArray()).toEqual([veyra.radius, veyra.radius, veyra.radius]);
+    expect(ocean.mesh.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(ocean.mesh.frustumCulled).toBe(false);
     expect(renderedTerrainHeight(-4_200, true)).toBe(-4_200);
     ocean.dispose();
   });
@@ -28,6 +30,7 @@ describe('Veyra ocean', () => {
       cameraRelativeOrigin: { x: 11, y: 12, z: 13 },
       cameraBodyFixed: { x: veyra.radius + 10, y: 20, z: 30 },
       bodySunDirection: { x: 0, y: 4, z: 0 },
+      orientation: { x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 },
       time: 123.5,
     });
     expect(ocean.mesh.position.toArray()).toEqual([11, 12, 13]);
@@ -35,6 +38,7 @@ describe('Veyra ocean', () => {
       .toEqual([veyra.radius + 10, 20, 30]);
     expect((ocean.material.uniforms.uSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
     expect(ocean.material.uniforms.uTime.value).toBe(123.5);
+    expect(ocean.mesh.quaternion.toArray()).toEqual([0, Math.SQRT1_2, 0, Math.SQRT1_2]);
     ocean.dispose();
   });
 
@@ -46,6 +50,11 @@ describe('Veyra ocean', () => {
     expect(low.material.uniforms.uHasShoreMask.value).toBe(0);
     expect(low.material.userData.shoreMaskFallback).toBe(true);
     expect(low.material.fragmentShader).toContain('float shore');
+    expect(low.material).toMatchObject({ transparent: false, depthWrite: true, opacity: 1 });
+    expect(low.material.fragmentShader).toContain('gl_FragColor = vec4(depthTint + foam * 0.72 + glitter, 1.0)');
+    expect(low.material.vertexShader).toContain('#include <common>');
+    expect(low.material.vertexShader).toContain('#include <logdepthbuf_vertex>');
+    expect(low.material.fragmentShader).toContain('#include <logdepthbuf_fragment>');
     low.dispose();
     high.dispose();
   });

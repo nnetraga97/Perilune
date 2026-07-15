@@ -321,7 +321,11 @@ export function buildTerrainChunkGeometry(
     periodicOffset(origin[1]),
     periodicOffset(origin[2]),
   ];
-  const eps = Math.max(1e-5, size / (res * 8));
+  // Sample normals at a fraction of this tile's actual vertex spacing. A
+  // world-scale UV floor (formerly 1e-5) spans a large portion of a depth-16
+  // tile and smooths away the relief the vertex itself represents.
+  const cellUvSize = size / Math.max(1, res - 1);
+  const eps = Math.max(1e-9, cellUvSize / 8);
   const point = new Vec3();
   const sampleU = new Vec3();
   const sampleV = new Vec3();
