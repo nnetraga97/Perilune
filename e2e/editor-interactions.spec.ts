@@ -76,7 +76,7 @@ test('desktop selection, hover, movement history, and launch remain coherent', a
   await expect(page.getByTitle('Prograde')).toHaveClass(/active/);
   await page.getByRole('button', { name: 'Map' }).click();
   await page.getByRole('button', { name: '+ Node in 2 min' }).click();
-  const prograde = page.locator('.map-axis', { hasText: 'Prograde' });
+  const prograde = page.locator('.map-axis', { hasText: 'Tangential' });
   await prograde.getByRole('button', { name: '+', exact: true }).click();
   await expect(page.locator('.map-readout').filter({ hasText: 'Δv' })).toContainText('1.0 m/s');
 });

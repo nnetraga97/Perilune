@@ -25,10 +25,13 @@ import type { Body, Universe } from '../sim/universe';
 import {
   ManeuverNode,
   nodeDeltaV,
-  orbitAfterNode,
   predictTrajectory,
   TrajectoryPrediction,
 } from '../sim/maneuver';
+import {
+  projectedOrbitAfterRemainingBurn,
+  type ManeuverPlan,
+} from '../sim/maneuverPlan';
 import { makeStarfield } from '../render/starfield';
 import { depositSites, DepositSite } from '../sim/resources';
 import { bodyFixedToInertial, bodyOrientation } from '../sim/bodyOrientation';
@@ -47,10 +50,20 @@ import { el, injectUiStyles } from './kit';
 import { analyzeCraft } from '../sim/vessel';
 import type { AlarmKind } from '../sim/state';
 import { predictEntry, type EntryPrediction } from '../sim/entry';
-import { launchSiteBodyFixedDirection } from '../sim/launchSite';
+import { pickOrbitSegment, type OrbitPick, type ScreenOrbitPoint } from './orbitPicking';
 
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
+
+type NodeAxis = 'prograde' | 'normal' | 'radial';
+type NodeHandleKind = 'prograde' | 'retrograde' | 'normal' | 'antinormal' | 'radial-out' | 'radial-in';
+
+interface NodeHandle {
+  axis: NodeAxis;
+  sign: 1 | -1;
+  label: string;
+  sprite: THREE.Sprite;
+}
 
 function paletteColor(descriptor: Readonly<BodyMaterialDescriptor>, u: number, v: number): THREE.Color {
   if (descriptor.identity === 'star') {
@@ -180,6 +193,35 @@ function fillConic(line: THREE.Line, el: OrbitalElements, offset: Vec3 | null): 
     }
   }
   attr.needsUpdate = true;
+  line.geometry.setDrawRange(0, attr.count);
+  (line as THREE.Line & { computeLineDistances(): void }).computeLineDistances?.();
+}
+
+/** Fill a chronological conic patch between two absolute simulation times. */
+function fillConicTimeRange(
+  line: THREE.Line,
+  elements: OrbitalElements,
+  startTime: number,
+  endTime: number,
+  offset: Vec3 | null = null,
+): void {
+  const attribute = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+  const count = attribute.count;
+  const position = new Vec3();
+  const velocity = new Vec3();
+  const duration = Math.max(1, endTime - startTime);
+  for (let index = 0; index < count; index++) {
+    const time = startTime + duration * index / Math.max(1, count - 1);
+    elementsAtTime(elements, time, position, velocity);
+    attribute.setXYZ(
+      index,
+      (position.x + (offset?.x ?? 0)) * SCALE,
+      (position.y + (offset?.y ?? 0)) * SCALE,
+      (position.z + (offset?.z ?? 0)) * SCALE,
+    );
+  }
+  attribute.needsUpdate = true;
+  line.geometry.setDrawRange(0, count);
   (line as THREE.Line & { computeLineDistances(): void }).computeLineDistances?.();
 }
 
@@ -189,6 +231,10 @@ function elementsToStateSafe(el: OrbitalElements, nu: number, outR: Vec3, outV: 
 }
 
 export interface MapCallbacks {
+  getManeuverPlan(): Readonly<ManeuverPlan> | null;
+  onCreateManeuverNode(node: ManeuverNode): void;
+  onUpdateManeuverNode(node: ManeuverNode): void;
+  onDeleteManeuverNode(): void;
   onWarpToNode(node: ManeuverNode): void;
   onCreateAlarm(time: number, label: string, kind: AlarmKind): void;
   onSetTarget(bodyId: string | null): void;
@@ -207,12 +253,15 @@ export class MapView {
   private bodyOrbits = new Map<string, THREE.Line>();
   private soiMeshes = new Map<string, THREE.Mesh>();
   private vesselLine = orbitLine('#7fd0e8');
+  private currentArcLine = orbitLine('#a9ebff');
   private nodeLine = orbitLine('#e8c76b', true);
+  private completionLine = orbitLine('#fff0a8', true);
   private encounterLine = orbitLine('#c88be8', true);
   private entryLine = entryPathLine();
   private vesselMarker: THREE.Sprite;
   private nodeMarker: THREE.Sprite;
-  private nodeHandles = new Map<'prograde' | 'normal' | 'radial', THREE.Sprite>();
+  private orbitHoverMarker: THREE.Sprite;
+  private nodeHandles = new Map<NodeHandleKind, NodeHandle>();
   private encounterMarker: THREE.Sprite;
   private entryMarker: THREE.Sprite;
   private landingTargetMarker: THREE.Sprite;
@@ -230,10 +279,11 @@ export class MapView {
   private camDist = 400; // scene units
   private camFocus = new THREE.Vector3();
 
-  node: ManeuverNode | null = null;
   private prediction: TrajectoryPrediction | null = null;
   private predictionDirty = true;
   private lastElSig = '';
+  private lastRenderedPlanRevision = -1;
+  private lastPredictionRefreshAt = -Infinity;
 
   private panel: HTMLElement;
   private nodePanel: HTMLElement;
@@ -251,13 +301,36 @@ export class MapView {
   private markerEvents = new Map<THREE.Object3D, { label: string; time: number }>();
   private nodeStep = 1;
   private nodeInputs = new Map<'prograde' | 'normal' | 'radial' | 'time', HTMLInputElement>();
+  private lastPanelPhase: ManeuverPlan['phase'] | null = null;
   private currentElements: OrbitalElements | null = null;
   private readonly raycaster = new THREE.Raycaster();
-  private dragControl: 'prograde' | 'normal' | 'radial' | 'time' | null = null;
+  private dragControl: NodeAxis | 'time' | 'pending-orbit' | null = null;
+  private dragHandleSign: 1 | -1 = 1;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private dragDistance = 0;
+  private dragStartNode: ManeuverNode | null = null;
+  private dragAxisScreen = new THREE.Vector2(0, -1);
+  private pendingOrbitFraction: number | null = null;
+  private orbitHover: OrbitPick | null = null;
+  private orbitPointerCoarse = false;
+  private orbitScreenPoints: ScreenOrbitPoint[] = Array.from({ length: 256 }, () => ({
+    x: 0,
+    y: 0,
+    depth: 0,
+    visible: false,
+  }));
+  private orbitHoverLabel: HTMLElement;
+  private handleHoverLabel: HTMLElement;
+  private readonly projectedPoint = new THREE.Vector3();
   entryPrediction: EntryPrediction | null = null;
   landingTargetDirBF: Vec3 | null = null;
   private entrySignature = '';
   private lastEntryPredictionAt = -Infinity;
+
+  get node(): ManeuverNode | null {
+    return this.cb.getManeuverPlan()?.node ?? null;
+  }
 
   constructor(private readonly uiRoot: HTMLElement, cb: MapCallbacks) {
     this.cb = cb;
@@ -274,7 +347,15 @@ export class MapView {
     this.sun = new THREE.DirectionalLight('#fff4e0', 1.4);
     this.sun.position.set(1, 0.3, 0.5);
     this.scene.add(this.sun, this.sun.target);
-    this.scene.add(this.vesselLine, this.nodeLine, this.encounterLine, this.entryLine);
+    this.scene.add(
+      this.vesselLine,
+      this.currentArcLine,
+      this.nodeLine,
+      this.completionLine,
+      this.encounterLine,
+      this.entryLine,
+    );
+    (this.vesselLine.material as THREE.LineBasicMaterial).opacity = 0.32;
 
     const mkSprite = (color: string, size: number, glyph = '') => {
       const c = document.createElement('canvas');
@@ -301,14 +382,45 @@ export class MapView {
       sprite.renderOrder = 10;
       return sprite;
     };
+    const mkArrowSprite = (color: string) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 48;
+      const context = canvas.getContext('2d')!;
+      context.strokeStyle = '#f4fbff';
+      context.fillStyle = color;
+      context.lineWidth = 2.5;
+      context.lineJoin = 'round';
+      context.beginPath();
+      context.moveTo(24, 4);
+      context.lineTo(41, 31);
+      context.lineTo(30, 28);
+      context.lineTo(30, 43);
+      context.lineTo(18, 43);
+      context.lineTo(18, 28);
+      context.lineTo(7, 31);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(canvas),
+        depthTest: false,
+        transparent: true,
+      }));
+      sprite.renderOrder = 12;
+      sprite.visible = false;
+      return sprite;
+    };
     this.vesselMarker = mkSprite('#7fd0e8', 5);
     this.nodeMarker = mkSprite('#e8c76b', 4);
+    this.orbitHoverMarker = mkSprite('#dff8ff', 3.5, '+');
+    this.orbitHoverMarker.visible = false;
     this.encounterMarker = mkSprite('#c88be8', 4);
     this.entryMarker = mkSprite('#e27a4f', 4, 'E');
     this.landingTargetMarker = mkSprite('#ef7dc2', 4, 'T');
     this.scene.add(
       this.vesselMarker,
       this.nodeMarker,
+      this.orbitHoverMarker,
       this.encounterMarker,
       this.entryMarker,
       this.landingTargetMarker,
@@ -322,28 +434,35 @@ export class MapView {
       this.orbitMarkers.set(kind, marker);
       this.scene.add(marker);
     }
-    for (const [axis, color, glyph] of [
-      ['prograde', '#70d58c', 'P'],
-      ['normal', '#b98ce8', 'N'],
-      ['radial', '#6baee8', 'R'],
+    for (const [kind, axis, sign, label, color] of [
+      ['prograde', 'prograde', 1, 'Prograde', '#70d58c'],
+      ['retrograde', 'prograde', -1, 'Retrograde', '#70d58c'],
+      ['normal', 'normal', 1, 'Normal', '#b98ce8'],
+      ['antinormal', 'normal', -1, 'Anti-normal', '#b98ce8'],
+      ['radial-out', 'radial', 1, 'Radial out', '#6baee8'],
+      ['radial-in', 'radial', -1, 'Radial in', '#6baee8'],
     ] as const) {
-      const handle = mkSprite(color, 3.5, glyph);
-      handle.visible = false;
-      this.nodeHandles.set(axis, handle);
-      this.scene.add(handle);
+      const sprite = mkArrowSprite(color);
+      this.nodeHandles.set(kind, { axis, sign, label, sprite });
+      this.scene.add(sprite);
     }
     this.mkDepositSprite = () => mkSprite('#e2b13c', 3);
+
+    this.orbitHoverLabel = el('div', 'map-orbit-hover', uiRoot);
+    this.orbitHoverLabel.hidden = true;
+    this.handleHoverLabel = el('div', 'map-handle-hover', uiRoot);
+    this.handleHoverLabel.hidden = true;
 
     // ---- DOM panel
     this.panel = el('div', 'map-panel', uiRoot);
     injectUiStyles();
-    const title = el('div', 'map-title', this.panel, 'MANEUVER PLANNER');
+    el('div', 'map-title', this.panel, 'MANEUVER PLANNER');
     const btnRow = el('div', 'map-row', this.panel);
     const addBtn = el('button', 'hud-btn', btnRow, '+ Node in 2 min') as HTMLButtonElement;
     addBtn.onclick = () => this.createNode(120);
     const delBtn = el('button', 'hud-btn', btnRow, 'Delete') as HTMLButtonElement;
     delBtn.onclick = () => {
-      this.node = null;
+      cb.onDeleteManeuverNode();
       this.predictionDirty = true;
       this.refreshNodePanel();
     };
@@ -351,27 +470,12 @@ export class MapView {
     warpBtn.onclick = () => {
       if (this.node) cb.onWarpToNode(this.node);
     };
-    const alarmRow = el('div', 'map-row map-alarm-row', this.panel);
-    const alarmButton = (label: string, time: () => number | null, alarmLabel: string, kind: AlarmKind) => {
-      const button = el('button', 'hud-btn', alarmRow, label);
-      button.onclick = () => {
-        const alarmTime = time();
-        if (alarmTime !== null && alarmTime > (this.gameRef?.time ?? 0)) {
-          cb.onCreateAlarm(alarmTime, alarmLabel, kind);
-        }
-      };
-    };
-    alarmButton('Alarm node', () => this.node?.time ?? null, 'Maneuver node', 'maneuver');
-    alarmButton('Ap', () => this.apsisTime('ap'), 'Apoapsis', 'custom');
-    alarmButton('Pe', () => this.apsisTime('pe'), 'Periapsis', 'custom');
-    alarmButton('SOI', () => this.prediction?.encounter?.entryTime ?? this.prediction?.escape?.exitTime ?? null, 'SOI transition', 'custom');
-    const targetRow = el('div', 'map-row map-alarm-row', this.panel);
-    const pinCape = el('button', 'hud-btn', targetRow, 'Pin Cape Skyward');
-    pinCape.onclick = () => {
-      const body = this.gameRef?.active ? this.gameRef.bodyOf(this.gameRef.active) : null;
-      if (!body || body.id !== 'veyra') return;
-      this.landingTargetDirBF = this.landingTargetDirBF ? null : launchSiteBodyFixedDirection(new Vec3());
-      pinCape.textContent = this.landingTargetDirBF ? 'Clear landing target' : 'Pin Cape Skyward';
+    const alarmBtn = el('button', 'hud-btn', btnRow, 'Alarm') as HTMLButtonElement;
+    alarmBtn.onclick = () => {
+      const alarmTime = this.node?.time;
+      if (alarmTime !== undefined && alarmTime > (this.gameRef?.time ?? 0)) {
+        cb.onCreateAlarm(alarmTime, 'Maneuver node', 'maneuver');
+      }
     };
 
     this.nodePanel = el('div', 'map-node-panel', this.panel);
@@ -388,6 +492,12 @@ export class MapView {
   setVisible(vis: boolean): void {
     this.visible = vis;
     this.panel.style.display = vis ? '' : 'none';
+    if (!vis) {
+      this.orbitHoverMarker.visible = false;
+      this.orbitHoverLabel.hidden = true;
+      this.handleHoverLabel.hidden = true;
+      this.cancelPointer();
+    }
   }
 
   focusBody(bodyId: string): void {
@@ -449,37 +559,77 @@ export class MapView {
     this.predictionDirty = true;
   }
 
+  /** Update hover affordances using a stable pixel-space orbit hit band. */
+  updatePointer(clientX: number, clientY: number, pointerType = 'mouse'): void {
+    if (!this.visible) return;
+    this.orbitPointerCoarse = pointerType !== 'mouse';
+    const handle = this.pickNodeHandle(clientX, clientY);
+    this.handleHoverLabel.hidden = !handle;
+    if (handle) {
+      this.handleHoverLabel.textContent = `${handle.label} · drag or click ${this.nodeStep} m/s`;
+      this.handleHoverLabel.style.left = `${Math.min(window.innerWidth - 190, clientX + 14)}px`;
+      this.handleHoverLabel.style.top = `${Math.max(8, clientY - 28)}px`;
+    }
+
+    const hitRadius = this.orbitPointerCoarse ? 24 : 12;
+    this.orbitHover = handle ? null : pickOrbitSegment(this.orbitScreenPoints, clientX, clientY, hitRadius);
+    const hoveringOrbit = !!this.orbitHover && !this.dragControl;
+    this.orbitHoverMarker.visible = hoveringOrbit;
+    this.orbitHoverLabel.hidden = !hoveringOrbit;
+    const material = this.vesselLine.material as THREE.LineBasicMaterial;
+    material.opacity = hoveringOrbit ? 0.72 : (this.node ? 0.32 : 0.85);
+    if (hoveringOrbit && this.orbitHover) {
+      this.positionAtOrbitPick(this.orbitHover, this.orbitHoverMarker.position);
+      this.orbitHoverMarker.scale.setScalar(this.camDist * 0.011);
+      const eta = this.timeAtOrbitFraction(this.orbitHover.fraction) - (this.gameRef?.time ?? 0);
+      this.orbitHoverLabel.textContent = `${this.node ? 'MOVE MANEUVER' : 'ADD MANEUVER'} · T−${Math.max(1, eta).toFixed(0)}s`;
+      this.orbitHoverLabel.style.left = `${Math.min(window.innerWidth - 190, clientX + 14)}px`;
+      this.orbitHoverLabel.style.top = `${Math.max(8, clientY - 34)}px`;
+    }
+  }
+
   /** Begin direct node/conic interaction. Returns true when a map control captured the pointer. */
-  beginPointer(clientX: number, clientY: number): boolean {
+  beginPointer(clientX: number, clientY: number, pointerType = 'mouse'): boolean {
     if (!this.visible || !this.currentElements || !this.gameRef) return false;
+    this.updatePointer(clientX, clientY, pointerType);
+    this.dragStartX = clientX;
+    this.dragStartY = clientY;
+    this.dragDistance = 0;
+    this.dragStartNode = this.node ? { ...this.node } : null;
+
+    const handle = this.pickNodeHandle(clientX, clientY);
+    if (handle && this.dragStartNode) {
+      this.dragControl = handle.axis;
+      this.dragHandleSign = handle.sign;
+      const nodeScreen = this.projectObject(this.nodeMarker);
+      const handleScreen = this.projectObject(handle.sprite);
+      this.dragAxisScreen.set(handleScreen.x - nodeScreen.x, handleScreen.y - nodeScreen.y);
+      if (this.dragAxisScreen.lengthSq() < 1e-6) this.dragAxisScreen.set(0, -1);
+      else this.dragAxisScreen.normalize();
+      return true;
+    }
+
+    if (this.nodeMarker.visible && this.screenDistanceTo(this.nodeMarker, clientX, clientY) <= (this.orbitPointerCoarse ? 24 : 18)) {
+      this.dragControl = 'time';
+      return true;
+    }
+    if (this.orbitHover) {
+      this.pendingOrbitFraction = this.orbitHover.fraction;
+      this.dragControl = 'pending-orbit';
+      return true;
+    }
+    for (const [marker, event] of this.markerEvents) {
+      if (marker !== this.nodeMarker && marker.visible && this.screenDistanceTo(marker, clientX, clientY) <= 18) {
+        this.showMarkerCard(event, clientX, clientY);
+        return true;
+      }
+    }
+
     const pointer = new THREE.Vector2(
       (clientX / window.innerWidth) * 2 - 1,
       -(clientY / window.innerHeight) * 2 + 1,
     );
     this.raycaster.setFromCamera(pointer, this.camera);
-    this.raycaster.params.Line = { threshold: Math.max(0.08, this.camDist * 0.0015) };
-    for (const [axis, handle] of this.nodeHandles) {
-      if (handle.visible && this.raycaster.intersectObject(handle, false).length) {
-        this.dragControl = axis;
-        return true;
-      }
-    }
-    for (const [marker, event] of this.markerEvents) {
-      if (marker.visible && this.raycaster.intersectObject(marker, false).length) {
-        this.showMarkerCard(event, clientX, clientY);
-        return true;
-      }
-    }
-    if (this.nodeMarker.visible && this.raycaster.intersectObject(this.nodeMarker, false).length) {
-      this.dragControl = 'time';
-      return true;
-    }
-    const conicHit = this.raycaster.intersectObject(this.vesselLine, false)[0];
-    if (conicHit) {
-      this.placeNodeAtMapPoint(conicHit.point);
-      this.dragControl = 'time';
-      return true;
-    }
     for (const [bodyId, mesh] of this.bodyMeshes) {
       if (mesh.visible && this.raycaster.intersectObject(mesh, false).length) {
         this.showBodyCard(bodyId, clientX, clientY);
@@ -540,77 +690,194 @@ export class MapView {
     };
   }
 
-  dragPointer(dx: number, dy: number): boolean {
-    if (!this.dragControl || !this.node) return false;
+  dragPointer(clientX: number, clientY: number, shiftKey = false): boolean {
+    if (!this.dragControl) return false;
+    const dx = clientX - this.dragStartX;
+    const dy = clientY - this.dragStartY;
+    this.dragDistance = Math.hypot(dx, dy);
+    if (this.dragControl === 'pending-orbit') return true;
+    if (!this.dragStartNode || !this.node) return false;
+
     if (this.dragControl === 'time') {
-      const period = this.currentElements ? periodOf(this.currentElements) : 600;
-      const secondsPerPixel = Number.isFinite(period) ? period / Math.max(400, window.innerWidth) : 5;
-      this.node.time = Math.max((this.gameRef?.time ?? 0) + 1, this.node.time + dx * secondsPerPixel);
+      const pick = pickOrbitSegment(this.orbitScreenPoints, clientX, clientY, this.orbitPointerCoarse ? 96 : 72);
+      if (pick) this.commitNode({ ...this.node, time: this.timeAtOrbitFraction(pick.fraction) });
     } else {
-      this.node[this.dragControl] += -dy * this.nodeStep * 0.2;
+      const projectedPixels = dx * this.dragAxisScreen.x + dy * this.dragAxisScreen.y;
+      const sensitivity = this.nodeStep * 0.08 * (shiftKey ? 0.1 : 1);
+      this.commitNode({
+        ...this.node,
+        [this.dragControl]: this.dragStartNode[this.dragControl] + this.dragHandleSign * projectedPixels * sensitivity,
+      });
     }
-    this.predictionDirty = true;
-    this.syncNodeInputs();
     return true;
   }
 
   endPointer(): void {
-    this.dragControl = null;
+    if (this.dragControl === 'pending-orbit' && this.pendingOrbitFraction !== null && this.dragDistance < 6) {
+      this.placeNodeAtOrbitFraction(this.pendingOrbitFraction);
+    } else if (
+      this.dragControl && this.dragControl !== 'time' && this.dragControl !== 'pending-orbit' &&
+      this.dragDistance < 4 && this.dragStartNode
+    ) {
+      this.commitNode({
+        ...this.dragStartNode,
+        [this.dragControl]: this.dragStartNode[this.dragControl] + this.dragHandleSign * this.nodeStep,
+      });
+    }
+    this.cancelPointer();
   }
 
-  private placeNodeAtMapPoint(point: THREE.Vector3): void {
-    if (!this.currentElements || !this.gameRef) return;
-    const positions = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    let nearestIndex = 0;
-    let nearestDistance = Infinity;
-    for (let index = 0; index < positions.count; index++) {
-      const distance = point.distanceToSquared(new THREE.Vector3(
-        positions.getX(index), positions.getY(index), positions.getZ(index),
-      ));
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
-    }
-    const fraction = nearestIndex / Math.max(1, positions.count - 1);
-    const elements = this.currentElements;
-    const trueAnomaly = elements.e < 1
-      ? fraction * TWO_PI
-      : -Math.acos(-1 / elements.e) * 0.96 + fraction * Math.acos(-1 / elements.e) * 1.92;
-    const eta = timeToTrueAnomaly(elements, this.gameRef.time, trueAnomaly);
-    this.node = {
-      time: this.gameRef.time + Math.max(1, eta),
-      prograde: 0,
-      normal: 0,
-      radial: 0,
+  cancelPointer(): void {
+    this.dragControl = null;
+    this.pendingOrbitFraction = null;
+    this.dragStartNode = null;
+    this.dragDistance = 0;
+  }
+
+  openOrbitContext(clientX: number, clientY: number, pointerType = 'mouse'): boolean {
+    this.cancelPointer();
+    this.updatePointer(clientX, clientY, pointerType);
+    const pick = this.orbitHover;
+    if (!pick) return false;
+    const time = this.timeAtOrbitFraction(pick.fraction);
+    this.bodyCard?.remove();
+    const card = el('div', 'map-body-card map-orbit-card', this.uiRoot);
+    this.bodyCard = card;
+    card.style.left = `${Math.min(window.innerWidth - 210, clientX + 10)}px`;
+    card.style.top = `${Math.min(window.innerHeight - 130, clientY + 10)}px`;
+    el('strong', '', card, `Orbit · T−${Math.max(1, time - (this.gameRef?.time ?? 0)).toFixed(0)} s`);
+    const actions = el('div', 'map-row', card);
+    const plan = el('button', 'hud-btn', actions, this.node ? 'Move maneuver' : 'Add maneuver');
+    plan.onclick = () => {
+      this.placeNodeAtOrbitFraction(pick.fraction);
+      card.remove();
+      this.bodyCard = null;
     };
-    this.predictionDirty = true;
-    this.refreshNodePanel();
+    const warp = el('button', 'hud-btn', actions, 'Warp here');
+    warp.onclick = () => this.cb.onWarpToTime(time, 10);
+    const close = el('button', 'k-window-btn', card, '×');
+    close.onclick = () => {
+      card.remove();
+      this.bodyCard = null;
+    };
+    return true;
+  }
+
+  private placeNodeAtOrbitFraction(fraction: number): void {
+    if (!this.currentElements || !this.gameRef) return;
+    const time = this.timeAtOrbitFraction(fraction);
+    if (this.node) this.commitNode({ ...this.node, time });
+    else {
+      this.cb.onCreateManeuverNode({ time, prograde: 0, normal: 0, radial: 0 });
+      this.predictionDirty = true;
+      this.refreshNodePanel();
+    }
   }
 
   createNode(inSeconds: number): void {
-    this.nodeTimeBase = null;
     const t = this.gameRef?.time ?? 0;
-    this.node = { time: t + inSeconds, prograde: 0, normal: 0, radial: 0 };
+    this.cb.onCreateManeuverNode({ time: t + inSeconds, prograde: 0, normal: 0, radial: 0 });
     this.predictionDirty = true;
     this.refreshNodePanel();
   }
 
   setNode(node: ManeuverNode): void {
-    this.node = { ...node };
-    this.nodeTimeBase = null;
+    this.cb.onCreateManeuverNode(node);
     this.predictionDirty = true;
     this.refreshNodePanel();
   }
 
-  private nodeTimeBase: number | null = null;
   private gameRef: GameState | null = null;
+
+  private commitNode(node: ManeuverNode): void {
+    this.cb.onUpdateManeuverNode(node);
+    this.predictionDirty = true;
+    this.syncNodeInputs();
+  }
+
+  private timeAtOrbitFraction(fraction: number): number {
+    if (!this.currentElements || !this.gameRef) return this.gameRef?.time ?? 0;
+    const elements = this.currentElements;
+    const trueAnomaly = elements.e < 1
+      ? fraction * TWO_PI
+      : -Math.acos(-1 / elements.e) * 0.96 + fraction * Math.acos(-1 / elements.e) * 1.92;
+    const eta = timeToTrueAnomaly(elements, this.gameRef.time, trueAnomaly);
+    return this.gameRef.time + Math.max(1, eta);
+  }
+
+  private positionAtOrbitPick(pick: OrbitPick, out: THREE.Vector3): void {
+    const positions = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const next = Math.min(positions.count - 1, pick.segmentIndex + 1);
+    out.set(
+      positions.getX(pick.segmentIndex) + (positions.getX(next) - positions.getX(pick.segmentIndex)) * pick.segmentT,
+      positions.getY(pick.segmentIndex) + (positions.getY(next) - positions.getY(pick.segmentIndex)) * pick.segmentT,
+      positions.getZ(pick.segmentIndex) + (positions.getZ(next) - positions.getZ(pick.segmentIndex)) * pick.segmentT,
+    );
+  }
+
+  private refreshOrbitScreenPoints(): void {
+    this.camera.updateMatrixWorld();
+    const positions = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const count = Math.min(positions.count, this.orbitScreenPoints.length);
+    for (let index = 0; index < count; index++) {
+      const point = this.orbitScreenPoints[index];
+      this.projectedPoint
+        .set(positions.getX(index), positions.getY(index), positions.getZ(index))
+        .project(this.camera);
+      point.x = (this.projectedPoint.x + 1) * 0.5 * window.innerWidth;
+      point.y = (1 - this.projectedPoint.y) * 0.5 * window.innerHeight;
+      point.depth = this.projectedPoint.z;
+      point.visible = Number.isFinite(point.x) && Number.isFinite(point.y) &&
+        point.depth >= -1 && point.depth <= 1;
+    }
+  }
+
+  /** Read-only projection samples used by browser interaction checks. */
+  orbitInteractionSamples(): Array<{ x: number; y: number; visible: boolean }> {
+    return this.orbitScreenPoints.map(({ x, y, visible }) => ({ x, y, visible }));
+  }
+
+  private projectObject(object: THREE.Object3D): { x: number; y: number; depth: number } {
+    this.projectedPoint.copy(object.position).project(this.camera);
+    return {
+      x: (this.projectedPoint.x + 1) * 0.5 * window.innerWidth,
+      y: (1 - this.projectedPoint.y) * 0.5 * window.innerHeight,
+      depth: this.projectedPoint.z,
+    };
+  }
+
+  private screenDistanceTo(object: THREE.Object3D, clientX: number, clientY: number): number {
+    const point = this.projectObject(object);
+    return Math.hypot(clientX - point.x, clientY - point.y);
+  }
+
+  private pickNodeHandle(clientX: number, clientY: number): NodeHandle | null {
+    const radius = this.orbitPointerCoarse ? 24 : 18;
+    let best: NodeHandle | null = null;
+    let bestDistance = Infinity;
+    for (const handle of this.nodeHandles.values()) {
+      if (!handle.sprite.visible) continue;
+      const distance = this.screenDistanceTo(handle.sprite, clientX, clientY);
+      if (distance <= radius && distance < bestDistance) {
+        best = handle;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
 
   private refreshNodePanel(): void {
     this.nodePanel.innerHTML = '';
     this.nodeInputs.clear();
-    if (!this.node) {
-      el('div', 'map-readout', this.nodePanel, 'no node planned');
+    const node = this.node;
+    const phase = this.cb.getManeuverPlan()?.phase ?? null;
+    const editingLocked = phase === 'executing' || phase === 'complete';
+    this.lastPanelPhase = phase;
+    this.panel.classList.toggle('has-node', !!node);
+    if (!node) {
+      const empty = el('div', 'map-empty', this.nodePanel);
+      el('strong', '', empty, 'CLICK THE ORBIT TO PLAN');
+      el('span', '', empty, 'The brightened arc has a wide invisible hit area.');
       this.dvReadout.textContent = '';
       this.etaReadout.textContent = '';
       this.encounterInfo.textContent = '';
@@ -621,17 +888,18 @@ export class MapView {
     const stepRow = el('div', 'map-step-row', this.nodePanel);
     el('span', 'map-step-label', stepRow, 'Δv step');
     for (const step of [0.1, 1, 10, 100]) {
-      const button = el('button', 'hud-btn', stepRow, String(step));
+      const button = el('button', 'hud-btn', stepRow, String(step)) as HTMLButtonElement;
       button.classList.toggle('active', step === this.nodeStep);
+      button.disabled = editingLocked;
       button.onclick = () => {
         this.nodeStep = step;
         this.refreshNodePanel();
       };
     }
-    const axes: Array<{ key: 'prograde' | 'normal' | 'radial' | 'time'; label: string }> = [
-      { key: 'prograde', label: 'Prograde' },
-      { key: 'normal', label: 'Normal' },
-      { key: 'radial', label: 'Radial' },
+    const axes: Array<{ key: 'prograde' | 'normal' | 'radial' | 'time'; label: string; minus?: string; plus?: string }> = [
+      { key: 'prograde', label: 'Tangential', minus: 'Retrograde', plus: 'Prograde' },
+      { key: 'normal', label: 'Plane', minus: 'Anti-normal', plus: 'Normal' },
+      { key: 'radial', label: 'Radial', minus: 'Radial in', plus: 'Radial out' },
       { key: 'time', label: 'Node ETA' },
     ];
     for (const ax of axes) {
@@ -640,27 +908,34 @@ export class MapView {
       const minus = el('button', 'hud-btn', row, '−') as HTMLButtonElement;
       const input = el('input', 'map-number', row) as HTMLInputElement;
       const plus = el('button', 'hud-btn', row, '+') as HTMLButtonElement;
+      minus.title = ax.minus ?? 'Earlier';
+      minus.setAttribute('aria-label', ax.minus ?? 'Move node earlier');
+      plus.title = ax.plus ?? 'Later';
+      plus.setAttribute('aria-label', ax.plus ?? 'Move node later');
       input.type = 'number';
       input.step = String(ax.key === 'time' ? 10 : this.nodeStep);
+      minus.disabled = editingLocked;
+      input.disabled = editingLocked;
+      plus.disabled = editingLocked;
       this.nodeInputs.set(ax.key, input);
       const apply = (delta: number) => {
-        if (!this.node) return;
-        if (ax.key === 'time') this.node.time += delta;
-        else this.node[ax.key] += delta;
-        this.predictionDirty = true;
-        this.syncNodeInputs();
+        const current = this.node;
+        if (!current) return;
+        this.commitNode(ax.key === 'time'
+          ? { ...current, time: current.time + delta }
+          : { ...current, [ax.key]: current[ax.key] + delta });
       };
       const step = ax.key === 'time' ? 10 : this.nodeStep;
       minus.onclick = () => apply(-step);
       plus.onclick = () => apply(step);
       input.onchange = () => {
-        if (!this.node) return;
+        const current = this.node;
+        if (!current) return;
         const value = Number(input.value);
         if (!Number.isFinite(value)) return this.syncNodeInputs();
-        if (ax.key === 'time') this.node.time = (this.gameRef?.time ?? 0) + Math.max(1, value);
-        else this.node[ax.key] = value;
-        this.predictionDirty = true;
-        this.syncNodeInputs();
+        this.commitNode(ax.key === 'time'
+          ? { ...current, time: (this.gameRef?.time ?? 0) + Math.max(1, value) }
+          : { ...current, [ax.key]: value });
       };
     }
     const snapRow = el('div', 'map-snap-row', this.nodePanel);
@@ -668,8 +943,24 @@ export class MapView {
     for (const [kind, label] of [
       ['ap', 'Ap'], ['pe', 'Pe'], ['an', 'AN'], ['dn', 'DN'], ['soi', 'SOI'],
     ] as const) {
-      const button = el('button', 'hud-btn', snapRow, label);
+      const button = el('button', 'hud-btn', snapRow, label) as HTMLButtonElement;
+      const unavailable = editingLocked ||
+        (kind === 'ap' && this.currentElements?.e !== undefined && this.currentElements.e >= 1) ||
+        ((kind === 'an' || kind === 'dn') && !this.gameRef?.active?.target) ||
+        (kind === 'soi' && !this.prediction?.encounter && !this.prediction?.escape);
+      button.disabled = unavailable;
       button.onclick = () => this.snapNode(kind);
+    }
+    const period = this.cb.getManeuverPlan() ? periodOf(this.cb.getManeuverPlan()!.referenceOrbit) : Infinity;
+    if (Number.isFinite(period)) {
+      const passRow = el('div', 'map-snap-row', this.nodePanel);
+      el('span', 'map-step-label', passRow, 'Orbit pass');
+      const previous = el('button', 'hud-btn', passRow, '← Previous') as HTMLButtonElement;
+      const next = el('button', 'hud-btn', passRow, 'Next →') as HTMLButtonElement;
+      previous.disabled = editingLocked || node.time - period <= (this.gameRef?.time ?? 0) + 1;
+      next.disabled = editingLocked;
+      previous.onclick = () => this.commitNode({ ...node, time: node.time - period });
+      next.onclick = () => this.commitNode({ ...node, time: node.time + period });
     }
     this.syncNodeInputs();
   }
@@ -700,9 +991,7 @@ export class MapView {
           : null;
     }
     if (eta === null || !Number.isFinite(eta)) return;
-    this.node.time = now + Math.max(1, eta);
-    this.predictionDirty = true;
-    this.syncNodeInputs();
+    this.commitNode({ ...this.node, time: now + Math.max(1, eta) });
   }
 
   private apsisTime(kind: 'ap' | 'pe'): number | null {
@@ -845,10 +1134,17 @@ export class MapView {
       for (const m of this.depositMarkers) m.visible = false;
     }
 
-    // Vessel conic.
-    const els = stateToElements(body.mu, v.pos, v.vel, t);
-    this.currentElements = els;
-    fillConic(this.vesselLine, els, null);
+    // Vessel and maneuver conics.
+    const elements = stateToElements(body.mu, v.pos, v.vel, t);
+    this.currentElements = elements;
+    fillConic(this.vesselLine, elements, null);
+    const plan = this.cb.getManeuverPlan();
+    const activePlan = plan?.vesselId === v.id && plan.bodyId === body.id ? plan : null;
+    const node = activePlan?.node ?? null;
+    if ((activePlan?.phase ?? null) !== this.lastPanelPhase) this.refreshNodePanel();
+    (this.vesselLine.material as THREE.LineBasicMaterial).opacity = this.orbitHover
+      ? 0.72
+      : node ? 0.32 : 0.85;
     this.vesselMarker.position.set(v.pos.x * SCALE, v.pos.y * SCALE, v.pos.z * SCALE);
     const markerScale = this.camDist * 0.014;
     this.vesselMarker.scale.setScalar(markerScale);
@@ -856,75 +1152,121 @@ export class MapView {
     this.encounterMarker.scale.setScalar(markerScale * 0.8);
     this.entryMarker.scale.setScalar(markerScale * 0.8);
     this.landingTargetMarker.scale.setScalar(markerScale * 0.8);
-    this.updateOrbitMarkers(els, gv.target, game, markerScale);
-    this.markerEvents.clear();
-    const apTime = this.apsisTime('ap');
-    const peTime = this.apsisTime('pe');
-    if (apTime !== null) this.markerEvents.set(this.orbitMarkers.get('ap')!, { label: 'Apoapsis', time: apTime });
-    if (peTime !== null) this.markerEvents.set(this.orbitMarkers.get('pe')!, { label: 'Periapsis', time: peTime });
-    if (this.node) this.markerEvents.set(this.nodeMarker, { label: 'Maneuver node', time: this.node.time });
-    if (this.prediction?.encounter) {
-      this.markerEvents.set(this.encounterMarker, { label: `${this.prediction.encounter.bodyId} SOI entry`, time: this.prediction.encounter.entryTime });
-    } else if (this.prediction?.escape) {
-      this.markerEvents.set(this.encounterMarker, { label: `${body.name} SOI exit`, time: this.prediction.escape.exitTime });
-    }
+    this.updateOrbitMarkers(elements, gv.target, game, markerScale);
 
-    // Node: keep it in the future.
-    if (this.node && this.node.time < t + 1) {
-      this.node.time = t + 1;
-      this.predictionDirty = true;
-    }
+    if (activePlan && node) {
+      const currentArcEnd = Math.max(t + 1, node.time);
+      fillConicTimeRange(this.currentArcLine, elements, t, currentArcEnd);
+      this.currentArcLine.visible = true;
 
-    // Prediction refresh (only when orbit/node changed).
-    const sig = `${els.a.toFixed(0)}:${els.e.toFixed(5)}:${els.i.toFixed(4)}:${this.node ? `${this.node.time.toFixed(0)}:${this.node.prograde.toFixed(1)}:${this.node.normal.toFixed(1)}:${this.node.radial.toFixed(1)}` : 'x'}`;
-    if (sig !== this.lastElSig || this.predictionDirty) {
-      this.lastElSig = sig;
-      this.predictionDirty = false;
-      if (this.node) {
-        const after = orbitAfterNode(els, this.node);
-        this.prediction = predictTrajectory(game.universe, body, after, this.node.time);
-        fillConic(this.nodeLine, after, null);
-        this.nodeLine.visible = true;
-        const nr = new Vec3();
-        const nv = new Vec3();
-        elementsAtTime(els, this.node.time, nr, nv);
-        this.nodeMarker.position.set(nr.x * SCALE, nr.y * SCALE, nr.z * SCALE);
-        this.nodeMarker.visible = true;
-        const radial = nr.clone().normalize();
-        const normal = Vec3.cross(nr, nv, new Vec3()).normalize();
-        const prograde = nv.clone().normalize();
-        const offset = markerScale * 2.4;
-        for (const [axis, direction] of [
-          ['prograde', prograde], ['normal', normal], ['radial', radial],
-        ] as const) {
-          const handle = this.nodeHandles.get(axis)!;
-          handle.position.copy(this.nodeMarker.position).add(
-            new THREE.Vector3(direction.x, direction.y, direction.z).multiplyScalar(offset),
-          );
-          handle.scale.setScalar(markerScale * 0.65);
-          handle.visible = true;
-        }
-      } else {
-        this.prediction = predictTrajectory(game.universe, body, els, t);
-        this.nodeLine.visible = false;
-        this.nodeMarker.visible = false;
-        for (const handle of this.nodeHandles.values()) handle.visible = false;
+      if (activePlan.revision !== this.lastRenderedPlanRevision) {
+        this.lastRenderedPlanRevision = activePlan.revision;
+        const targetPeriod = periodOf(activePlan.targetOrbit);
+        const targetEnd = node.time + (Number.isFinite(targetPeriod) ? targetPeriod : 200_000);
+        fillConicTimeRange(this.nodeLine, activePlan.targetOrbit, node.time, targetEnd);
       }
-      // Encounter display.
-      if (this.prediction?.encounter) {
-        const enc = this.prediction.encounter;
-        const moon = game.universe.get(enc.bodyId);
-        const mp = new Vec3();
-        game.universe.localPosition(moon, enc.entryTime, mp);
-        fillConic(this.encounterLine, enc.elements, mp);
+      this.nodeLine.visible = true;
+
+      const nodePosition = new Vec3();
+      const nodeVelocity = new Vec3();
+      elementsAtTime(activePlan.referenceOrbit, node.time, nodePosition, nodeVelocity);
+      this.nodeMarker.position.set(nodePosition.x * SCALE, nodePosition.y * SCALE, nodePosition.z * SCALE);
+      this.nodeMarker.visible = true;
+      const directions: Record<NodeAxis, Vec3> = {
+        radial: nodePosition.clone().normalize(),
+        normal: Vec3.cross(nodePosition, nodeVelocity, new Vec3()).normalize(),
+        prograde: nodeVelocity.clone().normalize(),
+      };
+      const offset = markerScale * 2.7;
+      for (const handle of this.nodeHandles.values()) {
+        const direction = directions[handle.axis];
+        handle.sprite.position.copy(this.nodeMarker.position).add(
+          new THREE.Vector3(direction.x, direction.y, direction.z).multiplyScalar(offset * handle.sign),
+        );
+        handle.sprite.scale.setScalar(markerScale * 0.8);
+        handle.sprite.visible = activePlan.phase !== 'executing' && activePlan.phase !== 'complete';
+        const nodeScreen = this.projectObject(this.nodeMarker);
+        const handleScreen = this.projectObject(handle.sprite);
+        const angle = Math.atan2(handleScreen.y - nodeScreen.y, handleScreen.x - nodeScreen.x);
+        (handle.sprite.material as THREE.SpriteMaterial).rotation = -angle - Math.PI / 2;
+      }
+
+      if (activePlan.phase === 'executing') {
+        const completion = projectedOrbitAfterRemainingBurn(
+          body.mu,
+          v.pos,
+          v.vel,
+          t,
+          activePlan.burnDirection,
+          activePlan.remainingDeltaV,
+        );
+        const completionPeriod = periodOf(completion);
+        fillConicTimeRange(
+          this.completionLine,
+          completion,
+          t,
+          t + (Number.isFinite(completionPeriod) ? completionPeriod : 200_000),
+        );
+        this.completionLine.visible = true;
+      } else {
+        this.completionLine.visible = false;
+      }
+    } else {
+      this.lastRenderedPlanRevision = -1;
+      this.currentArcLine.visible = false;
+      this.nodeLine.visible = false;
+      this.completionLine.visible = false;
+      this.nodeMarker.visible = false;
+      for (const handle of this.nodeHandles.values()) handle.sprite.visible = false;
+    }
+
+    this.refreshOrbitScreenPoints();
+
+    // Prediction refresh. Local conics update immediately; encounter scans are throttled during drags.
+    const signature = activePlan
+      ? `${body.id}:plan:${activePlan.revision}`
+      : [
+          body.id,
+          elements.a.toFixed(0), elements.e.toFixed(6), elements.i.toFixed(5),
+          elements.raan.toFixed(5), elements.argPe.toFixed(5), elements.meanAnomaly0.toFixed(4),
+          Math.floor(t / 5),
+        ].join(':');
+    const predictionNow = performance.now();
+    const predictionChanged = signature !== this.lastElSig || this.predictionDirty;
+    const predictionAllowed = !this.dragControl || predictionNow - this.lastPredictionRefreshAt >= 150;
+    if (predictionChanged && predictionAllowed) {
+      this.lastElSig = signature;
+      this.predictionDirty = false;
+      this.lastPredictionRefreshAt = predictionNow;
+      const predictionElements = activePlan?.targetOrbit ?? elements;
+      const predictionStart = activePlan?.node.time ?? t;
+      this.prediction = predictTrajectory(game.universe, body, predictionElements, predictionStart);
+      if (activePlan) {
+        const transitionTime = this.prediction.encounter?.entryTime ?? this.prediction.escape?.exitTime;
+        if (transitionTime) fillConicTimeRange(this.nodeLine, activePlan.targetOrbit, activePlan.node.time, transitionTime);
+      }
+
+      if (this.prediction.encounter) {
+        const encounter = this.prediction.encounter;
+        const moon = game.universe.get(encounter.bodyId);
+        const moonPosition = new Vec3();
+        game.universe.localPosition(moon, encounter.entryTime, moonPosition);
+        const encounterPeriod = periodOf(encounter.elements);
+        fillConicTimeRange(
+          this.encounterLine,
+          encounter.elements,
+          encounter.entryTime,
+          encounter.entryTime + (Number.isFinite(encounterPeriod) ? encounterPeriod : 80_000),
+          moonPosition,
+        );
         this.encounterLine.visible = true;
-        this.encounterMarker.position.set(mp.x * SCALE, mp.y * SCALE, mp.z * SCALE);
+        this.encounterMarker.position.set(moonPosition.x * SCALE, moonPosition.y * SCALE, moonPosition.z * SCALE);
         this.encounterMarker.visible = true;
         this.encounterInfo.textContent =
           `${moon.name} encounter!\n` +
-          `SOI entry in ${((enc.entryTime - t) / 60).toFixed(0)} min\n` +
-          `periapsis ${enc.periapsisAltitude > 0 ? (enc.periapsisAltitude / 1000).toFixed(0) + ' km' : 'IMPACT'}`;
-      } else if (this.prediction?.escape) {
+          `SOI entry in ${((encounter.entryTime - t) / 60).toFixed(0)} min\n` +
+          `periapsis ${encounter.periapsisAltitude > 0 ? (encounter.periapsisAltitude / 1000).toFixed(0) + ' km' : 'IMPACT'}`;
+      } else if (this.prediction.escape) {
         this.encounterLine.visible = false;
         const exitPosition = new Vec3();
         const exitVelocity = new Vec3();
@@ -940,29 +1282,46 @@ export class MapView {
       }
     }
 
-    if (this.node) {
-      this.dvReadout.textContent = `Δv ${nodeDeltaV(this.node).toFixed(1)} m/s`;
-      this.etaReadout.textContent = `burn in ${(this.node.time - t).toFixed(0)} s`;
-      const after = orbitAfterNode(els, this.node);
+    this.markerEvents.clear();
+    const apoapsisTime = this.apsisTime('ap');
+    const periapsisTime = this.apsisTime('pe');
+    if (apoapsisTime !== null) this.markerEvents.set(this.orbitMarkers.get('ap')!, { label: 'Apoapsis', time: apoapsisTime });
+    if (periapsisTime !== null) this.markerEvents.set(this.orbitMarkers.get('pe')!, { label: 'Periapsis', time: periapsisTime });
+    if (node) this.markerEvents.set(this.nodeMarker, { label: 'Maneuver node', time: node.time });
+    if (this.prediction?.encounter) {
+      this.markerEvents.set(this.encounterMarker, { label: `${this.prediction.encounter.bodyId} SOI entry`, time: this.prediction.encounter.entryTime });
+    } else if (this.prediction?.escape) {
+      this.markerEvents.set(this.encounterMarker, { label: `${body.name} SOI exit`, time: this.prediction.escape.exitTime });
+    }
+
+    if (activePlan && node) {
+      const phase = activePlan.phase === 'overdue' ? ' · OVERDUE' : activePlan.phase === 'executing' ? ' · EXECUTING' : '';
+      this.dvReadout.textContent = `Δv ${nodeDeltaV(node).toFixed(1)} m/s${phase}`;
+      this.etaReadout.textContent = `burn ${node.time >= t ? 'in ' : ''}${(node.time - t).toFixed(0)} s`;
+      const after = activePlan.targetOrbit;
       const postApoapsis = after.e < 1 ? `${((apoapsisOf(after) - body.radius) / 1000).toFixed(1)} km` : 'escape';
       const postPeriapsis = `${((periapsisOf(after) - body.radius) / 1000).toFixed(1)} km`;
       const postPeriod = periodOf(after);
       this.postReadout.textContent =
-        `ORBIT AFTER  Ap ${postApoapsis}  ·  Pe ${postPeriapsis}\n` +
+        `TARGET ORBIT  Ap ${postApoapsis}  ·  Pe ${postPeriapsis}\n` +
         `Inc ${(after.i * 180 / Math.PI).toFixed(2)}°  ·  Period ${Number.isFinite(postPeriod) ? `${(postPeriod / 60).toFixed(1)} min` : '—'}`;
-      const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
-      const available = analysis.stages
+      const craftAnalysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
+      const available = craftAnalysis.stages
         .filter((stage) => stage.stageIndex >= v.currentStage)
         .reduce((sum, stage) => sum + stage.deltaV, 0);
-      const required = nodeDeltaV(this.node);
-      this.budgetReadout.textContent = `VESSEL Δv ${available.toFixed(0)} m/s  ·  margin ${(available - required).toFixed(0)} m/s`;
+      const required = activePlan.initialDeltaV;
+      this.budgetReadout.textContent = activePlan.phase === 'executing'
+        ? `REMAINING ${activePlan.remainingDeltaV.toFixed(1)} m/s  ·  target held stable`
+        : `VESSEL Δv ${available.toFixed(0)} m/s  ·  margin ${(available - required).toFixed(0)} m/s`;
       this.budgetReadout.classList.toggle('warning', required > available);
       this.syncNodeInputs();
     } else {
+      this.dvReadout.textContent = '';
+      this.etaReadout.textContent = '';
       this.postReadout.textContent = '';
       this.budgetReadout.textContent = '';
     }
-    this.updateEntryPrediction(game, body, els, markerScale);
+    this.updateEntryPrediction(game, body, elements, markerScale);
   }
 
   private updateOrbitMarkers(
@@ -1038,13 +1397,15 @@ export class MapView {
   ): void {
     const gv = game.active!;
     const v = gv.runtime;
+    const plan = this.cb.getManeuverPlan();
+    const activePlan = plan?.vesselId === v.id && plan.bodyId === body.id ? plan : null;
     const signature = [
       body.id,
       elements.a.toFixed(0),
       elements.e.toFixed(5),
       elements.i.toFixed(4),
       Math.floor(game.time / 10),
-      this.node ? `${this.node.time.toFixed(0)}:${this.node.prograde.toFixed(1)}:${this.node.normal.toFixed(1)}:${this.node.radial.toFixed(1)}` : 'none',
+      activePlan ? `plan:${activePlan.revision}` : 'none',
       v.massProps.mass.toFixed(0),
     ].join(':');
     const now = performance.now();
@@ -1054,14 +1415,13 @@ export class MapView {
       let startPosition = v.pos;
       let startVelocity = v.vel;
       let startTime = game.time;
-      if (this.node) {
-        const postNode = orbitAfterNode(elements, this.node);
+      if (activePlan) {
         const nodePosition = new Vec3();
         const nodeVelocity = new Vec3();
-        elementsAtTime(postNode, this.node.time, nodePosition, nodeVelocity);
+        elementsAtTime(activePlan.targetOrbit, activePlan.node.time, nodePosition, nodeVelocity);
         startPosition = nodePosition;
         startVelocity = nodeVelocity;
-        startTime = this.node.time;
+        startTime = activePlan.node.time;
       }
       this.entryPrediction = predictEntry(
         body,
@@ -1141,6 +1501,8 @@ export class MapView {
     this.depositCache.clear();
     this.scene.clear();
     this.panel.remove();
+    this.orbitHoverLabel.remove();
+    this.handleHoverLabel.remove();
     this.gameRef = null;
   }
 }

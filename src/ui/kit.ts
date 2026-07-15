@@ -254,9 +254,13 @@ export function injectUiStyles(): void {
       /* ============================== map view */
       .map-panel { position: absolute; left: 12px; bottom: 12px; width: 300px;
         background: var(--ui-bg); border: 1px solid #223240; border-radius: 8px;
-        padding: 10px 12px; pointer-events: auto; }
+        padding: 10px 12px; pointer-events: auto; box-shadow: 0 12px 34px rgba(0,0,0,.34); }
       .map-title { font-size: 11px; letter-spacing: 2px; color: #9fb4c4; margin-bottom: 8px; }
       .map-row { display: flex; gap: 6px; margin-bottom: 8px; }
+      .map-panel:not(.has-node) > .map-row:first-of-type button:not(:first-child) { display: none; }
+      .map-empty { display: flex; flex-direction: column; gap: 3px; color: #718694; font-size: 10px;
+        border-top: 1px solid #223240; padding-top: 7px; }
+      .map-empty strong { color: #b9c9d3; font-size: 11px; font-weight: 500; }
       .map-alarm-row { gap: 3px; }
       .map-alarm-row button { padding: 2px 6px; font-size: 9px; }
       .map-node-panel { display: flex; flex-direction: column; gap: 6px; }
@@ -284,6 +288,12 @@ export function injectUiStyles(): void {
       .map-body-card > span { color: #8195a4; font-family: var(--ui-mono); font-size: 9.5px; }
       .map-body-card .map-row { margin: 3px 0 0; }
       .map-body-card .k-window-btn { position: absolute; right: 4px; top: 3px; }
+      .map-orbit-hover, .map-handle-hover { position: absolute; z-index: 56; pointer-events: none;
+        transform: translate(10px,-50%); padding: 4px 7px; border: 1px solid #31556a;
+        background: rgba(7,14,20,.94); color: #dbe7ed; font: 9px var(--ui-mono);
+        letter-spacing: .35px; white-space: nowrap; box-shadow: 0 5px 18px rgba(0,0,0,.35); }
+      .map-orbit-hover { border-color: var(--ui-accent); color: var(--ui-accent); }
+      .map-handle-hover { border-color: var(--ui-warn); color: #f2d79d; }
 
       /* ============================== mission tools */
       .mission-alarm-form { display: grid; grid-template-columns: 1fr 66px 82px auto; gap: 4px; margin-bottom: 8px; }
@@ -491,6 +501,17 @@ export function injectUiStyles(): void {
         .ed-notice { top:calc(62px + env(safe-area-inset-top)); }
         .ed-utility-host { bottom:calc(61px + env(safe-area-inset-bottom)); }
         .ed-utility-host .k-launcher,.hud-utility-host .k-launcher { gap:2px; }
+        .map-panel { left: 0; right: 0; bottom: 0; width: auto; max-height: min(45dvh, 390px);
+          overflow-y: auto; border-width: 1px 0 0; border-radius: 12px 12px 0 0;
+          padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+        .map-panel:not(.has-node) { right: auto; width: min(280px, calc(100vw - 24px));
+          border-right-width: 1px; border-radius: 0 12px 0 0; }
+        .map-axis { flex-wrap: wrap; }
+        .map-axis label { width: 72px; }
+        .map-axis input[type=range] { order: 5; flex-basis: 100%; height: 26px; }
+        .map-axis button { width: 42px; min-height: 42px; }
+        .map-number { flex: 1; min-height: 34px; font-size: 13px; }
+        .map-step-row button, .map-snap-row button { min-height: 38px; padding-inline: 10px; }
       }
 
       /* main menu */

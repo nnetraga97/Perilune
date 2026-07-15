@@ -61,6 +61,16 @@ export function nodeBurnDirection(
   node: ManeuverNode,
   out: Vec3,
 ): Vec3 {
+  nodeBurnVector(elements, node, out);
+  return out.lengthSq() > 0 ? out.normalize() : out.set(1, 0, 0);
+}
+
+/** World-frame delta-v vector represented by a node's signed RTN components. */
+export function nodeBurnVector(
+  elements: OrbitalElements,
+  node: ManeuverNode,
+  out: Vec3,
+): Vec3 {
   elementsAtTime(elements, node.time, _r, _v);
   _rHat.copy(_r).normalize();
   Vec3.cross(_r, _v, _nHat).normalize();
@@ -69,7 +79,7 @@ export function nodeBurnDirection(
   out.addScaled(_tHat, node.prograde);
   out.addScaled(_rHat, node.radial);
   out.addScaled(_nHat, node.normal);
-  return out.lengthSq() > 0 ? out.normalize() : out.set(1, 0, 0);
+  return out;
 }
 
 export interface EncounterPrediction {

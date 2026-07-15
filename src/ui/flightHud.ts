@@ -11,7 +11,7 @@ import { G0, defOf, analyzeCraft } from '../sim/vessel';
 import { oreConcentration, oreCapacityOf } from '../sim/resources';
 import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
-import { estimateBurnTime, nodeBurnDirection, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
+import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading } from './navball';
 import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
@@ -40,6 +40,7 @@ export interface HudCallbacks {
 
 export interface HudTelemetry {
   nodeRemainingDv: number;
+  nodeBurnDirection: Vec3 | null;
   cameraMode: string;
   precision: boolean;
   entryPrediction: EntryPrediction | null;
@@ -481,7 +482,7 @@ export class FlightHud {
       this.lastEventCount = v.events.length;
     }
 
-    this.drawNavball(game, node, telemetry.nodeRemainingDv);
+    this.drawNavball(game, node, telemetry.nodeRemainingDv, telemetry.nodeBurnDirection);
   }
 
   showActionGroup(group: number, executed: number): void {
@@ -665,7 +666,12 @@ export class FlightHud {
   }
 
   // ------------------------------------------------------------- navball
-  private drawNavball(game: GameState, node: ManeuverNode | null, remainingDv: number): void {
+  private drawNavball(
+    game: GameState,
+    node: ManeuverNode | null,
+    remainingDv: number,
+    plannedBurnDirection: Readonly<Vec3> | null,
+  ): void {
     const gv = game.active!;
     const v = gv.runtime;
     const ctx = this.navCtx;
@@ -973,11 +979,8 @@ export class FlightHud {
       drawMarker(normal, '#b98ce8', 'N+');
       drawMarker(normal.clone().negate(), '#8f70c2', 'N−');
     }
-    if (node) {
-      const body = game.bodyOf(gv);
-      const els = stateToElements(body.mu, v.pos, v.vel, game.time);
-      const burnDir = nodeBurnDirection(els, node, new Vec3());
-      drawMarker(burnDir, '#6bd0e8', '✦');
+    if (node && plannedBurnDirection) {
+      drawMarker(new Vec3().copy(plannedBurnDirection), '#6bd0e8', '✦');
       const burnDuration = this.estimateNodeBurn(game, remainingDv || nodeDeltaV(node));
       const eta = node.time - game.time;
       const progress = burnDuration > 0 ? Math.max(0, Math.min(1, 1 - (eta - burnDuration / 2) / Math.max(1, burnDuration))) : 0;
