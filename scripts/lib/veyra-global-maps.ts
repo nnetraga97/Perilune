@@ -107,12 +107,35 @@ export function decodeOctNormal(encodedX: number, encodedY: number): Vec3 {
   return new Vec3(x, y, z).normalize();
 }
 
-function sourceLuminanceAt(source: RawRaster, x: number, y: number): number {
-  const offset = (y * source.width + x) * source.channels;
-  return source.data[offset] * 0.21 + source.data[offset + 1] * 0.72 + source.data[offset + 2] * 0.07;
+export interface SourceColor {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
 }
 
-function sourceLuminance(source: RawRaster, u: number, v: number): number {
+function bilinearSourceChannel(
+  source: RawRaster,
+  northWest: number,
+  northEast: number,
+  southWest: number,
+  southEast: number,
+  tx: number,
+  ty: number,
+  channel: 0 | 1 | 2,
+): number {
+  return mixNumber(
+    mixNumber(source.data[northWest + channel], source.data[northEast + channel], tx),
+    mixNumber(source.data[southWest + channel], source.data[southEast + channel], tx),
+    ty,
+  );
+}
+
+function sourceColor(
+  source: RawRaster,
+  u: number,
+  v: number,
+  out: { r: number; g: number; b: number },
+): SourceColor {
   const wrappedU = u - Math.floor(u);
   const scaledX = wrappedU * source.width - 0.5;
   const scaledY = Math.max(0, Math.min(source.height - 1, v * source.height - 0.5));
@@ -123,34 +146,59 @@ function sourceLuminance(source: RawRaster, u: number, v: number): number {
   const y1 = Math.min(source.height - 1, y0 + 1);
   const tx = scaledX - x0Unwrapped;
   const ty = scaledY - y0;
-  const north = mixNumber(sourceLuminanceAt(source, x0, y0), sourceLuminanceAt(source, x1, y0), tx);
-  const south = mixNumber(sourceLuminanceAt(source, x0, y1), sourceLuminanceAt(source, x1, y1), tx);
-  return mixNumber(north, south, ty);
+  const northWest = (y0 * source.width + x0) * source.channels;
+  const northEast = (y0 * source.width + x1) * source.channels;
+  const southWest = (y1 * source.width + x0) * source.channels;
+  const southEast = (y1 * source.width + x1) * source.channels;
+  out.r = bilinearSourceChannel(source, northWest, northEast, southWest, southEast, tx, ty, 0);
+  out.g = bilinearSourceChannel(source, northWest, northEast, southWest, southEast, tx, ty, 1);
+  out.b = bilinearSourceChannel(source, northWest, northEast, southWest, southEast, tx, ty, 2);
+  return out;
 }
 
-function directionLuminance(source: RawRaster, x: number, y: number, z: number): number {
+function directionColor(
+  source: RawRaster,
+  x: number,
+  y: number,
+  z: number,
+  out: { r: number; g: number; b: number },
+): SourceColor {
   const length = Math.hypot(x, y, z) || 1;
   const nx = x / length;
   const ny = y / length;
   const nz = Math.max(-1, Math.min(1, z / length));
   const u = Math.atan2(ny, nx) / TAU + 0.5;
   const v = 0.5 - Math.asin(nz) / Math.PI;
-  const directional = sourceLuminance(source, u, v);
-  const poleAverage = sourceLuminance(source, 0.5, v);
-  return mixNumber(directional, poleAverage, smoothstep(0.96, 0.9995, Math.abs(nz)));
+  const poleBlend = smoothstep(0.96, 0.9995, Math.abs(nz));
+  sourceColor(source, u, v, out);
+  if (poleBlend <= 0) return out;
+  const directionalR = out.r;
+  const directionalG = out.g;
+  const directionalB = out.b;
+  sourceColor(source, 0.5, v, out);
+  out.r = mixNumber(directionalR, out.r, poleBlend);
+  out.g = mixNumber(directionalG, out.g, poleBlend);
+  out.b = mixNumber(directionalB, out.b, poleBlend);
+  return out;
 }
 
-/** Pole- and seam-safe Natural Earth detail sampled only from body direction. */
+/**
+ * Pole- and seam-safe Natural Earth color sampled from one deterministic
+ * body-space rotation. Keeping a single projection preserves authored color
+ * structure; the previous three-way luminance average visibly smeared it.
+ */
+export function sampleVeyraSourceColor(
+  source: RawRaster,
+  direction: Readonly<Vec3>,
+  out: { r: number; g: number; b: number } = { r: 0, g: 0, b: 0 },
+): SourceColor {
+  return directionColor(source, direction.y, direction.z, direction.x, out);
+}
+
+/** Backwards-compatible luminance view used by source-sampling diagnostics. */
 export function sampleVeyraSourceDetail(source: RawRaster, direction: Readonly<Vec3>): number {
-  const sampleA = directionLuminance(source, direction.y, direction.z, direction.x);
-  const sampleB = directionLuminance(source, -direction.z, direction.x, -direction.y);
-  const sampleC = directionLuminance(
-    source,
-    direction.x * 0.36 + direction.z * 0.93,
-    direction.y,
-    -direction.x * 0.93 + direction.z * 0.36,
-  );
-  return (sampleA + sampleB + sampleC) / 3;
+  const color = sampleVeyraSourceColor(source, direction);
+  return color.r * 0.21 + color.g * 0.72 + color.b * 0.07;
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -238,6 +286,7 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
   const westDirection = new Vec3();
   const northDirection = new Vec3();
   const southDirection = new Vec3();
+  const sourceColor = { r: 0, g: 0, b: 0 };
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -266,14 +315,16 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
       if (surfaceNormal.dot(direction) < 0) surfaceNormal.negate();
       writeOctNormal(surfaceNormal, normal, index * 2);
 
-      const sourceDetail = sampleVeyraSourceDetail(source, direction);
+      sampleVeyraSourceColor(source, direction, sourceColor);
+      const sourceLuminance = sourceColor.r * 0.21 + sourceColor.g * 0.72 + sourceColor.b * 0.07;
       const ocean = terrainHeight < 0;
       const elevation = Math.max(-1, Math.min(1, terrainHeight / 8_000));
       if (ocean) {
         const depth = Math.min(1, -terrainHeight / 6_000);
-        albedo[index * 3] = clampByte(12 + sourceDetail * 0.04);
-        albedo[index * 3 + 1] = clampByte(45 + sourceDetail * 0.12 - depth * 15);
-        albedo[index * 3 + 2] = clampByte(78 + sourceDetail * 0.28 - depth * 20);
+        const sourceGain = 0.82 + (sourceLuminance / 255) * 0.36;
+        albedo[index * 3] = clampByte(18 * sourceGain - depth * 4);
+        albedo[index * 3 + 1] = clampByte(68 * sourceGain - depth * 18);
+        albedo[index * 3 + 2] = clampByte(118 * sourceGain - depth * 28);
       } else {
         const latitude = Math.abs(direction.z);
         const moistureNoise = fbm3(direction.x * 3.4, direction.y * 3.4, direction.z * 3.4, seed + 91, 5);
@@ -301,10 +352,22 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
         baseR = mixNumber(baseR, 198, snowWeight);
         baseG = mixNumber(baseG, 207, snowWeight);
         baseB = mixNumber(baseB, 205, snowWeight);
-        const detail = (sourceDetail - 128) * 0.16;
-        albedo[index * 3] = clampByte(baseR + detail + elevation * 24);
-        albedo[index * 3 + 1] = clampByte(baseG + detail + elevation * 19);
-        albedo[index * 3 + 2] = clampByte(baseB + detail + elevation * 16);
+        // Preserve macro contrast and some chroma from the authored source,
+        // while retaining Veyra's terrain-derived coastline and biome palette.
+        const sourceGain = 0.7 + (sourceLuminance / 255) * 0.6;
+        const neutral = Math.max(24, sourceLuminance);
+        const sourceChromaR = Math.max(0.72, Math.min(1.28, sourceColor.r / neutral));
+        const sourceChromaG = Math.max(0.72, Math.min(1.28, sourceColor.g / neutral));
+        const sourceChromaB = Math.max(0.72, Math.min(1.28, sourceColor.b / neutral));
+        albedo[index * 3] = clampByte(
+          (baseR + elevation * 24) * sourceGain * mixNumber(1, sourceChromaR, 0.28),
+        );
+        albedo[index * 3 + 1] = clampByte(
+          (baseG + elevation * 19) * sourceGain * mixNumber(1, sourceChromaG, 0.28),
+        );
+        albedo[index * 3 + 2] = clampByte(
+          (baseB + elevation * 16) * sourceGain * mixNumber(1, sourceChromaB, 0.28),
+        );
       }
 
       const radialAgreement = Math.max(0, surfaceNormal.dot(direction));

@@ -10,7 +10,10 @@ import {
   bodyFixedUv,
   installBodyFixedDirectionAttribute,
 } from '../src/render/terrestrial/globalCoordinates';
-import { createTerrestrialGlobalMaterial } from '../src/render/terrestrial/globalMaterial';
+import {
+  createTerrestrialGlobalMaterial,
+  updateTerrestrialCloudLighting,
+} from '../src/render/terrestrial/globalMaterial';
 
 const veyra = new GameState().universe.get('veyra');
 const descriptor = bodyMaterialDescriptor(veyra);
@@ -64,12 +67,21 @@ describe('Veyra global coordinates and material', () => {
       manifestDigest: 'digest', gpuBytes: 1,
       textures: new Map([['albedo', albedo], ['normal', normal], ['material', packed], ['clouds', clouds]]),
     };
-    const material = createTerrestrialGlobalMaterial(pack, descriptor);
+    const material = createTerrestrialGlobalMaterial(pack, descriptor, 8);
     expect(material.userData).toMatchObject({ terrestrialGlobal: true, bodyId: 'veyra', authored: true });
     expect(material.vertexColors).toBe(false);
     expect(albedo.colorSpace).toBe(THREE.SRGBColorSpace);
     expect(normal.colorSpace).toBe(THREE.NoColorSpace);
     expect(packed.colorSpace).toBe(THREE.NoColorSpace);
+    expect(albedo.anisotropy).toBe(4);
+    expect(normal.anisotropy).toBe(4);
+    expect(packed.anisotropy).toBe(4);
+    expect(albedo.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(normal.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(packed.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(albedo.magFilter).toBe(THREE.LinearFilter);
+    expect(material.userData.maps.clouds).toBe(clouds);
+    updateTerrestrialCloudLighting(material, { x: 0, y: 2, z: 0 }, 0.4);
 
     const shader = {
       uniforms: {} as Record<string, { value: unknown }>,
@@ -80,15 +92,21 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.vertexShader).toContain('attribute vec3 bodyDirection');
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('decodeGlobalOctNormal');
+    expect(shader.fragmentShader).toContain('vec3 globalBodyNormal');
     expect(shader.fragmentShader).toContain('diffuseColor.rgb *= authoredAlbedo.rgb;');
+    expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);
+    expect(shader.uniforms.globalCloudMap.value).toBe(clouds);
+    expect((shader.uniforms.globalSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
+    expect(shader.uniforms.globalCloudDriftAngle.value).toBe(0.4);
   });
 
   it('keeps descriptor fallback visible and rejects incomplete authored packs', () => {
     const fallback = createTerrestrialGlobalMaterial(null, descriptor);
     expect(fallback.vertexColors).toBe(true);
     expect(fallback.color.getHex()).not.toBe(0);
+    expect(fallback.userData.maps.albedo.minFilter).toBe(THREE.LinearFilter);
     expect(() => createTerrestrialGlobalMaterial({
       bodyId: 'veyra', tier: 'low', width: 1, height: 1, manifestDigest: 'x', gpuBytes: 0,
       textures: new Map([['albedo', texture()]]),

@@ -15,10 +15,19 @@ import {
 import { Universe } from '../src/sim/universe';
 import { bodyOrientation } from '../src/sim/bodyOrientation';
 import type { GpuTimerSnapshot, GpuTimingSample } from '../src/render/gpuTimer';
+import type { RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { WorldScene } from '../src/render/worldScene';
 import { RenderContextLifecycle } from '../src/render/contextLifecycle';
 
 const universe = new Universe(structuredClone(AUREN_SYSTEM));
+
+function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAssetPack {
+  const texture = () => new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
+  return {
+    bodyId: 'veyra', tier, width: 4096, height: 2048, manifestDigest: 'map-test', gpuBytes: 12,
+    textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()], ['clouds', texture()]]),
+  };
+}
 
 describe('compact map body presentation', () => {
   test('selects solid, gas, and star materials from the shared descriptor identity', () => {
@@ -50,6 +59,18 @@ describe('compact map body presentation', () => {
     expect(palette.size).toBeGreaterThan(1);
   });
 
+  test('uses the borrowed authored pack and quality-tier sphere resolution for terrestrial bodies', () => {
+    const pack = authoredPack('high');
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('veyra')), pack, 16, 'high');
+    const material = mesh.material as THREE.MeshStandardMaterial;
+
+    expect(material.userData).toMatchObject({ terrestrialGlobal: true, authored: true, bodyId: 'veyra' });
+    expect(material.userData.maps.albedo).toBe(pack.textures.get('albedo'));
+    expect(material.userData.maps.albedo.anisotropy).toBe(8);
+    expect(mesh.geometry.parameters).toMatchObject({ widthSegments: 160, heightSegments: 96 });
+    expect(mesh.userData.assetPack).toBe(pack);
+  });
+
   test('applies the authoritative body orientation to every compact mesh at simulation time', () => {
     const body = universe.get('veyra');
     const mesh = compactBodyMesh(bodyMaterialDescriptor(body));
@@ -77,9 +98,10 @@ describe('compact map body presentation', () => {
     expect(actual.z).toBeCloseTo(expected.z, 12);
   });
 
-  test('keeps compact map code independent of flight terrain, scatter, and asset packs', () => {
+  test('borrows committed packs without creating a second loader or terrain renderer', () => {
     const source = readFileSync(new URL('../src/ui/mapView.ts', import.meta.url), 'utf8');
-    expect(source).not.toMatch(/PlanetAssetLoader|KTX2Loader|createTerrain|scatter|planetAssetPack/);
+    expect(source).not.toMatch(/PlanetAssetLoader|KTX2Loader|createTerrain|scatter/);
+    expect(source).toContain('getBodyAssetPack');
     expect(source).toContain('bodyMaterialDescriptor');
   });
 

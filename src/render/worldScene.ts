@@ -334,6 +334,13 @@ export class WorldScene {
     return { chunks, visible };
   }
 
+  /** Borrow the committed pack for secondary views; ownership remains with this scene. */
+  bodyAssetPack(bodyId: string): Readonly<RuntimeBodyAssetPack> | null {
+    return this.bodyRendererManagers.get(bodyId)?.currentAssetPack() ?? null;
+  }
+
+  qualityTier(): QualityTier { return this.quality; }
+
   renderStats(): Readonly<WorldRendererStats> {
     const body = this.planetStats();
     let rendererFailures = 0;

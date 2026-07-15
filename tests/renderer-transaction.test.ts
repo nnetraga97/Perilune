@@ -161,6 +161,7 @@ describe('transactional body renderer replacement', () => {
 
     expect(order).toEqual(['load', 'stage', 'prepare', 'compile']);
     expect(stagedCandidates[0].stageAssets).toHaveBeenCalledWith(pack);
+    expect(manager.currentAssetPack()).toBe(pack);
   });
 
   test('disposes loaded textures and the candidate when staging fails while retaining committed coverage', async () => {
@@ -213,8 +214,11 @@ describe('transactional body renderer replacement', () => {
     });
 
     await manager.ensure(body('veyra'));
+    expect(manager.currentAssetPack()).toBe(medium);
     await manager.replaceQuality('high');
+    expect(manager.currentAssetPack()).toBe(high);
     await manager.rebuildCommitted();
+    expect(manager.currentAssetPack()).toBe(restored);
 
     expect(made.map((entry) => entry.stageAssets.mock.calls.map(([pack]) => pack))).toEqual([
       [medium], [high], [restored],

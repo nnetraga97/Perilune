@@ -11,6 +11,7 @@ import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 import { Vec3 } from '../src/core/vec3';
 import { launchSiteBodyFixedDirection } from '../src/sim/launchSite';
 import { solidHeight } from '../src/sim/terrain';
+import { globalSphereSegments } from '../src/render/terrestrial/globalGeometry';
 
 const caps: RenderCaps = {
   backend: 'webgl2',
@@ -64,6 +65,14 @@ function frame(radius: number, overrides: Partial<BodyRenderFrame> = {}): BodyRe
 }
 
 describe('TerrestrialBodyRenderer integration', () => {
+  it.each(['low', 'medium', 'high'] as const)('scales compact planet tessellation for %s quality', (quality) => {
+    const renderer = createBodyRendererCandidate({ body: body('veyra'), caps, quality }) as TerrestrialBodyRenderer;
+    const compact = renderer.root.getObjectByName('terrestrial-compact:veyra') as THREE.Mesh<THREE.SphereGeometry>;
+    const [widthSegments, heightSegments] = globalSphereSegments(quality);
+    expect(compact.geometry.parameters).toMatchObject({ widthSegments, heightSegments });
+    renderer.dispose();
+  });
+
   it('reports the existing compact-to-terrain presentation without changing its result', () => {
     let now = 0;
     const diagnostics = new RenderDiagnostics({ quality: 'medium', detailed: true, now: () => now++ });
@@ -94,7 +103,8 @@ describe('TerrestrialBodyRenderer integration', () => {
 
   it('composes Veyra without a decorative near-surface scatter layer', () => {
     const renderer = createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' }) as TerrestrialBodyRenderer;
-    renderer.stageAssets(pack());
+    const authored = pack();
+    renderer.stageAssets(authored);
     expect(renderer.root.children.map((child) => child.name)).toEqual([
       'terrestrial-compact:veyra',
       'terrestrial-terrain:veyra',
@@ -107,6 +117,9 @@ describe('TerrestrialBodyRenderer integration', () => {
     const lights: THREE.Light[] = [];
     renderer.root.traverse((object) => { if (object instanceof THREE.Light) lights.push(object); });
     expect(lights).toHaveLength(0);
+    for (const channel of ['albedo', 'normal', 'material'] as const) {
+      expect(authored.textures.get(channel)?.anisotropy).toBe(4);
+    }
     renderer.dispose();
   });
 

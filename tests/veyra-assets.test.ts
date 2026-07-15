@@ -98,6 +98,53 @@ describe('Veyra authored asset contracts', () => {
     expect(Math.abs(sampler(source, southA) - sampler(source, southB))).toBeLessThanOrEqual(2);
   });
 
+  it('preserves authored RGB separation instead of collapsing the source to luminance', () => {
+    const width = 16;
+    const height = 8;
+    const sourceData = new Uint8Array(width * height * 3);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 3;
+        const redHalf = x < width / 2;
+        sourceData[offset] = redHalf ? 230 : 20;
+        sourceData[offset + 1] = 30;
+        sourceData[offset + 2] = redHalf ? 20 : 230;
+      }
+    }
+    const source: veyraMaps.RawRaster = { data: sourceData, width, height, channels: 3 };
+    const red = veyraMaps.sampleVeyraSourceColor(source, new Vec3(0, 0, -1));
+    const blue = veyraMaps.sampleVeyraSourceColor(source, new Vec3(0, 0, 1));
+    expect(red.r).toBeGreaterThan(red.b * 4);
+    expect(blue.b).toBeGreaterThan(blue.r * 4);
+  });
+
+  it('carries source chroma through the generated land albedo', () => {
+    const width = 32;
+    const height = 16;
+    const generate = (rgb: readonly [number, number, number]) => {
+      const source = new Uint8Array(width * height * 3);
+      for (let offset = 0; offset < source.length; offset += 3) source.set(rgb, offset);
+      return veyraMaps.generateVeyraCanonicalMaps({
+        width,
+        height,
+        source: { data: source, width, height, channels: 3 },
+        radius: 600_000,
+        heightAt: () => 1_000,
+        seed: 42,
+      }).albedo;
+    };
+    const redSource = generate([220, 50, 50]);
+    const blueSource = generate([50, 50, 220]);
+    const channelMean = (pixels: Uint8Array, channel: 0 | 1 | 2) => {
+      let total = 0;
+      for (let offset = channel; offset < pixels.length; offset += 3) total += pixels[offset];
+      return total / (pixels.length / 3);
+    };
+    const redRatio = channelMean(redSource, 0) / channelMean(redSource, 2);
+    const blueRatio = channelMean(blueSource, 0) / channelMean(blueSource, 2);
+    expect(redRatio).toBeGreaterThan(blueRatio * 1.2);
+  });
+
   it('encodes a graded one-texel shoreline while preserving the authoritative sign', () => {
     const width = 144;
     const height = 72;

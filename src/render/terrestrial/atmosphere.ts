@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
-import type { BodyRenderFrame } from '../bodyRenderer';
+import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
 import type { RenderCaps } from '../context';
 import {
   createAtmosphereMaterial,
@@ -11,20 +11,21 @@ export class TerrestrialAtmosphere {
   readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   readonly path: RenderCaps['atmospherePath'];
   readonly shellRadius: number;
-  private readonly lookupTexture: THREE.DataTexture | null;
+  private readonly lookupTextures: readonly THREE.DataTexture[];
   private disposed = false;
 
   constructor(
     readonly body: Body,
     caps: Pick<RenderCaps, 'atmospherePath'>,
     visual: Readonly<AtmosphereVisualCoefficients>,
+    quality: QualityTier = 'medium',
   ) {
     const physical = body.def.atmosphere;
     if (!physical) throw new Error(`${body.id} has no physical atmosphere`);
     this.path = caps.atmospherePath;
     this.shellRadius = body.radius + physical.height;
-    const bundle = createAtmosphereMaterial(this.path, body.radius, physical, visual);
-    this.lookupTexture = bundle.lookupTexture;
+    const bundle = createAtmosphereMaterial(this.path, body.radius, physical, visual, quality);
+    this.lookupTextures = bundle.lookupTextures;
     const geometry = new THREE.SphereGeometry(1, 96, 64);
     this.mesh = new THREE.Mesh(geometry, bundle.material);
     this.mesh.name = `terrestrial-atmosphere:${body.id}`;
@@ -58,6 +59,6 @@ export class TerrestrialAtmosphere {
     this.disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
-    this.lookupTexture?.dispose();
+    for (const texture of this.lookupTextures) texture.dispose();
   }
 }

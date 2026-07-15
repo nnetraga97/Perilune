@@ -236,6 +236,9 @@ class PeriluneGame {
         if (this.game.active) this.game.active.target = bodyId;
       },
       onWarpToTime: (time, margin) => this.warpToTime(time, margin),
+      getBodyAssetPack: (bodyId) => this.world.bodyAssetPack(bodyId),
+      getQualityTier: () => this.world.qualityTier(),
+      maxAnisotropy: this.ctx.caps.maxAnisotropy,
     });
     this.tutorial = new Tutorial(this.uiRoot);
     window.addEventListener('pagehide', this.onPageHide);

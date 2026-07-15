@@ -144,6 +144,7 @@ export class BodyRendererManager {
   }
 
   current(): BodyRenderer | null { return this.committed?.renderer ?? null; }
+  currentAssetPack(): Readonly<RuntimeBodyAssetPack> | null { return this.committed?.assets.pack ?? null; }
   failureStats(): Readonly<RenderFailureStats> { return this.failures.stats(); }
   platformStats(): Readonly<BodyRendererManagerStats> {
     return Object.freeze({

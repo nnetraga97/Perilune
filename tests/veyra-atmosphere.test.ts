@@ -26,7 +26,13 @@ describe('Veyra atmosphere', () => {
         ATMOSPHERE_ANALYTIC: path === 'analytic' ? 1 : 0,
         ATMOSPHERE_LOOKUP: path === 'lookup' ? 1 : 0,
         ATMOSPHERE_LIMB_HAZE: path === 'limb-haze' ? 1 : 0,
+        ATMOSPHERE_LUT_SCATTERING: 1,
       });
+      expect(layer.material.userData.atmosphereModel).toBe('hillaire-lut-foundation');
+      expect(layer.material.userData.quality).toBe('medium');
+      expect(layer.material.defines.ATMOSPHERE_VIEW_SAMPLES).toBe(
+        path === 'analytic' ? 8 : path === 'lookup' ? 6 : 5,
+      );
       expect(layer.material.uniforms.uAtmosphereHeight.value).toBe(physical.height);
       expect(layer.material.uniforms.uSeaLevelPressure.value).toBe(physical.seaLevelPressure);
       expect(layer.material.uniforms.uSeaLevelDensity.value).toBe(physical.seaLevelDensity);
@@ -61,6 +67,26 @@ describe('Veyra atmosphere', () => {
     layer.dispose();
   });
 
+  it('binds RGB transmittance and multiple-scattering LUTs to the view-ray integrator', () => {
+    const layer = atmosphere('analytic');
+    const transmittance = layer.material.uniforms.uTransmittanceLut.value as THREE.DataTexture;
+    const multipleScattering = layer.material.uniforms.uMultipleScatteringLut.value as THREE.DataTexture;
+    expect(transmittance.image).toMatchObject({ width: 128, height: 32 });
+    expect(multipleScattering.image).toMatchObject({ width: 32, height: 32 });
+    expect(transmittance.userData.atmosphereLut).toBe('transmittance');
+    expect(multipleScattering.userData.atmosphereLut).toBe('multiple-scattering');
+    const transmittanceBytes = transmittance.image.data as Uint8Array;
+    const upwardGroundOffset = ((32 - 1) * 128) * 4;
+    const upwardTopOffset = ((32 - 1) * 128 + 127) * 4;
+    expect(transmittanceBytes[upwardGroundOffset + 2]).toBeLessThan(transmittanceBytes[upwardGroundOffset]);
+    expect(transmittanceBytes[upwardTopOffset + 2]).toBeGreaterThan(transmittanceBytes[upwardGroundOffset + 2]);
+    expect(Array.from(multipleScattering.image.data as Uint8Array).some((value) => value > 0 && value < 255)).toBe(true);
+    expect(layer.material.fragmentShader).toContain('atmosphereRaySphere');
+    expect(layer.material.fragmentShader).toContain('sunTransmittance');
+    expect(layer.material.fragmentShader).toContain('viewTransmittance');
+    layer.dispose();
+  });
+
   it('rejects airless bodies and declares terrestrial ownership over legacy tint', () => {
     expect(() => new TerrestrialAtmosphere(
       universe.get('palla'),
@@ -72,16 +98,19 @@ describe('Veyra atmosphere', () => {
     expect(usesLegacyAtmosphereTint('terrestrial')).toBe(false);
   });
 
-  it('disposes geometry, material, and lookup texture only once', () => {
+  it('disposes geometry, material, and both atmosphere LUTs only once', () => {
     const layer = atmosphere('lookup');
     const geometryDispose = vi.spyOn(layer.mesh.geometry, 'dispose');
     const materialDispose = vi.spyOn(layer.mesh.material, 'dispose');
-    const lookup = layer.material.uniforms.uOpticalDepthLut.value as THREE.DataTexture;
-    const lookupDispose = vi.spyOn(lookup, 'dispose');
+    const transmittance = layer.material.uniforms.uTransmittanceLut.value as THREE.DataTexture;
+    const multipleScattering = layer.material.uniforms.uMultipleScatteringLut.value as THREE.DataTexture;
+    const transmittanceDispose = vi.spyOn(transmittance, 'dispose');
+    const multipleScatteringDispose = vi.spyOn(multipleScattering, 'dispose');
     layer.dispose();
     layer.dispose();
     expect(geometryDispose).toHaveBeenCalledOnce();
     expect(materialDispose).toHaveBeenCalledOnce();
-    expect(lookupDispose).toHaveBeenCalledOnce();
+    expect(transmittanceDispose).toHaveBeenCalledOnce();
+    expect(multipleScatteringDispose).toHaveBeenCalledOnce();
   });
 });

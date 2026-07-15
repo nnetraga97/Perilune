@@ -14,12 +14,12 @@ import type {
 import type { RenderCaps } from './context';
 import { CoverageTransition } from './coverageTransition';
 import { PLANET_QUALITY, PlanetRenderer } from './planet';
-import { installBodyFixedDirectionAttribute } from './terrestrial/globalCoordinates';
-import { createTerrestrialGlobalMaterial } from './terrestrial/globalMaterial';
+import { createGlobalSphereGeometry } from './terrestrial/globalGeometry';
+import { createTerrestrialGlobalMaterial, updateTerrestrialCloudLighting } from './terrestrial/globalMaterial';
 import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial';
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
-import { TerrestrialCloudDeck } from './terrestrial/cloudLayer';
+import { TerrestrialCloudDeck, WEATHER_CLOUD_DRIFT_RATE } from './terrestrial/cloudLayer';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
@@ -53,6 +53,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private readonly transition = new CoverageTransition();
   private compact!: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
   private terrain!: PlanetRenderer;
+  private surfaceMaterial!: THREE.Material;
   private atmosphere!: TerrestrialAtmosphere;
   private ocean!: TerrestrialOcean;
   private clouds!: TerrestrialCloudDeck;
@@ -106,15 +107,14 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   }
 
   private buildStack(pack: Readonly<RuntimeBodyAssetPack> | null): void {
-    const compactMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor);
-    const compactGeometry = new THREE.SphereGeometry(1, 48, 32);
-    installBodyFixedDirectionAttribute(compactGeometry);
+    const compactMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor, this.caps.maxAnisotropy);
+    const compactGeometry = createGlobalSphereGeometry(this.quality);
     this.compact = new THREE.Mesh(compactGeometry, compactMaterial);
     this.compact.name = `terrestrial-compact:${this.bodyId}`;
     this.compact.scale.setScalar(this.body.radius);
 
     const visual = BODY_VISUALS[this.body.id as BodyId].atmosphereVisual!;
-    this.atmosphere = new TerrestrialAtmosphere(this.body, this.caps, visual);
+    this.atmosphere = new TerrestrialAtmosphere(this.body, this.caps, visual, this.quality);
     const materialMap = pack?.textures.get('material') ?? null;
     this.ocean = new TerrestrialOcean(this.body, this.quality, materialMap);
 
@@ -149,7 +149,13 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       scatterBytes: 0,
       effectBytes: 0,
     });
-    const terrainMaterial = createTerrestrialSurfaceMaterial(pack, this.descriptor, this.quality);
+    const terrainMaterial = createTerrestrialSurfaceMaterial(
+      pack,
+      this.descriptor,
+      this.quality,
+      this.caps.maxAnisotropy,
+    );
+    this.surfaceMaterial = terrainMaterial;
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
@@ -183,6 +189,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const origin = frame.cameraRelativeOrigin;
     this.compact.position.set(origin.x, origin.y, origin.z);
     this.compact.quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
+    const cloudDriftAngle = frame.time * WEATHER_CLOUD_DRIFT_RATE;
+    updateTerrestrialCloudLighting(this.compact.material, frame.bodySunDirection, cloudDriftAngle);
+    updateTerrestrialCloudLighting(this.surfaceMaterial, frame.bodySunDirection, cloudDriftAngle);
     this.atmosphere.update(frame);
     this.ocean.update(frame);
     this.clouds.update(frame);

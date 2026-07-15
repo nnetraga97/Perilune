@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
-import { createCloudMaterial, createCloudShadowMaterial } from './cloudMaterial';
+import { createCloudMaterial } from './cloudMaterial';
 import type { RenderDiagnosticsPort } from '../renderDiagnostics';
 
 const DRIFT_AXIS = new THREE.Vector3(0, 0, 1);
 const DRIFT_QUATERNION = new THREE.Quaternion();
 const INVERSE_DRIFT_QUATERNION = new THREE.Quaternion();
 const CAMERA_CLOUD_FIXED = new THREE.Vector3();
+export const WEATHER_CLOUD_DRIFT_RATE = 9e-6;
 
 export interface TerrestrialCloudShell {
   readonly name: 'weather' | 'wisps';
@@ -21,7 +22,6 @@ export class TerrestrialCloudDeck {
   readonly group = new THREE.Group();
   readonly shells: readonly [TerrestrialCloudShell, TerrestrialCloudShell];
   private disposed = false;
-  private shadowRequested = true;
   private lastDiagnosticObservationAt = Number.NEGATIVE_INFINITY;
 
   constructor(
@@ -45,7 +45,10 @@ export class TerrestrialCloudDeck {
       parallaxStrength: number,
       segments: readonly [number, number],
     ): TerrestrialCloudShell => {
-      const altitude = body.def.atmosphere!.height * altitudeFraction;
+      const volumetric = quality === 'high' && name === 'weather';
+      const volumeBaseAltitude = body.def.atmosphere!.height * 0.04;
+      const volumeTopAltitude = body.def.atmosphere!.height * 0.18;
+      const altitude = volumetric ? volumeTopAltitude : body.def.atmosphere!.height * altitudeFraction;
       const shellRadius = body.radius + altitude;
       const geometry = new THREE.SphereGeometry(1, segments[0], segments[1]);
       const material = createCloudMaterial(cloudTexture, {
@@ -54,6 +57,12 @@ export class TerrestrialCloudDeck {
         tint: name === 'weather' ? '#e9edf0' : '#d7e1e8',
         shellRadius,
         parallaxStrength,
+        volume: volumetric ? {
+          baseRadius: body.radius + volumeBaseAltitude,
+          topRadius: body.radius + volumeTopAltitude,
+          samples: quality === 'high' ? 12 : 6,
+          noiseOctaves: quality === 'high' ? 3 : 2,
+        } : undefined,
       });
       material.name = `terrestrial-cloud:${name}`;
       const mesh = new THREE.Mesh(geometry, material);
@@ -61,9 +70,6 @@ export class TerrestrialCloudDeck {
       mesh.scale.setScalar(shellRadius);
       // Default launch ordering: render the farther outer wisps first.
       mesh.renderOrder = name === 'wisps' ? 30 : 31;
-      if (name === 'weather' && quality !== 'low') {
-        mesh.customDepthMaterial = createCloudShadowMaterial(cloudTexture, textureScale);
-      }
       this.diagnostics?.record({
         subsystem: 'clouds',
         event: 'cloud-shell-created',
@@ -88,29 +94,21 @@ export class TerrestrialCloudDeck {
           anisotropy: cloudTexture.anisotropy,
           colorSpace: cloudTexture.colorSpace,
           textureScale,
-          shadowMaterial: mesh.customDepthMaterial !== undefined,
+          shadowMaterial: false,
+          cloudModel: material.userData.cloudModel,
+          volumeBaseAltitude: volumetric ? volumeBaseAltitude : null,
+          volumeTopAltitude: volumetric ? volumeTopAltitude : null,
         },
       }, { bodyId: body.id });
       return Object.freeze({ name, mesh, altitude, driftRate, baseOpacity: opacity });
     };
     const segments: readonly [number, number] = quality === 'low' ? [48, 30] : quality === 'medium' ? [72, 44] : [96, 60];
     this.shells = Object.freeze([
-      makeShell('weather', 0.11, 9e-6, 1, 0.58, 0.009, segments),
+      makeShell('weather', 0.11, WEATHER_CLOUD_DRIFT_RATE, 1, quality === 'high' ? 0.82 : quality === 'medium' ? 0.62 : 0.58, 0.009, segments),
       makeShell('wisps', 0.22, -3.5e-6, 2.4, 0.14, 0.004, segments),
     ]) as unknown as readonly [TerrestrialCloudShell, TerrestrialCloudShell];
     this.group.name = `terrestrial-cloud-deck:${body.id}`;
     this.group.add(this.shells[0].mesh, this.shells[1].mesh);
-    this.applyShadowPolicy();
-  }
-
-  setShadowEnabled(enabled: boolean): void {
-    this.shadowRequested = enabled;
-    this.applyShadowPolicy();
-  }
-
-  private applyShadowPolicy(): void {
-    this.shells[0].mesh.castShadow = this.quality !== 'low' && this.shadowRequested;
-    this.shells[1].mesh.castShadow = false;
   }
 
   update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'>): void {
@@ -193,7 +191,6 @@ export class TerrestrialCloudDeck {
       }, { bodyId: this.body.id });
       shell.mesh.geometry.dispose();
       shell.mesh.material.dispose();
-      shell.mesh.customDepthMaterial?.dispose();
     }
     this.group.clear();
   }

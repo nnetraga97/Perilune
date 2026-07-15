@@ -220,7 +220,8 @@ describe('analytic surface detail', () => {
 
 describe('createTerrestrialSurfaceMaterial', () => {
   it('extends the authored global program with detail-anchor attributes and surface classification', () => {
-    const material = createTerrestrialSurfaceMaterial(pack(), descriptor, 'medium');
+    const authoredPack = pack();
+    const material = createTerrestrialSurfaceMaterial(authoredPack, descriptor, 'medium', 8);
     expect(material.userData).toMatchObject({
       terrestrialSurface: true, bodyId: 'veyra', authored: true, tier: 'medium',
     });
@@ -236,7 +237,11 @@ describe('createTerrestrialSurfaceMaterial', () => {
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('classifyTerrestrialSurface');
     expect(shader.fragmentShader).toContain('triplanarSurfaceDetail');
+    expect(shader.fragmentShader).toContain('mix(surfBodyNormal, globalBodyNormal');
+    expect(shader.fragmentShader).toContain('cloudShadowCoverage');
+    expect(shader.uniforms.globalCloudMap.value).toBe(authoredPack.textures.get('clouds'));
     expect(shader.uniforms.surfaceDetailMaxOctave.value).toBe(surfaceDetailTier('medium').maxOctave);
+    expect(material.userData.authored).toBe(true);
     material.dispose();
   });
 

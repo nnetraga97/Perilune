@@ -9,6 +9,7 @@ import {
   GLOBAL_VERTEX_BEGIN,
   GLOBAL_VERTEX_COMMON,
   bindTerrestrialAuthoredUniforms,
+  createTerrestrialCloudLightingState,
   resolveTerrestrialAuthoredTextures,
 } from './globalMaterial';
 
@@ -340,9 +341,10 @@ roughnessFactor = clamp(roughnessFactor * surfClassRough + surfDetail * 0.05 * s
 `;
 
 const SURFACE_NORMAL_APPLY = /* glsl */ `
-vec3 surfTangentGradient = surfDetailGradient - surfBodyNormal * dot(surfDetailGradient, surfBodyNormal);
+vec3 surfMacroNormal = normalize(mix(surfBodyNormal, globalBodyNormal, 0.68 * useAuthoredGlobalMaps));
+vec3 surfTangentGradient = surfDetailGradient - surfMacroNormal * dot(surfDetailGradient, surfMacroNormal);
 float surfBump = mix(80.0, 240.0, surfWeights.rock);
-vec3 surfPerturbed = normalize(surfBodyNormal - surfTangentGradient * surfBump);
+vec3 surfPerturbed = normalize(surfMacroNormal - surfTangentGradient * surfBump);
 normal = normalize(normalMatrix * surfPerturbed);
 `;
 
@@ -356,8 +358,10 @@ export function createTerrestrialSurfaceMaterial(
   pack: Readonly<RuntimeBodyAssetPack> | null,
   descriptor: Readonly<BodyMaterialDescriptor>,
   tier: QualityTier,
+  maxAnisotropy = 1,
 ): TerrestrialSurfaceMaterial {
-  const textures = resolveTerrestrialAuthoredTextures(pack, descriptor.bodyId);
+  const textures = resolveTerrestrialAuthoredTextures(pack, descriptor.bodyId, maxAnisotropy);
+  const cloudLighting = createTerrestrialCloudLightingState();
   const maxOctave = SURFACE_DETAIL_TIERS[tier].maxOctave;
 
   const material = new THREE.MeshStandardMaterial({
@@ -371,10 +375,11 @@ export function createTerrestrialSurfaceMaterial(
     bodyId: descriptor.bodyId,
     authored: pack !== null,
     tier,
+    terrestrialCloudLighting: cloudLighting,
   });
-  material.customProgramCacheKey = () => `terrestrial-surface-v1:${pack ? 'authored' : 'palette'}:${tier}`;
+  material.customProgramCacheKey = () => `terrestrial-surface-v2:${pack ? 'authored' : 'palette'}:${tier}`;
   material.onBeforeCompile = (shader) => {
-    bindTerrestrialAuthoredUniforms(shader, textures);
+    bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
     shader.uniforms.surfaceDetailMaxOctave = { value: maxOctave };
     shader.vertexShader = shader.vertexShader
       .replace(

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "compilerVersion": "2.2.0",
+  "compilerVersion": "2.3.0",
   "fingerprint": {
     "width": 64,
     "height": 32,
@@ -97,12 +97,12 @@
     "width": 8192,
     "height": 4096,
     "rawHashes": {
-      "albedo": "397af7d42a4f0f9151a3de8593094cd73d1e88a8948d69b97f66d9c4e6940c04",
+      "albedo": "a893da948d0886038d9bf025b12de8e3255e3e6a61012504a3385ed99a1dbce5",
       "normal": "cf5eb48f452b2535f79400fddbd1b72cb4e7469509693927d153a9492c6e7745",
       "material": "0539311725e303c60b51a208d60a2f24e1d46b01a9c17bb6e8bdcbd66271ef02",
       "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
     },
-    "identitySha256": "e02ff53b3b7b744eb6c7c5f87aabef103c2e598962b69ec568779318a1a461f5",
+    "identitySha256": "77819597807ed9a62917b6c1592348c23496ebe301091e8350d183f45a2af7f3",
     "heightArtifact": {
       "path": "generated/veyra/canonical/height.s16le",
       "checksumSha256": "682dd15caead1154458581d2b40f23f9d79697cf401bf723a9adfba063b821e5",

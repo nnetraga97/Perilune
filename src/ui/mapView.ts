@@ -38,7 +38,10 @@ import {
   type BodyMaterialDescriptor,
 } from '../render/bodyMaterial';
 import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
-import { createTerrestrialGlobalMaterial } from '../render/terrestrial/globalMaterial';
+import { createTerrestrialGlobalMaterial, updateTerrestrialCloudLighting } from '../render/terrestrial/globalMaterial';
+import { WEATHER_CLOUD_DRIFT_RATE } from '../render/terrestrial/cloudLayer';
+import { createGlobalSphereGeometry } from '../render/terrestrial/globalGeometry';
+import type { QualityTier, RuntimeBodyAssetPack } from '../render/bodyRenderer';
 import { el, injectUiStyles } from './kit';
 import { analyzeCraft } from '../sim/vessel';
 import type { AlarmKind } from '../sim/state';
@@ -62,9 +65,16 @@ function paletteColor(descriptor: Readonly<BodyMaterialDescriptor>, u: number, v
   return new THREE.Color(continental < 0 ? descriptor.albedo.low : descriptor.albedo.mid);
 }
 
-/** Build a pack-free compact body whose local colors use the shared body-fixed UV convention. */
-export function compactBodyMesh(descriptor: Readonly<BodyMaterialDescriptor>): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(1, 32, 20);
+/** Build a compact body, borrowing authored terrestrial maps when a committed pack is available. */
+export function compactBodyMesh(
+  descriptor: Readonly<BodyMaterialDescriptor>,
+  pack: Readonly<RuntimeBodyAssetPack> | null = null,
+  maxAnisotropy = 1,
+  quality: QualityTier = pack?.tier ?? 'medium',
+): THREE.Mesh<THREE.SphereGeometry, THREE.Material> {
+  const geometry = descriptor.identity === 'solid'
+    ? createGlobalSphereGeometry(quality)
+    : new THREE.SphereGeometry(1, 48, 32);
   const positions = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(positions.count * 3);
   for (let index = 0; index < positions.count; index++) {
@@ -75,13 +85,13 @@ export function compactBodyMesh(descriptor: Readonly<BodyMaterialDescriptor>): T
     colors[index * 3 + 2] = color.b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  installBodyFixedDirectionAttribute(geometry);
+  if (!geometry.getAttribute('bodyDirection')) installBodyFixedDirectionAttribute(geometry);
 
   const material: THREE.Material = descriptor.identity === 'star'
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
-      : createTerrestrialGlobalMaterial(null, descriptor);
+      : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `compact-body:${descriptor.bodyId}`;
   mesh.userData.bodyMaterial = {
@@ -91,6 +101,8 @@ export function compactBodyMesh(descriptor: Readonly<BodyMaterialDescriptor>): T
     albedo: { ...descriptor.albedo },
   };
   mesh.userData.orientationConvention = descriptor.orientationConvention;
+  mesh.userData.assetPack = pack;
+  mesh.userData.quality = quality;
   return mesh;
 }
 
@@ -178,6 +190,9 @@ export interface MapCallbacks {
   onCreateAlarm(time: number, label: string, kind: AlarmKind): void;
   onSetTarget(bodyId: string | null): void;
   onWarpToTime(time: number, margin: number): void;
+  getBodyAssetPack?(bodyId: string): Readonly<RuntimeBodyAssetPack> | null;
+  getQualityTier?(): QualityTier;
+  readonly maxAnisotropy?: number;
 }
 
 export class MapView {
@@ -710,14 +725,26 @@ export class MapView {
     const place = (b: Body, pos: Vec3) => {
       shown.add(b.id);
       let mesh = this.bodyMeshes.get(b.id);
-      if (!mesh) {
-        mesh = compactBodyMesh(bodyMaterialDescriptor(b));
+      const pack = this.cb.getBodyAssetPack?.(b.id) ?? null;
+      const quality = this.cb.getQualityTier?.() ?? pack?.tier ?? 'medium';
+      if (!mesh || mesh.userData.assetPack !== pack || mesh.userData.quality !== quality) {
+        if (mesh) {
+          this.scene.remove(mesh);
+          mesh.geometry.dispose();
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const material of materials) material.dispose();
+        }
+        mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality);
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }
       mesh.scale.setScalar(Math.max(b.radius * SCALE, this.camDist * 0.008));
       mesh.position.set(pos.x * SCALE, pos.y * SCALE, pos.z * SCALE);
       updateCompactBodyOrientation(mesh, b, t);
+      const bodyMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of bodyMaterials) {
+        updateTerrestrialCloudLighting(material, starDirection, t * WEATHER_CLOUD_DRIFT_RATE);
+      }
       // SOI sphere (children only, subtle).
       if (b.soiRadius !== Infinity && b.id !== body.id) {
         let soi = this.soiMeshes.get(b.id);

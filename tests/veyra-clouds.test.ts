@@ -39,7 +39,7 @@ describe('Veyra two-scale clouds', () => {
     const snapshot = diagnostics.snapshot();
     expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-created')).toHaveLength(2);
     expect(snapshot.entries.find((entry) => entry.event === 'cloud-shell-created' && entry.data.shell === 'weather')?.data)
-      .toMatchObject({ widthSegments: 96, heightSegments: 60, textureIdentity: texture.uuid, shadowMaterial: true });
+      .toMatchObject({ widthSegments: 96, heightSegments: 60, textureIdentity: texture.uuid, shadowMaterial: false });
     expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-sample').map((entry) => entry.data.classification))
       .toEqual(expect.arrayContaining(['inside', 'crossing', 'outside']));
     deck.dispose();
@@ -53,12 +53,17 @@ describe('Veyra two-scale clouds', () => {
     expect(deck.shells[0].driftRate).not.toBe(deck.shells[1].driftRate);
     expect(deck.shells[0].mesh.material.uniforms.uTextureScale.value).toBe(1);
     expect(deck.shells[1].mesh.material.uniforms.uTextureScale.value).toBe(2.4);
+    expect(deck.shells[0].mesh.material.userData.cloudModel).toBe('parallax-shell');
+    expect(deck.shells[0].mesh.material.defines).toMatchObject({
+      CLOUD_VOLUMETRIC: 0,
+      CLOUD_VIEW_SAMPLES: 1,
+      CLOUD_NOISE_OCTAVES: 2,
+    });
+    expect(deck.shells[1].mesh.material.userData.cloudModel).toBe('parallax-shell');
     expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec3 direction = normalize(vBodyDirection)');
     expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec2 field3 = sampleCloud');
     expect(deck.shells[0].mesh.material.fragmentShader)
       .toContain('dot(normalize(vViewDirection), -viewSunDirection)');
-    expect((deck.shells[0].mesh.customDepthMaterial as THREE.ShaderMaterial).fragmentShader)
-      .toContain('vec3 direction = normalize(vBodyDirection)');
     deck.dispose();
   });
 
@@ -82,18 +87,12 @@ describe('Veyra two-scale clouds', () => {
     high.dispose();
   });
 
-  it('disables Low shadows and gives only the weather shell an alpha-aware conditional shadow', () => {
+  it('does not allocate the legacy no-op Three.js shadow-map path', () => {
     const low = new TerrestrialCloudDeck(veyra, 'low', cloudTexture());
     const medium = new TerrestrialCloudDeck(veyra, 'medium', cloudTexture());
     expect(low.shells.every((shell) => !shell.mesh.castShadow)).toBe(true);
-    expect(low.shells[0].mesh.customDepthMaterial).toBeUndefined();
-    expect(medium.shells[0].mesh.castShadow).toBe(true);
-    expect(medium.shells[0].mesh.customDepthMaterial).toBeInstanceOf(THREE.ShaderMaterial);
-    expect(medium.shells[1].mesh.castShadow).toBe(false);
-    medium.setShadowEnabled(false);
-    expect(medium.shells[0].mesh.castShadow).toBe(false);
-    medium.setShadowEnabled(true);
-    expect(medium.shells[0].mesh.castShadow).toBe(true);
+    expect(medium.shells.every((shell) => !shell.mesh.castShadow)).toBe(true);
+    expect(medium.shells.every((shell) => shell.mesh.customDepthMaterial === undefined)).toBe(true);
     expect(medium.group.children.some((child) => child instanceof THREE.DirectionalLight)).toBe(false);
     low.dispose();
     medium.dispose();
@@ -104,7 +103,7 @@ describe('Veyra two-scale clouds', () => {
     const weather = deck.shells[0];
     const wisps = deck.shells[1];
     expect(wisps.mesh.renderOrder).toBeLessThan(weather.mesh.renderOrder);
-    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.6);
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.65);
     expect(wisps.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.15);
 
     deck.update({ ...frame, altitude: weather.altitude - 5_000 });
@@ -127,18 +126,30 @@ describe('Veyra two-scale clouds', () => {
     deck.dispose();
   });
 
+  it('reserves the shell-only fallback for low and scales the high volume budget', () => {
+    const low = new TerrestrialCloudDeck(veyra, 'low', cloudTexture());
+    const high = new TerrestrialCloudDeck(veyra, 'high', cloudTexture());
+    expect(low.shells[0].mesh.material.userData.cloudModel).toBe('parallax-shell');
+    expect(low.shells[0].mesh.material.defines.CLOUD_VOLUMETRIC).toBe(0);
+    expect(high.shells[0].mesh.material.userData.cloudModel).toBe('bounded-volume');
+    expect(high.shells[0].mesh.material.defines).toMatchObject({
+      CLOUD_VIEW_SAMPLES: 12,
+      CLOUD_NOISE_OCTAVES: 3,
+    });
+    low.dispose();
+    high.dispose();
+  });
+
   it('disposes owned geometry/materials once without disposing the borrowed cloud texture', () => {
     const texture = cloudTexture();
     const textureDispose = vi.spyOn(texture, 'dispose');
     const deck = new TerrestrialCloudDeck(veyra, 'medium', texture);
     const geometryDisposals = deck.shells.map((shell) => vi.spyOn(shell.mesh.geometry, 'dispose'));
     const materialDisposals = deck.shells.map((shell) => vi.spyOn(shell.mesh.material, 'dispose'));
-    const depthDispose = vi.spyOn(deck.shells[0].mesh.customDepthMaterial!, 'dispose');
     deck.dispose();
     deck.dispose();
     for (const dispose of geometryDisposals) expect(dispose).toHaveBeenCalledOnce();
     for (const dispose of materialDisposals) expect(dispose).toHaveBeenCalledOnce();
-    expect(depthDispose).toHaveBeenCalledOnce();
     expect(textureDispose).not.toHaveBeenCalled();
   });
 

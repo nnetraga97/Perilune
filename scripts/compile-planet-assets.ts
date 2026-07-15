@@ -27,7 +27,7 @@ const canonicalHeight = 4096;
 const fingerprintWidth = 64;
 const fingerprintHeight = 32;
 const quantizationMeters = 0.5;
-const compilerVersion = '2.2.0';
+const compilerVersion = '2.3.0';
 const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
 const writeGlobal = write && !process.argv.includes('--fingerprints-only');
@@ -330,7 +330,7 @@ if (writeGlobal) {
     localPath: 'sources/natural-earth-ii-3.2.0/NE2_LR_LC.zip',
     authoringOnly: true,
     sourceDimensions: [16200, 8100],
-    transformations: ['body-fixed reprojection', 'deterministic geographic warp and recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'independent logical RG Lanczos3 tier resampling', 'truecolor fallback encoding', 'BasisLZ and UASTC KTX2 encoding'],
+    transformations: ['body-fixed color reprojection and biome-aware recolor', 'solidHeight-derived ocean/material masks and oct normals', 'deterministic cloud synthesis', 'independent logical RG Lanczos3 tier resampling', 'truecolor fallback encoding', 'BasisLZ and UASTC KTX2 encoding'],
     bodies: ['veyra'], channels: ['albedo'],
   }];
   manifest.canonicalArtifacts = [heightArtifact, scatterArtifact];
