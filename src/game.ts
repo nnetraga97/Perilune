@@ -19,12 +19,6 @@ import { Tutorial } from './ui/tutorial';
 import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
 import { GpuTimerRing } from './render/gpuTimer';
 import { restoreGame } from './save/persistence';
-import {
-  experimentKey,
-  experimentValue,
-  EXPERIMENT_INDEX,
-  scienceSituation,
-} from './content/science';
 import { logEvent } from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from './sim/maneuver';
@@ -54,6 +48,7 @@ import {
   settleContracts,
   type GameMode,
 } from './sim/campaign';
+import { collectScience, recoverScience, transmitScience as transmitBufferedScience } from './sim/science';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -224,6 +219,7 @@ class PeriluneGame {
       onQuickLoad: () => void this.quickLoad(),
       onRevert: () => this.revert(),
       onRunScience: () => this.runScience(),
+      onTransmitScience: () => this.transmitScience(),
       onRecover: () => this.recover(),
       onSetSas: (m) => {
         const gv = this.game.active;
@@ -677,41 +673,56 @@ class PeriluneGame {
     const gv = this.game.active;
     if (!gv) return;
     const v = gv.runtime;
-    const body = this.game.bodyOf(gv);
-    const alt = v.pos.length() - body.radius;
-    const situation = scienceSituation(v.situation, alt, body.radius, body.def.atmosphere?.height ?? 0);
-    if (!situation) {
+    const outcome = collectScience(this.game, gv);
+    if (!outcome.site) {
       logEvent(v, this.game.time, 'No valid science situation right now.', 'warning');
       return;
     }
-    let gained = 0;
-    for (const p of v.craft.parts) {
-      const sci = defOf(p).science;
-      if (!sci) continue;
-      const exp = EXPERIMENT_INDEX.get(sci.experimentId);
-      if (!exp) continue;
-      if (!exp.validSituations.includes(situation)) continue;
-      if (exp.needsAtmosphere && !body.hasAtmosphere()) continue;
-      const key = experimentKey(exp.id, body.id, situation);
-      if (this.game.completedExperiments.has(key) || v.scienceData.has(key)) continue;
-      const value = experimentValue(exp, body.def.scienceValue);
-      v.scienceData.set(key, value);
-      gained += value;
-      logEvent(v, this.game.time, `${exp.name}: +${value} science stored (${situation} at ${body.name})`);
+    for (const result of outcome.collected) {
+      logEvent(
+        v,
+        this.game.time,
+        `${result.experiment.name}: ${result.collectValue} science aboard (${outcome.site.biome.name}, ${outcome.site.situation})`,
+      );
     }
-    if (gained === 0) {
-      logEvent(v, this.game.time, 'Nothing new to record here — try a different situation or world.', 'warning');
+    if (outcome.collected.length === 0) {
+      logEvent(v, this.game.time, 'No collectable science here — the site is exhausted or its result is already aboard.', 'warning');
+      return;
     }
+    void this.saveSync.write(this.game, 'auto', 'autosave');
+  }
+
+  private transmitScience(): void {
+    const gv = this.game.active;
+    if (!gv) return;
+    const outcome = transmitBufferedScience(this.game, gv);
+    if (!outcome.accepted) {
+      logEvent(gv.runtime, this.game.time, 'Science downlink unavailable — no route to a ground station.', 'warning');
+      return;
+    }
+    logEvent(
+      gv.runtime,
+      this.game.time,
+      outcome.delivered > 0
+        ? `Science downlink complete: ${outcome.delivered} points delivered via ${outcome.link.path.join(' → ')}.`
+        : 'No additional science can be transmitted from the results aboard.',
+      outcome.delivered > 0 ? 'info' : 'warning',
+    );
+    this.completeCampaignContracts();
+    this.editor.refreshCampaign();
+    void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
   private recover(): void {
     const gv = this.game.active;
     if (!gv) return;
     const v = gv.runtime;
-    let points = 0;
-    for (const val of v.scienceData.values()) points += val;
-    for (const key of v.scienceData.keys()) this.game.completedExperiments.add(key);
-    this.game.sciencePoints += points;
+    const science = recoverScience(this.game, gv);
+    if (!science.accepted) {
+      logEvent(v, this.game.time, 'Recovery denied: vessel must be intact and landed at the home world.', 'warning');
+      return;
+    }
+    const points = science.deliveredByRecovery;
     const recoveryRefund = this.game.campaign.mode === 'program' ? Math.round(craftCost(v.craft) * 0.35) : 0;
     if (recoveryRefund) this.game.campaign.funds += recoveryRefund;
     if (points > 0) this.game.flags['campaign:science-return'] = true;

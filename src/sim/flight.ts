@@ -28,6 +28,7 @@ import {
   inertialToBodyFixed,
   surfaceVelocity,
 } from './bodyOrientation';
+import type { BufferedResult, ScienceKeyId } from './science';
 
 export type SasMode =
   | 'off'
@@ -100,8 +101,8 @@ export interface VesselRuntime {
   events: FlightEvent[];
   /** Set when the vessel is uncontrollable debris. */
   isDebris: boolean;
-  /** Accumulated science data by experiment+situation key. */
-  scienceData: Map<string, number>;
+  /** Uncommitted science samples aboard this vessel. */
+  scienceBuffer: Map<ScienceKeyId, BufferedResult>;
   /** Crew names aboard. */
   crew: string[];
   charge: { amount: number; capacity: number };
@@ -166,7 +167,7 @@ export function createVesselRuntime(
     aero: newAeroForces(),
     events: [],
     isDebris: false,
-    scienceData: new Map(),
+    scienceBuffer: new Map(),
     crew: [],
     charge: { amount: 0, capacity: 0 },
     landedBodyFixed: null,

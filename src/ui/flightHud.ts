@@ -18,6 +18,7 @@ import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 import { el, injectUiStyles } from './kit';
 import { appendNavballIcon, type NavballIcon } from './icons';
 import type { EntryPrediction } from '../sim/entry';
+import { availableHere, isRecoverable } from '../sim/science';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -26,6 +27,7 @@ export interface HudCallbacks {
   onQuickLoad(): void;
   onRevert(): void;
   onRunScience(): void;
+  onTransmitScience(): void;
   onRecover(): void;
   onSetSas(mode: SasMode): void;
   onToggleSas(): void;
@@ -123,6 +125,8 @@ export class FlightHud {
   private lastEventCount = 0;
   private recoverBtn: HTMLElement;
   private scienceBtn: HTMLElement;
+  private transmitBtn: HTMLButtonElement;
+  private scienceStatusEl: HTMLElement;
   private nodeInfoEl: HTMLElement;
   private lastStageRender = '';
   private missionStart = 0;
@@ -133,6 +137,8 @@ export class FlightHud {
   private peakQ = 0;
   private peakQVesselId: string | null = null;
   private partPopup: HTMLElement | null = null;
+  private lastComms: CommsStatus = { connected: false, path: [], strength: 0 };
+  private lastScienceRender = '';
 
   constructor(uiRoot: HTMLElement, cb: HudCallbacks) {
     this.cb = cb;
@@ -173,6 +179,8 @@ export class FlightHud {
     mk('Editor', 'Back to the workshop', cb.onExitToEditor);
     this.scienceBtn = mk('Science', 'Run experiments here', cb.onRunScience);
     this.scienceBtn.dataset.action = 'science';
+    this.transmitBtn = mk('Transmit', 'Downlink science through the comms network', cb.onTransmitScience) as HTMLButtonElement;
+    this.transmitBtn.dataset.action = 'transmit-science';
     this.recoverBtn = mk('Recover', 'Recover vessel (ends flight)', cb.onRecover);
     this.recoverBtn.classList.add('hud-recover');
 
@@ -282,6 +290,8 @@ export class FlightHud {
       if (res === 'ore') this.oreRow = row;
     }
 
+    this.scienceStatusEl = el('div', 'hud-panel hud-science-status', right);
+
     // ---- ISRU systems panel (drills/converters/survey), shown when present
     this.sysPanel = el('div', 'hud-panel hud-systems', right);
     this.sysPanel.style.display = 'none';
@@ -301,6 +311,7 @@ export class FlightHud {
   private commsEl!: HTMLElement;
 
   setComms(status: CommsStatus, blocked: boolean): void {
+    this.lastComms = status;
     if (blocked) {
       this.commsEl.textContent = '⇅ NO SIGNAL';
       this.commsEl.style.color = 'var(--ui-danger)';
@@ -314,6 +325,7 @@ export class FlightHud {
       this.commsEl.style.color = '#7d8b96';
       this.commsEl.title = 'Crewed vessel: no link needed';
     }
+    this.transmitBtn.disabled = !status.connected;
   }
 
   private warpStep(dir: number): void {
@@ -422,6 +434,7 @@ export class FlightHud {
     if (oreMax > 0) this.setGauge('ore', ore, oreMax);
 
     this.updateSystems(game);
+    this.updateScienceStatus(game);
 
     // SAS highlight.
     for (const [mode, btn] of this.sasButtons) {
@@ -463,10 +476,7 @@ export class FlightHud {
     }
 
     // Buttons visibility.
-    const landedHome =
-      (v.situation === 'landed' || v.situation === 'splashed' || v.situation === 'prelaunch') &&
-      v.bodyId === 'veyra';
-    this.recoverBtn.style.display = landedHome ? '' : 'none';
+    this.recoverBtn.style.display = isRecoverable(gv, game.universe) ? '' : 'none';
 
     // Event feed.
     if (v.events.length !== this.lastEventCount) {
@@ -491,6 +501,50 @@ export class FlightHud {
     window.setTimeout(() => {
       this.actionGroupEl.style.display = 'none';
     }, 1400);
+  }
+
+  private updateScienceStatus(game: GameState): void {
+    const gv = game.active;
+    if (!gv) return;
+    const bufferSignature = [...gv.runtime.scienceBuffer]
+      .map(([key, value]) => `${key}:${value.heldValue}:${value.transmittedFromThis}`)
+      .join('|');
+    const signature = `${gv.runtime.id}:${gv.runtime.bodyId}:${gv.runtime.situation}:${Math.floor(game.time * 2)}:${game.sciencePoints}:${bufferSignature}:${game.scienceLedger.size}`;
+    if (signature === this.lastScienceRender) return;
+    this.lastScienceRender = signature;
+    const preview = availableHere(game, gv);
+    const aboard = [...gv.runtime.scienceBuffer].reduce((total, [keyId, result]) => {
+      const ledger = game.scienceLedger.get(keyId);
+      const delivered = ledger ? ledger.deliveredByRecovery + ledger.deliveredByTransmit : 0;
+      const remainingCap = ledger ? Math.max(0, ledger.cap - delivered) : result.siteCapAtCollection;
+      return total + Math.min(result.heldValue - result.transmittedFromThis, remainingCap);
+    }, 0);
+    const recoverOnly = [...gv.runtime.scienceBuffer.values()]
+      .filter((result) => result.transmitTarget === 0)
+      .length;
+    const count = preview.results.length;
+    const scienceButton = this.scienceBtn as HTMLButtonElement;
+    scienceButton.disabled = count === 0;
+    scienceButton.classList.toggle('active', count > 0);
+    scienceButton.textContent = count > 0 ? `Science ${count}` : 'Science';
+    this.transmitBtn.style.display = gv.runtime.scienceBuffer.size > 0 ? '' : 'none';
+    this.transmitBtn.disabled = !this.lastComms.connected || gv.runtime.scienceBuffer.size === 0;
+    this.scienceStatusEl.replaceChildren();
+    el('div', 'hud-science-kicker', this.scienceStatusEl, preview.site?.biome.name.toUpperCase() ?? 'NO SCIENCE SITE');
+    el(
+      'div',
+      'hud-science-available',
+      this.scienceStatusEl,
+      count > 0 ? `${count} RESULT${count === 1 ? '' : 'S'} · ${preview.totalCollectValue} SCI` : 'SITE EXHAUSTED',
+    );
+    el(
+      'div',
+      'hud-science-aboard',
+      this.scienceStatusEl,
+      aboard > 0
+        ? `${aboard} SCI ABOARD · ${this.lastComms.connected ? 'LINK READY' : 'NO DOWNLINK'}${recoverOnly ? ` · ${recoverOnly} RECOVER ONLY` : ''}`
+        : 'NO DATA ABOARD',
+    );
   }
 
   showPartActions(game: GameState, partKey: number, clientX: number, clientY: number): void {

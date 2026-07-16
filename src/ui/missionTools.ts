@@ -3,6 +3,7 @@ import { allTransferPlans, type TransferPlan } from '../sim/transfer';
 import { el } from './kit';
 import type { WindowManager } from './window';
 import { defOf } from '../sim/vessel';
+import { isRecoverable } from '../sim/science';
 
 export interface MissionToolCallbacks {
   onSwitchVessel(vesselId: string): void;
@@ -327,8 +328,7 @@ export class MissionTools {
       el('span', '', info, `${type} · ${game.universe.get(v.bodyId).name} · ${v.situation}`);
       const switchButton = el('button', 'hud-btn', row, v.id === game.activeVesselId ? 'Active' : 'Switch');
       switchButton.onclick = () => this.callbacks.onSwitchVessel(v.id);
-      const home = v.bodyId === 'veyra' && ['landed', 'splashed', 'prelaunch'].includes(v.situation);
-      if (home && !v.isDebris) {
+      if (isRecoverable(vessel, game.universe)) {
         const recover = el('button', 'k-window-btn', row, '⌂');
         recover.title = 'Recover';
         recover.onclick = () => this.callbacks.onRecoverVessel(v.id);

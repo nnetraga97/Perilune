@@ -1,4 +1,4 @@
-import { partById, type PartDef } from '../content/parts';
+import { partById, type PartDef, type TechId } from '../content/parts';
 import type { Craft } from './vessel';
 
 export type GameMode = 'sandbox' | 'exploration' | 'program';
@@ -7,17 +7,29 @@ export interface CampaignState {
   mode: GameMode;
   funds: number;
   reputation: number;
-  unlockedTech: string[];
+  unlockedTech: TechId[];
   activeContracts: string[];
   completedContracts: string[];
+  upgradeLevels: Record<UpgradeId, number>;
 }
 
 export interface TechnologyDef {
-  id: string;
+  id: TechId;
   name: string;
   brief: string;
   scienceCost: number;
-  requires: string | null;
+  requires: TechId | null;
+}
+
+export type UpgradeId = 'field-methods' | 'downlink-coding';
+
+export interface RepeatableUpgradeDef {
+  id: UpgradeId;
+  name: string;
+  brief: string;
+  requires: TechId;
+  baseCost: number;
+  costGrowth: number;
 }
 
 export interface ContractDef {
@@ -72,6 +84,46 @@ export const TECHNOLOGIES: readonly TechnologyDef[] = [
     scienceCost: 85,
     requires: 'exploration-instruments',
   },
+  {
+    id: 'precision-science',
+    name: 'Precision Science',
+    brief: 'Long-range downlinks, orbital surveys, field sampling, and higher-fidelity instruments.',
+    scienceCost: 80,
+    requires: 'exploration-instruments',
+  },
+  {
+    id: 'crewed-expeditions',
+    name: 'Crewed Expeditions',
+    brief: 'Docking, large crew systems, heavy thermal protection, and long-duration mission hardware.',
+    scienceCost: 105,
+    requires: 'deep-space-systems',
+  },
+  {
+    id: 'planetary-industry',
+    name: 'Planetary Industry',
+    brief: 'Prospecting, extraction, storage, and conversion hardware for sustained surface operations.',
+    scienceCost: 130,
+    requires: 'surface-operations',
+  },
+];
+
+export const REPEATABLE_UPGRADES: readonly RepeatableUpgradeDef[] = [
+  {
+    id: 'field-methods',
+    name: 'Field Methods',
+    brief: 'Future collections capture a larger share of each site\'s remaining value.',
+    requires: 'precision-science',
+    baseCost: 60,
+    costGrowth: 1.55,
+  },
+  {
+    id: 'downlink-coding',
+    name: 'Downlink Coding',
+    brief: 'Future non-sample results preserve more value when transmitted.',
+    requires: 'precision-science',
+    baseCost: 75,
+    costGrowth: 1.6,
+  },
 ];
 
 export const CONTRACTS: readonly ContractDef[] = [
@@ -109,72 +161,6 @@ export const CONTRACTS: readonly ContractDef[] = [
   },
 ];
 
-const PART_TECH: Readonly<Record<string, string>> = {
-  'pod-voyager': 'foundations',
-  'tank-s1': 'foundations',
-  'tank-s2': 'foundations',
-  'eng-pike': 'foundations',
-  'srb-flare': 'foundations',
-  'dec-s': 'foundations',
-  'nose-s': 'foundations',
-  'fin-swift': 'foundations',
-  'chute-main': 'foundations',
-  'batt-s': 'foundations',
-  'sci-thermo': 'foundations',
-
-  'core-pilot': 'orbital-engineering',
-  'tank-s4': 'orbital-engineering',
-  'tank-m4': 'orbital-engineering',
-  'eng-mule': 'orbital-engineering',
-  'eng-ember': 'orbital-engineering',
-  'eng-colt': 'orbital-engineering',
-  'rcs-quad': 'orbital-engineering',
-  'dec-interstage-ms': 'orbital-engineering',
-  'dec-radial': 'orbital-engineering',
-  'adapt-ms': 'orbital-engineering',
-  'girder-s': 'orbital-engineering',
-  'plate-base': 'orbital-engineering',
-  'solar-flat': 'orbital-engineering',
-  'wheel-rw': 'orbital-engineering',
-  'lamp-dot': 'orbital-engineering',
-
-  'fin-rudder': 'atmospheric-flight',
-  'wing-span': 'atmospheric-flight',
-  'chute-drogue': 'atmospheric-flight',
-  'gear-skid': 'atmospheric-flight',
-  'wing-delta': 'atmospheric-flight',
-  'ctrl-elevon': 'atmospheric-flight',
-  'eng-whirl': 'atmospheric-flight',
-
-  'ant-whip': 'exploration-instruments',
-  'ant-dish': 'exploration-instruments',
-  'sci-baro': 'exploration-instruments',
-  'sci-spore': 'exploration-instruments',
-  'sci-survey': 'exploration-instruments',
-  'sci-fieldkit': 'exploration-instruments',
-  'scan-prospector': 'exploration-instruments',
-
-  'pod-tandem': 'deep-space-systems',
-  'tank-m8': 'deep-space-systems',
-  'tank-radial': 'deep-space-systems',
-  'eng-aspen': 'deep-space-systems',
-  'srb-torch': 'deep-space-systems',
-  'dec-m': 'deep-space-systems',
-  'dock-port-s': 'deep-space-systems',
-  'nose-m': 'deep-space-systems',
-  'batt-m': 'deep-space-systems',
-  'solar-fold': 'deep-space-systems',
-  'shield-s': 'deep-space-systems',
-  'shield-m': 'deep-space-systems',
-
-  'leg-lander': 'surface-operations',
-  'wheel-scout': 'surface-operations',
-  'wheel-mesa': 'surface-operations',
-  'drill-auger': 'surface-operations',
-  'conv-kiln': 'surface-operations',
-  'bin-ore': 'surface-operations',
-};
-
 export function createCampaign(mode: GameMode = 'sandbox'): CampaignState {
   return {
     mode,
@@ -183,6 +169,7 @@ export function createCampaign(mode: GameMode = 'sandbox'): CampaignState {
     unlockedTech: mode === 'sandbox' ? TECHNOLOGIES.map((technology) => technology.id) : ['foundations'],
     activeContracts: [],
     completedContracts: [],
+    upgradeLevels: { 'field-methods': 0, 'downlink-coding': 0 },
   };
 }
 
@@ -197,18 +184,27 @@ export function normalizeCampaign(raw: Partial<CampaignState> | null | undefined
     reputation: Number.isFinite(raw?.reputation) ? Math.max(0, Math.round(raw!.reputation!)) : 0,
     unlockedTech: mode === 'sandbox'
       ? fallback.unlockedTech
-      : [...new Set(['foundations', ...(raw?.unlockedTech ?? [])])].filter((id) => knownTech.has(id)),
+      : [...new Set<TechId>(['foundations', ...(raw?.unlockedTech ?? [])])].filter((id) => knownTech.has(id)),
     activeContracts: [...new Set(raw?.activeContracts ?? [])].filter((id) => knownContracts.has(id)),
     completedContracts: [...new Set(raw?.completedContracts ?? [])].filter((id) => knownContracts.has(id)),
+    upgradeLevels: {
+      'field-methods': normalizedUpgradeLevel(raw?.upgradeLevels?.['field-methods']),
+      'downlink-coding': normalizedUpgradeLevel(raw?.upgradeLevels?.['downlink-coding']),
+    },
   };
 }
 
-export function technologyForPart(part: Pick<PartDef, 'id'>): TechnologyDef {
-  const id = PART_TECH[part.id] ?? 'deep-space-systems';
-  return TECHNOLOGIES.find((technology) => technology.id === id)!;
+function normalizedUpgradeLevel(value: unknown): number {
+  return Number.isInteger(value) && (value as number) >= 0 ? value as number : 0;
 }
 
-export function isPartUnlocked(campaign: CampaignState, part: Pick<PartDef, 'id'>): boolean {
+export function technologyForPart(part: Pick<PartDef, 'tech'>): TechnologyDef {
+  const technology = TECHNOLOGIES.find((candidate) => candidate.id === part.tech);
+  if (!technology) throw new Error(`Unknown technology ${part.tech}`);
+  return technology;
+}
+
+export function isPartUnlocked(campaign: CampaignState, part: Pick<PartDef, 'tech'>): boolean {
   return campaign.mode === 'sandbox' || campaign.unlockedTech.includes(technologyForPart(part).id);
 }
 
@@ -243,6 +239,28 @@ export function unlockTechnology(
   }
   campaign.unlockedTech.push(technology.id);
   return { ok: true, sciencePoints: sciencePoints - technology.scienceCost };
+}
+
+export function upgradeCost(upgrade: RepeatableUpgradeDef, level: number): number {
+  return Math.round(upgrade.baseCost * upgrade.costGrowth ** Math.max(0, level));
+}
+
+export function purchaseUpgrade(
+  campaign: CampaignState,
+  sciencePoints: number,
+  upgradeId: UpgradeId,
+): { ok: boolean; sciencePoints: number; reason?: string } {
+  if (campaign.mode === 'sandbox') return { ok: false, sciencePoints, reason: 'Research purchases are disabled in Sandbox.' };
+  const upgrade = REPEATABLE_UPGRADES.find((candidate) => candidate.id === upgradeId);
+  if (!upgrade) return { ok: false, sciencePoints, reason: 'Unknown upgrade.' };
+  if (!campaign.unlockedTech.includes(upgrade.requires)) {
+    return { ok: false, sciencePoints, reason: 'Unlock Precision Science first.' };
+  }
+  const level = campaign.upgradeLevels[upgrade.id] ?? 0;
+  const cost = upgradeCost(upgrade, level);
+  if (sciencePoints < cost) return { ok: false, sciencePoints, reason: `Requires ${cost} science.` };
+  campaign.upgradeLevels[upgrade.id] = level + 1;
+  return { ok: true, sciencePoints: sciencePoints - cost };
 }
 
 export function acceptContract(campaign: CampaignState, contractId: string): { ok: boolean; reason?: string } {

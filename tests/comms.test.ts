@@ -17,6 +17,14 @@ function probeCraft(antenna: 'ant-whip' | 'ant-dish' | null): Craft {
 }
 
 describe('comms network', () => {
+  it('uses the launch-site authority for the Cape Skyward ground station', () => {
+    const game = new GameState();
+    const gv = game.spawnOnPad(probeCraft('ant-whip'), 'Pad Probe');
+    const status = evaluateComms(game, gv);
+    expect(status.connected).toBe(true);
+    expect(status.path.at(-1)).toBe('Cape Skyward');
+  });
+
   it('connects a whip-antenna probe in low orbit to the ground', () => {
     const game = new GameState();
     const gv = game.spawnInOrbit(probeCraft('ant-whip'), 'LEO Probe', 'veyra', 200_000);

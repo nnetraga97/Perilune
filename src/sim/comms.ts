@@ -10,6 +10,7 @@ import { Vec3 } from '../core/vec3';
 import type { GameState, GameVessel } from './state';
 import { defOf } from './vessel';
 import { bodyFixedToInertial } from './bodyOrientation';
+import { launchSiteBodyFixedDirection } from './launchSite';
 
 export interface GroundStation {
   id: string;
@@ -25,14 +26,14 @@ export const GROUND_STATIONS: GroundStation[] = [
     id: 'gs-cape',
     name: 'Cape Skyward',
     bodyId: 'veyra',
-    dir: new Vec3(Math.cos(0.12) * Math.cos(-0.5), Math.cos(0.12) * Math.sin(-0.5), Math.sin(0.12)).normalize(),
+    dir: launchSiteBodyFixedDirection(new Vec3()),
     range: 5e10,
   },
   {
     id: 'gs-farside',
     name: 'Farside Array',
     bodyId: 'veyra',
-    dir: new Vec3(Math.cos(-0.3) * Math.cos(2.4), Math.cos(-0.3) * Math.sin(2.4), Math.sin(-0.3)).normalize(),
+    dir: new Vec3(Math.cos(0.12) * Math.cos(-0.5), Math.cos(0.12) * Math.sin(-0.5), Math.sin(0.12)).normalize(),
     range: 5e10,
   },
   {

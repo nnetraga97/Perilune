@@ -9,6 +9,8 @@ import type { BodyDef } from '../sim/universe';
 
 const DEG = Math.PI / 180;
 
+export const HOME_BODY_ID = 'veyra';
+
 export const AUREN_SYSTEM: BodyDef[] = [
   {
     id: 'auren',
@@ -123,6 +125,19 @@ export const AUREN_SYSTEM: BodyDef[] = [
     parent: 'auren',
     color: '#5fa8d3',
     scienceValue: 1,
+    biomes: [
+      { id: 'global', name: 'Global', scienceMultiplier: 1 },
+      { id: 'ocean', name: 'Open Ocean', scienceMultiplier: 0.7 },
+      { id: 'lowland', name: 'Moss Lowlands', scienceMultiplier: 0.9 },
+      { id: 'highland', name: 'Wind Highlands', scienceMultiplier: 1.1 },
+      { id: 'mountains', name: 'Skyward Mountains', scienceMultiplier: 1.25 },
+      { id: 'ice-cap', name: 'Polar Ice', scienceMultiplier: 1.2 },
+    ],
+    scienceBiomeThresholds: {
+      iceLatitudeMin: 0.82,
+      highlandAltitudeMin: 2_400,
+      mountainSlopeMinDeg: 18,
+    },
     orbit: {
       a: 1.5e10,
       e: 0.0,
@@ -165,6 +180,18 @@ export const AUREN_SYSTEM: BodyDef[] = [
     parent: 'veyra',
     color: '#b8b4ae',
     scienceValue: 4,
+    biomes: [
+      { id: 'global', name: 'Global', scienceMultiplier: 1 },
+      { id: 'lowland', name: 'Pale Basins', scienceMultiplier: 0.9 },
+      { id: 'highland', name: 'Ancient Highlands', scienceMultiplier: 1.15 },
+      { id: 'mountains', name: 'Crater Rims', scienceMultiplier: 1.3 },
+      { id: 'ice-cap', name: 'Polar Regolith', scienceMultiplier: 1.1 },
+    ],
+    scienceBiomeThresholds: {
+      iceLatitudeMin: 0.88,
+      highlandAltitudeMin: 2_800,
+      mountainSlopeMinDeg: 20,
+    },
     orbit: {
       a: 1.4e7,
       e: 0.0,
@@ -274,6 +301,10 @@ export const AUREN_SYSTEM: BodyDef[] = [
     parent: 'auren',
     color: '#7fb8a4',
     scienceValue: 9,
+    biomes: [
+      { id: 'global', name: 'Global', scienceMultiplier: 1 },
+      { id: 'upper-atmosphere', name: 'Upper Atmosphere', scienceMultiplier: 1.15 },
+    ],
     orbit: {
       a: 7.1e10,
       e: 0.04,

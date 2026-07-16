@@ -1,5 +1,10 @@
 import type { GameState } from '../sim/state';
-import { EXPERIMENTS, experimentValue, type ScienceSituation } from '../content/science';
+import {
+  EXPERIMENT_INDEX,
+  EXPERIMENTS,
+  experimentCap,
+  scienceBiomesForSituation,
+} from '../content/science';
 import type { ConflictChoice, UnifiedSaveSlot } from '../cloud/types';
 import { el } from './kit';
 import { type KeyBinding, InputService, keyDisplay } from './input';
@@ -8,10 +13,21 @@ import type { WindowManager } from './window';
 import {
   acceptContract,
   CONTRACTS,
+  purchaseUpgrade,
+  REPEATABLE_UPGRADES,
   settleContracts,
   TECHNOLOGIES,
   unlockTechnology,
+  upgradeCost,
 } from '../sim/campaign';
+import {
+  aboardScienceValue,
+  decodeScienceKey,
+  deliveredScience,
+  encodeScienceKey,
+  type LedgerEntry,
+  type ScienceKey,
+} from '../sim/science';
 
 export interface UiSettings {
   uiScale: number;
@@ -50,22 +66,6 @@ export interface UtilityCallbacks {
   onSettings(settings: UiSettings): void;
   onTelemetry(enabled: boolean): void;
   onCampaignChanged(): void;
-}
-
-const SITUATIONS: readonly ScienceSituation[] = [
-  'surface', 'ocean', 'flying-low', 'flying-high', 'space-low', 'space-high',
-];
-
-function parseScienceKey(key: string): { experimentId: string; bodyId: string; situation: ScienceSituation } | null {
-  const at = key.indexOf('@');
-  if (at < 1) return null;
-  for (const situation of SITUATIONS) {
-    const suffix = `-${situation}`;
-    if (key.endsWith(suffix)) {
-      return { experimentId: key.slice(0, at), bodyId: key.slice(at + 1, -suffix.length), situation };
-    }
-  }
-  return null;
 }
 
 export class UtilityTools {
@@ -149,7 +149,7 @@ export class UtilityTools {
       'program-balance',
       hero,
       campaign.mode === 'program'
-        ? `${campaign.funds.toLocaleString()} FUNDS · ${campaign.reputation} REPUTATION`
+        ? `${campaign.funds.toLocaleString()} FUNDS · ${campaign.reputation} REPUTATION · ${game.sciencePoints} SCIENCE`
         : `${game.sciencePoints} SCIENCE AVAILABLE`,
     );
     el(
@@ -185,6 +185,32 @@ export class UtilityTools {
           };
         }
       }
+
+      el('div', 'program-section-heading', this.programEl, 'REPEATABLE RESEARCH');
+      const upgradeGrid = el('div', 'program-tech-grid', this.programEl);
+      for (const upgrade of REPEATABLE_UPGRADES) {
+        const level = campaign.upgradeLevels[upgrade.id] ?? 0;
+        const cost = upgradeCost(upgrade, level);
+        const prerequisiteMet = campaign.unlockedTech.includes(upgrade.requires);
+        const card = el('article', 'program-card', upgradeGrid);
+        el('div', 'program-card-state', card, `LEVEL ${level} · ${cost} SCIENCE`);
+        el('strong', '', card, upgrade.name);
+        el('p', '', card, upgrade.brief);
+        const buy = el(
+          'button',
+          'hud-btn program-action',
+          card,
+          prerequisiteMet ? 'Research next level' : 'Precision Science required',
+        ) as HTMLButtonElement;
+        buy.disabled = !prerequisiteMet || game.sciencePoints < cost;
+        buy.onclick = () => {
+          const result = purchaseUpgrade(campaign, game.sciencePoints, upgrade.id);
+          if (!result.ok) return;
+          game.sciencePoints = result.sciencePoints;
+          this.callbacks.onCampaignChanged();
+          this.renderProgram();
+        };
+      }
     }
 
     if (campaign.mode === 'program') {
@@ -216,42 +242,113 @@ export class UtilityTools {
   private renderScience(): void {
     if (!this.scienceEl) return;
     const game = this.game();
-    const stored = game.vessels.flatMap((vessel) => [...vessel.runtime.scienceData.entries()].map(([key, points]) => ({
-      key, points, vessel: vessel.runtime.name,
+    const stored = game.vessels.flatMap((vessel) => [...vessel.runtime.scienceBuffer.entries()].map(([keyId, result]) => ({
+      keyId, result, vessel: vessel.runtime.name,
     })));
-    const signature = `${game.sciencePoints}:${[...game.completedExperiments].sort().join('|')}:${stored.length}`;
+    const ledgerSignature = [...game.scienceLedger]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => `${key}:${entry.cap}:${entry.deliveredByTransmit}:${entry.deliveredByRecovery}`)
+      .join('|');
+    const bufferSignature = stored
+      .map(({ keyId, result, vessel }) => `${vessel}:${keyId}:${result.heldValue}:${result.transmittedFromThis}:${result.transmitTarget}`)
+      .sort()
+      .join('|');
+    const signature = `${game.sciencePoints}:${ledgerSignature}:${bufferSignature}`;
     if (signature === this.lastScienceSignature) return;
     this.lastScienceSignature = signature;
     this.scienceEl.replaceChildren();
-    el('div', 'utility-total', this.scienceEl, `${game.sciencePoints} SCIENCE RECOVERED · ${stored.length} RESULTS ABOARD`);
+    let transmitted = 0;
+    let recovered = 0;
+    for (const entry of game.scienceLedger.values()) {
+      transmitted += entry.deliveredByTransmit;
+      recovered += entry.deliveredByRecovery;
+    }
+    el(
+      'div',
+      'utility-total',
+      this.scienceEl,
+      `${game.sciencePoints} AVAILABLE · ${transmitted} TRANSMITTED · ${recovered} RECOVERED · ${aboardScienceValue(game)} ABOARD`,
+    );
 
     if (stored.length) {
       const aboard = el('section', 'utility-section', this.scienceEl);
-      el('div', 'utility-heading', aboard, 'RESULTS AWAITING RECOVERY');
-      for (const result of stored) {
-        const parsed = parseScienceKey(result.key);
-        const experiment = parsed ? EXPERIMENTS.find((candidate) => candidate.id === parsed.experimentId) : null;
-        const body = parsed ? game.universe.bodies.get(parsed.bodyId) : null;
+      el('div', 'utility-heading', aboard, 'RESULTS ABOARD');
+      for (const storedResult of stored) {
+        const key = decodeScienceKey(storedResult.keyId);
+        const experiment = key ? EXPERIMENT_INDEX.get(key.experimentId) : null;
+        const body = key ? game.universe.bodies.get(key.bodyId) : null;
+        const biome = body?.def.biomes?.find((candidate) => candidate.id === key?.biomeId);
+        const deliverable = Math.max(0, storedResult.result.heldValue - storedResult.result.transmittedFromThis);
+        const deliveryLabel = storedResult.result.transmitTarget === 0
+          ? `${deliverable} recover only`
+          : `${deliverable} remaining`;
         const card = el('div', 'utility-science-card', aboard);
-        el('strong', '', card, experiment?.name ?? result.key);
-        el('span', '', card, `+${result.points} · ${parsed?.situation ?? 'unknown'} at ${body?.name ?? parsed?.bodyId ?? 'unknown'} · aboard ${result.vessel}`);
+        el('strong', '', card, experiment?.name ?? storedResult.keyId);
+        el(
+          'span',
+          '',
+          card,
+          `${deliveryLabel} · ${key?.situation ?? 'unknown'} · ${body?.name ?? key?.bodyId ?? 'unknown'} / ${biome?.name ?? key?.biomeId ?? 'unknown'} · ${storedResult.vessel}`,
+        );
         if (experiment) el('em', '', card, experiment.blurb);
       }
     }
 
-    const completed = [...game.completedExperiments].map(parseScienceKey).filter((item): item is NonNullable<typeof item> => item !== null);
-    for (const experiment of EXPERIMENTS) {
-      const section = el('section', 'utility-section', this.scienceEl);
-      const done = completed.filter((item) => item.experimentId === experiment.id);
-      el('div', 'utility-heading', section, `${experiment.name} · ${done.length} recovered`);
-      el('div', 'utility-muted', section, experiment.blurb);
-      for (const item of done.slice(-8)) {
-        const body = game.universe.bodies.get(item.bodyId);
-        const points = body ? experimentValue(experiment, body.def.scienceValue) : experiment.baseValue;
-        el('div', 'utility-row', section, `${body?.name ?? item.bodyId} · ${item.situation}  +${points}`);
+    const groups = new Map<string, Array<{ keyId: string; key: ScienceKey; entry: LedgerEntry }>>();
+    const listedKeys = new Set<string>();
+    for (const body of game.universe.bodies.values()) {
+      if (body.def.isStar) continue;
+      for (const experiment of EXPERIMENTS) {
+        if (experiment.needsAtmosphere && !body.hasAtmosphere()) continue;
+        for (const situation of experiment.validSituations) {
+          for (const biome of scienceBiomesForSituation(body.def, situation)) {
+            const key: ScienceKey = {
+              experimentId: experiment.id,
+              bodyId: body.id,
+              biomeId: biome.id,
+              situation,
+            };
+            const keyId = encodeScienceKey(key);
+            const groupId = `${key.bodyId}\u0000${key.biomeId}\u0000${key.situation}`;
+            const entry = game.scienceLedger.get(keyId) ?? {
+              cap: experimentCap(experiment, body.def.scienceValue, biome.scienceMultiplier),
+              deliveredByTransmit: 0,
+              deliveredByRecovery: 0,
+            };
+            const group = groups.get(groupId) ?? [];
+            group.push({ keyId, key, entry });
+            groups.set(groupId, group);
+            listedKeys.add(keyId);
+          }
+        }
       }
-      const remaining = experiment.validSituations.filter((situation) => !done.some((item) => item.situation === situation));
-      el('div', 'utility-remaining', section, remaining.length ? `Still available: ${remaining.join(', ')}` : 'All situation types recovered');
+    }
+    // Preserve migrated or previously-authored sites even if current content no longer enumerates them.
+    for (const [keyId, entry] of game.scienceLedger) {
+      if (listedKeys.has(keyId)) continue;
+      const key = decodeScienceKey(keyId);
+      if (!key) continue;
+      const groupId = `${key.bodyId}\u0000${key.biomeId}\u0000${key.situation}`;
+      const group = groups.get(groupId) ?? [];
+      group.push({ keyId, key, entry });
+      groups.set(groupId, group);
+    }
+    for (const [groupId, results] of groups) {
+      const [bodyId, biomeId, situation] = groupId.split('\u0000');
+      const body = game.universe.bodies.get(bodyId);
+      const biome = body?.def.biomes?.find((candidate) => candidate.id === biomeId);
+      const section = el('section', 'utility-section', this.scienceEl);
+      el('div', 'utility-heading', section, `${body?.name ?? bodyId} · ${biome?.name ?? biomeId} · ${situation}`);
+      for (const result of results.sort((a, b) => a.key.experimentId.localeCompare(b.key.experimentId))) {
+        const experiment = EXPERIMENT_INDEX.get(result.key.experimentId);
+        const remaining = Math.max(0, result.entry.cap - deliveredScience(result.entry));
+        el(
+          'div',
+          'utility-row',
+          section,
+          `${experiment?.name ?? result.key.experimentId} · T ${result.entry.deliveredByTransmit} · R ${result.entry.deliveredByRecovery} · ${remaining} remaining`,
+        );
+      }
     }
   }
 

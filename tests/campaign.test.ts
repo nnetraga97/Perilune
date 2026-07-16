@@ -6,10 +6,13 @@ import {
   craftCost,
   createCampaign,
   isPartUnlocked,
+  purchaseUpgrade,
+  REPEATABLE_UPGRADES,
   settleContracts,
   TECHNOLOGIES,
   technologyForPart,
   unlockTechnology,
+  upgradeCost,
 } from '../src/sim/campaign';
 import { GameState } from '../src/sim/state';
 import { restoreGame, serializeGame } from '../src/save/persistence';
@@ -45,6 +48,22 @@ describe('campaign progression', () => {
     const expected = craft.parts.reduce((total, part) => total + partById(part.defId).cost, 0);
     expect(craftCost(craft)).toBe(expected);
     expect(craftCost(craft)).toBeGreaterThan(0);
+  });
+
+  it('persists repeatable upgrade levels and charges the authored growth curve', () => {
+    const game = new GameState('exploration');
+    game.campaign.unlockedTech.push('orbital-engineering', 'exploration-instruments', 'precision-science');
+    game.sciencePoints = 500;
+    const upgrade = REPEATABLE_UPGRADES.find((candidate) => candidate.id === 'field-methods')!;
+    expect(upgradeCost(upgrade, 0)).toBe(60);
+    expect(upgradeCost(upgrade, 1)).toBe(93);
+
+    const first = purchaseUpgrade(game.campaign, game.sciencePoints, upgrade.id);
+    expect(first).toEqual({ ok: true, sciencePoints: 440 });
+    game.sciencePoints = first.sciencePoints;
+    const restored = restoreGame(JSON.parse(JSON.stringify(serializeGame(game, 'upgrade'))));
+    expect(restored.campaign.upgradeLevels['field-methods']).toBe(1);
+    expect(restored.sciencePoints).toBe(440);
   });
 });
 

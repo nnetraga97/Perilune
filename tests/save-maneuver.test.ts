@@ -13,6 +13,7 @@ import {
 } from '../src/sim/maneuver';
 import { buildTwoStageRocket } from './vessel.test';
 import { createCampaign } from '../src/sim/campaign';
+import { encodeScienceKey } from '../src/sim/science';
 
 describe('save system', () => {
   it('round-trips a full game state losslessly', () => {
@@ -23,7 +24,13 @@ describe('save system', () => {
     game.fireStage(gv);
     for (let i = 0; i < 500; i++) game.update(PHYSICS_DT);
     game.sciencePoints = 42;
-    game.completedExperiments.add('thermal-scan@veyra-surface');
+    const scienceKey = encodeScienceKey({
+      experimentId: 'thermal-scan', bodyId: 'veyra', biomeId: 'global', situation: 'surface',
+    });
+    game.scienceLedger.set(scienceKey, { cap: 8, deliveredByTransmit: 3, deliveredByRecovery: 5 });
+    gv.runtime.scienceBuffer.set(encodeScienceKey({
+      experimentId: 'surface-sample', bodyId: 'veyra', biomeId: 'lowland', situation: 'surface',
+    }), { siteCapAtCollection: 20, heldValue: 12, transmittedFromThis: 0, transmitTarget: 0 });
     game.flags.tutorialDone = true;
     game.campaign = createCampaign('program');
     game.campaign.funds = 17_250;
@@ -42,7 +49,8 @@ describe('save system', () => {
 
     expect(restored.time).toBeCloseTo(game.time, 9);
     expect(restored.sciencePoints).toBe(42);
-    expect(restored.completedExperiments.has('thermal-scan@veyra-surface')).toBe(true);
+    expect(restored.scienceLedger.get(scienceKey)).toEqual({ cap: 8, deliveredByTransmit: 3, deliveredByRecovery: 5 });
+    expect(restored.active!.runtime.scienceBuffer).toEqual(gv.runtime.scienceBuffer);
     expect(restored.flags.tutorialDone).toBe(true);
     expect(restored.campaign).toEqual(game.campaign);
     expect(restored.vessels.length).toBe(game.vessels.length);
@@ -114,6 +122,43 @@ describe('save system', () => {
     v6.saveVersion = 6;
     for (const alarm of v6.alarms) delete alarm.vesselId;
     expect(migrateSave(v6).alarms[0].vesselId).toBeNull();
+  });
+
+  it('migrates banked history and aboard science through distinct v8 rules', () => {
+    const game = new GameState('exploration');
+    game.spawnOnPad(buildTwoStageRocket(), 'Legacy science craft');
+    const legacy = JSON.parse(JSON.stringify(serializeGame(game, 'legacy-v8')));
+    legacy.saveVersion = 8;
+    legacy.science = { points: 17, completed: ['thermal-scan@veyra-surface'] };
+    delete legacy.campaign.upgradeLevels;
+    legacy.vessels[0].science = { 'spore-exposure@veyra-surface': 7 };
+    delete legacy.vessels[0].scienceBuffer;
+
+    const migrated = migrateSave(legacy);
+    const historyKey = encodeScienceKey({
+      experimentId: 'thermal-scan', bodyId: 'veyra', biomeId: 'global', situation: 'surface',
+    });
+    const aboardKey = encodeScienceKey({
+      experimentId: 'spore-exposure', bodyId: 'veyra', biomeId: 'global', situation: 'surface',
+    });
+
+    expect(migrated.science.points).toBe(17);
+    expect(migrated.science.ledger[historyKey]).toMatchObject({
+      deliveredByTransmit: 0,
+      deliveredByRecovery: migrated.science.ledger[historyKey].cap,
+    });
+    expect(migrated.vessels[0].scienceBuffer[aboardKey]).toMatchObject({
+      heldValue: 7,
+      transmittedFromThis: 0,
+      transmitTarget: 2,
+    });
+    expect(migrated.science.ledger[aboardKey]).toBeUndefined();
+
+    const restored = restoreGame(migrated);
+    const resaved = serializeGame(restored, 'round-trip');
+    expect(resaved.science.points).toBe(17);
+    expect(resaved.science.ledger).toEqual(migrated.science.ledger);
+    expect(resaved.vessels[0].scienceBuffer).toEqual(migrated.vessels[0].scienceBuffer);
   });
 });
 

@@ -19,7 +19,7 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "bench": "vitest bench --run",
-    "validate:content": "node scripts/validate-content.mjs",
+    "validate:content": "node scripts/validate-content.mjs && tsx scripts/validate-game-content.ts",
     "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
     "compile:planet-assets:container": "node scripts/compile-planet-assets-container.mjs",
     "fetch:part-sources": "node scripts/fetch-part-sources.mjs",

@@ -12,6 +12,17 @@
 
 export type ResourceId = 'propellant' | 'solidFuel' | 'monoprop' | 'charge' | 'ablator' | 'ore';
 
+export type TechId =
+  | 'foundations'
+  | 'orbital-engineering'
+  | 'atmospheric-flight'
+  | 'exploration-instruments'
+  | 'deep-space-systems'
+  | 'surface-operations'
+  | 'precision-science'
+  | 'crewed-expeditions'
+  | 'planetary-industry';
+
 export const RESOURCE_DENSITY: Record<ResourceId, number> = {
   propellant: 5, // kg per unit
   solidFuel: 7.5,
@@ -59,6 +70,7 @@ export interface DecouplerDef {
 
 export interface PartDef {
   id: string;
+  tech: TechId;
   name: string;
   blurb: string;
   category:
@@ -136,6 +148,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- pods
   {
     id: 'pod-voyager',
+    tech: 'foundations',
     modelAssetId: 'orion-voyager-pod',
     name: 'Voyager Pod',
     blurb: 'A snug single-seat command pod. The window is small; the view is not.',
@@ -156,6 +169,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'pod-tandem',
+    tech: 'crewed-expeditions',
     name: 'Tandem Cab',
     blurb: 'Two seats, one purpose: putting bootprints somewhere new.',
     category: 'pods',
@@ -175,6 +189,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'core-pilot',
+    tech: 'orbital-engineering',
     name: 'Pilot Chip',
     blurb: 'A stubborn little guidance computer. Never complains about the catering.',
     category: 'pods',
@@ -195,6 +210,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- tanks
   {
     id: 'tank-s1',
+    tech: 'foundations',
     name: 'PL-100 Tank',
     blurb: 'The smallest serious fuel tank the Cooperative sells.',
     category: 'tanks',
@@ -214,6 +230,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-s2',
+    tech: 'foundations',
     modelAssetId: 'procedural-tank-pod',
     name: 'PL-200 Tank',
     blurb: 'Twice the tank. Same paint budget.',
@@ -234,6 +251,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-s4',
+    tech: 'orbital-engineering',
     modelAssetId: 'shuttle-pl400-tank',
     name: 'PL-400 Tank',
     blurb: 'A long drink of propellant for small stacks.',
@@ -254,6 +272,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-m4',
+    tech: 'orbital-engineering',
     modelAssetId: 'procedural-tank-mule',
     name: 'HV-800 Tank',
     blurb: 'Heavy-vehicle tankage. The workhorse of every launch stack.',
@@ -274,6 +293,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-m8',
+    tech: 'deep-space-systems',
     name: 'HV-1600 Tank',
     blurb: 'When the mission plan says "more".',
     category: 'tanks',
@@ -293,6 +313,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'tank-radial',
+    tech: 'deep-space-systems',
     name: 'Sidecar Tank',
     blurb: 'Clips onto the hull for that last bit of margin.',
     category: 'tanks',
@@ -310,6 +331,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- engines
   {
     id: 'eng-pike',
+    tech: 'foundations',
     name: 'K-45 "Pike"',
     blurb: 'A dependable gimballed lifter engine. The sound of progress.',
     category: 'engines',
@@ -327,6 +349,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-mule',
+    tech: 'orbital-engineering',
     modelAssetId: 'shuttle-mule-engine',
     name: 'K-180 "Mule"',
     blurb: 'Brute force with paperwork. Lifts what you bolt above it.',
@@ -345,6 +368,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-ember',
+    tech: 'orbital-engineering',
     name: 'V-9 "Ember"',
     blurb: 'A vacuum specialist. Weak at sea level, poetry in orbit.',
     category: 'engines',
@@ -362,6 +386,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-colt',
+    tech: 'orbital-engineering',
     modelAssetId: 'apollo-colt-engine',
     name: 'V-2 "Colt"',
     blurb: 'Tiny, eager, and precise. Landers love it.',
@@ -380,6 +405,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'eng-aspen',
+    tech: 'deep-space-systems',
     name: 'K-90 "Aspen"',
     blurb: 'Efficient upper-stage muscle for long journeys.',
     category: 'engines',
@@ -397,6 +423,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'srb-flare',
+    tech: 'foundations',
     name: 'SB-30 "Flare"',
     blurb: 'A solid booster: cheap thrust with strong opinions and no off switch.',
     category: 'engines',
@@ -416,6 +443,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'srb-torch',
+    tech: 'deep-space-systems',
     modelAssetId: 'procedural-srb-torch',
     name: 'SB-90 "Torch"',
     blurb: 'The big solid. Light it and hold on to your logbook.',
@@ -436,6 +464,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'rcs-quad',
+    tech: 'orbital-engineering',
     name: 'Quadjet RCS',
     blurb: 'Four polite nozzles for nudging, docking, and second thoughts.',
     category: 'engines',
@@ -453,6 +482,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- coupling
   {
     id: 'dec-s',
+    tech: 'foundations',
     name: 'Ring Separator S',
     blurb: 'Explosive charges arranged responsibly. Fires once.',
     category: 'coupling',
@@ -470,6 +500,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'dec-interstage-ms',
+    tech: 'orbital-engineering',
     modelAssetId: 'procedural-separator',
     name: 'Wayfarer Interstage M–S',
     blurb: 'A single-piece separator and fitted shroud for stepping a heavy booster down to a slim upper stage.',
@@ -488,6 +519,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'dec-m',
+    tech: 'deep-space-systems',
     modelAssetId: 'procedural-separator',
     name: 'Wayfarer Separator M',
     blurb: 'For parting with larger investments.',
@@ -506,6 +538,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'dec-radial',
+    tech: 'orbital-engineering',
     modelAssetId: 'procedural-radial-decoupler',
     name: 'Side Latch',
     blurb: 'Holds a booster firmly until the moment it very much does not.',
@@ -525,6 +558,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'dock-port-s',
+    tech: 'crewed-expeditions',
     name: 'Union Ring S',
     blurb: 'A standard docking collar. Two of these make a handshake in orbit.',
     category: 'coupling',
@@ -542,6 +576,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- structural
   {
     id: 'adapt-ms',
+    tech: 'orbital-engineering',
     name: 'Taper Adapter M-S',
     blurb: 'Bridges heavy stacks down to slim ones without arguments.',
     category: 'structural',
@@ -558,6 +593,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'nose-s',
+    tech: 'foundations',
     modelAssetId: 'procedural-srb-nose-cone',
     name: 'Streamline Cap S',
     blurb: 'Pointy end up. Considerably improves the shouting-at-drag situation.',
@@ -574,6 +610,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'nose-m',
+    tech: 'deep-space-systems',
     name: 'Streamline Cap M',
     blurb: 'A bigger point for bigger arguments with the atmosphere.',
     category: 'structural',
@@ -589,6 +626,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'girder-s',
+    tech: 'orbital-engineering',
     name: 'Lattice Girder',
     blurb: 'Honest steel. Holds things apart, or together, as required.',
     category: 'structural',
@@ -607,6 +645,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'plate-base',
+    tech: 'orbital-engineering',
     name: 'Foundation Plate',
     blurb: 'A flat, forgiving mounting plate for landers and contraptions.',
     category: 'structural',
@@ -625,6 +664,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- aero
   {
     id: 'fin-swift',
+    tech: 'foundations',
     modelAssetId: 'procedural-fin-pod',
     name: 'Swift Fin',
     blurb: 'A fixed fin. Keeps the pointy end convinced about which way is forward.',
@@ -642,6 +682,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'fin-rudder',
+    tech: 'atmospheric-flight',
     modelAssetId: 'procedural-fin-mule',
     name: 'Helm Fin',
     blurb: 'A steerable fin with a small motor and a big sense of duty.',
@@ -659,6 +700,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'wing-span',
+    tech: 'atmospheric-flight',
     name: 'Span Wing',
     blurb: 'A proper wing. Lift included; landings sold separately.',
     category: 'aero',
@@ -677,6 +719,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- utility
   {
     id: 'chute-main',
+    tech: 'foundations',
     modelAssetId: 'orion-homecoming-housing',
     name: 'Homecoming Chute',
     blurb: 'The last part to do its job, and the most appreciated.',
@@ -695,6 +738,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'chute-drogue',
+    tech: 'atmospheric-flight',
     name: 'Anchor Drogue',
     blurb: 'A small stubborn chute that makes the big one’s day easier.',
     category: 'utility',
@@ -712,6 +756,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'batt-s',
+    tech: 'foundations',
     name: 'Cell Pack S',
     blurb: 'Stored sunlight, ready when the sun is not.',
     category: 'utility',
@@ -728,6 +773,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'batt-m',
+    tech: 'crewed-expeditions',
     name: 'Cell Bank M',
     blurb: 'Enough charge to keep the lights on through a long eclipse.',
     category: 'utility',
@@ -745,6 +791,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'solar-fold',
+    tech: 'crewed-expeditions',
     name: 'Petal Array',
     blurb: 'Unfolds toward Auren like a patient flower.',
     category: 'utility',
@@ -761,6 +808,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'solar-flat',
+    tech: 'orbital-engineering',
     name: 'Shingle Panel',
     blurb: 'A rugged bolt-on solar shingle. No moving parts to regret.',
     category: 'utility',
@@ -777,8 +825,9 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'ant-whip',
+    tech: 'exploration-instruments',
     name: 'Whipline Antenna',
-    blurb: 'Keeps you on the family call, at least near home.',
+    blurb: 'Keeps you on the family call and downlinks science, at least near home.',
     category: 'utility',
     massDry: 8,
     cost: 150,
@@ -793,9 +842,10 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'ant-dish',
+    tech: 'precision-science',
     modelAssetId: 'tdrs-longtalk-dish',
     name: 'Longtalk Dish',
-    blurb: 'For conversations across very awkward distances.',
+    blurb: 'Relays control and science downlinks across very awkward distances.',
     category: 'utility',
     massDry: 60,
     cost: 700,
@@ -811,6 +861,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'leg-lander',
+    tech: 'surface-operations',
     modelAssetId: 'viking-stilt-leg',
     name: 'Stilt Leg',
     blurb: 'A sprung landing leg. Prefers gentle arrivals; tolerates honest ones.',
@@ -828,6 +879,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'wheel-rw',
+    tech: 'orbital-engineering',
     name: 'Gyro Ring',
     blurb: 'A flywheel assembly that turns electricity into attitude.',
     category: 'utility',
@@ -845,6 +897,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'lamp-dot',
+    tech: 'orbital-engineering',
     name: 'Beacon Lamp',
     blurb: 'A small light against a very large dark.',
     category: 'utility',
@@ -861,6 +914,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- science
   {
     id: 'sci-thermo',
+    tech: 'foundations',
     name: 'Thermoscope',
     blurb: 'Measures how enthusiastically the environment wants to cook you.',
     category: 'science',
@@ -877,6 +931,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'sci-baro',
+    tech: 'exploration-instruments',
     name: 'Pressograph',
     blurb: 'Reads the weight of the sky, where there is any.',
     category: 'science',
@@ -893,6 +948,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'sci-spore',
+    tech: 'exploration-instruments',
     name: 'Spore Vault',
     blurb: 'A sealed capsule of hardy Veyran moss spores. How do they fare out there?',
     category: 'science',
@@ -909,6 +965,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'sci-survey',
+    tech: 'precision-science',
     name: 'Starfield Camera',
     blurb: 'Photographs worlds from above and stars from everywhere.',
     category: 'science',
@@ -926,6 +983,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'sci-fieldkit',
+    tech: 'precision-science',
     name: 'Field Sample Kit',
     blurb: 'Scoops, bags, and labels. Ground truth requires ground.',
     category: 'science',
@@ -943,6 +1001,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- thermal
   {
     id: 'shield-s',
+    tech: 'deep-space-systems',
     name: 'Emberguard S',
     blurb: 'An ablative dish that takes the heat so the crew can take the credit.',
     category: 'thermal',
@@ -961,6 +1020,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'shield-m',
+    tech: 'crewed-expeditions',
     name: 'Emberguard M',
     blurb: 'The wide brim. For heavier things coming home faster.',
     category: 'thermal',
@@ -980,6 +1040,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------------------- ground
   {
     id: 'wheel-scout',
+    tech: 'surface-operations',
     name: 'Burro Wheel',
     blurb: 'A patient motorized wheel. Happiest below walking pace, capable of more.',
     category: 'ground',
@@ -996,6 +1057,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'wheel-mesa',
+    tech: 'surface-operations',
     modelAssetId: 'mars-mesa-wheel',
     name: 'Mesa Wheel',
     blurb: 'Heavy-duty traction for serious expedition rovers.',
@@ -1013,6 +1075,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'gear-skid',
+    tech: 'atmospheric-flight',
     name: 'Roadrunner Gear',
     blurb: 'Free-rolling landing gear with honest brakes. Runways optional.',
     category: 'ground',
@@ -1029,6 +1092,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'drill-auger',
+    tech: 'planetary-industry',
     name: 'Groundhog Drill',
     blurb: 'Chews regolith into hopper-ready concentrate. Loud, proud, effective.',
     category: 'ground',
@@ -1045,6 +1109,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'conv-kiln',
+    tech: 'planetary-industry',
     name: 'Ember Kiln',
     blurb: 'Bakes ore into propellant through chemistry best not discussed at dinner.',
     category: 'ground',
@@ -1063,6 +1128,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'bin-ore',
+    tech: 'planetary-industry',
     name: 'Hopper Bin',
     blurb: 'A rugged box of future fuel. Smells like progress and gravel.',
     category: 'ground',
@@ -1082,6 +1148,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'scan-prospector',
+    tech: 'planetary-industry',
     name: 'Prospector Eye',
     blurb: 'Sees riches under the surface from a polite orbital distance.',
     category: 'science',
@@ -1100,6 +1167,7 @@ export const PARTS: PartDef[] = [
   // ------------------------------------------------- aero (M2 additions)
   {
     id: 'wing-delta',
+    tech: 'atmospheric-flight',
     name: 'Delta Wing',
     blurb: 'A broad delta panel. Carries aircraft, dreams, and modest payloads.',
     category: 'aero',
@@ -1117,6 +1185,7 @@ export const PARTS: PartDef[] = [
   },
   {
     id: 'ctrl-elevon',
+    tech: 'atmospheric-flight',
     name: 'Elevon Flap',
     blurb: 'A powered control surface that argues with the airflow and usually wins.',
     category: 'aero',
@@ -1134,6 +1203,7 @@ export const PARTS: PartDef[] = [
   // -------------------------------------------- engines (M2 additions)
   {
     id: 'eng-whirl',
+    tech: 'atmospheric-flight',
     name: 'A-70 "Whirligig"',
     blurb: 'An air-breathing fan engine. Sips fuel, gulps sky, refuses vacuum.',
     category: 'engines',

@@ -119,7 +119,9 @@ export function serializeGame(game: GameState, label: string): SaveGame {
       isDebris: v.isDebris,
       crew: [...v.crew],
       charge: v.charge.amount,
-      science: Object.fromEntries(v.scienceData),
+      scienceBuffer: Object.fromEntries(
+        [...v.scienceBuffer].map(([key, value]) => [key, { ...value }]),
+      ),
       railsElements: gv.rails.elements ? { ...gv.rails.elements } : null,
       railsLandedPos: gv.rails.landedPos
         ? { x: gv.rails.landedPos.x, y: gv.rails.landedPos.y, z: gv.rails.landedPos.z }
@@ -139,13 +141,19 @@ export function serializeGame(game: GameState, label: string): SaveGame {
     time: game.time,
     activeVesselId: game.activeVesselId,
     vessels,
-    science: { points: game.sciencePoints, completed: [...game.completedExperiments] },
+    science: {
+      points: game.sciencePoints,
+      ledger: Object.fromEntries(
+        [...game.scienceLedger].map(([key, value]) => [key, { ...value }]),
+      ),
+    },
     flags: { ...game.flags },
     campaign: {
       ...game.campaign,
       unlockedTech: [...game.campaign.unlockedTech],
       activeContracts: [...game.campaign.activeContracts],
       completedContracts: [...game.campaign.completedContracts],
+      upgradeLevels: { ...game.campaign.upgradeLevels },
     },
     isru: { scanned: [...game.scannedBodies] },
     alarms: game.alarms.map((alarm) => ({ ...alarm })),
@@ -158,7 +166,9 @@ export function restoreGame(save: SaveGame): GameState {
   game.time = migrated.time;
   game.activeVesselId = migrated.activeVesselId;
   game.sciencePoints = migrated.science?.points ?? 0;
-  game.completedExperiments = new Set(migrated.science?.completed ?? []);
+  game.scienceLedger = new Map(
+    Object.entries(migrated.science?.ledger ?? {}).map(([key, value]) => [key, { ...value }]),
+  );
   game.flags = { ...(migrated.flags ?? {}) };
   game.campaign = normalizeCampaign(migrated.campaign);
   game.scannedBodies = new Set(migrated.isru?.scanned ?? []);
@@ -231,7 +241,9 @@ export function restoreGame(save: SaveGame): GameState {
     runtime.isDebris = sv.isDebris;
     runtime.crew = [...sv.crew];
     runtime.charge.amount = sv.charge;
-    runtime.scienceData = new Map(Object.entries(sv.science ?? {}));
+    runtime.scienceBuffer = new Map(
+      Object.entries(sv.scienceBuffer ?? {}).map(([key, value]) => [key, { ...value }]),
+    );
     refreshDerived(runtime);
     // refreshDerived clamps charge; restore exact amount afterward.
     runtime.charge.amount = Math.min(sv.charge, runtime.charge.capacity);

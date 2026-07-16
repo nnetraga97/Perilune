@@ -98,7 +98,7 @@ const STEPS: TutorialStep[] = [
     title: 'Science!',
     highlight: '[data-action="science"]',
     text: 'Press the SCIENCE button to record observations from orbit. Every new situation around every world has something to teach.',
-    done: (ctx) => (ctx.game?.active?.runtime.scienceData.size ?? 0) > 0 || (ctx.game?.completedExperiments.size ?? 0) > 0,
+    done: (ctx) => (ctx.game?.active?.runtime.scienceBuffer.size ?? 0) > 0 || (ctx.game?.scienceLedger.size ?? 0) > 0,
   },
   {
     title: 'Come home',

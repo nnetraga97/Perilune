@@ -13,7 +13,7 @@ import {
   timeToTrueAnomaly,
 } from '../core/orbit';
 import { Body, Universe } from './universe';
-import { AUREN_SYSTEM } from '../content/system';
+import { AUREN_SYSTEM, HOME_BODY_ID } from '../content/system';
 import {
   ACTION_GROUP_IDS,
   ActionGroupId,
@@ -45,6 +45,7 @@ import { launchSiteDirection } from './launchSite';
 import { preferredOrbitAltitude } from './orbitPlacement';
 import { snapshotInterstageShrouds } from './interstage';
 import { createCampaign, type CampaignState, type GameMode } from './campaign';
+import type { LedgerEntry, ScienceKeyId } from './science';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -100,7 +101,7 @@ const _bv = new Vec3();
 const _sun = new Vec3();
 
 export class GameState {
-  readonly universe = new Universe(AUREN_SYSTEM);
+  readonly universe = new Universe(AUREN_SYSTEM, HOME_BODY_ID);
   time = 0;
   vessels: GameVessel[] = [];
   activeVesselId: string | null = null;
@@ -111,12 +112,12 @@ export class GameState {
   private nextVesselSerial = 1;
   /** Set when the active vessel was destroyed this frame (UI reacts). */
   lastDestruction: { vesselId: string; reason: string } | null = null;
-  /** Recovered science points (spendable in later milestones). */
+  /** Spendable science balance from all delivery channels. */
   sciencePoints = 0;
   /** Persisted progression, economy, and contract state. */
   campaign: CampaignState;
-  /** Completed experiment keys (experimentId@body-situation). */
-  completedExperiments = new Set<string>();
+  /** Delivered science by canonical experiment/body/biome/situation key. */
+  scienceLedger = new Map<ScienceKeyId, LedgerEntry>();
   /** Progress/tutorial flags. */
   flags: Record<string, boolean> = {};
   /** Bodies whose resource fields have been surveyed from orbit. */
@@ -1147,6 +1148,25 @@ export class GameState {
     va.craft.nextKey = keyOffset + vb.craft.nextKey;
     va.crew = [...va.crew, ...vb.crew];
     va.charge.amount += vb.charge.amount;
+    for (const [keyId, incoming] of vb.scienceBuffer) {
+      const existing = va.scienceBuffer.get(keyId);
+      if (!existing) {
+        va.scienceBuffer.set(keyId, { ...incoming });
+        continue;
+      }
+      const siteCapAtCollection = Math.max(existing.siteCapAtCollection, incoming.siteCapAtCollection);
+      const transmittedFromThis = Math.min(
+        siteCapAtCollection,
+        existing.transmittedFromThis + incoming.transmittedFromThis,
+      );
+      const heldValue = Math.min(siteCapAtCollection, existing.heldValue + incoming.heldValue);
+      va.scienceBuffer.set(keyId, {
+        siteCapAtCollection,
+        heldValue: Math.max(heldValue, transmittedFromThis),
+        transmittedFromThis,
+        transmitTarget: Math.min(heldValue, existing.transmitTarget + incoming.transmitTarget),
+      });
+    }
     refreshDerived(va);
     // Runtime position is the world-space craft CoM. Recenter it after the
     // geometry merge so every existing part keeps the same world position.

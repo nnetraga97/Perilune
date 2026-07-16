@@ -229,6 +229,10 @@ export function injectUiStyles(): void {
       .hud-gauge-track { flex: 1; height: 8px; background: #101c26; border-radius: 4px; overflow: hidden; }
       .hud-gauge-fill { height: 100%; width: 0%; background: var(--ui-accent); }
       .hud-gauge-text { font-family: var(--ui-mono); font-size: 10px; color: #9fb4c4; min-width: 50px; text-align: right; }
+      .hud-science-status { border-color: #315267; background: linear-gradient(135deg, rgba(13,34,46,.96), rgba(7,16,23,.96)); }
+      .hud-science-kicker { color: #8fa7b4; font: 8px var(--ui-mono); letter-spacing: 1.7px; }
+      .hud-science-available { margin-top: 3px; color: var(--ui-accent); font: 10px var(--ui-mono); }
+      .hud-science-aboard { margin-top: 2px; color: #9fb4c4; font: 8.5px var(--ui-mono); }
       .hud-systems { display: flex; flex-direction: column; gap: 4px; }
       .hud-sys-toggle { width: 100%; text-align: left; font-size: 11px; }
       .hud-sys-toggle.active { border-color: var(--ui-good); color: #cfe8d6; }
@@ -574,7 +578,7 @@ export function injectUiStyles(): void {
           display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; }
         .hud-panel { padding:6px 8px; border-radius:6px; background:rgba(7,16,23,.91); }
         .hud-orbit,.hud-resources { min-width:0; }
-        .hud-staging,.hud-entry-card,.hud-systems { grid-column:1/-1; }
+        .hud-staging,.hud-entry-card,.hud-systems,.hud-science-status { grid-column:1/-1; }
         .hud-row { gap:5px; font-size:11px; }
         .hud-key { min-width:28px; font-size:9px; }
         .hud-eta { font-size:9px; white-space:nowrap; }

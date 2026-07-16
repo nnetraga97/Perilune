@@ -16,8 +16,14 @@ import { sanitizeInterstageShroudSpec } from '../sim/interstage';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 import type { CampaignState } from '../sim/campaign';
+import { EXPERIMENT_INDEX, experimentCap, type ScienceSituation } from '../content/science';
+import { AUREN_SYSTEM } from '../content/system';
+import { encodeScienceKey, type BufferedResult, type LedgerEntry } from '../sim/science';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
+
+export type SavedBufferedResult = BufferedResult;
+export type SavedLedgerEntry = LedgerEntry;
 
 export interface SavedAlarm {
   id: string;
@@ -77,7 +83,10 @@ export interface SavedVessel {
   isDebris: boolean;
   crew: string[];
   charge: number;
-  science: Record<string, number>;
+  /** Legacy v1-v8 aboard science. */
+  science?: Record<string, number>;
+  /** Canonical v9 aboard science buffers. */
+  scienceBuffer: Record<string, SavedBufferedResult>;
   railsElements: {
     a: number;
     e: number;
@@ -103,8 +112,8 @@ export interface SaveGame {
   time: number;
   activeVesselId: string | null;
   vessels: SavedVessel[];
-  /** Recovered science points and completed experiment keys. */
-  science: { points: number; completed: string[] };
+  /** Spendable science balance and canonical delivered-site ledger. */
+  science: { points: number; ledger: Record<string, SavedLedgerEntry>; completed?: string[] };
   /** Tutorial / progress flags. */
   flags: Record<string, boolean>;
   /** Game mode, technology, economy, and contracts (added in v8). */
@@ -132,6 +141,18 @@ export function validateSave(raw: unknown): raw is SaveGame {
     if (!Array.isArray(campaign.unlockedTech)) return false;
     if (!Array.isArray(campaign.activeContracts)) return false;
     if (!Array.isArray(campaign.completedContracts)) return false;
+    if ((s.saveVersion ?? 0) >= 9) {
+      if (typeof campaign.upgradeLevels !== 'object' || campaign.upgradeLevels === null) return false;
+      for (const level of Object.values(campaign.upgradeLevels)) {
+        if (!Number.isInteger(level) || level < 0) return false;
+      }
+    }
+  }
+  if ((s.saveVersion ?? 0) >= 9) {
+    if (!s.science || typeof s.science.ledger !== 'object' || s.science.ledger === null) return false;
+    for (const entry of Object.values(s.science.ledger)) {
+      if (!validLedgerEntry(entry)) return false;
+    }
   }
   if ((s.saveVersion ?? 0) >= 3) {
     if (!Array.isArray(s.alarms)) return false;
@@ -187,8 +208,58 @@ export function validateSave(raw: unknown): raw is SaveGame {
         }
       }
     }
+    if ((s.saveVersion ?? 0) >= 9) {
+      if (typeof v.scienceBuffer !== 'object' || v.scienceBuffer === null) return false;
+      for (const entry of Object.values(v.scienceBuffer)) {
+        if (!validBufferedResult(entry)) return false;
+      }
+    }
   }
   return true;
+}
+
+function validLedgerEntry(entry: unknown): entry is SavedLedgerEntry {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const value = entry as Partial<SavedLedgerEntry>;
+  return Number.isInteger(value.cap) && value.cap! >= 1
+    && Number.isInteger(value.deliveredByTransmit) && value.deliveredByTransmit! >= 0
+    && Number.isInteger(value.deliveredByRecovery) && value.deliveredByRecovery! >= 0
+    && value.deliveredByTransmit! + value.deliveredByRecovery! <= value.cap!;
+}
+
+function validBufferedResult(entry: unknown): entry is SavedBufferedResult {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const value = entry as Partial<SavedBufferedResult>;
+  return Number.isInteger(value.siteCapAtCollection) && value.siteCapAtCollection! >= 1
+    && Number.isInteger(value.heldValue) && value.heldValue! >= 1
+    && Number.isInteger(value.transmittedFromThis) && value.transmittedFromThis! >= 0
+    && Number.isInteger(value.transmitTarget) && value.transmitTarget! >= 0
+    && value.transmittedFromThis! <= value.transmitTarget!
+    && value.transmitTarget! <= value.heldValue!;
+}
+
+const LEGACY_SITUATIONS: readonly ScienceSituation[] = [
+  'flying-high', 'flying-low', 'space-high', 'space-low', 'surface', 'ocean',
+];
+
+function parseLegacyScienceKey(key: string): { experimentId: string; bodyId: string; situation: ScienceSituation } | null {
+  const at = key.indexOf('@');
+  if (at < 1) return null;
+  for (const situation of LEGACY_SITUATIONS) {
+    const suffix = `-${situation}`;
+    if (key.endsWith(suffix)) {
+      return { experimentId: key.slice(0, at), bodyId: key.slice(at + 1, -suffix.length), situation };
+    }
+  }
+  return null;
+}
+
+function legacyCap(experimentId: string, bodyId: string): number {
+  const experiment = EXPERIMENT_INDEX.get(experimentId);
+  const body = AUREN_SYSTEM.find((candidate) => candidate.id === bodyId);
+  if (!experiment || !body) return 1;
+  const globalMultiplier = body.biomes?.find((biome) => biome.id === 'global')?.scienceMultiplier ?? 1;
+  return experimentCap(experiment, body.scienceValue, globalMultiplier);
 }
 
 /** Upgrade an older save to the current version. Throws on unknown versions. */
@@ -248,7 +319,46 @@ export function migrateSave(raw: SaveGame): SaveGame {
         unlockedTech: [],
         activeContracts: [],
         completedContracts: [],
+        upgradeLevels: { 'field-methods': 0, 'downlink-coding': 0 },
       },
+    };
+  }
+  if (save.saveVersion === 8) {
+    const completed = save.science?.completed ?? [];
+    const ledger: Record<string, SavedLedgerEntry> = {};
+    for (const legacyId of completed) {
+      const parsed = parseLegacyScienceKey(legacyId);
+      if (!parsed) continue;
+      const cap = legacyCap(parsed.experimentId, parsed.bodyId);
+      const keyId = encodeScienceKey({ ...parsed, biomeId: 'global' });
+      ledger[keyId] = { cap, deliveredByTransmit: 0, deliveredByRecovery: cap };
+    }
+    save = {
+      ...save,
+      saveVersion: 9,
+      science: { points: save.science?.points ?? 0, ledger },
+      campaign: {
+        ...save.campaign,
+        upgradeLevels: { 'field-methods': 0, 'downlink-coding': 0 },
+      },
+      vessels: save.vessels.map((vessel) => {
+        const scienceBuffer: Record<string, SavedBufferedResult> = {};
+        for (const [legacyId, storedValue] of Object.entries(vessel.science ?? {})) {
+          const parsed = parseLegacyScienceKey(legacyId);
+          if (!parsed) continue;
+          const heldValue = Math.max(1, Math.round(storedValue));
+          const experiment = EXPERIMENT_INDEX.get(parsed.experimentId);
+          const keyId = encodeScienceKey({ ...parsed, biomeId: 'global' });
+          scienceBuffer[keyId] = {
+            siteCapAtCollection: legacyCap(parsed.experimentId, parsed.bodyId),
+            heldValue,
+            transmittedFromThis: 0,
+            transmitTarget: Math.round(heldValue * (experiment?.transmitFraction ?? 0)),
+          };
+        }
+        const { science: _legacyScience, ...current } = vessel;
+        return { ...current, scienceBuffer };
+      }),
     };
   }
   if (save.saveVersion !== SAVE_VERSION) {

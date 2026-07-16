@@ -46,6 +46,21 @@ export interface TerrainDef {
 
 export type SurfaceKind = 'solid' | 'gas' | 'star';
 
+export interface ScienceBiomeDef {
+  id: string;
+  name: string;
+  scienceMultiplier: number;
+}
+
+export interface ScienceBiomeThresholds {
+  /** Normalized absolute body-fixed latitude component in [0, 1]. */
+  iceLatitudeMin?: number;
+  /** Meters above terrain datum. */
+  highlandAltitudeMin?: number;
+  /** Local surface slope in degrees. */
+  mountainSlopeMinDeg?: number;
+}
+
 export interface BodyDef {
   id: string;
   name: string;
@@ -76,6 +91,9 @@ export interface BodyDef {
   color: string;
   /** Science multiplier for experiments here. */
   scienceValue: number;
+  /** Optional authored science biomes; unauthored bodies use a synthetic global biome. */
+  biomes?: ScienceBiomeDef[];
+  scienceBiomeThresholds?: ScienceBiomeThresholds;
 }
 
 export class Body {
@@ -165,8 +183,9 @@ const _pv = new Vec3();
 export class Universe {
   readonly bodies = new Map<string, Body>();
   readonly root: Body;
+  readonly homeBodyId: string;
 
-  constructor(defs: BodyDef[]) {
+  constructor(defs: BodyDef[], homeBodyId = 'veyra') {
     const rootDef = defs.find((d) => !d.parent);
     if (!rootDef) throw new Error('Universe needs a root body');
     this.root = new Body(rootDef, null);
@@ -191,6 +210,8 @@ export class Universe {
     if (remaining.length) {
       throw new Error(`Orphan bodies: ${remaining.map((d) => d.id).join(', ')}`);
     }
+    if (!this.bodies.has(homeBodyId)) throw new Error(`Unknown home body: ${homeBodyId}`);
+    this.homeBodyId = homeBodyId;
   }
 
   get(id: string): Body {
