@@ -61,6 +61,7 @@ class UiWindow {
     private readonly onFocus: (w: UiWindow) => void,
   ) {
     this.root = el('div', 'k-window', parent);
+    this.root.dataset.windowId = def.id;
     this.root.style.display = 'none';
     const bar = el('div', 'k-window-bar', this.root);
     el('span', 'k-window-title', bar, def.title);

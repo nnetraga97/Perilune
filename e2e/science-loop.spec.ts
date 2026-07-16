@@ -65,6 +65,6 @@ test('collects on the pad, establishes a live link in flight, and transmits', as
   await expect.poll(() => page.evaluate(() => (window as any).__TEST__.sciencePoints())).toBeGreaterThan(0);
 
   await page.locator('.hud-utility-host .k-launcher').getByRole('button', { name: 'Science' }).click();
-  await expect(page.locator('.utility-total')).toContainText('TRANSMITTED');
-  await expect(page.locator('.utility-section').filter({ hasText: 'Thermoscope Reading' }).first()).toContainText('T ');
+  await expect(page.locator('.science-filter-summary')).toContainText('transmitted');
+  await expect(page.locator('.science-site-card').filter({ hasText: 'Thermoscope Reading' }).first()).toContainText('T ');
 });
