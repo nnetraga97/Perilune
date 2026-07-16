@@ -539,6 +539,80 @@ export function injectUiStyles(): void {
         .map-step-row button, .map-snap-row button { min-height: 38px; padding-inline: 10px; }
       }
 
+      /* Phone flight deck: preserve the view while keeping primary controls thumb-reachable. */
+      @media (max-width:820px) {
+        #perf-mini { display:none !important; }
+        .hud { --hud-mobile-top: max(6px, env(safe-area-inset-top)); }
+        .hud-top { top:var(--hud-mobile-top); left:6px; right:6px; transform:none; min-height:40px;
+          display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:7px; padding:4px 6px;
+          border-color:#365264; background:linear-gradient(180deg,rgba(9,20,28,.97),rgba(6,13,19,.94));
+          box-shadow:0 8px 24px rgba(0,0,0,.28); }
+        .hud-ut,.hud-crew,.hud-next-alarm,.hud-comms { display:none; }
+        .hud-met { min-width:0; font-size:11px; white-space:nowrap; }
+        .hud-situation { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+          text-align:left; font-size:10px; letter-spacing:1.4px; }
+        .hud-warp { min-width:0; font-size:11px; white-space:nowrap; }
+        .hud-warp-btns { gap:3px; }
+        .hud-warp-btns .hud-btn { width:34px; min-height:32px; padding:0; font-size:10px; }
+
+        .hud-sys { top:calc(var(--hud-mobile-top) + 46px); left:6px; right:6px; display:flex; gap:4px;
+          padding:4px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none;
+          background:linear-gradient(90deg,rgba(6,14,20,.96),rgba(6,14,20,.74));
+          border:1px solid #263f50; border-radius:6px; pointer-events:auto; }
+        .hud-sys::-webkit-scrollbar { display:none; }
+        .hud-sys .hud-btn { flex:0 0 auto; min-height:36px; padding:4px 11px; font-size:10px; white-space:nowrap; }
+
+        .hud-right { top:calc(var(--hud-mobile-top) + 96px); left:6px; right:6px; width:auto;
+          display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px; }
+        .hud-panel { padding:6px 8px; border-radius:6px; background:rgba(7,16,23,.91); }
+        .hud-orbit,.hud-resources { min-width:0; }
+        .hud-staging,.hud-entry-card,.hud-systems { grid-column:1/-1; }
+        .hud-row { gap:5px; font-size:11px; }
+        .hud-key { min-width:28px; font-size:9px; }
+        .hud-eta { font-size:9px; white-space:nowrap; }
+        .hud-node-info { font-size:9px; }
+        .hud-gauge { gap:4px; padding:1px 0; }
+        .hud-gauge-track { min-width:22px; height:6px; }
+        .hud-gauge-text { min-width:28px; font-size:9px; }
+        .hud-stages { max-height:none; }
+        .hud-stage-btn { min-height:44px; margin:0; font-size:11px; letter-spacing:.7px; }
+        .hud-stage-list { display:none; }
+
+        .hud-left { bottom:calc(88px + env(safe-area-inset-bottom)); }
+        .hud-navwrap { transform:scale(.8); transform-origin:50% 100%; }
+        .hud-status-strip { display:none; }
+        .hud-events { top:calc(var(--hud-mobile-top) + 238px); left:8px; right:8px; max-width:none; gap:3px; }
+        .hud-event { width:fit-content; max-width:100%; padding:4px 8px; font-size:10px; }
+        .hud-part-popup { left:8px !important; right:8px; width:auto; max-height:48dvh; overflow-y:auto; }
+
+        .hud-utility-host { left:0; right:0; bottom:0; padding:5px 6px calc(5px + env(safe-area-inset-bottom));
+          overflow:hidden; background:linear-gradient(180deg,rgba(7,16,23,.98),rgba(4,10,15,.99));
+          border-top:1px solid #345267; box-shadow:0 -10px 28px rgba(0,0,0,.34); }
+        .hud-utility-host .k-launcher { flex-direction:row; flex-wrap:nowrap; gap:4px; overflow-x:auto;
+          overscroll-behavior-x:contain; scrollbar-width:none; }
+        .hud-utility-host .k-launcher::-webkit-scrollbar { display:none; }
+        .hud-utility-host .k-icon-btn { flex:0 0 42px; border:1px solid #2f4859; border-radius:5px; }
+        .hud-utility-host .k-icon-tooltip { left:50%; top:auto; bottom:calc(100% + 7px);
+          transform:translate(-50%,4px); }
+        .hud-utility-host .k-icon-btn:hover .k-icon-tooltip,
+        .hud-utility-host .k-icon-btn:focus-visible .k-icon-tooltip { transform:translate(-50%,0); }
+
+        .k-window { position:fixed; left:6px !important; right:6px; top:auto !important;
+          bottom:calc(58px + env(safe-area-inset-bottom)); width:auto; min-width:0; max-width:none;
+          max-height:min(58dvh,520px); overflow:hidden; border-radius:10px 10px 5px 5px;
+          box-shadow:0 -14px 42px rgba(0,0,0,.46); }
+        .k-window-bar { min-height:40px; cursor:default; }
+        .k-window-content { max-height:calc(min(58dvh,520px) - 40px); overflow-y:auto; }
+        .map-panel { bottom:calc(58px + env(safe-area-inset-bottom)); }
+      }
+
+      @media (max-width:340px) {
+        .hud-navwrap { transform:scale(.74); }
+        .hud-right { grid-template-columns:1fr; }
+        .hud-orbit,.hud-resources,.hud-staging,.hud-entry-card,.hud-systems { grid-column:1; }
+        .hud-events { top:calc(var(--hud-mobile-top) + 296px); }
+      }
+
       /* main menu */
       .perilune-menu { position:absolute; inset:0; overflow:hidden; z-index:40; pointer-events:auto;
         background:#03080d url('/ui/perilune-command-deck-bg.jpg') 72% center/cover no-repeat; }

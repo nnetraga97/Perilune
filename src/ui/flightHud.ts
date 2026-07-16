@@ -253,7 +253,7 @@ export class FlightHud {
 
     // ---- right: orbit info + resources + staging
     const right = el('div', 'hud-right', this.root);
-    const orbitBox = el('div', 'hud-panel', right);
+    const orbitBox = el('div', 'hud-panel hud-orbit', right);
     const apRow = el('div', 'hud-row', orbitBox);
     el('span', 'hud-key hud-key-ap', apRow, 'Ap');
     this.apEl = el('span', 'hud-val', apRow, '—');
@@ -267,7 +267,7 @@ export class FlightHud {
     this.entryCard = el('div', 'hud-panel hud-entry-card', right);
     this.entryCard.style.display = 'none';
 
-    const resBox = el('div', 'hud-panel', right);
+    const resBox = el('div', 'hud-panel hud-resources', right);
     for (const res of ['propellant', 'monoprop', 'charge', 'ore'] as const) {
       const row = el('div', 'hud-gauge', resBox);
       el(
@@ -286,7 +286,7 @@ export class FlightHud {
     this.sysPanel = el('div', 'hud-panel hud-systems', right);
     this.sysPanel.style.display = 'none';
 
-    const stagePanel = el('div', 'hud-panel hud-stages', right);
+    const stagePanel = el('div', 'hud-panel hud-stages hud-staging', right);
     const stageBtn = el('button', 'hud-btn hud-stage-btn', stagePanel, 'STAGE (Space)');
     stageBtn.onclick = cb.onStage;
     this.stageListEl = el('div', 'hud-stage-list', stagePanel);
