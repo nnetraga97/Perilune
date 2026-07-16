@@ -1,7 +1,15 @@
 import * as Sentry from '@sentry/browser';
 import { inject, track } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
-import { safeAnalyticsProperties, scrubSentryEvent, stripQuery, type TelemetryEventName } from './privacy';
+import type { LogEvent, LogFields } from './logContract';
+import {
+  safeAnalyticsProperties,
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+  scrubSentryTransaction,
+  stripQuery,
+  type TelemetryEventName,
+} from './privacy';
 
 export class TelemetryService {
   private enabled = true;
@@ -26,6 +34,15 @@ export class TelemetryService {
   setUser(userId: string | null): void {
     if (!this.sentryStarted) return;
     Sentry.setUser(userId ? { id: userId } : null);
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  addBreadcrumb(event: LogEvent, fields: LogFields = {}): void {
+    if (!this.enabled || !this.sentryStarted) return;
+    Sentry.addBreadcrumb({ category: `perilune.${event}`, level: 'info', data: { ...fields } });
   }
 
   track(name: TelemetryEventName, properties: Readonly<Record<string, unknown>> = {}): void {
@@ -59,7 +76,9 @@ export class TelemetryService {
         sendDefaultPii: false,
         tracesSampleRate: import.meta.env.PROD ? 0.1 : 0,
         integrations: import.meta.env.PROD ? [Sentry.browserTracingIntegration()] : [],
+        beforeBreadcrumb: (breadcrumb) => this.enabled ? scrubSentryBreadcrumb(breadcrumb) : null,
         beforeSend: (event) => this.enabled ? scrubSentryEvent(event) : null,
+        beforeSendTransaction: (event) => this.enabled ? scrubSentryTransaction(event) : null,
       });
     }
   }

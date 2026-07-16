@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { cloudPublicConfig } from './config';
+import { clientLog } from '../telemetry/log';
 
 export interface AuthSession {
   userId: string;
@@ -20,7 +21,24 @@ interface AuthResponse {
     session: { accessToken: string; refreshToken: string; expiresAt: number | null };
     user: { id: string; email: string };
   };
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; requestId?: string };
+}
+
+export class AccountRequestError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    message: string,
+    readonly requestId?: string,
+  ) {
+    super(message);
+  }
+}
+
+function validRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160 && /^[A-Za-z0-9:._-]+$/.test(value)
+    ? value
+    : undefined;
 }
 
 type Listener = (state: AuthState) => void;
@@ -115,14 +133,43 @@ export class AuthService {
 
   private async authenticate(mode: 'signup' | 'login', email: string, password: string): Promise<void> {
     if (!this.client) throw new Error('Cloud accounts are unavailable in this build.');
-    const response = await this.fetcher(`/api/auth/${mode}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const body = await response.json() as AuthResponse;
+    let response: Response;
+    try {
+      response = await this.fetcher(`/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch {
+      const error = new AccountRequestError('NETWORK_UNAVAILABLE', 0, 'Account service is unreachable.');
+      clientLog.warn('account.request.error', { operation: mode, status: 0, reason: error.code });
+      throw error;
+    }
+    const headerRequestId = validRequestId(response.headers.get('x-request-id'))
+      ?? validRequestId(response.headers.get('x-vercel-id'));
+    let body: AuthResponse;
+    try {
+      body = await response.json() as AuthResponse;
+    } catch {
+      const error = new AccountRequestError('INVALID_RESPONSE', response.status, 'Account service returned an invalid response.', headerRequestId);
+      clientLog.with(headerRequestId ? { requestId: headerRequestId } : {}).warn('account.request.error', {
+        operation: mode, status: response.status, reason: error.code,
+        ...(headerRequestId ? { requestId: headerRequestId } : {}),
+      });
+      throw error;
+    }
     if (!response.ok || !body.ok || !body.data) {
-      throw new Error(body.error?.message ?? 'Account request failed. Try again.');
+      const error = new AccountRequestError(
+        body.error?.code ?? 'ACCOUNT_ERROR',
+        response.status,
+        body.error?.message ?? 'Account request failed. Try again.',
+        validRequestId(body.error?.requestId) ?? headerRequestId,
+      );
+      clientLog.with(error.requestId ? { requestId: error.requestId } : {}).warn('account.request.error', {
+        operation: mode, status: response.status, reason: error.code,
+        ...(error.requestId ? { requestId: error.requestId } : {}),
+      });
+      throw error;
     }
     const result = await this.client.auth.setSession({
       access_token: body.data.session.accessToken,

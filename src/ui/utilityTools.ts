@@ -33,6 +33,7 @@ import {
   type ScienceKey,
 } from '../sim/science';
 import { PARTS } from '../content/parts';
+import { clientLog } from '../telemetry/log';
 
 export interface UiSettings {
   uiScale: number;
@@ -354,6 +355,7 @@ export class UtilityTools {
           const result = unlockTechnology(game.campaign, game.sciencePoints, technology.id);
           if (!result.ok) return;
           game.sciencePoints = result.sciencePoints;
+          clientLog.info('tech.unlock', { technologyId: technology.id });
           this.callbacks.onCampaignChanged();
           this.lastProgramSignature = '';
           this.renderProgram();

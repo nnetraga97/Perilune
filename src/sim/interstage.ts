@@ -1,4 +1,6 @@
 import type { PartDef } from '../content/parts';
+export { sanitizeInterstageShroudSpec } from '../core/interstageShroud';
+import { sanitizeInterstageShroudSpec } from '../core/interstageShroud';
 import {
   defOf,
   type Craft,
@@ -6,42 +8,9 @@ import {
   type PartInstance,
 } from './vessel';
 
-const MIN_RADIUS = 0.05;
-const MAX_RADIUS = 10;
-const MIN_SPAN = 0.08;
-const MAX_SPAN = 8;
 const MAX_RADIAL_OFFSET = 0.05;
 const MIN_UP_DOT = Math.cos(5 * Math.PI / 180);
 const MAX_WALK_PARTS = 16;
-
-function finite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-/** Validate untrusted craft/save data and return a fresh bounded snapshot. */
-export function sanitizeInterstageShroudSpec(raw: unknown): InterstageShroudSpec | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const value = raw as Partial<InterstageShroudSpec>;
-  if (
-    !finite(value.lowerRadius)
-    || !finite(value.upperRadius)
-    || !finite(value.lowerY)
-    || !finite(value.upperY)
-  ) return null;
-  const span = value.upperY - value.lowerY;
-  if (
-    value.lowerRadius < MIN_RADIUS || value.lowerRadius > MAX_RADIUS
-    || value.upperRadius < MIN_RADIUS || value.upperRadius > MAX_RADIUS
-    || span < MIN_SPAN || span > MAX_SPAN
-    || Math.abs(value.lowerY) > MAX_SPAN || Math.abs(value.upperY) > MAX_SPAN
-  ) return null;
-  return {
-    lowerRadius: value.lowerRadius,
-    upperRadius: value.upperRadius,
-    lowerY: value.lowerY,
-    upperY: value.upperY,
-  };
-}
 
 function isStackEdge(child: PartInstance): boolean {
   return child.attach === 'stack-top' || child.attach === 'stack-bottom';

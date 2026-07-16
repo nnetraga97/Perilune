@@ -1,4 +1,5 @@
-import type { Event } from '@sentry/browser';
+import type { Breadcrumb, Event } from '@sentry/browser';
+import { isLogEvent, sanitizeLogFields } from './logContract';
 
 export type TelemetryEventName =
   | 'account_created'
@@ -48,6 +49,44 @@ export function safeAnalyticsProperties(
   return output;
 }
 
+export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
+  const category = breadcrumb.category ?? '';
+  if (!category.startsWith('perilune.')) return null;
+  const event = category.slice('perilune.'.length);
+  if (!isLogEvent(event)) return null;
+  return {
+    category,
+    level: breadcrumb.level,
+    timestamp: breadcrumb.timestamp,
+    type: 'default',
+    data: sanitizeLogFields(event, breadcrumb.data),
+  };
+}
+
+function stripQuerySuffix(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value.split(/[?#]/, 1)[0] ?? '';
+}
+
+export function scrubSentryTransaction<T extends Event>(event: T): T {
+  const trace = event.contexts?.trace;
+  return {
+    ...event,
+    transaction: stripQuerySuffix(event.transaction),
+    request: event.request?.url ? { url: stripQuery(event.request.url) } : undefined,
+    user: undefined,
+    contexts: trace ? { trace } : undefined,
+    breadcrumbs: undefined,
+    extra: undefined,
+    tags: undefined,
+    spans: event.spans?.map((span) => ({
+      ...span,
+      description: stripQuerySuffix(span.description),
+      data: undefined,
+    })),
+  } as T;
+}
+
 export function scrubSentryEvent<T extends Event>(event: T): T {
   const trace = event.contexts?.trace;
   return {
@@ -61,7 +100,9 @@ export function scrubSentryEvent<T extends Event>(event: T): T {
     request: event.request?.url ? { url: stripQuery(event.request.url) } : undefined,
     user: event.user?.id ? { id: String(event.user.id) } : undefined,
     contexts: trace ? { trace } : undefined,
-    breadcrumbs: [],
+    breadcrumbs: event.breadcrumbs
+      ?.map(scrubSentryBreadcrumb)
+      .filter((breadcrumb): breadcrumb is Breadcrumb => breadcrumb !== null),
     extra: undefined,
     tags: undefined,
     message: undefined,

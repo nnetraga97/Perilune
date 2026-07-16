@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { SAVE_VERSION, type SaveGame, validateSave } from '../src/save/schema.js';
+import type { SaveGame } from '../src/save/schema.js';
+import { SAVE_VERSION, validateSave } from '../src/save/validation.js';
 import { HttpError, jsonError, jsonOk, methodNotAllowed, readJsonBody, requestId, safeHandlerError } from './http.js';
+import { log } from './log.js';
 import type { RateLimiter } from './rateLimit.js';
 import type { CacheStore } from './redis.js';
 
@@ -176,6 +178,7 @@ export function createSaveCollectionHandler(
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const id = requestId(request);
+    const requestLog = log.with({ requestId: id });
     if (request.method !== 'GET') return methodNotAllowed(['GET'], id);
     try {
       const context = await dependencies.authenticate(request);
@@ -183,9 +186,13 @@ export function createSaveCollectionHandler(
       if (limited) return limited;
       const key = listKey(context.userId);
       const cached = await dependencies.cache.getJson<CloudSaveMeta[]>(key);
-      if (cached) return jsonOk(cached, 200, { 'x-perilune-cache': 'hit' });
+      if (cached) {
+        requestLog.info('save.read.ok', { status: 200, cache: 'hit' });
+        return jsonOk(cached, 200, { 'x-perilune-cache': 'hit' });
+      }
       const saves = await context.repository.list(context.userId);
       await dependencies.cache.setJson(key, saves, CACHE_TTL_SECONDS);
+      requestLog.info('save.read.ok', { status: 200, cache: 'miss' });
       return jsonOk(saves, 200, { 'x-perilune-cache': 'miss' });
     } catch (error) {
       return safeHandlerError(error, id);
@@ -199,6 +206,7 @@ export function createSaveItemHandler(
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const id = requestId(request);
+    const requestLog = log.with({ requestId: id });
     if (!['GET', 'PUT', 'DELETE'].includes(request.method)) return methodNotAllowed(['GET', 'PUT', 'DELETE'], id);
     try {
       const slot = validateSlot(rawSlot);
@@ -209,16 +217,24 @@ export function createSaveItemHandler(
 
       if (request.method === 'GET') {
         const cached = await dependencies.cache.getJson<CloudSaveRecord>(key);
-        if (cached) return jsonOk(cached, 200, { 'x-perilune-cache': 'hit' });
+        if (cached) {
+          requestLog.info('save.read.ok', { status: 200, cache: 'hit' });
+          return jsonOk(cached, 200, { 'x-perilune-cache': 'hit' });
+        }
         const record = await context.repository.read(context.userId, slot);
-        if (!record) return jsonError('SAVE_NOT_FOUND', 'Cloud save was not found', 404, id);
+        if (!record) {
+          requestLog.info('save.read.miss', { status: 404 });
+          return jsonError('SAVE_NOT_FOUND', 'Cloud save was not found', 404, id);
+        }
         await dependencies.cache.setJson(key, record, CACHE_TTL_SECONDS);
+        requestLog.info('save.read.ok', { status: 200, cache: 'miss' });
         return jsonOk(record, 200, { 'x-perilune-cache': 'miss' });
       }
 
       if (request.method === 'PUT') {
         const body = await readJsonBody<PutBody>(request, SAVE_MAX_BYTES);
         if (!validateSave(body.save) || body.save.saveVersion < 1 || body.save.saveVersion > SAVE_VERSION) {
+          requestLog.info('save.write.invalid', { status: 400, reason: 'invalid_or_unsupported' });
           throw new HttpError(400, 'INVALID_SAVE', 'Save data is invalid or unsupported');
         }
         const expected = body.expectedRevision;
@@ -229,9 +245,16 @@ export function createSaveItemHandler(
         const result = expected === null || expected === undefined
           ? await context.repository.create(context.userId, input)
           : await context.repository.update(context.userId, { ...input, expectedRevision: Number(expected) });
-        if (result === 'conflict') return jsonError('SAVE_CONFLICT', 'Cloud save changed on another device', 409, id);
+        if (result === 'conflict') {
+          requestLog.warn('save.write.conflict', { status: 409 });
+          return jsonError('SAVE_CONFLICT', 'Cloud save changed on another device', 409, id);
+        }
         await dependencies.cache.delete(key, listKey(context.userId));
-        return jsonOk(result, expected === null || expected === undefined ? 201 : 200);
+        const status = expected === null || expected === undefined ? 201 : 200;
+        requestLog.info('save.write.ok', {
+          status, payloadHash: input.payloadHash, payloadBytes: JSON.stringify(body.save).length,
+        });
+        return jsonOk(result, status);
       }
 
       const body = await readJsonBody<DeleteBody>(request, 16 * 1024);
@@ -239,9 +262,16 @@ export function createSaveItemHandler(
         throw new HttpError(400, 'INVALID_REVISION', 'Expected revision is required');
       }
       const result = await context.repository.delete(context.userId, slot, Number(body.expectedRevision));
-      if (result === 'conflict') return jsonError('SAVE_CONFLICT', 'Cloud save changed on another device', 409, id);
-      if (result === 'missing') return jsonError('SAVE_NOT_FOUND', 'Cloud save was not found', 404, id);
+      if (result === 'conflict') {
+        requestLog.warn('save.delete.conflict', { status: 409 });
+        return jsonError('SAVE_CONFLICT', 'Cloud save changed on another device', 409, id);
+      }
+      if (result === 'missing') {
+        requestLog.info('save.delete.missing', { status: 404 });
+        return jsonError('SAVE_NOT_FOUND', 'Cloud save was not found', 404, id);
+      }
       await dependencies.cache.delete(key, listKey(context.userId));
+      requestLog.info('save.delete.ok', { status: 200 });
       return jsonOk({ deleted: true });
     } catch (error) {
       return safeHandlerError(error, id);

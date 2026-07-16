@@ -1,3 +1,5 @@
+import '../../server/instrumentation.js';
+import { observeApiRequest } from '../../server/http.js';
 import { saveItemHandler } from '../../server/saveRuntime.js';
 
 export default {
@@ -10,6 +12,6 @@ export default {
     } catch {
       // The handler's slot validator returns the stable error response.
     }
-    return saveItemHandler(request, slot);
+    return observeApiRequest(request, () => saveItemHandler(request, slot));
   },
 };

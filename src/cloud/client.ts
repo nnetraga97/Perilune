@@ -10,6 +10,7 @@ export class CloudClientError extends Error {
     readonly code: string,
     readonly status: number,
     message: string,
+    readonly requestId?: string,
   ) {
     super(message);
   }
@@ -17,6 +18,12 @@ export class CloudClientError extends Error {
   get retryable(): boolean {
     return this.status === 429 || this.status >= 500 || this.status === 0;
   }
+}
+
+function validRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160 && /^[A-Za-z0-9:._-]+$/.test(value)
+    ? value
+    : undefined;
 }
 
 export class CloudSaveClient {
@@ -64,15 +71,22 @@ export class CloudSaveClient {
       throw new CloudClientError('NETWORK_UNAVAILABLE', 0, 'Cloud service is unreachable.');
     }
     if (response.status === 401 && !retried) return this.request<T>(url, init, true);
+    const headerRequestId = validRequestId(response.headers.get('x-request-id'))
+      ?? validRequestId(response.headers.get('x-vercel-id'));
     let body: Success<T> | Failure;
     try {
       body = await response.json() as Success<T> | Failure;
     } catch {
-      throw new CloudClientError('INVALID_RESPONSE', response.status, 'Cloud service returned an invalid response.');
+      throw new CloudClientError('INVALID_RESPONSE', response.status, 'Cloud service returned an invalid response.', headerRequestId);
     }
     if (!response.ok || !body.ok) {
       const failure = body as Failure;
-      throw new CloudClientError(failure.error?.code ?? 'CLOUD_ERROR', response.status, failure.error?.message ?? 'Cloud request failed.');
+      throw new CloudClientError(
+        failure.error?.code ?? 'CLOUD_ERROR',
+        response.status,
+        failure.error?.message ?? 'Cloud request failed.',
+        validRequestId(failure.error?.requestId) ?? headerRequestId,
+      );
     }
     return body.data;
   }

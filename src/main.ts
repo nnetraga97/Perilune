@@ -6,6 +6,7 @@ import { RenderCapabilityError } from './render/context';
 import { parseRenderStartupOptions } from './render/renderStartupOptions';
 import { browserProfileStore } from './ui/profileStore';
 import { telemetry } from './telemetry/service';
+import { clientLog } from './telemetry/log';
 
 const params = new URLSearchParams(location.search);
 const proto = params.get('proto');
@@ -38,8 +39,10 @@ async function boot(): Promise<void> {
 }
 
 boot().catch((err) => {
-  telemetry.captureError(err);
-  console.error('Boot failed:', err);
+  clientLog.error('client.boot.error', err, {
+    source: proto ? 'prototype' : 'game',
+    errorType: err instanceof Error ? err.name : 'UnknownError',
+  });
   if (err instanceof RenderCapabilityError) {
     setBoot(err.message, 0);
     return;

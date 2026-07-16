@@ -14,6 +14,7 @@ import { reconcileCatalog } from './reconcile';
 import { SyncStore, type SlotSyncRecord } from './syncStore';
 import type { CloudSaveMeta, ConflictChoice, UnifiedSaveSlot } from './types';
 import { telemetry } from '../telemetry/service';
+import { clientLog } from '../telemetry/log';
 
 type Listener = () => void;
 
@@ -74,6 +75,7 @@ export class SaveSyncService {
     const localOk = await writeSave(game, slot, label);
     if (!localOk) return false;
     telemetry.track('local_save', { kind: slot === 'auto' ? 'auto' : slot === 'quick' ? 'quick' : 'named' });
+    clientLog.info('game.save', { kind: slot === 'auto' ? 'auto' : slot === 'quick' ? 'quick' : 'named' });
     const userId = this.userId();
     if (!userId) {
       this.emit();
@@ -89,6 +91,7 @@ export class SaveSyncService {
     const local = await readSave(slot);
     if (local) {
       telemetry.track('load', { source: 'local' });
+      clientLog.info('game.load', { source: 'local' });
       return local;
     }
     const userId = this.userId();
@@ -104,6 +107,7 @@ export class SaveSyncService {
       });
       this.emit();
       telemetry.track('load', { source: 'cloud' });
+      clientLog.info('game.load', { source: 'cloud' });
       return record.payload;
     } catch {
       return null;
@@ -268,6 +272,7 @@ export class SaveSyncService {
         attempts: 0, nextRetryAt: 0, cloud: uploaded,
       });
       telemetry.track('cloud_sync', { result: 'synced' });
+      clientLog.info('cloud.sync', { result: 'synced' });
       if (prior.state === 'pending') telemetry.track('pending_sync_recovered');
     } catch (error) {
       if (error instanceof CloudClientError && error.code === 'SAVE_CONFLICT') {
@@ -279,6 +284,10 @@ export class SaveSyncService {
         });
         telemetry.track('save_conflict');
         telemetry.track('cloud_sync', { result: 'conflict' });
+        clientLog.with(error.requestId ? { requestId: error.requestId } : {}).warn('cloud.sync', {
+          result: 'conflict',
+          ...(error.requestId ? { requestId: error.requestId } : {}),
+        });
         return;
       }
       const attempts = Math.min(prior.attempts + 1, 5);
@@ -291,7 +300,11 @@ export class SaveSyncService {
         nextRetryAt: Date.now() + delays[attempts - 1] * 1000,
       });
       telemetry.track('cloud_sync', { result: 'pending' });
-      telemetry.captureError(error);
+      const correlated = error instanceof CloudClientError ? error.requestId : undefined;
+      clientLog.with(correlated ? { requestId: correlated } : {}).error('cloud.sync.error', error, {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+        ...(correlated ? { requestId: correlated } : {}),
+      });
     }
   }
 

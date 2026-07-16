@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { captureServerError } from './sentry.js';
+import { log, flushServerTelemetry } from './log.js';
+import { withServerRequestSpan } from './sentry.js';
 
 export interface ApiErrorBody {
   ok: false;
@@ -16,11 +17,18 @@ export class HttpError extends Error {
   }
 }
 
+const REQUEST_IDS = new WeakMap<Request, string>();
+const CAPTURED_ERROR_RESPONSES = new WeakSet<Response>();
+
 export function requestId(request: Request): string {
+  const existing = REQUEST_IDS.get(request);
+  if (existing) return existing;
   const candidate = request.headers.get('x-vercel-id') ?? '';
-  return candidate && candidate.length <= 160 && /^[A-Za-z0-9:._-]+$/.test(candidate)
+  const id = candidate && candidate.length <= 160 && /^[A-Za-z0-9:._-]+$/.test(candidate)
     ? candidate
     : randomUUID();
+  REQUEST_IDS.set(request, id);
+  return id;
 }
 
 export function jsonOk<T>(data: T, status = 200, headers?: HeadersInit): Response {
@@ -81,9 +89,36 @@ export function methodNotAllowed(allowed: readonly string[], id: string): Respon
 
 export function safeHandlerError(error: unknown, id: string): Response {
   if (error instanceof HttpError) return jsonError(error.code, error.message, error.status, id);
-  captureServerError(error, { requestId: id, operation: 'api_request' });
-  console.error('Cloud API request failed', { requestId: id, error });
-  return jsonError('INTERNAL_ERROR', 'The request could not be completed', 500, id);
+  log.with({ requestId: id }).error('api.error', error, { status: 500 });
+  const response = jsonError('INTERNAL_ERROR', 'The request could not be completed', 500, id);
+  CAPTURED_ERROR_RESPONSES.add(response);
+  return response;
+}
+
+export async function observeApiRequest(
+  request: Request,
+  handler: () => Promise<Response>,
+): Promise<Response> {
+  const id = requestId(request);
+  const started = performance.now();
+  let response: Response;
+  try {
+    response = await withServerRequestSpan(request, handler);
+  } catch (error) {
+    response = safeHandlerError(error, id);
+  }
+  const durationMs = Math.max(0, Math.round(performance.now() - started));
+  const pathname = new URL(request.url).pathname;
+  log.with({ requestId: id }).info('api.request', {
+    method: request.method,
+    path: pathname,
+    status: response.status,
+    durationMs,
+  });
+  if (CAPTURED_ERROR_RESPONSES.has(response)) await flushServerTelemetry();
+  const headers = new Headers(response.headers);
+  headers.set('x-request-id', id);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 export function clientIp(request: Request): string {

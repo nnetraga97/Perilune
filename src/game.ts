@@ -40,6 +40,7 @@ import { SaveSyncService } from './cloud/saveSync';
 import { SyncStore } from './cloud/syncStore';
 import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
+import { clientLog } from './telemetry/log';
 import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
 import { el, injectUiStyles } from './ui/kit';
 import {
@@ -518,6 +519,7 @@ class PeriluneGame {
       mode,
       account: this.auth.state.kind === 'signed-in' ? 'signed-in' : 'guest',
     });
+    clientLog.info('game.start', { mode });
   }
 
   private showMenu(): void {
@@ -582,6 +584,7 @@ class PeriluneGame {
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
     telemetry.track('launch');
+    clientLog.info('launch', { mode: this.game.campaign.mode });
     logEvent(this.game.active!.runtime, this.game.time, `${craft.name} on the pad. Throttle up (Shift) and stage (Space) when ready.`);
     this.game.flags['campaign:launched'] = true;
     this.completeCampaignContracts();
@@ -1349,7 +1352,10 @@ class PeriluneGame {
           const signature = `${rendererFailure.bodyId}:${rendererFailure.message}`;
           if (signature !== this.reportedRendererFailure) {
             this.reportedRendererFailure = signature;
-            telemetry.captureError(new Error(`Planet renderer degraded: ${signature}`));
+            clientLog.error('sim.boundary.error', new Error(`Planet renderer degraded: ${signature}`), {
+              boundary: 'planet-renderer',
+              errorType: 'RenderDegradation',
+            });
           }
         }
       }

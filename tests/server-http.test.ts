@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { serverEnv } from '../server/env';
-import { HttpError, jsonError, readJsonBody } from '../server/http';
+import { HttpError, jsonError, observeApiRequest, readJsonBody, requestId } from '../server/http';
 import { rateLimitIdentity, RateLimiter } from '../server/rateLimit';
 import type { CacheStore } from '../server/redis';
 
@@ -27,6 +27,32 @@ describe('cloud API primitives', () => {
     expect(await jsonError('BAD_REQUEST', 'Invalid request', 400, 'req-1').json()).toEqual({
       ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid request', requestId: 'req-1' },
     });
+  });
+
+  it('uses one request ID across nested calls, logs once, and returns it on success and failure', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const request = new Request('https://perilune.test/api/saves?token=secret', {
+      headers: { 'x-vercel-id': 'iad1::stable-id' },
+    });
+    expect(requestId(request)).toBe('iad1::stable-id');
+    expect(requestId(request)).toBe('iad1::stable-id');
+    const success = await observeApiRequest(request, async () => {
+      expect(requestId(request)).toBe('iad1::stable-id');
+      return Response.json({ ok: true });
+    });
+    expect(success.headers.get('x-request-id')).toBe('iad1::stable-id');
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls[0]?.[1]).toMatchObject({
+      event: 'api.request', requestId: 'iad1::stable-id', path: '/api/saves', status: 200,
+    });
+
+    info.mockClear();
+    const failure = await observeApiRequest(new Request('https://perilune.test/api/saves'), async () => {
+      throw new HttpError(400, 'BAD_REQUEST', 'Invalid request');
+    });
+    const body = await failure.json();
+    expect(failure.headers.get('x-request-id')).toBe(body.error.requestId);
+    expect(info).toHaveBeenCalledTimes(1);
   });
 
   it('rejects oversized JSON and hashes rate-limit identities', async () => {
