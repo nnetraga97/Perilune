@@ -216,7 +216,7 @@ class PeriluneGame {
       onLaunch: (craft) => this.launch(craft),
       onExit: () => this.showMenu(),
       campaign: () => this.game.campaign,
-    }, this.partModels);
+    }, this.partModels, this.ctx.renderer);
     this.hud = new FlightHud(this.uiRoot, {
       onStage: () => this.stage(),
       onToggleMap: () => this.toggleMap(),

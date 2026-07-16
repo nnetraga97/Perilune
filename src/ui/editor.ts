@@ -30,6 +30,7 @@ import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisual
 import type { PartModelLibrary } from '../render/partModelLibrary';
 import { deleteCraftFile, listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 import { el, injectUiStyles } from './kit';
+import { partPortrait } from './partPortrait';
 import { BUILT_IN_CRAFTS } from '../content/crafts';
 import {
   craftCost,
@@ -91,36 +92,6 @@ export function expandedBranchKeys(craft: Readonly<Craft>, roots: Iterable<numbe
     }
   }
   return expanded;
-}
-
-function partThumbnail(def: PartDef): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = 56;
-  canvas.height = 56;
-  canvas.className = 'ed-part-thumb';
-  const context = canvas.getContext('2d')!;
-  context.translate(28, 28);
-  context.fillStyle = def.color ?? '#b9c4ca';
-  context.strokeStyle = def.accent ?? '#4f7186';
-  context.lineWidth = 3;
-  const height = Math.min(42, Math.max(16, def.shape.height * 18));
-  const width = Math.min(38, Math.max(10, (def.shape.width ?? (def.shape.radiusBottom ?? 0.4) * 2) * 15));
-  context.beginPath();
-  if (def.shape.kind === 'cone') {
-    const top = Math.max(3, (def.shape.radiusTop ?? 0.1) * 15);
-    context.moveTo(-top, -height / 2);
-    context.lineTo(top, -height / 2);
-    context.lineTo(width / 2, height / 2);
-    context.lineTo(-width / 2, height / 2);
-    context.closePath();
-  } else if (def.shape.kind === 'capsule' || def.shape.kind === 'dome') {
-    context.ellipse(0, 0, width / 2, height / 2, 0, 0, Math.PI * 2);
-  } else {
-    context.rect(-width / 2, -height / 2, width, height);
-  }
-  context.fill();
-  context.stroke();
-  return canvas;
 }
 
 export interface EditorCallbacks {
@@ -201,7 +172,12 @@ export class Editor {
     | { kind: 'root'; pos: Vec3 }
     | null = null;
 
-  constructor(uiRoot: HTMLElement, cb: EditorCallbacks, private readonly partModels?: PartModelLibrary) {
+  constructor(
+    uiRoot: HTMLElement,
+    cb: EditorCallbacks,
+    private readonly partModels?: PartModelLibrary,
+    private readonly renderer?: THREE.WebGLRenderer,
+  ) {
     this.cb = cb;
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
     window.addEventListener('resize', () => {
@@ -490,7 +466,7 @@ export class Editor {
       const card = el('div', unlocked ? 'ed-part' : 'ed-part ed-part-locked', this.partListEl);
       card.draggable = unlocked;
       card.setAttribute('aria-disabled', String(!unlocked));
-      card.appendChild(partThumbnail(def));
+      card.appendChild(partPortrait(def, this.partModels, this.renderer));
       const copy = el('div', 'ed-part-copy', card);
       el('div', 'ed-part-name', copy, def.name);
       const stats = [

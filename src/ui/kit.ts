@@ -352,9 +352,17 @@ export function injectUiStyles(): void {
       .ed-cat.active { border-color: var(--ui-accent); background: #16303f; }
       .ed-parts { flex: 1; overflow-y: auto; padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
       .ed-part { border: 1px solid #223240; border-radius: 6px; padding: 5px; cursor: pointer;
-        background: rgba(20,30,40,0.6); display: grid; grid-template-columns: 56px 1fr; gap: 7px; }
+        background: rgba(20,30,40,0.6); display: grid; grid-template-columns: 64px 1fr; gap: 8px; min-height:76px; }
       .ed-part:hover { border-color: var(--ui-accent); }
-      .ed-part-thumb { width: 56px; height: 56px; background: #0d1720; border: 1px solid #1d2b35; }
+      .ed-part-thumb { width: 64px; height: 64px; align-self:center; border: 1px solid #29404f; border-radius:4px;
+        background:
+          linear-gradient(rgba(113,161,187,.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(113,161,187,.08) 1px, transparent 1px),
+          radial-gradient(circle at 48% 42%, #1b2b36 0, #0b141b 72%);
+        background-size:16px 16px,16px 16px,100% 100%;
+        box-shadow:inset 0 0 18px rgba(0,0,0,.5),0 1px 0 rgba(255,255,255,.025);
+        transition:border-color .14s ease,transform .14s ease,filter .14s ease; }
+      .ed-part:hover .ed-part-thumb { border-color:#4f829d; transform:translateY(-1px); filter:brightness(1.07); }
       .ed-part-copy { min-width: 0; }
       .ed-part-name { font-size: 12px; color: #d8e2ea; }
       .ed-part-info { font-size: 10px; color: #7d8b96; }
