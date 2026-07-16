@@ -48,6 +48,12 @@ import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
 import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
 import { el, injectUiStyles } from './ui/kit';
+import {
+  craftCost,
+  lockedCraftParts,
+  settleContracts,
+  type GameMode,
+} from './sim/campaign';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -209,6 +215,7 @@ class PeriluneGame {
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
       onExit: () => this.showMenu(),
+      campaign: () => this.game.campaign,
     }, this.partModels);
     this.hud = new FlightHud(this.uiRoot, {
       onStage: () => this.stage(),
@@ -337,15 +344,27 @@ class PeriluneGame {
       onSavesChanged: (listener) => this.saveSync.subscribe(listener),
       onSettings: (settings) => this.applySettings(settings),
       onTelemetry: (enabled) => telemetry.setEnabled(enabled),
+      onCampaignChanged: () => {
+        this.editor.refreshCampaign();
+        void this.saveSync.write(this.game, 'auto', 'autosave');
+      },
     });
     this.menu = new MainMenu(this.uiRoot, {
       onFirstLight: () => {
-        this.newGame();
+        this.newGame('sandbox');
         this.tutorial.start();
         this.toEditor();
       },
       onSandbox: () => {
-        this.newGame();
+        this.newGame('sandbox');
+        this.toEditor();
+      },
+      onExploration: () => {
+        this.newGame('exploration');
+        this.toEditor();
+      },
+      onProgram: () => {
+        this.newGame('program');
         this.toEditor();
       },
       onContinue: () => this.continueAutosave(),
@@ -446,6 +465,14 @@ class PeriluneGame {
       vesselCount: () => this.game.vessels.length,
       time: () => this.game.time,
       sciencePoints: () => this.game.sciencePoints,
+      campaign: () => ({
+        mode: this.game.campaign.mode,
+        funds: this.game.campaign.funds,
+        reputation: this.game.campaign.reputation,
+        unlockedTech: [...this.game.campaign.unlockedTech],
+        activeContracts: [...this.game.campaign.activeContracts],
+        completedContracts: [...this.game.campaign.completedContracts],
+      }),
       warpRate: () => this.game.warpRate,
       target: () => this.game.active?.target ?? null,
       maneuverNode: () => this.maneuver.current ? { ...this.maneuver.current.node } : null,
@@ -483,13 +510,18 @@ class PeriluneGame {
       return;
     }
     this.game = restoreGame(save);
+    this.editor.refreshCampaign();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
 
-  private newGame(): void {
-    this.game = new GameState();
-    telemetry.track('game_started', { mode: this.auth.state.kind === 'signed-in' ? 'account' : 'guest' });
+  private newGame(mode: GameMode): void {
+    this.game = new GameState(mode);
+    this.editor.refreshCampaign();
+    telemetry.track('game_started', {
+      mode,
+      account: this.auth.state.kind === 'signed-in' ? 'signed-in' : 'guest',
+    });
   }
 
   private showMenu(): void {
@@ -516,6 +548,7 @@ class PeriluneGame {
     this.perf.setMiniVisible(false);
     this.windows.setLauncherHost(this.editor.utilityHost);
     this.windows.setScreen('editor');
+    this.editor.refreshCampaign();
     if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
     void this.saveSync.write(this.game, 'auto', 'autosave');
   }
@@ -536,13 +569,27 @@ class PeriluneGame {
     this.hud.setMissionStart(this.missionStart);
   }
 
-  private launch(craft: Craft): void {
+  private launch(craft: Craft): string | null {
+    const locked = lockedCraftParts(this.game.campaign, craft);
+    if (locked.length) {
+      return `Unlock required technology for ${locked.map((part) => part.name).join(', ')}.`;
+    }
+    const cost = craftCost(craft);
+    if (this.game.campaign.mode === 'program') {
+      if (cost > this.game.campaign.funds) {
+        return `Launch requires ${cost.toLocaleString()} funds; ${this.game.campaign.funds.toLocaleString()} available.`;
+      }
+      this.game.campaign.funds -= cost;
+    }
     this.launchedCraft = structuredClone(craft);
     this.game.clearFlightVessels();
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
     telemetry.track('launch');
     logEvent(this.game.active!.runtime, this.game.time, `${craft.name} on the pad. Throttle up (Shift) and stage (Space) when ready.`);
+    this.game.flags['campaign:launched'] = true;
+    this.completeCampaignContracts();
+    return null;
   }
 
   // --------------------------------------------------------------- actions
@@ -593,6 +640,7 @@ class PeriluneGame {
     const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save);
+    this.editor.refreshCampaign();
     this.world.resetDynamicState();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
@@ -664,6 +712,9 @@ class PeriluneGame {
     for (const val of v.scienceData.values()) points += val;
     for (const key of v.scienceData.keys()) this.game.completedExperiments.add(key);
     this.game.sciencePoints += points;
+    const recoveryRefund = this.game.campaign.mode === 'program' ? Math.round(craftCost(v.craft) * 0.35) : 0;
+    if (recoveryRefund) this.game.campaign.funds += recoveryRefund;
+    if (points > 0) this.game.flags['campaign:science-return'] = true;
     this.game.flags.recoveredOnce = true;
     this.game.vessels = this.game.vessels.filter((x) => x !== gv);
     this.game.activeVesselId = null;
@@ -671,9 +722,12 @@ class PeriluneGame {
     this.showDialog(
       'Vessel recovered',
       `${v.name} is home. Science recovered: ${points} points (total ${this.game.sciencePoints}).` +
+        (recoveryRefund ? ` Hardware recovery returned ${recoveryRefund.toLocaleString()} funds.` : '') +
         (v.crew.length ? ` Crew ${v.crew.join(', ')} return to a hero's welcome.` : ''),
       [{ label: 'Back to the Workshop', fn: () => this.toEditor() }],
     );
+    this.completeCampaignContracts();
+    this.editor.refreshCampaign();
     void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
@@ -1202,6 +1256,45 @@ class PeriluneGame {
     );
   }
 
+  private updateCampaignAchievements(): void {
+    const gv = this.game.active;
+    if (!gv) return;
+    const vessel = gv.runtime;
+    if (
+      vessel.bodyId === 'veyra'
+      && vessel.situation === 'orbit'
+      && !this.game.flags['campaign:veyra-orbit']
+    ) {
+      const body = this.game.bodyOf(gv);
+      const orbit = stateToElements(body.mu, vessel.pos, vessel.vel, this.game.time);
+      if (periapsisOf(orbit) > body.radius) this.game.flags['campaign:veyra-orbit'] = true;
+    }
+    if (
+      vessel.bodyId === 'palla'
+      && (vessel.situation === 'landed' || vessel.situation === 'prelaunch')
+    ) {
+      this.game.flags['campaign:palla-landed'] = true;
+    }
+    this.completeCampaignContracts();
+  }
+
+  private completeCampaignContracts(): void {
+    const completed = settleContracts(this.game.campaign, this.game.flags);
+    if (!completed.length) return;
+    const vessel = this.game.active?.runtime;
+    if (vessel) {
+      for (const contract of completed) {
+        logEvent(
+          vessel,
+          this.game.time,
+          `Contract fulfilled: ${contract.name}. +${contract.rewardFunds.toLocaleString()} funds, +${contract.rewardReputation} reputation.`,
+        );
+      }
+    }
+    this.editor.refreshCampaign();
+    this.scheduleAutosave();
+  }
+
   // ------------------------------------------------------------------ loop
   private frame(): void {
     const now = performance.now();
@@ -1226,6 +1319,7 @@ class PeriluneGame {
         if (!this.controlBlocked) this.applyContinuousInput(dt);
         this.updateNodeAssist(dt);
         this.game.update(realDt);
+        this.updateCampaignAchievements();
         for (const alarm of this.game.consumeFiredAlarms()) {
           const vessel = (alarm.vesselId
             ? this.game.vessels.find((candidate) => candidate.runtime.id === alarm.vesselId)

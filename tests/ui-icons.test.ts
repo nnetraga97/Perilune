@@ -8,7 +8,7 @@ describe('utility icon registry', () => {
   it('covers every approved launcher without text glyphs', () => {
     expect(UTILITY_ICON_NAMES).toEqual([
       'science', 'save', 'account', 'settings', 'keyboard', 'orbit',
-      'surface', 'vessel', 'alarm', 'transfer', 'fleet', 'log',
+      'surface', 'vessel', 'alarm', 'transfer', 'fleet', 'log', 'program',
     ]);
     for (const name of UTILITY_ICON_NAMES) {
       expect(ICON_PATHS[name].length).toBeGreaterThan(0);

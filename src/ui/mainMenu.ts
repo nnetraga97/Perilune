@@ -2,7 +2,7 @@ import type { SaveGame } from '../save/schema';
 import { iconButton } from './icons';
 import { el, injectUiStyles } from './kit';
 
-export type MissionEntry = 'continue' | 'first-light' | 'sandbox';
+export type MissionEntry = 'continue' | 'first-light' | 'exploration' | 'program' | 'sandbox';
 
 export interface MenuMission {
   id: MissionEntry;
@@ -22,8 +22,22 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
       primary: !save,
     },
     {
+      id: 'exploration',
+      eyebrow: 'DISCOVERY',
+      title: 'EXPLORATION',
+      detail: 'Recover science · unlock technology',
+      primary: false,
+    },
+    {
+      id: 'program',
+      eyebrow: 'CAREER',
+      title: 'SPACE PROGRAM',
+      detail: 'Balance funding · fulfill contracts',
+      primary: false,
+    },
+    {
       id: 'sandbox',
-      eyebrow: 'OPEN PROGRAM',
+      eyebrow: 'UNRESTRICTED',
       title: 'SANDBOX',
       detail: 'Build and fly freely',
       primary: false,
@@ -50,6 +64,8 @@ export interface MainMenuCallbacks {
   onContinue(): Promise<void> | void;
   onFirstLight(): void;
   onSandbox(): void;
+  onExploration(): void;
+  onProgram(): void;
   onSaves(): void;
   onAccount(): void;
   onSettings(): void;
@@ -92,6 +108,8 @@ const actionLabels: Record<MissionEntry, string> = {
   continue: 'Continue Mission',
   'first-light': 'First Light tutorial',
   sandbox: 'Sandbox — just build and fly',
+  exploration: 'Exploration — unlock technology with science',
+  program: 'Space Program — funding, technology, and contracts',
 };
 
 export class MainMenu {
@@ -138,7 +156,9 @@ export class MainMenu {
 
   private rebuildCommandDeck(): void {
     this.commandDeck.replaceChildren();
-    for (const mission of menuMissions(this.continueSave)) {
+    const missions = menuMissions(this.continueSave);
+    this.commandDeck.style.setProperty('--mission-count', String(missions.length));
+    for (const mission of missions) {
       const button = el(
         'button',
         `perilune-mission${mission.primary ? ' perilune-mission-primary' : ''}`,
@@ -152,6 +172,8 @@ export class MainMenu {
       button.onclick = () => {
         if (mission.id === 'continue') void this.callbacks.onContinue();
         else if (mission.id === 'first-light') this.callbacks.onFirstLight();
+        else if (mission.id === 'exploration') this.callbacks.onExploration();
+        else if (mission.id === 'program') this.callbacks.onProgram();
         else this.callbacks.onSandbox();
       };
     }

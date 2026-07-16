@@ -12,6 +12,7 @@ import {
   estimateBurnTime,
 } from '../src/sim/maneuver';
 import { buildTwoStageRocket } from './vessel.test';
+import { createCampaign } from '../src/sim/campaign';
 
 describe('save system', () => {
   it('round-trips a full game state losslessly', () => {
@@ -24,6 +25,11 @@ describe('save system', () => {
     game.sciencePoints = 42;
     game.completedExperiments.add('thermal-scan@veyra-surface');
     game.flags.tutorialDone = true;
+    game.campaign = createCampaign('program');
+    game.campaign.funds = 17_250;
+    game.campaign.reputation = 4;
+    game.campaign.unlockedTech.push('orbital-engineering');
+    game.campaign.activeContracts.push('veyra-orbit');
     game.active!.target = 'palla';
     const actionPartKey = game.active!.runtime.craft.parts[0].key;
     game.active!.runtime.craft.actionGroups = {
@@ -38,6 +44,7 @@ describe('save system', () => {
     expect(restored.sciencePoints).toBe(42);
     expect(restored.completedExperiments.has('thermal-scan@veyra-surface')).toBe(true);
     expect(restored.flags.tutorialDone).toBe(true);
+    expect(restored.campaign).toEqual(game.campaign);
     expect(restored.vessels.length).toBe(game.vessels.length);
     expect(restored.active!.target).toBe('palla');
     expect(restored.active!.runtime.craft.actionGroups).toEqual({

@@ -15,8 +15,9 @@ import type { ActionGroups, Craft, Stage, PartInstance, InterstageShroudSpec } f
 import { sanitizeInterstageShroudSpec } from '../sim/interstage';
 import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
+import type { CampaignState } from '../sim/campaign';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 export interface SavedAlarm {
   id: string;
@@ -106,6 +107,8 @@ export interface SaveGame {
   science: { points: number; completed: string[] };
   /** Tutorial / progress flags. */
   flags: Record<string, boolean>;
+  /** Game mode, technology, economy, and contracts (added in v8). */
+  campaign: CampaignState;
   /** ISRU state: bodies surveyed for resources (added in v2). */
   isru?: { scanned: string[] };
   /** Mission alarms (added in v3). */
@@ -121,6 +124,15 @@ export function validateSave(raw: unknown): raw is SaveGame {
   if (typeof s.saveVersion !== 'number') return false;
   if (typeof s.time !== 'number' || !Number.isFinite(s.time)) return false;
   if (!Array.isArray(s.vessels)) return false;
+  if ((s.saveVersion ?? 0) >= 8) {
+    const campaign = s.campaign;
+    if (!campaign || !['sandbox', 'exploration', 'program'].includes(campaign.mode)) return false;
+    if (!Number.isFinite(campaign.funds) || campaign.funds < 0) return false;
+    if (!Number.isFinite(campaign.reputation) || campaign.reputation < 0) return false;
+    if (!Array.isArray(campaign.unlockedTech)) return false;
+    if (!Array.isArray(campaign.activeContracts)) return false;
+    if (!Array.isArray(campaign.completedContracts)) return false;
+  }
   if ((s.saveVersion ?? 0) >= 3) {
     if (!Array.isArray(s.alarms)) return false;
     for (const alarm of s.alarms) {
@@ -223,6 +235,20 @@ export function migrateSave(raw: SaveGame): SaveGame {
       ...save,
       saveVersion: 7,
       alarms: save.alarms.map((alarm) => ({ ...alarm, vesselId: null })),
+    };
+  }
+  if (save.saveVersion === 7) {
+    save = {
+      ...save,
+      saveVersion: 8,
+      campaign: {
+        mode: 'sandbox',
+        funds: 0,
+        reputation: 0,
+        unlockedTech: [],
+        activeContracts: [],
+        completedContracts: [],
+      },
     };
   }
   if (save.saveVersion !== SAVE_VERSION) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## Milestone 3 — Progression and Space Program slice (2026-07-16)
+
+- Added explicit Exploration and Space Program starts alongside First Light
+  and unrestricted Sandbox.
+- Added six technology branches. Recovered science now unlocks parts, while
+  the Workshop visibly identifies locked hardware and blocks invalid craft.
+- Added a persisted economy: 25,000 starting funds, authoritative craft cost,
+  launch commitment, insufficient-funds interlock, and 35% recovery returns.
+- Added four accepted contracts tied to real launch, stable-orbit,
+  science-return, and Palla-landing achievements, with funds and reputation
+  rewards.
+- Added the Program Control instrument, save-schema v8 migration, and focused
+  progression/menu/save coverage.
+
 ## Milestone 1 — Vertical Slice (2026-07-10)
 
 The playable core loop, end to end:

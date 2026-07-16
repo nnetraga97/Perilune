@@ -1501,8 +1501,8 @@ export class MapView {
     this.depositCache.clear();
     this.scene.clear();
     this.panel.remove();
-    this.orbitHoverLabel.remove();
-    this.handleHoverLabel.remove();
+    this.orbitHoverLabel?.remove();
+    this.handleHoverLabel?.remove();
     this.gameRef = null;
   }
 }

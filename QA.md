@@ -6,7 +6,9 @@
    Kepler solvers, conservation laws, craft graph invariants, structural
    solver, save schema validation/corruption/migration guards, maneuver
    planning. Property tests randomize orbits and assert invariants
-   (energy conservation, back-propagation returns to start, no NaN).
+   (energy conservation, back-propagation returns to start, no NaN). Campaign
+   tests cover technology prerequisites, part gating, costs, contracts, and
+   save round-trips.
 2. **Integration mission tests** (vitest, real sim loop): full ascent →
    orbit → deorbit → chute landing; full Palla round trip (transfer,
    finite burns with corrections, SOI transitions, moon landing, return,

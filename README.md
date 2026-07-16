@@ -4,7 +4,7 @@ An original browser-based orbital engineering game by the Skyward
 Cooperative: build spacecraft, fly them with credible physics, reach orbit,
 land on moons, and bring your crew home.
 
-**Status: Milestone 2 systems slice — playable.** Build a rocket in the
+**Status: Milestone 2 sandbox plus a playable Milestone 3 progression slice.** Build a rocket in the
 Workshop, launch from Veyra, reach orbit, plan a transfer to the moon Palla
 with maneuver nodes, land, return, and recover. Docking and undocking, vessel
 switching, alarms, transfer planning, entry prediction, communications,
@@ -13,6 +13,11 @@ simulation, and writing are original. Veyra's authored global albedo uses a
 public-domain Natural Earth II source through Perilune's deterministic asset
 compiler; its provenance and modifications are recorded in
 `ATTRIBUTIONS.md` and `LICENSES.md`.
+
+Exploration mode turns recovered science into technology unlocks. Space
+Program mode adds a 25,000-fund starting budget, launch costs, hardware
+recovery refunds, accepted contracts, rewards, and reputation. Sandbox remains
+fully unrestricted.
 
 ## Play (development)
 

@@ -31,6 +31,13 @@ import type { PartModelLibrary } from '../render/partModelLibrary';
 import { deleteCraftFile, listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 import { el, injectUiStyles } from './kit';
 import { BUILT_IN_CRAFTS } from '../content/crafts';
+import {
+  craftCost,
+  isPartUnlocked,
+  lockedCraftParts,
+  technologyForPart,
+  type CampaignState,
+} from '../sim/campaign';
 
 interface StackNodeSpot {
   parentKey: number;
@@ -117,8 +124,9 @@ function partThumbnail(def: PartDef): HTMLCanvasElement {
 }
 
 export interface EditorCallbacks {
-  onLaunch(craft: Craft): void;
+  onLaunch(craft: Craft): string | null;
   onExit(): void;
+  campaign(): CampaignState;
 }
 
 export class Editor {
@@ -165,6 +173,7 @@ export class Editor {
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
   private launchBtn!: HTMLButtonElement;
+  private campaignEl!: HTMLElement;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
   private mobileMultiBtn!: HTMLButtonElement;
@@ -269,6 +278,7 @@ export class Editor {
     this.nameInput.onchange = () => {
       this.craft.name = this.nameInput.value || 'Untitled Craft';
     };
+    this.campaignEl = el('div', 'ed-campaign-balance', topScroll);
     this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
     this.undoBtn.onclick = () => this.undo();
     this.redoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Redo') as HTMLButtonElement;
@@ -298,7 +308,8 @@ export class Editor {
     this.mobileMultiBtn.onclick = () => this.toggleTouchMultiSelect();
     this.launchBtn = el('button', 'hud-btn ed-launch', top, '▲ LAUNCH') as HTMLButtonElement;
     this.launchBtn.onclick = () => {
-      this.cb.onLaunch(structuredClone(this.craft));
+      const error = this.cb.onLaunch(structuredClone(this.craft));
+      if (error) this.showNotice(error, true);
     };
     const utilityHost = el('div', 'ed-utility-host', this.root);
 
@@ -475,8 +486,10 @@ export class Editor {
     else if (this.sortSelect?.value === 'thrust') parts.sort((a, b) => (b.engine?.thrustVac ?? 0) - (a.engine?.thrustVac ?? 0));
     else if (this.sortSelect?.value === 'name') parts.sort((a, b) => a.name.localeCompare(b.name));
     for (const def of parts) {
-      const card = el('div', 'ed-part', this.partListEl);
-      card.draggable = true;
+      const unlocked = isPartUnlocked(this.cb.campaign(), def);
+      const card = el('div', unlocked ? 'ed-part' : 'ed-part ed-part-locked', this.partListEl);
+      card.draggable = unlocked;
+      card.setAttribute('aria-disabled', String(!unlocked));
       card.appendChild(partThumbnail(def));
       const copy = el('div', 'ed-part-copy', card);
       el('div', 'ed-part-name', copy, def.name);
@@ -486,6 +499,7 @@ export class Editor {
         def.engine ? `${(def.engine.thrustVac / 1000).toFixed(0)} kN` : '',
       ].filter(Boolean).join(' · ');
       el('div', 'ed-part-info', copy, stats);
+      if (!unlocked) el('div', 'ed-part-tech', copy, `LOCKED · ${technologyForPart(def).name}`);
       el('div', 'ed-part-blurb', copy, def.blurb);
       card.title = [
         def.name,
@@ -496,8 +510,15 @@ export class Editor {
         def.engine ? `Thrust: ${(def.engine.thrustVac / 1000).toFixed(1)} kN · Isp ${def.engine.ispSea}/${def.engine.ispVac} s` : '',
         def.resources ? `Resources: ${Object.entries(def.resources).map(([key, value]) => `${key} ${value}`).join(', ')}` : '',
       ].filter(Boolean).join('\n');
-      card.onclick = () => this.pickUp(def);
+      card.onclick = () => {
+        if (unlocked) this.pickUp(def);
+        else this.showNotice(`Unlock ${technologyForPart(def).name} in Program Control.`, true);
+      };
       card.ondragstart = (event) => {
+        if (!unlocked) {
+          event.preventDefault();
+          return;
+        }
         this.pickUp(def);
         event.dataTransfer?.setData('text/plain', def.id);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
@@ -1409,9 +1430,19 @@ export class Editor {
     }
     this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
-    const canLaunch = this.craft.parts.length > 0;
+    const campaign = this.cb.campaign();
+    const locked = lockedCraftParts(campaign, this.craft);
+    const cost = craftCost(this.craft);
+    const canAfford = campaign.mode !== 'program' || campaign.funds >= cost;
+    const canLaunch = this.craft.parts.length > 0 && locked.length === 0 && canAfford;
     this.launchBtn.disabled = !canLaunch;
-    this.launchBtn.title = canLaunch ? 'Launch this craft' : 'Add at least one part before launch';
+    this.launchBtn.title = canLaunch
+      ? campaign.mode === 'program' ? `Commit ${cost.toLocaleString()} funds and launch` : 'Launch this craft'
+      : this.craft.parts.length === 0
+        ? 'Add at least one part before launch'
+        : locked.length
+          ? `Craft contains locked technology: ${locked.map((part) => part.name).join(', ')}`
+          : `Insufficient funds: ${cost.toLocaleString()} required`;
     this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
     this.selectedKeys = new Set([...this.selectedKeys].filter((key) => Boolean(craftPart(this.craft, key))));
     if (this.primarySelectedKey !== null && !this.selectedKeys.has(this.primarySelectedKey)) {
@@ -1471,6 +1502,13 @@ export class Editor {
     const a = analyzeCraft(this.craft, gravity, pressure);
     const props = computeMassProperties(this.craft);
     const aero = buildAeroModel(this.craft);
+    const campaign = this.cb.campaign();
+    const cost = craftCost(this.craft);
+    this.campaignEl.textContent = campaign.mode === 'program'
+      ? `${campaign.funds.toLocaleString()} FUNDS · ${cost.toLocaleString()} COMMIT`
+      : campaign.mode === 'exploration'
+        ? 'EXPLORATION · TECHNOLOGY ENABLED'
+        : 'SANDBOX · UNRESTRICTED';
 
     const stability = aero.copY - props.com.y;
     this.statsEl.innerHTML = '';
@@ -1480,6 +1518,7 @@ export class Editor {
       el('span', 'ed-engineering-value', totals, value);
     };
     stat('Parts', String(a.partCount));
+    stat('Craft cost', `${cost.toLocaleString()} funds`);
     stat('Wet mass', `${(a.mass / 1000).toFixed(2)} t`);
     stat('Dry mass', `${(a.dryMass / 1000).toFixed(2)} t`);
     stat('Crew', String(a.crewCapacity));
@@ -1521,6 +1560,13 @@ export class Editor {
       }
     }
     if (!warnings.length) el('div', 'ed-part-info', this.warningsEl, 'no complaints — impressive');
+  }
+
+  /** Refresh palette access, campaign balance, and launch readiness after progression changes. */
+  refreshCampaign(): void {
+    this.renderPartList();
+    this.statsDirty = true;
+    this.rebuildVisual();
   }
 
   private refreshStages(): void {

@@ -69,6 +69,10 @@ class UiWindow {
     const closeBtn = el('button', 'k-window-btn', bar, '×');
     closeBtn.title = 'Close';
     this.content = el('div', 'k-window-content', this.root);
+    if (state.open) {
+      this.built = true;
+      def.build(this.content);
+    }
     this.applyState();
 
     collapseBtn.onclick = () => {

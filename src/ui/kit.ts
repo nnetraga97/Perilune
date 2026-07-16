@@ -459,11 +459,36 @@ export function injectUiStyles(): void {
         color: #aebfca; font-size: 9px; padding: 2px 0; }
       .utility-binding button { padding: 2px 4px; font-size: 8.5px; }
       .utility-reset { margin-top: 6px; font-size: 9px; }
+      .program-hero { margin:-8px -10px 10px; padding:12px 12px 11px; border-bottom:1px solid #395568;
+        background:linear-gradient(135deg,rgba(30,68,86,.62),rgba(12,24,33,.18)); }
+      .program-kicker { color:#8fa7b4; font:8px var(--ui-mono); letter-spacing:2.4px; }
+      .program-balance { margin:4px 0 6px; color:#f0c46b; font:13px var(--ui-mono); letter-spacing:.7px; }
+      .program-section-heading { margin:11px 0 5px; color:#8fa7b4; font:8px var(--ui-mono);
+        letter-spacing:2px; border-bottom:1px solid #263b49; padding-bottom:4px; }
+      .program-tech-grid,.program-contracts { display:grid; gap:5px; }
+      .program-card { position:relative; display:grid; grid-template-columns:1fr auto; gap:3px 8px;
+        padding:8px 9px 8px 11px; border:1px solid #294353; border-left:3px solid #496b7f;
+        background:linear-gradient(110deg,rgba(18,34,44,.92),rgba(11,21,29,.84)); }
+      .program-card::before { content:''; position:absolute; top:0; right:0; width:20px; height:1px; background:#65869a; }
+      .program-card strong { color:#dce8ee; font-size:10.5px; letter-spacing:.25px; }
+      .program-card p { grid-column:1/-1; margin:0; color:#8296a3; font-size:8.8px; line-height:1.4; }
+      .program-card-state { grid-column:2; grid-row:1; color:#e5b75c; font:7.5px var(--ui-mono); letter-spacing:1px; }
+      .program-card.is-complete { border-left-color:#6ead91; background:linear-gradient(110deg,rgba(22,54,49,.78),rgba(11,24,27,.8)); }
+      .program-card.is-complete .program-card-state { color:#8cd2ae; }
+      .program-card.is-active { border-left-color:#e2b13c; }
+      .program-reward { grid-column:1/-1; color:#d0ad65; font:8px var(--ui-mono); }
+      .program-action { grid-column:1/-1; justify-self:end; padding:3px 8px; font-size:8.5px; }
+      .ed-campaign-balance { position:absolute; left:10px; top:calc(100% + 4px); color:#e3b75e;
+        font:8px var(--ui-mono); letter-spacing:.8px; white-space:nowrap; padding:4px 7px;
+        border:1px solid #4e4937; border-radius:3px; background:rgba(8,16,22,.92); }
+      .ed-part-locked { opacity:.64; cursor:not-allowed; border-color:#2d3740; filter:saturate(.35); }
+      .ed-part-locked:hover { border-color:#725f43; }
+      .ed-part-tech { color:#dda94a; font:7.5px var(--ui-mono); letter-spacing:.65px; margin-top:2px; }
       .k-reduced-motion *, .k-reduced-motion *::before, .k-reduced-motion *::after {
         animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
       }
 
-      @media (max-width:900px), (pointer:coarse) {
+      @media (max-width:820px), (pointer:coarse) {
         .k-icon-btn { width:42px; height:42px; }
         .ed-root { height:100dvh; }
         .ed-right { position:static; display:contents; padding:0; border:0; background:transparent; overflow:visible; }
@@ -527,7 +552,7 @@ export function injectUiStyles(): void {
       .perilune-menu-tagline { margin-top:14px; max-width:420px; color:#c0ccd2; font-size:12px; letter-spacing:.7px; }
       .perilune-menu-build { position:absolute; top:28px; right:34px; color:#8da3af; font:9px var(--ui-mono); letter-spacing:1.5px; }
       .perilune-command-deck { position:absolute; left:3.5vw; right:3.5vw; bottom:4vh; display:grid;
-        grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) auto; gap:8px;
+        grid-template-columns:repeat(var(--mission-count,4),minmax(128px,1fr)) auto; gap:8px;
         padding:10px; background:linear-gradient(180deg,rgba(9,18,26,.86),rgba(5,11,17,.95));
         border:1px solid rgba(100,163,193,.5); border-top-color:#73bfdf; backdrop-filter:blur(12px);
         box-shadow:0 18px 50px rgba(0,0,0,.42); animation:menuDeckIn .45s ease-out both; }
@@ -540,7 +565,7 @@ export function injectUiStyles(): void {
       .perilune-mission-eyebrow { display:block; color:#8fa7b4; font-size:8px; letter-spacing:2px; }
       .perilune-mission-title { display:block; margin-top:5px; font-size:14px; letter-spacing:.8px; }
       .perilune-mission-detail { display:block; margin-top:5px; color:#9fadb4; font-size:9px; }
-      .perilune-menu-utilities { grid-column:4; display:flex; align-items:center; gap:6px; padding:0 4px 0 10px; border-left:1px solid #29404f; }
+      .perilune-menu-utilities { grid-column:-2/-1; display:flex; align-items:center; gap:6px; padding:0 4px 0 10px; border-left:1px solid #29404f; }
       .perilune-menu-utilities .k-icon-btn { width:42px; height:42px; }
       @keyframes menuDeckIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
       @media (max-width:820px) {

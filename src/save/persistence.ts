@@ -37,6 +37,7 @@ import { contactSurface } from '../sim/terrain';
 import { recipeForBody } from '../sim/terrainRecipe';
 import { scatterRecipeForBody } from '../sim/scatterRecipe';
 import { sanitizeInterstageShroudSpec } from '../sim/interstage';
+import { normalizeCampaign } from '../sim/campaign';
 
 function cloneActionGroups(groups: Readonly<ActionGroups>): ActionGroups {
   const clone: ActionGroups = {};
@@ -140,6 +141,12 @@ export function serializeGame(game: GameState, label: string): SaveGame {
     vessels,
     science: { points: game.sciencePoints, completed: [...game.completedExperiments] },
     flags: { ...game.flags },
+    campaign: {
+      ...game.campaign,
+      unlockedTech: [...game.campaign.unlockedTech],
+      activeContracts: [...game.campaign.activeContracts],
+      completedContracts: [...game.campaign.completedContracts],
+    },
     isru: { scanned: [...game.scannedBodies] },
     alarms: game.alarms.map((alarm) => ({ ...alarm })),
   };
@@ -153,6 +160,7 @@ export function restoreGame(save: SaveGame): GameState {
   game.sciencePoints = migrated.science?.points ?? 0;
   game.completedExperiments = new Set(migrated.science?.completed ?? []);
   game.flags = { ...(migrated.flags ?? {}) };
+  game.campaign = normalizeCampaign(migrated.campaign);
   game.scannedBodies = new Set(migrated.isru?.scanned ?? []);
   game.restoreAlarms(migrated.alarms);
 

@@ -5,6 +5,13 @@ import { el } from './kit';
 import { type KeyBinding, InputService, keyDisplay } from './input';
 import type { ProfileStore } from './profileStore';
 import type { WindowManager } from './window';
+import {
+  acceptContract,
+  CONTRACTS,
+  settleContracts,
+  TECHNOLOGIES,
+  unlockTechnology,
+} from '../sim/campaign';
 
 export interface UiSettings {
   uiScale: number;
@@ -42,6 +49,7 @@ export interface UtilityCallbacks {
   onSavesChanged(listener: () => void): () => void;
   onSettings(settings: UiSettings): void;
   onTelemetry(enabled: boolean): void;
+  onCampaignChanged(): void;
 }
 
 const SITUATIONS: readonly ScienceSituation[] = [
@@ -66,6 +74,7 @@ export class UtilityTools {
   private savesEl: HTMLElement | null = null;
   private logEl: HTMLElement | null = null;
   private settingsEl: HTMLElement | null = null;
+  private programEl: HTMLElement | null = null;
   private lastScienceSignature = '';
   private lastLogSignature = '';
 
@@ -83,6 +92,12 @@ export class UtilityTools {
     callbacks.onTelemetry(this.settings.telemetryEnabled);
     callbacks.onSavesChanged(() => { if (this.savesEl) void this.renderSaves(); });
 
+    windows.register({
+      id: 'program-control', title: 'PROGRAM CONTROL', launcherIcon: 'program', buttonLabel: 'Program Control', screen: 'any',
+      defaultPos: { x: 36, y: 82 },
+      build: (content) => { this.programEl = content; this.renderProgram(); },
+      update: () => this.renderProgram(),
+    });
     windows.register({
       id: 'science-archive', title: 'SCIENCE ARCHIVE', launcherIcon: 'science', buttonLabel: 'Science', screen: 'any',
       defaultPos: { x: 36, y: 110 },
@@ -114,6 +129,88 @@ export class UtilityTools {
 
   openSettings(): void {
     this.windows.toggle('settings');
+  }
+
+  private renderProgram(): void {
+    if (!this.programEl) return;
+    const game = this.game();
+    const campaign = game.campaign;
+    this.programEl.replaceChildren();
+
+    const modeName = campaign.mode === 'program'
+      ? 'SPACE PROGRAM'
+      : campaign.mode === 'exploration'
+        ? 'EXPLORATION'
+        : 'SANDBOX';
+    const hero = el('section', 'program-hero', this.programEl);
+    el('div', 'program-kicker', hero, modeName);
+    el(
+      'div',
+      'program-balance',
+      hero,
+      campaign.mode === 'program'
+        ? `${campaign.funds.toLocaleString()} FUNDS · ${campaign.reputation} REPUTATION`
+        : `${game.sciencePoints} SCIENCE AVAILABLE`,
+    );
+    el(
+      'div',
+      'utility-muted',
+      hero,
+      campaign.mode === 'sandbox'
+        ? 'All technology is open. Funding and contracts are disabled.'
+        : campaign.mode === 'exploration'
+          ? 'Recover experiments, then invest science to expand the Workshop.'
+          : 'Commit funds at launch, recover hardware for a partial refund, and fulfill accepted contracts.',
+    );
+
+    if (campaign.mode !== 'sandbox') {
+      el('div', 'program-section-heading', this.programEl, 'TECHNOLOGY PATH');
+      const techGrid = el('div', 'program-tech-grid', this.programEl);
+      for (const technology of TECHNOLOGIES) {
+        const unlocked = campaign.unlockedTech.includes(technology.id);
+        const prerequisiteMet = !technology.requires || campaign.unlockedTech.includes(technology.requires);
+        const card = el('article', `program-card${unlocked ? ' is-complete' : ''}`, techGrid);
+        el('div', 'program-card-state', card, unlocked ? 'DEPLOYED' : `${technology.scienceCost} SCIENCE`);
+        el('strong', '', card, technology.name);
+        el('p', '', card, technology.brief);
+        if (!unlocked) {
+          const unlock = el('button', 'hud-btn program-action', card, prerequisiteMet ? 'Unlock' : 'Prerequisite required') as HTMLButtonElement;
+          unlock.disabled = !prerequisiteMet || game.sciencePoints < technology.scienceCost;
+          unlock.onclick = () => {
+            const result = unlockTechnology(campaign, game.sciencePoints, technology.id);
+            if (!result.ok) return;
+            game.sciencePoints = result.sciencePoints;
+            this.callbacks.onCampaignChanged();
+            this.renderProgram();
+          };
+        }
+      }
+    }
+
+    if (campaign.mode === 'program') {
+      el('div', 'program-section-heading', this.programEl, 'CONTRACT BOARD');
+      const board = el('div', 'program-contracts', this.programEl);
+      for (const contract of CONTRACTS) {
+        const completed = campaign.completedContracts.includes(contract.id);
+        const active = campaign.activeContracts.includes(contract.id);
+        const card = el('article', `program-card program-contract${completed ? ' is-complete' : active ? ' is-active' : ''}`, board);
+        el('div', 'program-card-state', card, completed ? 'FULFILLED' : active ? 'ACTIVE' : 'AVAILABLE');
+        el('strong', '', card, contract.name);
+        el('p', '', card, contract.brief);
+        el('div', 'program-reward', card, `+${contract.rewardFunds.toLocaleString()} funds · +${contract.rewardReputation} reputation`);
+        if (!completed && !active) {
+          const accept = el('button', 'hud-btn program-action', card, 'Accept contract') as HTMLButtonElement;
+          accept.disabled = campaign.activeContracts.length >= 3;
+          accept.onclick = () => {
+            const result = acceptContract(campaign, contract.id);
+            if (!result.ok) return;
+            settleContracts(campaign, game.flags);
+            this.callbacks.onCampaignChanged();
+            this.renderProgram();
+          };
+        }
+      }
+    }
   }
 
   private renderScience(): void {

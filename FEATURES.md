@@ -47,6 +47,14 @@ Status legend: ✅ shipped · 🔶 partial · 🕐 scheduled (milestone).
 | Entry prediction | See atmospheric outcome before committing | Guidance mods | Sampled entry corridor and landing estimate in map/HUD | ✅ | entry.test | throttled | — | Simplified lift guidance |
 | Rovers + ISRU | Surface exploration loop | Genre standard | Wheel contact, survey map, drills and conversion | ✅ | wheels/resources | active physics + slow background | — | Basic suspension and resource economy |
 
+## Progression and program management
+
+| Feature | Player value | Inspiration | Original implementation | Status | Tests | Perf | Difficulty | Limitations |
+|---|---|---|---|---|---|---|---|---|
+| Exploration mode + technology | Science changes what can be built | Career-mode convention | Six-branch Skyward technology path; authoritative catalog and launch gating; science is spent only after recovery | ✅ | campaign, save, menu | UI-only | Exploration / Program | Technology branches are fixed; no facility prerequisites yet |
+| Funding + recovery economy | Designs have program consequences | Management convention | Part-price launch commitment, insufficient-funds interlock, and 35% recovered-hardware return | ✅ | campaign, save | negligible | Space Program | No insurance, salaries, or facility upkeep yet |
+| Contract board + reputation | Gives flights authored goals and rewards | Mission-board convention | Player accepts up to three contracts; real launch/orbit/science-return/Palla-landing achievements settle rewards | ✅ | campaign, save | negligible | Space Program | Four starter contracts; no procedural generation yet |
+
 ## Rendering
 
 | Feature | Player value | Inspiration | Original implementation | Status | Tests | Perf | Difficulty | Limitations |
@@ -59,6 +67,6 @@ Status legend: ✅ shipped · 🔶 partial · 🕐 scheduled (milestone).
 
 ## Scheduled (M3–M5)
 
-EVA, expanded aircraft/runway gameplay, progression modes, tech tree,
-contracts, crew traits, reliability and life-support options, colonies,
-logistics routes, programmable flight computer, and a second star system.
+EVA, expanded aircraft/runway gameplay, facilities, deeper authored mission
+arcs, crew traits, reliability and life-support options, colonies, logistics
+routes, programmable flight computer, and a second star system.

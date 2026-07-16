@@ -2,7 +2,7 @@ import { el } from './kit';
 
 export const UTILITY_ICON_NAMES = [
   'science', 'save', 'account', 'settings', 'keyboard', 'orbit',
-  'surface', 'vessel', 'alarm', 'transfer', 'fleet', 'log',
+  'surface', 'vessel', 'alarm', 'transfer', 'fleet', 'log', 'program',
 ] as const;
 export type UtilityIcon = (typeof UTILITY_ICON_NAMES)[number];
 
@@ -22,6 +22,7 @@ export const ICON_PATHS: Readonly<Record<UtilityIcon, readonly string[]>> = {
   transfer: ['M4 7h13', 'M14 4l3 3-3 3', 'M20 17H7', 'M10 14l-3 3 3 3'],
   fleet: ['M7 3l3 5-3 5-3-5z', 'M17 8l3 5-3 5-3-5z', 'M9 18h5'],
   log: ['M5 3h14v18H5z', 'M8 7h8M8 11h8M8 15h5'],
+  program: ['M4 20V8l8-5 8 5v12', 'M8 20v-6h8v6', 'M8 10h.01M12 10h.01M16 10h.01'],
 };
 
 /**

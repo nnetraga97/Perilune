@@ -26,7 +26,9 @@ async function flushAsyncBinding(): Promise<void> {
 describe('main-menu mission hierarchy', () => {
   it('leads with Continue when an autosave exists', () => {
     const missions = menuMissions(save);
-    expect(missions.map((mission) => mission.id)).toEqual(['continue', 'first-light', 'sandbox']);
+    expect(missions.map((mission) => mission.id)).toEqual([
+      'continue', 'first-light', 'exploration', 'program', 'sandbox',
+    ]);
     expect(missions.find((mission) => mission.primary)?.id).toBe('continue');
     expect(missions[0].detail).toContain('Pathfinder');
     expect(missions[0].detail).not.toContain('Wayfarer');
@@ -34,7 +36,9 @@ describe('main-menu mission hierarchy', () => {
 
   it('omits dead Continue and promotes First Light without a save', () => {
     const missions = menuMissions(null);
-    expect(missions.map((mission) => mission.id)).toEqual(['first-light', 'sandbox']);
+    expect(missions.map((mission) => mission.id)).toEqual([
+      'first-light', 'exploration', 'program', 'sandbox',
+    ]);
     expect(missions.find((mission) => mission.primary)?.id).toBe('first-light');
   });
 });

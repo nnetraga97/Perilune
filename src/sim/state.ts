@@ -44,6 +44,7 @@ import {
 import { launchSiteDirection } from './launchSite';
 import { preferredOrbitAltitude } from './orbitPlacement';
 import { snapshotInterstageShrouds } from './interstage';
+import { createCampaign, type CampaignState, type GameMode } from './campaign';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -112,6 +113,8 @@ export class GameState {
   lastDestruction: { vesselId: string; reason: string } | null = null;
   /** Recovered science points (spendable in later milestones). */
   sciencePoints = 0;
+  /** Persisted progression, economy, and contract state. */
+  campaign: CampaignState;
   /** Completed experiment keys (experimentId@body-situation). */
   completedExperiments = new Set<string>();
   /** Progress/tutorial flags. */
@@ -122,6 +125,10 @@ export class GameState {
   readonly alarms: GameAlarm[] = [];
   private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
+
+  constructor(mode: GameMode = 'sandbox') {
+    this.campaign = createCampaign(mode);
+  }
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
   noteRestoredVessel(id: string): void {
