@@ -317,10 +317,11 @@ deceleration is wanted.
 ### B11 — Multiple vessels & debris
 
 Reentring debris and non-active vessels exist in the same scene loop. Firefly
-runs effects for every loaded vessel; Perilune should scope by tier: active
-vessel gets the full stack; other vessels within physics range get glow-only
-(cheap: 1 draw, no depth pass) on Medium/High, nothing on Low. The airstream
-depth pass is active-vessel-only on every tier.
+runs effects for every loaded vessel; Perilune v1 is **active-vessel-only**
+(decision §8.1): one effect instance, one lifecycle, the depth pass never
+multiplies. A glow-only variant for non-active vessels within physics range
+(cheap: 1 draw, no depth pass) is a noted future extension, deliberately out
+of v1 scope.
 
 ### B12 — Testing & determinism
 
@@ -426,6 +427,11 @@ rv.vel, body rotation       ──►    airflow dir (vessel-local uniform)
    `worldScene`. No visuals yet.
 2. **Phase 1 — windward glow.** Merged inflated envelope, glow shader driven
    by exposure model (B10). This alone makes reentry *read* as reentry.
+   Starts with a **reference-gathering step** (decision §8.3): curate visual
+   references — real capsule/shuttle entry footage, published entry-plasma
+   photography, Firefly gameplay as mood reference only — before authoring
+   Veyra's palette. References inform hand-tuned original values; nothing is
+   sampled or copied from Firefly assets.
 3. **Phase 2 — trail fins.** Fin builder + VS extrusion + procedural noise,
    two layers, streaks. The signature Firefly look.
 4. **Phase 3 — airstream occlusion.** Depth target; glow/trails/bowshock gain
@@ -441,14 +447,14 @@ rv.vel, body rotation       ──►    airflow dir (vessel-local uniform)
 
 Phases 4–6 are droppable/reorderable without stranding earlier work.
 
-## 8. Open questions for review
+## 8. Resolved decisions (owner review, 2026-07-17)
 
-1. **Debris/non-active vessels** — is glow-only for nearby non-active vessels
-   (B11) the right scope, or should the first release be active-vessel-only?
-2. **Transonic effects** — include the mach-whiteout state in Phase 0 signal
-   work (cheap now, used in Phase 2+), or cut transonic visuals entirely from
-   v1?
-3. **Palette authorship** — tune Veyra's entry palette during Phase 1 (art
-   pass by feel), or block on a reference-gathering step first?
-4. **Map/far view** — is alternative E (distant ribbon trail) wanted enough to
-   reserve a hook for it in the strength driver now?
+1. **Debris/non-active vessels** — v1 is **active-vessel-only**. Glow-only for
+   nearby non-active vessels is a future extension (B11 updated).
+2. **Transonic effects** — **in scope for v1**: the band-pass mach state
+   (B10) is built in Phase 0 and drives whiteout blending from Phase 2 on.
+3. **Palette authorship** — **reference gathering first**: Phase 1 begins
+   with a curated visual-reference step before Veyra's palette is authored.
+4. **Map/far view** — **no reserved hook** (decided by default): the strength
+   driver is a pure function of `AeroForces`, so a future distant ribbon
+   trail can consume it without rework; nothing speculative is built now.
