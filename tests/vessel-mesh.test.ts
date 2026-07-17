@@ -8,8 +8,24 @@ import type { PartEffectAnchor } from '../src/render/partModelManifest';
 
 const EXPECTED_MODEL_IDS: Record<string, string> = {
   'pod-voyager': 'orion-voyager-pod',
+  'pod-tandem': 'perilune-tandem-cab',
+  'core-pilot': 'perilune-pilot-chip',
   'leg-lander': 'viking-stilt-leg',
+  'eng-pike': 'perilune-pike-engine',
+  'eng-ember': 'perilune-ember-engine',
   'eng-colt': 'apollo-colt-engine',
+  'eng-aspen': 'perilune-aspen-engine',
+  'rcs-quad': 'perilune-quadjet-rcs',
+  'batt-s': 'perilune-cell-pack-s',
+  'batt-m': 'perilune-cell-bank-m',
+  'solar-fold': 'perilune-petal-array',
+  'solar-flat': 'perilune-shingle-panel',
+  'sci-thermo': 'perilune-thermoscope',
+  'sci-baro': 'perilune-pressograph',
+  'sci-spore': 'perilune-spore-vault',
+  'sci-survey': 'perilune-starfield-camera',
+  'sci-fieldkit': 'perilune-field-sample-kit',
+  'scan-prospector': 'perilune-prospector-eye',
   'ant-dish': 'tdrs-longtalk-dish',
   'wheel-mesa': 'mars-mesa-wheel',
   'eng-mule': 'shuttle-mule-engine',
@@ -28,7 +44,10 @@ const EXPECTED_MODEL_IDS: Record<string, string> = {
 
 const ANCHOR_COUNTS: Record<string, number> = {
   'shuttle-mule-engine': 3,
+  'perilune-pike-engine': 1,
+  'perilune-ember-engine': 1,
   'apollo-colt-engine': 1,
+  'perilune-aspen-engine': 1,
   'procedural-srb-torch': 1,
 };
 

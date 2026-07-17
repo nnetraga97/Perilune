@@ -27,7 +27,7 @@ describe('compilePartAssets', () => {
     const first = await compilePartAssets({ root, write: false, optimize: copyGenerated });
     const second = await compilePartAssets({ root, write: false, optimize: copyGenerated });
     expect(canonicalJson(first)).toBe(canonicalJson(second));
-    expect(first.manifest.models).toHaveLength(16);
+    expect(first.manifest.models).toHaveLength(32);
   });
 
   it('reproduces the committed checked-part-manifest exactly', async () => {
@@ -38,7 +38,7 @@ describe('compilePartAssets', () => {
   });
 
   it('rejects a triangle-limit overrun', async () => {
-    // Feed the Mule's mesh (5283 tris) into the Colt recipe (limit 2000).
+    // Feed the Mule's mesh (5283 tris) into the Colt recipe (limit 500).
     const optimize = substitute({ 'apollo-colt-engine': 'shuttle-mule-engine' });
     await expect(compilePartAssets({ root, write: false, optimize })).rejects.toThrow(/triangles; limit is/);
   });

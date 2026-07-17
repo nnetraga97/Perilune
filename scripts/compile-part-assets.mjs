@@ -33,6 +33,10 @@ function optimizeWithCli({ inputPath, outputPath, simplifyRatio, textureMaxDimen
     '--compress', 'meshopt',
     '--meshopt-level', 'high',
     '--flatten', 'true',
+    // The checked bounds inspector validates baked node transforms. GPU
+    // instancing stores per-instance transforms in an extension it does not
+    // interpret, producing false [-1, 1] quantized-accessor bounds.
+    '--instance', 'false',
     '--join', 'true',
     '--prune', 'true',
     '--weld', 'true',

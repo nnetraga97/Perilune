@@ -201,7 +201,9 @@ class PeriluneGame {
     const checkedParts = checkPartModelManifest(checkedPartArtifact);
     this.partModels = createBrowserPartModelLibrary(this.ctx.renderer, checkedParts, {
       transcoderPath: `${baseUrl}basis/`,
-      resolveAssetUrl: (path) => `${baseUrl}parts/${path}`,
+      // Content-address the request so a regenerated GLB cannot be confused with
+      // an older browser-cached response at the same public path.
+      resolveAssetUrl: (path, sha256) => `${baseUrl}parts/${path}?v=${sha256}`,
     });
     await this.partModels.preload();
     this.world = new WorldScene(this.ctx, this.partModels, {
