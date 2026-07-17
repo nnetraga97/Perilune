@@ -152,7 +152,9 @@ export function createAtmosphereMaterial(
         float alpha = clamp(1.0 - dot(viewTransmittance, vec3(0.333333)), 0.0, 1.0);
         vec3 color = radiance * 8.0 * uVisualStrength;
         color *= mix(vec3(1.0), uWavelengthTint, 0.16);
-        gl_FragColor = vec4(color, alpha);
+        // The material uses premultiplied alpha. Leaving RGB unscaled makes
+        // low-density samples outside the limb composite as a broad glow.
+        gl_FragColor = vec4(color * alpha, alpha);
       }
     `,
     side: THREE.BackSide,

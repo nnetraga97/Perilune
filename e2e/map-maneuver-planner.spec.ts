@@ -55,16 +55,62 @@ test('map orbit has a forgiving click target and a compact six-direction planner
   await page.mouse.click(point.x, point.y);
   await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode())).not.toBeNull();
 
+  const panel = page.locator('.map-panel');
   await expect(page.locator('.map-axis')).toHaveCount(4); // three signed axes plus node time
   for (const direction of ['Retrograde', 'Prograde', 'Anti-normal', 'Normal', 'Radial in', 'Radial out']) {
-    await expect(page.locator('.map-panel').getByTitle(direction, { exact: true })).toBeVisible();
+    await expect(panel.getByTitle(direction, { exact: true })).toBeVisible();
+  }
+  await panel.getByTitle('Prograde', { exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode()?.prograde)).toBeCloseTo(1, 4);
+  await panel.getByRole('spinbutton', { name: 'Tangential value' }).fill('25');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode()?.prograde)).toBeCloseTo(25, 4);
+
+  const markers = await page.evaluate(() => (window.__TEST__ as unknown as {
+    mapMarkerSamples(): Record<'craft' | 'ap' | 'pe', {
+      x: number; y: number; visible: boolean; width: number; height: number;
+    }>;
+  }).mapMarkerSamples());
+  expect(markers.craft.visible).toBe(true);
+  expect(markers.craft.width).toBeGreaterThan(markers.craft.height * 2);
+  for (const kind of ['ap', 'pe'] as const) {
+    expect(markers[kind].visible, kind).toBe(true);
+    expect(markers[kind].width, kind).toBeGreaterThan(markers[kind].height * 1.5);
+    expect(markers[kind].width, kind).toBeLessThan(markers[kind].height * 1.8);
   }
 
+  const initialBounds = await panel.boundingBox();
+  expect(initialBounds).not.toBeNull();
+  expect(initialBounds!.x).toBeGreaterThanOrEqual(48);
+  const titleBar = panel.locator('.map-panel-bar');
+  const titleBounds = await titleBar.boundingBox();
+  expect(titleBounds).not.toBeNull();
+  await page.mouse.move(titleBounds!.x + 80, titleBounds!.y + titleBounds!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(titleBounds!.x + 160, titleBounds!.y + titleBounds!.height / 2 + 35, { steps: 5 });
+  await page.mouse.up();
+  const movedBounds = await panel.boundingBox();
+  expect(movedBounds).not.toBeNull();
+  expect(movedBounds!.x).toBeGreaterThan(initialBounds!.x + 60);
+  expect(movedBounds!.y).toBeGreaterThan(initialBounds!.y + 20);
+
+  const resize = panel.getByRole('separator', { name: 'Resize maneuver planner' });
+  await expect(resize).toBeVisible();
+  const resizeBounds = await resize.boundingBox();
+  expect(resizeBounds).not.toBeNull();
+  await page.mouse.move(resizeBounds!.x + resizeBounds!.width / 2, resizeBounds!.y + resizeBounds!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(resizeBounds!.x + 70, resizeBounds!.y + 50, { steps: 5 });
+  await page.mouse.up();
+  const resizedBounds = await panel.boundingBox();
+  expect(resizedBounds).not.toBeNull();
+  expect(resizedBounds!.width).toBeGreaterThan(movedBounds!.width + 50);
+  expect(resizedBounds!.height).toBeGreaterThan(movedBounds!.height + 30);
+
   await page.setViewportSize({ width: 390, height: 844 });
-  const panel = page.locator('.map-panel');
   await expect(panel).toHaveClass(/has-node/);
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds!.height).toBeLessThanOrEqual(390);
-  expect(Math.abs(bounds!.y + bounds!.height - 844)).toBeLessThanOrEqual(2);
+  expect(Math.abs(bounds!.y + bounds!.height - (844 - 58))).toBeLessThanOrEqual(2);
+  await expect(resize).toBeHidden();
 });

@@ -31,6 +31,8 @@ interface WindowState {
   y: number;
   collapsed: boolean;
   open: boolean;
+  width?: number;
+  height?: number;
 }
 
 /** Clamp a window position so its title bar stays reachable (pure; tested). */
@@ -70,6 +72,10 @@ class UiWindow {
     const closeBtn = el('button', 'k-window-btn', bar, '×');
     closeBtn.title = 'Close';
     this.content = el('div', 'k-window-content', this.root);
+    const resizeHandle = el('div', 'k-window-resize-handle', this.root);
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-label', 'Resize window');
+    resizeHandle.tabIndex = 0;
     if (state.open) {
       this.built = true;
       def.build(this.content);
@@ -112,6 +118,46 @@ class UiWindow {
       e.preventDefault();
     });
     this.root.addEventListener('pointerdown', () => onFocus(this));
+
+    const resizeBy = (dx: number, dy: number, startWidth: number, startHeight: number) => {
+      const maxWidth = Math.max(240, window.innerWidth - 16);
+      const maxHeight = Math.max(180, window.innerHeight - 16);
+      this.state.width = Math.max(190, Math.min(maxWidth, startWidth + dx));
+      this.state.height = Math.max(120, Math.min(maxHeight, startHeight + dy));
+      this.applyState();
+    };
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onFocus(this);
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startWidth = this.root.offsetWidth;
+      const startHeight = this.root.offsetHeight;
+      resizeHandle.setPointerCapture?.(event.pointerId);
+      const move = (moveEvent: PointerEvent) => {
+        resizeBy(moveEvent.clientX - startX, moveEvent.clientY - startY, startWidth, startHeight);
+      };
+      const up = () => {
+        resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', up);
+        resizeHandle.removeEventListener('pointercancel', up);
+        onState();
+      };
+      resizeHandle.addEventListener('pointermove', move);
+      resizeHandle.addEventListener('pointerup', up);
+      resizeHandle.addEventListener('pointercancel', up);
+    });
+    resizeHandle.addEventListener('keydown', (event) => {
+      const direction = event.shiftKey ? 24 : 8;
+      const dx = event.key === 'ArrowRight' ? direction : event.key === 'ArrowLeft' ? -direction : 0;
+      const dy = event.key === 'ArrowDown' ? direction : event.key === 'ArrowUp' ? -direction : 0;
+      if (!dx && !dy) return;
+      event.preventDefault();
+      resizeBy(dx, dy, this.root.offsetWidth, this.root.offsetHeight);
+      onState();
+    });
   }
 
   get open(): boolean {
@@ -142,7 +188,10 @@ class UiWindow {
   private applyState(): void {
     this.root.style.left = `${this.state.x}px`;
     this.root.style.top = `${this.state.y}px`;
+    this.root.style.width = this.state.width ? `${this.state.width}px` : '';
+    this.root.style.height = this.state.height ? `${this.state.height}px` : '';
     this.content.style.display = this.state.collapsed ? 'none' : '';
+    this.root.classList.toggle('collapsed', this.state.collapsed);
   }
 
   raise(z: number): void {

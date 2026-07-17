@@ -13,7 +13,7 @@ import { checkPartModelManifest } from './render/partModelManifest';
 import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
 import checkedPartArtifact from './generated/checked-part-manifest.json';
 import { Editor } from './ui/editor';
-import { FlightHud } from './ui/flightHud';
+import { FlightHud, type FlightControlAxis } from './ui/flightHud';
 import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
 import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
@@ -85,6 +85,14 @@ class PeriluneGame {
   private menu!: MainMenu;
   private uiRoot!: HTMLElement;
   private keys = new Set<string>();
+  private readonly touchFlightControl: Record<FlightControlAxis, number> = {
+    pitch: 0,
+    yaw: 0,
+    roll: 0,
+    'translate-x': 0,
+    'translate-y': 0,
+    'translate-z': 0,
+  };
   private dragging = false;
   private draggingMapControl = false;
   private dragMoved = 0;
@@ -234,8 +242,17 @@ class PeriluneGame {
         const gv = this.game.active;
         if (gv) gv.runtime.controls.rcs = !gv.runtime.controls.rcs;
       },
+      onSetThrottle: (value) => {
+        const gv = this.game.active;
+        if (gv && !this.controlBlocked) gv.runtime.controls.throttle = Math.max(0, Math.min(1, value));
+      },
+      onSetFlightControl: (axis, value) => {
+        this.touchFlightControl[axis] = Math.max(-1, Math.min(1, value));
+      },
+      onSetActiveVessel: (id) => this.activateVessel(id),
       onSetWarp: (i, rails) => this.game.setWarp(i, rails),
       onExitToEditor: () => this.toEditor(),
+      onExitToMenu: () => this.showMenu(),
       onToggleSystem: (partKey) => {
         const gv = this.game.active;
         if (!gv) return;
@@ -474,6 +491,7 @@ class PeriluneGame {
       target: () => this.game.active?.target ?? null,
       maneuverNode: () => this.maneuver.current ? { ...this.maneuver.current.node } : null,
       mapOrbitSamples: () => this.map.orbitInteractionSamples(),
+      mapMarkerSamples: () => this.map.markerInteractionSamples(),
       alarmCount: () => this.game.alarms.length,
       fuel: () => {
         const gv = this.game.active;
@@ -523,6 +541,7 @@ class PeriluneGame {
   }
 
   private showMenu(): void {
+    this.resetTouchFlightControls();
     this.screen = 'menu';
     document.getElementById('game-canvas')?.classList.remove('vab-active');
     this.menu.setVisible(true);
@@ -536,6 +555,7 @@ class PeriluneGame {
   }
 
   private toEditor(): void {
+    this.resetTouchFlightControls();
     this.paused = false;
     this.screen = 'editor';
     document.getElementById('game-canvas')?.classList.add('vab-active');
@@ -765,6 +785,12 @@ class PeriluneGame {
     const stopTime = eventTime - margin;
     const eta = stopTime - this.game.time;
     if (eta < 45) return;
+    const active = this.game.active;
+    const check = active ? this.game.canRailsWarp(active) : { ok: true };
+    if (!check.ok) {
+      if (active && check.reason) logEvent(active.runtime, this.game.time, check.reason, 'warning');
+      return;
+    }
     // Pick the highest rails rate that stops 30 s before finite-burn ignition.
     for (let i = RAILS_WARP_RATES.length - 1; i >= 1; i--) {
       if (eta / RAILS_WARP_RATES[i] > 3) {
@@ -816,21 +842,21 @@ class PeriluneGame {
   private showDialog(title: string, text: string, actions: Array<{ label: string; fn: () => void }>): void {
     this.dialogEl?.remove();
     const d = document.createElement('div');
-    d.style.cssText = `
-      position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%);
-      background: rgba(14,24,32,0.97); border: 1px solid var(--ui-accent);
-      border-radius: 10px; padding: 18px 22px; max-width: 420px; z-index: 80; pointer-events: auto;
-    `;
+    d.className = 'game-dialog';
+    d.setAttribute('role', 'dialog');
+    d.setAttribute('aria-modal', 'true');
+    d.setAttribute('aria-labelledby', 'game-dialog-title');
     // textContent, not innerHTML: title/text include user-authored names.
     const heading = document.createElement('div');
-    heading.style.cssText = 'font-size:17px;color:#fff;margin-bottom:8px';
+    heading.id = 'game-dialog-title';
+    heading.className = 'game-dialog-title';
     heading.textContent = title;
     const message = document.createElement('div');
-    message.style.cssText = 'font-size:13px;color:#c4d2dd;line-height:1.5;margin-bottom:12px';
+    message.className = 'game-dialog-message';
     message.textContent = text;
     d.append(heading, message);
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+    row.className = 'game-dialog-actions';
     for (const a of actions) {
       const b = document.createElement('button');
       b.className = 'hud-btn';
@@ -1242,6 +1268,12 @@ class PeriluneGame {
     const g = this.game;
     if (dir > 0) {
       if (!g.railsWarp && g.warpIndex >= PHYSICS_WARP_RATES.length - 1) {
+        const active = g.active;
+        const check = active ? g.canRailsWarp(active) : { ok: true };
+        if (!check.ok) {
+          if (active && check.reason) logEvent(active.runtime, g.time, check.reason, 'warning');
+          return;
+        }
         g.setWarp(1, true);
       } else {
         g.setWarp(g.warpIndex + 1, g.railsWarp);
@@ -1260,14 +1292,33 @@ class PeriluneGame {
     const b = this.keys.has('ControlLeft') || this.keys.has('ControlRight') ? 1 : 0;
     c.throttle = Math.max(0, Math.min(1, c.throttle + (t - b) * dt * 0.6));
     const authority = this.precisionControl ? 0.35 : 1;
-    c.pitch = ((this.keys.has('KeyS') ? 1 : 0) - (this.keys.has('KeyW') ? 1 : 0)) * authority;
-    c.yaw = ((this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0)) * authority;
-    c.roll = ((this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0)) * authority;
-    c.translate.set(
-      ((this.keys.has('KeyL') ? 1 : 0) - (this.keys.has('KeyJ') ? 1 : 0)) * authority,
-      ((this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0)) * authority,
-      ((this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0)) * authority,
+    const clampControl = (value: number) => Math.max(-1, Math.min(1, value)) * authority;
+    c.pitch = clampControl(
+      (this.keys.has('KeyS') ? 1 : 0) - (this.keys.has('KeyW') ? 1 : 0) + this.touchFlightControl.pitch,
     );
+    c.yaw = clampControl(
+      (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0) + this.touchFlightControl.yaw,
+    );
+    c.roll = clampControl(
+      (this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0) + this.touchFlightControl.roll,
+    );
+    c.translate.set(
+      clampControl((this.keys.has('KeyL') ? 1 : 0) - (this.keys.has('KeyJ') ? 1 : 0) + this.touchFlightControl['translate-x']),
+      clampControl((this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0) + this.touchFlightControl['translate-y']),
+      clampControl((this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0) + this.touchFlightControl['translate-z']),
+    );
+  }
+
+  private resetTouchFlightControls(): void {
+    for (const axis of Object.keys(this.touchFlightControl) as FlightControlAxis[]) {
+      this.touchFlightControl[axis] = 0;
+    }
+    const controls = this.game.active?.runtime.controls;
+    if (!controls) return;
+    controls.pitch = 0;
+    controls.yaw = 0;
+    controls.roll = 0;
+    controls.translate.set(0, 0, 0);
   }
 
   private updateCampaignAchievements(): void {
@@ -1332,7 +1383,10 @@ class PeriluneGame {
       if (!this.paused) {
         if (!this.controlBlocked) this.applyContinuousInput(dt);
         this.updateNodeAssist(dt);
-        this.game.update(realDt);
+        // Keep short browser/UI stalls from looking like a player-requested
+        // warp cancel. GameState still advances at the selected rate, but the
+        // per-frame catch-up request is bounded to what physics warp can run.
+        this.game.update(dt);
         this.updateCampaignAchievements();
         for (const alarm of this.game.consumeFiredAlarms()) {
           const vessel = (alarm.vesselId

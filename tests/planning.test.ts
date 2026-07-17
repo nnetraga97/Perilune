@@ -104,6 +104,16 @@ function bodyAngle(game: GameState, id: string, t: number): number {
 }
 
 describe('alarms', () => {
+  it('preserves physics warp when rails warp is unavailable', () => {
+    const game = new GameState();
+    game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 50_000);
+    game.setWarp(2, false); // 4x physics warp
+    game.setWarp(1, true); // 5x rails is unavailable inside Veyra's atmosphere
+    expect(game.railsWarp).toBe(false);
+    expect(game.warpIndex).toBe(2);
+    expect(game.warpRate).toBe(4);
+  });
+
   it('stops rails warp at the alarm time, not after it', () => {
     const game = new GameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);

@@ -248,13 +248,19 @@ export class Editor {
 
     // Top bar
     const top = el('div', 'ed-topbar', this.root);
-    const topScroll = el('div', 'ed-topbar-scroll', top);
-    this.nameInput = el('input', 'ed-name', topScroll) as HTMLInputElement;
+    const topPrimary = el('div', 'ed-topbar-primary', top);
+    this.nameInput = el('input', 'ed-name', topPrimary) as HTMLInputElement;
     this.nameInput.value = this.craft.name;
     this.nameInput.onchange = () => {
       this.craft.name = this.nameInput.value || 'Untitled Craft';
     };
-    this.campaignEl = el('div', 'ed-campaign-balance', topScroll);
+    this.campaignEl = el('div', 'ed-campaign-balance', topPrimary);
+    this.launchBtn = el('button', 'hud-btn ed-launch', topPrimary, '▲ LAUNCH') as HTMLButtonElement;
+    this.launchBtn.onclick = () => {
+      const error = this.cb.onLaunch(structuredClone(this.craft));
+      if (error) this.showNotice(error, true);
+    };
+    const topScroll = el('div', 'ed-topbar-scroll', top);
     this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
     this.undoBtn.onclick = () => this.undo();
     this.redoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Redo') as HTMLButtonElement;
@@ -282,11 +288,6 @@ export class Editor {
     this.mobileMultiBtn = el('button', 'hud-btn ed-mobile-multi', topScroll, 'Select multiple') as HTMLButtonElement;
     this.mobileMultiBtn.setAttribute('aria-pressed', 'false');
     this.mobileMultiBtn.onclick = () => this.toggleTouchMultiSelect();
-    this.launchBtn = el('button', 'hud-btn ed-launch', top, '▲ LAUNCH') as HTMLButtonElement;
-    this.launchBtn.onclick = () => {
-      const error = this.cb.onLaunch(structuredClone(this.craft));
-      if (error) this.showNotice(error, true);
-    };
     const utilityHost = el('div', 'ed-utility-host', this.root);
 
     // Right: stats, staging, warnings, craft files
@@ -453,6 +454,7 @@ export class Editor {
 
   private renderPartList(): void {
     this.partListEl.innerHTML = '';
+    const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
     const query = this.searchInput?.value.trim().toLowerCase() ?? '';
     const parts = PARTS.filter((part) => (
       (!query && part.category === this.activeCategory)
@@ -464,7 +466,7 @@ export class Editor {
     for (const def of parts) {
       const unlocked = isPartUnlocked(this.cb.campaign(), def);
       const card = el('div', unlocked ? 'ed-part' : 'ed-part ed-part-locked', this.partListEl);
-      card.draggable = unlocked;
+      card.draggable = unlocked && !coarsePointer;
       card.setAttribute('aria-disabled', String(!unlocked));
       card.appendChild(partPortrait(def, this.partModels, this.renderer));
       const copy = el('div', 'ed-part-copy', card);
@@ -545,6 +547,10 @@ export class Editor {
     this.ghostVisual = vis;
     this.ghost = vis.group;
     this.scene.add(this.ghost);
+    if (window.matchMedia('(max-width: 820px), (pointer: coarse)').matches) {
+      this.closeMobilePanel();
+      this.showNotice(`Holding ${def.name} · tap the craft to attach`);
+    }
   }
 
   private dropHolding(): void {
@@ -881,6 +887,20 @@ export class Editor {
       const align = el('button', 'hud-btn', actions, 'Center Y');
       align.onclick = () => this.verticalAlignSelected();
     }
+    if (point.touch && this.selectedKeys.size === 1) {
+      el('div', 'mission-section-title', panel, 'ROTATE PART');
+      const rotate = el('div', 'ed-touch-rotate', panel);
+      for (const [label, axis, direction] of [
+        ['Pitch −', 'x', -1], ['Pitch +', 'x', 1],
+        ['Yaw −', 'y', -1], ['Yaw +', 'y', 1],
+        ['Roll −', 'z', -1], ['Roll +', 'z', 1],
+      ] as const) {
+        const button = el('button', 'hud-btn', rotate, label);
+        button.onclick = () => this.rotateSelected(axis, direction);
+      }
+      const reset = el('button', 'hud-btn ed-touch-rotate-reset', rotate, 'Reset rotation');
+      reset.onclick = () => this.resetSelectedRotation();
+    }
     if (this.selectedKeys.size > 1) {
       this.positionPartContext(panel, point);
       return;
@@ -929,6 +949,15 @@ export class Editor {
       const active = id === this.mobilePanel;
       button.classList.toggle('active', active);
       button.setAttribute('aria-expanded', String(active));
+    }
+  }
+
+  private closeMobilePanel(): void {
+    this.mobilePanel = null;
+    for (const host of this.mobileHosts.values()) host.classList.remove('mobile-open');
+    for (const button of this.mobileDockButtons.values()) {
+      button.classList.remove('active');
+      button.setAttribute('aria-expanded', 'false');
     }
   }
 

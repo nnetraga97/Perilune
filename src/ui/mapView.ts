@@ -286,6 +286,7 @@ export class MapView {
   private lastPredictionRefreshAt = -Infinity;
 
   private panel: HTMLElement;
+  private panelContent: HTMLElement;
   private nodePanel: HTMLElement;
   private encounterInfo: HTMLElement;
   private entryInfo: HTMLElement;
@@ -382,6 +383,90 @@ export class MapView {
       sprite.renderOrder = 10;
       return sprite;
     };
+    const mkLabelSprite = (label: string, color: string, craft = false) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 48;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = 'rgba(5, 14, 20, 0.94)';
+      context.strokeStyle = color;
+      context.lineWidth = 3;
+      context.beginPath();
+      context.roundRect(2, 2, 124, 44, 10);
+      context.fill();
+      context.stroke();
+      context.fillStyle = color;
+      context.strokeStyle = color;
+      context.lineWidth = 3;
+      if (craft) {
+        context.beginPath();
+        context.moveTo(18, 8);
+        context.lineTo(28, 30);
+        context.lineTo(21, 27);
+        context.lineTo(21, 39);
+        context.lineTo(15, 39);
+        context.lineTo(15, 27);
+        context.lineTo(8, 30);
+        context.closePath();
+        context.fill();
+      } else {
+        context.beginPath();
+        context.arc(18, 24, 7, 0, Math.PI * 2);
+        context.stroke();
+        context.beginPath();
+        context.moveTo(18, 8);
+        context.lineTo(18, 15);
+        context.moveTo(18, 33);
+        context.lineTo(18, 40);
+        context.stroke();
+      }
+      context.fillStyle = '#edf7fa';
+      context.font = '700 21px ui-monospace, SFMono-Regular, Menlo, monospace';
+      context.textAlign = 'left';
+      context.textBaseline = 'middle';
+      context.fillText(label, 36, 25);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        depthTest: false,
+        transparent: true,
+      }));
+      sprite.renderOrder = 13;
+      sprite.userData.labelMarker = true;
+      return sprite;
+    };
+    const mkOrbitLabelSprite = (label: string, color: string) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 72;
+      canvas.height = 44;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = 'rgba(5, 14, 20, 0.96)';
+      context.strokeStyle = color;
+      context.lineWidth = 3;
+      context.beginPath();
+      context.roundRect(2, 2, 68, 40, 9);
+      context.fill();
+      context.stroke();
+      context.fillStyle = '#edf7fa';
+      context.font = '700 22px ui-monospace, SFMono-Regular, Menlo, monospace';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(label, 36, 23);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.generateMipmaps = false;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        depthTest: false,
+        transparent: true,
+      }));
+      sprite.renderOrder = 13;
+      sprite.userData.labelMarker = true;
+      return sprite;
+    };
     const mkArrowSprite = (color: string) => {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 48;
@@ -410,7 +495,8 @@ export class MapView {
       sprite.visible = false;
       return sprite;
     };
-    this.vesselMarker = mkSprite('#7fd0e8', 5);
+    this.vesselMarker = mkLabelSprite('CRAFT', '#7fd0e8', true);
+    this.vesselMarker.center.set(0, 0.5);
     this.nodeMarker = mkSprite('#e8c76b', 4);
     this.orbitHoverMarker = mkSprite('#dff8ff', 3.5, '+');
     this.orbitHoverMarker.visible = false;
@@ -426,10 +512,14 @@ export class MapView {
       this.landingTargetMarker,
     );
     for (const [kind, color, glyph] of [
-      ['ap', '#7fd0e8', 'Ap'], ['pe', '#7fd0e8', 'Pe'],
+      ['ap', '#7fd0e8', 'AP'], ['pe', '#e8b66b', 'PE'],
       ['an', '#70d58c', 'AN'], ['dn', '#d56ba9', 'DN'],
     ] as const) {
-      const marker = mkSprite(color, 3.5, glyph);
+      const marker = mkOrbitLabelSprite(glyph, color);
+      if (kind === 'ap') marker.center.set(1, 0.5);
+      else if (kind === 'pe') marker.center.set(0.5, 0);
+      else if (kind === 'an') marker.center.set(0, 1);
+      else marker.center.set(1, 1);
       marker.visible = false;
       this.orbitMarkers.set(kind, marker);
       this.scene.add(marker);
@@ -453,11 +543,19 @@ export class MapView {
     this.handleHoverLabel = el('div', 'map-handle-hover', uiRoot);
     this.handleHoverLabel.hidden = true;
 
-    // ---- DOM panel
+    // ---- DOM panel: floating desktop window, bottom sheet on touch layouts
     this.panel = el('div', 'map-panel', uiRoot);
     injectUiStyles();
-    el('div', 'map-title', this.panel, 'MANEUVER PLANNER');
-    const btnRow = el('div', 'map-row', this.panel);
+    this.panel.setAttribute('role', 'dialog');
+    this.panel.setAttribute('aria-label', 'Maneuver planner');
+    const panelBar = el('div', 'map-panel-bar', this.panel);
+    el('div', 'map-title', panelBar, 'MANEUVER PLANNER');
+    const collapse = el('button', 'k-window-btn map-panel-collapse', panelBar, '▾') as HTMLButtonElement;
+    collapse.type = 'button';
+    collapse.title = 'Collapse maneuver planner';
+    collapse.setAttribute('aria-label', 'Collapse maneuver planner');
+    this.panelContent = el('div', 'map-panel-content', this.panel);
+    const btnRow = el('div', 'map-row', this.panelContent);
     const addBtn = el('button', 'hud-btn', btnRow, '+ Node in 2 min') as HTMLButtonElement;
     addBtn.onclick = () => this.createNode(120);
     const delBtn = el('button', 'hud-btn', btnRow, 'Delete') as HTMLButtonElement;
@@ -478,15 +576,100 @@ export class MapView {
       }
     };
 
-    this.nodePanel = el('div', 'map-node-panel', this.panel);
-    this.dvReadout = el('div', 'map-readout', this.panel);
-    this.etaReadout = el('div', 'map-readout', this.panel);
-    this.postReadout = el('div', 'map-orbit-after', this.panel);
-    this.budgetReadout = el('div', 'map-budget', this.panel);
-    this.encounterInfo = el('div', 'map-encounter', this.panel);
-    this.entryInfo = el('div', 'map-entry-info', this.panel);
+    this.nodePanel = el('div', 'map-node-panel', this.panelContent);
+    this.dvReadout = el('div', 'map-readout', this.panelContent);
+    this.etaReadout = el('div', 'map-readout', this.panelContent);
+    this.postReadout = el('div', 'map-orbit-after', this.panelContent);
+    this.budgetReadout = el('div', 'map-budget', this.panelContent);
+    this.encounterInfo = el('div', 'map-encounter', this.panelContent);
+    this.entryInfo = el('div', 'map-entry-info', this.panelContent);
+    const resizeHandle = el('div', 'k-window-resize-handle map-panel-resize', this.panel);
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-label', 'Resize maneuver planner');
+    resizeHandle.tabIndex = 0;
+    this.installPanelInteractions(panelBar, collapse, resizeHandle);
     this.refreshNodePanel();
     this.setVisible(false);
+  }
+
+  private installPanelInteractions(
+    bar: HTMLElement,
+    collapse: HTMLButtonElement,
+    resizeHandle: HTMLElement,
+  ): void {
+    const compact = () => window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+    const clampPosition = (x: number, y: number) => ({
+      x: Math.max(48 - this.panel.offsetWidth, Math.min(window.innerWidth - 48, x)),
+      y: Math.max(0, Math.min(window.innerHeight - 32, y)),
+    });
+    collapse.onclick = () => {
+      const collapsed = !this.panel.classList.contains('collapsed');
+      this.panel.classList.toggle('collapsed', collapsed);
+      collapse.textContent = collapsed ? '▸' : '▾';
+      collapse.setAttribute('aria-expanded', String(!collapsed));
+    };
+    collapse.setAttribute('aria-expanded', 'true');
+
+    bar.addEventListener('pointerdown', (event) => {
+      if (compact() || event.button !== 0 || event.target === collapse) return;
+      event.preventDefault();
+      const bounds = this.panel.getBoundingClientRect();
+      const offsetX = event.clientX - bounds.left;
+      const offsetY = event.clientY - bounds.top;
+      const move = (moveEvent: PointerEvent) => {
+        const position = clampPosition(moveEvent.clientX - offsetX, moveEvent.clientY - offsetY);
+        this.panel.style.left = `${position.x}px`;
+        this.panel.style.top = `${position.y}px`;
+        this.panel.style.right = 'auto';
+        this.panel.style.bottom = 'auto';
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+
+    const resizeBy = (dx: number, dy: number, startWidth: number, startHeight: number) => {
+      if (compact()) return;
+      const bounds = this.panel.getBoundingClientRect();
+      const maxWidth = Math.max(300, window.innerWidth - bounds.left - 8);
+      const maxHeight = Math.max(180, window.innerHeight - bounds.top - 8);
+      this.panel.style.width = `${Math.max(300, Math.min(maxWidth, startWidth + dx))}px`;
+      this.panel.style.height = `${Math.max(180, Math.min(maxHeight, startHeight + dy))}px`;
+    };
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (compact() || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startWidth = this.panel.offsetWidth;
+      const startHeight = this.panel.offsetHeight;
+      resizeHandle.setPointerCapture?.(event.pointerId);
+      const move = (moveEvent: PointerEvent) => {
+        resizeBy(moveEvent.clientX - startX, moveEvent.clientY - startY, startWidth, startHeight);
+      };
+      const up = () => {
+        resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', up);
+        resizeHandle.removeEventListener('pointercancel', up);
+      };
+      resizeHandle.addEventListener('pointermove', move);
+      resizeHandle.addEventListener('pointerup', up);
+      resizeHandle.addEventListener('pointercancel', up);
+    });
+    resizeHandle.addEventListener('keydown', (event) => {
+      const step = event.shiftKey ? 24 : 8;
+      const dx = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0;
+      const dy = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
+      if (!dx && !dy) return;
+      event.preventDefault();
+      resizeBy(dx, dy, this.panel.offsetWidth, this.panel.offsetHeight);
+    });
   }
 
   setVisible(vis: boolean): void {
@@ -619,7 +802,11 @@ export class MapView {
       return true;
     }
     for (const [marker, event] of this.markerEvents) {
-      if (marker !== this.nodeMarker && marker.visible && this.screenDistanceTo(marker, clientX, clientY) <= 18) {
+      const markerHitRadius = marker.userData.labelMarker ? (this.orbitPointerCoarse ? 38 : 28) : 18;
+      if (
+        marker !== this.nodeMarker && marker.visible &&
+        this.screenDistanceTo(marker, clientX, clientY) <= markerHitRadius
+      ) {
         this.showMarkerCard(event, clientX, clientY);
         return true;
       }
@@ -837,6 +1024,25 @@ export class MapView {
     return this.orbitScreenPoints.map(({ x, y, visible }) => ({ x, y, visible }));
   }
 
+  /** Projected labeled markers used by browser checks and interaction diagnostics. */
+  markerInteractionSamples(): Record<'craft' | 'ap' | 'pe', {
+    x: number;
+    y: number;
+    visible: boolean;
+    width: number;
+    height: number;
+  }> {
+    const sample = (marker: THREE.Sprite) => {
+      const point = this.projectObject(marker);
+      return { x: point.x, y: point.y, visible: marker.visible, width: marker.scale.x, height: marker.scale.y };
+    };
+    return {
+      craft: sample(this.vesselMarker),
+      ap: sample(this.orbitMarkers.get('ap')!),
+      pe: sample(this.orbitMarkers.get('pe')!),
+    };
+  }
+
   private projectObject(object: THREE.Object3D): { x: number; y: number; depth: number } {
     this.projectedPoint.copy(object.position).project(this.camera);
     return {
@@ -914,6 +1120,7 @@ export class MapView {
       plus.setAttribute('aria-label', ax.plus ?? 'Move node later');
       input.type = 'number';
       input.step = String(ax.key === 'time' ? 10 : this.nodeStep);
+      input.setAttribute('aria-label', `${ax.label} value`);
       minus.disabled = editingLocked;
       input.disabled = editingLocked;
       plus.disabled = editingLocked;
@@ -928,7 +1135,7 @@ export class MapView {
       const step = ax.key === 'time' ? 10 : this.nodeStep;
       minus.onclick = () => apply(-step);
       plus.onclick = () => apply(step);
-      input.onchange = () => {
+      input.oninput = () => {
         const current = this.node;
         if (!current) return;
         const value = Number(input.value);
@@ -1147,7 +1354,7 @@ export class MapView {
       : node ? 0.32 : 0.85;
     this.vesselMarker.position.set(v.pos.x * SCALE, v.pos.y * SCALE, v.pos.z * SCALE);
     const markerScale = this.camDist * 0.014;
-    this.vesselMarker.scale.setScalar(markerScale);
+    this.vesselMarker.scale.set(markerScale * 3, markerScale * 1.02, 1);
     this.nodeMarker.scale.setScalar(markerScale * 0.8);
     this.encounterMarker.scale.setScalar(markerScale * 0.8);
     this.entryMarker.scale.setScalar(markerScale * 0.8);
@@ -1336,7 +1543,7 @@ export class MapView {
       elementsToStateSafe(elements, anomaly, position, velocity);
       const marker = this.orbitMarkers.get(kind)!;
       marker.position.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
-      marker.scale.setScalar(markerScale * 0.68);
+      marker.scale.set(markerScale * 1.48, markerScale * 0.9, 1);
       marker.visible = kind === 'pe' || elements.e < 1;
     };
     placeAtAnomaly('ap', Math.PI);
@@ -1383,8 +1590,8 @@ export class MapView {
     };
     an.position.copy(closest(nodeDirection));
     dn.position.copy(closest(nodeDirection.clone().negate()));
-    an.scale.setScalar(markerScale * 0.68);
-    dn.scale.setScalar(markerScale * 0.68);
+    an.scale.set(markerScale * 1.48, markerScale * 0.9, 1);
+    dn.scale.set(markerScale * 1.48, markerScale * 0.9, 1);
     an.visible = true;
     dn.visible = true;
   }

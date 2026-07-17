@@ -74,6 +74,7 @@ for (const tier of ['medium', 'high'] as const) {
           if (flight.altitude >= 47_000) {
             guidanceActive = false;
             await setPitchKey(null);
+            await page.getByRole('button', { name: 'Choose guidance mode' }).click();
             await page.getByTitle('Prograde').click();
             await page.keyboard.press('Period');
             await page.keyboard.press('Period');
@@ -129,6 +130,7 @@ for (const tier of ['medium', 'high'] as const) {
       expect(upperStaged).toBe(true);
       await captureCheckpoint(page, browser, tier, '08-ascent-cutoff', errors, digest);
 
+      await page.getByRole('button', { name: 'Choose guidance mode' }).click();
       await page.getByTitle('Prograde').click();
       await page.waitForFunction(() => {
         const altitude = window.__TEST__.altitude();
@@ -144,6 +146,7 @@ for (const tier of ['medium', 'high'] as const) {
       expect(stableOrbit?.eccentricity).toBeLessThan(0.15);
       await captureCheckpoint(page, browser, tier, '09-stable-orbit', errors, digest);
 
+      await page.getByRole('button', { name: 'Choose guidance mode' }).click();
       await page.getByTitle('Retrograde').click();
       await page.waitForTimeout(2_000);
       await page.keyboard.press('KeyZ');

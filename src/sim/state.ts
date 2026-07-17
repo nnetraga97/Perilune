@@ -783,10 +783,10 @@ export class GameState {
     const active = this.active;
     if (rails && active) {
       const check = this.canRailsWarp(active);
-      if (!check.ok) {
-        rails = false;
-        index = Math.min(index, PHYSICS_WARP_RATES.length - 1);
-      }
+      // A rejected 5x rails request used to reuse its array index in the
+      // physics table, turning 4x into 2x when the player pressed "faster".
+      // Preserve the current mode/rate; the shell can surface the reason.
+      if (!check.ok) return;
     }
     this.railsWarp = rails;
     const max = rails ? RAILS_WARP_RATES.length - 1 : PHYSICS_WARP_RATES.length - 1;
