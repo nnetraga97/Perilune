@@ -173,7 +173,7 @@ export const AUREN_SYSTEM: BodyDef[] = [
       'Veyra’s pale companion. Airless, cratered, and close — the first stepping stone for every young space program.',
     mu: 7.3e10,
     radius: 2.2e5,
-    rotationPeriod: 1_077_379, // tidally locked (matches orbital period)
+    rotationPeriod: 107_237.448, // tidally locked (matches orbital period)
     axialTilt: 0,
     surfaceKind: 'solid',
     terrainRecipeVersion: 1,
@@ -339,7 +339,7 @@ export const AUREN_SYSTEM: BodyDef[] = [
       'Tyran’s tormented innermost moon, kneaded by tides into constant eruption. Its night side glows with rivers of fire.',
     mu: 8.2e11,
     radius: 3.1e5,
-    rotationPeriod: 293_925,
+    rotationPeriod: 58_022.154, // tidally locked (matches orbital period)
     axialTilt: 0,
     surfaceKind: 'solid',
     terrainRecipeVersion: 1,
@@ -372,7 +372,7 @@ export const AUREN_SYSTEM: BodyDef[] = [
       'A cue-ball of cracked blue ice over a hidden ocean. The cracks breathe. The Vellans want very much to know why.',
     mu: 1.1e12,
     radius: 3.4e5,
-    rotationPeriod: 742_615,
+    rotationPeriod: 147_430.552, // tidally locked (matches orbital period)
     axialTilt: 0,
     surfaceKind: 'solid',
     terrainRecipeVersion: 1,

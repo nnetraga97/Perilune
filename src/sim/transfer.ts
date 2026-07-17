@@ -24,6 +24,10 @@ export interface TransferPlan {
   timeToWindow: number;
   /** Absolute sim time of the window. */
   windowTime: number;
+  /** Absolute burn time, phased to the vessel's parking orbit. */
+  burnTime: number;
+  /** Required parking-orbit position angle for an interplanetary ejection. */
+  ejectionAngle?: number;
   /** Coast time on the transfer ellipse (s). */
   transferTime: number;
   /** Departure burn from the parking orbit (m/s). */
@@ -33,6 +37,7 @@ export interface TransferPlan {
 }
 
 const _r = new Vec3();
+const _v = new Vec3();
 
 function angleOf(universe: Universe, body: Body, t: number): number {
   universe.localPosition(body, t, _r);
@@ -53,6 +58,24 @@ export interface TransferOptions {
    * interplanetary windows where the planets' phase dominates.
    */
   vesselAngle?: number;
+  /** Signed parking-orbit direction. Retrograde is -1. */
+  parkingOrbitDirection?: 1 | -1;
+}
+
+function nearestFuturePhaseTime(
+  time: number,
+  preferredTime: number,
+  currentAngle: number,
+  targetAngle: number,
+  angularRate: number,
+): number {
+  const delta = targetAngle - currentAngle;
+  const turnsAtPreferred = ((preferredTime - time) * angularRate - delta) / (Math.PI * 2);
+  const turn = Math.round(turnsAtPreferred);
+  let candidate = time + (delta + turn * Math.PI * 2) / angularRate;
+  const period = Math.PI * 2 / Math.abs(angularRate);
+  if (candidate <= time) candidate += Math.ceil((time - candidate + 1) / period) * period;
+  return candidate;
 }
 
 /**
@@ -85,6 +108,7 @@ function planMoonTransfer(
   opts: TransferOptions,
 ): TransferPlan | null {
   if (!moon.orbit) return null;
+  if ((opts.parkingOrbitDirection ?? 1) < 0) return null;
   const mu = from.mu;
   const r1 = opts.parkRadius;
   const r2 = moon.orbit.a;
@@ -125,6 +149,7 @@ function planMoonTransfer(
   const arrivalDv =
     Math.sqrt(vInf * vInf + (2 * moon.mu) / rCap) - Math.sqrt(moon.mu / rCap);
 
+  const windowTime = time + Math.max(0, timeToWindow);
   return {
     fromId: from.id,
     targetId: moon.id,
@@ -133,7 +158,8 @@ function planMoonTransfer(
     phaseNow,
     phaseNeeded,
     timeToWindow: Math.max(0, timeToWindow),
-    windowTime: time + Math.max(0, timeToWindow),
+    windowTime,
+    burnTime: windowTime,
     transferTime: tT,
     departureDv,
     arrivalDv,
@@ -181,6 +207,19 @@ function planInterplanetary(
   const departureDv =
     Math.sqrt(vInfDep * vInfDep + (2 * from.mu) / rp) - Math.sqrt(from.mu / rp);
 
+  const windowTime = time + Math.max(0, timeToWindow);
+  const direction = opts.parkingOrbitDirection ?? 1;
+  universe.localPosition(from, windowTime, _r, _v);
+  const planetVelocityAngle = Math.atan2(_v.y, _v.x);
+  const desiredAsymptoteAngle = planetVelocityAngle + (r2 > r1 ? 0 : Math.PI);
+  const hyperbolicEccentricity = 1 + (rp * vInfDep * vInfDep) / from.mu;
+  const asymptoteTrueAnomaly = Math.acos(-1 / hyperbolicEccentricity);
+  const ejectionAngle = norm2pi(desiredAsymptoteAngle - direction * asymptoteTrueAnomaly);
+  const parkingRate = direction * Math.sqrt(from.mu / (rp * rp * rp));
+  const burnTime = opts.vesselAngle === undefined
+    ? windowTime
+    : nearestFuturePhaseTime(time, windowTime, opts.vesselAngle, ejectionAngle, parkingRate);
+
   // Arrival capture (skip for airless-info: still estimate a low-orbit capture).
   const vArrHelio = Math.sqrt(muSun * (2 / r2 - 1 / aT));
   const vTarget = Math.sqrt(muSun / r2);
@@ -197,7 +236,9 @@ function planInterplanetary(
     phaseNow,
     phaseNeeded,
     timeToWindow: Math.max(0, timeToWindow),
-    windowTime: time + Math.max(0, timeToWindow),
+    windowTime,
+    burnTime,
+    ejectionAngle,
     transferTime: tT,
     departureDv,
     arrivalDv,

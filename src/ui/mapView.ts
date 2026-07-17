@@ -14,6 +14,7 @@ import {
   elementsAtTime,
   elementsToState,
   apoapsisOf,
+  meanMotionOf,
   periapsisOf,
   periodOf,
   stateToElements,
@@ -54,6 +55,16 @@ import { pickOrbitSegment, type OrbitPick, type ScreenOrbitPoint } from './orbit
 
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
+
+function predictionOrbitSignature(bodyId: string, elements: OrbitalElements): string {
+  let phaseAtZero = elements.meanAnomaly0 - meanMotionOf(elements) * elements.epoch;
+  if (elements.e < 1) phaseAtZero = ((phaseAtZero % TWO_PI) + TWO_PI) % TWO_PI;
+  return [
+    bodyId,
+    elements.a.toFixed(0), elements.e.toFixed(6), elements.i.toFixed(5),
+    elements.raan.toFixed(5), elements.argPe.toFixed(5), phaseAtZero.toFixed(4),
+  ].join(':');
+}
 
 type NodeAxis = 'prograde' | 'normal' | 'radial';
 type NodeHandleKind = 'prograde' | 'retrograde' | 'normal' | 'antinormal' | 'radial-out' | 'radial-in';
@@ -1379,10 +1390,12 @@ export class MapView {
       elementsAtTime(activePlan.referenceOrbit, node.time, nodePosition, nodeVelocity);
       this.nodeMarker.position.set(nodePosition.x * SCALE, nodePosition.y * SCALE, nodePosition.z * SCALE);
       this.nodeMarker.visible = true;
+      const radialDirection = nodePosition.clone().normalize();
+      const normalDirection = Vec3.cross(nodePosition, nodeVelocity, new Vec3()).normalize();
       const directions: Record<NodeAxis, Vec3> = {
-        radial: nodePosition.clone().normalize(),
-        normal: Vec3.cross(nodePosition, nodeVelocity, new Vec3()).normalize(),
-        prograde: nodeVelocity.clone().normalize(),
+        radial: radialDirection,
+        normal: normalDirection,
+        prograde: Vec3.cross(normalDirection, radialDirection, new Vec3()).normalize(),
       };
       const offset = markerScale * 2.7;
       for (const handle of this.nodeHandles.values()) {
@@ -1432,15 +1445,19 @@ export class MapView {
     // Prediction refresh. Local conics update immediately; encounter scans are throttled during drags.
     const signature = activePlan
       ? `${body.id}:plan:${activePlan.revision}`
-      : [
-          body.id,
-          elements.a.toFixed(0), elements.e.toFixed(6), elements.i.toFixed(5),
-          elements.raan.toFixed(5), elements.argPe.toFixed(5), elements.meanAnomaly0.toFixed(4),
-          Math.floor(t / 5),
-        ].join(':');
+      : predictionOrbitSignature(body.id, elements);
     const predictionNow = performance.now();
-    const predictionChanged = signature !== this.lastElSig || this.predictionDirty;
-    const predictionAllowed = !this.dragControl || predictionNow - this.lastPredictionRefreshAt >= 150;
+    const transitionTime = this.prediction?.encounter?.entryTime ?? this.prediction?.escape?.exitTime;
+    const hasFutureTransition = transitionTime !== undefined && transitionTime > t;
+    const predictionSpan = this.prediction
+      ? this.prediction.endTime - this.prediction.startTime
+      : 0;
+    const horizonNeedsExtension = !!this.prediction && !hasFutureTransition &&
+      t >= this.prediction.startTime + predictionSpan * 0.1;
+    const orbitChanged = signature !== this.lastElSig || this.predictionDirty || !this.prediction;
+    const predictionChanged = orbitChanged || horizonNeedsExtension;
+    const refreshInterval = orbitChanged ? (this.dragControl ? 150 : 250) : 1_000;
+    const predictionAllowed = predictionNow - this.lastPredictionRefreshAt >= refreshInterval;
     if (predictionChanged && predictionAllowed) {
       this.lastElSig = signature;
       this.predictionDirty = false;

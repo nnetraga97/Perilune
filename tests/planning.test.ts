@@ -66,6 +66,8 @@ describe('transfer planner', () => {
 
     const plan = planTransfer(game.universe, game.time, veyra, rusk, {
       parkRadius: veyra.radius + 100_000,
+      vesselAngle: 0.7,
+      parkingOrbitDirection: 1,
     });
     expect(plan).not.toBeNull();
     const p = plan!;
@@ -74,6 +76,16 @@ describe('transfer planner', () => {
     expect(p.transferTime).toBeGreaterThan(0);
     expect(p.departureDv).toBeGreaterThan(200);
     expect(p.departureDv).toBeLessThan(20_000);
+
+    // The burn is placed on the nearest parking-orbit pass through the
+    // required ejection angle, instead of blindly using the phase window.
+    const parkRate = Math.sqrt(veyra.mu / ((veyra.radius + 100_000) ** 3));
+    const angleAtBurn = 0.7 + parkRate * (p.burnTime - game.time);
+    let ejectionError = angleAtBurn - p.ejectionAngle!;
+    while (ejectionError > Math.PI) ejectionError -= Math.PI * 2;
+    while (ejectionError < -Math.PI) ejectionError += Math.PI * 2;
+    expect(Math.abs(ejectionError)).toBeLessThan(1e-9);
+    expect(Math.abs(p.burnTime - p.windowTime)).toBeLessThanOrEqual(Math.PI / parkRate);
 
     // At the window, the planets' relative phase matches the needed phase.
     const vAngle = bodyAngle(game, 'veyra', p.windowTime);
@@ -94,6 +106,17 @@ describe('transfer planner', () => {
     expect(
       planTransfer(game.universe, 0, veyra, auren, { parkRadius: veyra.radius + 100_000 }),
     ).toBeNull();
+  });
+
+  it('rejects moon-window estimates for retrograde parking orbits', () => {
+    const game = new GameState();
+    const veyra = game.universe.get('veyra');
+    const palla = game.universe.get('palla');
+    expect(planTransfer(game.universe, 0, veyra, palla, {
+      parkRadius: veyra.radius + 100_000,
+      vesselAngle: 0,
+      parkingOrbitDirection: -1,
+    })).toBeNull();
   });
 });
 

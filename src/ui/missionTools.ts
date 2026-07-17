@@ -230,17 +230,25 @@ export class MissionTools {
     if (signature === this.transferSignature) return;
     this.transferSignature = signature;
     const body = game.bodyOf(gv);
+    const parkingOrbitDirection =
+      gv.runtime.pos.x * gv.runtime.vel.y - gv.runtime.pos.y * gv.runtime.vel.x >= 0 ? 1 : -1;
     const plans = allTransferPlans(game.universe, game.time, body, {
       parkRadius: gv.runtime.pos.length(),
       vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection,
     });
     if (this.transferSort.value === 'dv') plans.sort((a, b) => a.departureDv - b.departureDv);
     else if (this.transferSort.value === 'target') plans.sort((a, b) => a.targetName.localeCompare(b.targetName));
     else plans.sort((a, b) => a.timeToWindow - b.timeToWindow);
     if (gv.target) plans.sort((a, b) => Number(b.targetId === gv.target) - Number(a.targetId === gv.target));
     this.transferList.innerHTML = '';
+    if (parkingOrbitDirection < 0 && body.children.length) {
+      el('div', 'mission-empty', this.transferList, 'Moon transfer windows require a prograde parking orbit.');
+    }
     if (!plans.length) {
-      el('div', 'mission-empty', this.transferList, 'No transfers from this SOI');
+      if (parkingOrbitDirection >= 0 || !body.children.length) {
+        el('div', 'mission-empty', this.transferList, 'No transfers from this SOI');
+      }
       return;
     }
     for (const plan of plans) this.renderTransfer(plan, gv.target === plan.targetId);
@@ -261,7 +269,7 @@ export class MissionTools {
     const target = el('button', 'hud-btn', actions, targeted ? 'Targeted' : 'Target');
     target.onclick = () => this.callbacks.onSetTarget(targeted ? null : plan.targetId);
     const alarm = el('button', 'hud-btn', actions, 'Alarm');
-    alarm.onclick = () => this.addAlarm(plan.windowTime, `Window: ${plan.targetName}`, 'transfer');
+    alarm.onclick = () => this.addAlarm(plan.burnTime, `Burn: ${plan.targetName}`, 'transfer');
     const sketch = el('button', 'hud-btn', actions, 'Sketch node');
     sketch.onclick = () => this.callbacks.onSketchNode(plan);
   }

@@ -313,7 +313,7 @@ class PeriluneGame {
       onSwitchVessel: (vesselId) => this.activateVessel(vesselId),
       onSketchNode: (plan) => {
         this.createManeuverNode({
-          time: plan.windowTime,
+          time: plan.burnTime,
           prograde: plan.departureDv,
           normal: 0,
           radial: 0,

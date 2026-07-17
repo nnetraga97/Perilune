@@ -3,9 +3,10 @@ import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { serializeGame, restoreGame } from '../src/save/persistence';
 import { validateSave, migrateSave, SAVE_VERSION } from '../src/save/schema';
 import { Vec3 } from '../src/core/vec3';
-import { stateToElements, apoapsisOf } from '../src/core/orbit';
+import { stateToElements, apoapsisOf, elementsAtTime } from '../src/core/orbit';
 import {
   ManeuverNode,
+  nodeBurnVector,
   nodeDeltaV,
   orbitAfterNode,
   predictTrajectory,
@@ -219,6 +220,43 @@ describe('maneuver planning', () => {
     const pred = predictTrajectory(game.universe, veyra, after, 200);
     expect(pred.escape).not.toBeNull();
     expect(pred.escape!.elements.mu).toBeCloseTo(game.universe.get('auren').mu, 3);
+    const exitPosition = new Vec3();
+    const exitVelocity = new Vec3();
+    elementsAtTime(after, pred.escape!.exitTime, exitPosition, exitVelocity);
+    expect(exitPosition.length()).toBeCloseTo(veyra.soiRadius, 3);
+  });
+
+  it('uses an orthogonal radial-transverse-normal maneuver frame', () => {
+    const eccentric = stateToElements(
+      veyra.mu,
+      new Vec3(r0, 0, 0),
+      new Vec3(450, vCirc * 0.9, 80),
+      0,
+    );
+    const transverse = nodeBurnVector(
+      eccentric,
+      { time: 0, prograde: 1, normal: 0, radial: 0 },
+      new Vec3(),
+    );
+    const radial = nodeBurnVector(
+      eccentric,
+      { time: 0, prograde: 0, normal: 0, radial: 1 },
+      new Vec3(),
+    );
+    expect(transverse.dot(radial)).toBeCloseTo(0, 12);
+  });
+
+  it('uses a 60 million second encounter horizon around the system star', () => {
+    const auren = game.universe.get('auren');
+    const radius = 1e11;
+    const circular = stateToElements(
+      auren.mu,
+      new Vec3(radius, 0, 0),
+      new Vec3(0, 0, Math.sqrt(auren.mu / radius)),
+      0,
+    );
+    const pred = predictTrajectory(game.universe, auren, circular, 0);
+    expect(pred.endTime - pred.startTime).toBe(60_000_000);
   });
 
   it('estimates finite burn durations sensibly', () => {

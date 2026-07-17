@@ -24,6 +24,14 @@ function quaternionDistance(a: Readonly<Quat>, b: Readonly<Quat>): number {
 }
 
 describe('body orientation', () => {
+  it('keeps authored tidally locked moons synchronized with their orbital periods', () => {
+    const universe = new GameState().universe;
+    for (const id of ['palla', 'brimm', 'glacia']) {
+      const moon = universe.get(id);
+      expect(moon.def.rotationPeriod).toBeCloseTo(moon.orbitalPeriod, 2);
+    }
+  });
+
   it('round-trips vectors and attitudes through tilt and spin', () => {
     const body = new GameState().universe.get('veyra');
     const bf = new Vec3(0.2, -0.7, 0.68).normalize();
