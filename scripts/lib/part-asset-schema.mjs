@@ -14,8 +14,24 @@ export const REFERENCE_CRAFT_TRIANGLE_LIMIT = 70_000;
 
 const PART_TEXTURE_LIMITS = Object.freeze({
   'pod-voyager': 1024,
+  'pod-tandem': 512,
+  'core-pilot': 512,
   'leg-lander': 512,
+  'eng-pike': 512,
+  'eng-ember': 512,
   'eng-colt': 512,
+  'eng-aspen': 512,
+  'rcs-quad': 512,
+  'batt-s': 512,
+  'batt-m': 512,
+  'solar-fold': 512,
+  'solar-flat': 512,
+  'sci-thermo': 512,
+  'sci-baro': 512,
+  'sci-spore': 512,
+  'sci-survey': 512,
+  'sci-fieldkit': 512,
+  'scan-prospector': 512,
   'ant-dish': 512,
   'wheel-mesa': 512,
   'eng-mule': 512,
@@ -147,7 +163,7 @@ function validateRecipe(recipe, sourceIds, errors) {
   requireIdentifier(recipe?.assetId, `${label} assetId`, errors);
   requireIdentifier(recipe?.partId, `${label} partId`, errors);
   if (typeof recipe?.partId === 'string' && !SCOPED_PART_IDS.has(recipe.partId)) {
-    errors.push(`${label} partId ${recipe.partId} is not one of the eight scoped part IDs`);
+    errors.push(`${label} partId ${recipe.partId} is not an approved scoped part ID`);
   }
 
   const recipeSourceIds = Array.isArray(recipe?.sourceIds)
@@ -258,7 +274,7 @@ function validateCheckedModel(model, recipeByAssetId, errors) {
   requireIdentifier(model?.assetId, `${label} assetId`, errors);
   requireIdentifier(model?.partId, `${label} partId`, errors);
   if (typeof model?.partId === 'string' && !SCOPED_PART_IDS.has(model.partId)) {
-    errors.push(`${label} partId ${model.partId} is not one of the eight scoped part IDs`);
+    errors.push(`${label} partId ${model.partId} is not an approved scoped part ID`);
   }
   const recipe = recipeByAssetId.get(model?.assetId);
   if (!recipe) errors.push(`${label} has no matching recipe`);

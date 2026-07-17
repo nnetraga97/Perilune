@@ -170,6 +170,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'pod-tandem',
     tech: 'crewed-expeditions',
+    modelAssetId: 'perilune-tandem-cab',
     name: 'Tandem Cab',
     blurb: 'Two seats, one purpose: putting bootprints somewhere new.',
     category: 'pods',
@@ -190,6 +191,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'core-pilot',
     tech: 'orbital-engineering',
+    modelAssetId: 'perilune-pilot-chip',
     name: 'Pilot Chip',
     blurb: 'A stubborn little guidance computer. Never complains about the catering.',
     category: 'pods',
@@ -332,6 +334,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'eng-pike',
     tech: 'foundations',
+    modelAssetId: 'perilune-pike-engine',
     name: 'K-45 "Pike"',
     blurb: 'A dependable gimballed lifter engine. The sound of progress.',
     category: 'engines',
@@ -369,6 +372,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'eng-ember',
     tech: 'orbital-engineering',
+    modelAssetId: 'perilune-ember-engine',
     name: 'V-9 "Ember"',
     blurb: 'A vacuum specialist. Weak at sea level, poetry in orbit.',
     category: 'engines',
@@ -406,6 +410,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'eng-aspen',
     tech: 'deep-space-systems',
+    modelAssetId: 'perilune-aspen-engine',
     name: 'K-90 "Aspen"',
     blurb: 'Efficient upper-stage muscle for long journeys.',
     category: 'engines',
@@ -465,6 +470,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'rcs-quad',
     tech: 'orbital-engineering',
+    modelAssetId: 'perilune-quadjet-rcs',
     name: 'Quadjet RCS',
     blurb: 'Four polite nozzles for nudging, docking, and second thoughts.',
     category: 'engines',
@@ -757,6 +763,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'batt-s',
     tech: 'foundations',
+    modelAssetId: 'perilune-cell-pack-s',
     name: 'Cell Pack S',
     blurb: 'Stored sunlight, ready when the sun is not.',
     category: 'utility',
@@ -774,6 +781,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'batt-m',
     tech: 'crewed-expeditions',
+    modelAssetId: 'perilune-cell-bank-m',
     name: 'Cell Bank M',
     blurb: 'Enough charge to keep the lights on through a long eclipse.',
     category: 'utility',
@@ -792,6 +800,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'solar-fold',
     tech: 'crewed-expeditions',
+    modelAssetId: 'perilune-petal-array',
     name: 'Petal Array',
     blurb: 'Unfolds toward Auren like a patient flower.',
     category: 'utility',
@@ -809,6 +818,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'solar-flat',
     tech: 'orbital-engineering',
+    modelAssetId: 'perilune-shingle-panel',
     name: 'Shingle Panel',
     blurb: 'A rugged bolt-on solar shingle. No moving parts to regret.',
     category: 'utility',
@@ -915,6 +925,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'sci-thermo',
     tech: 'foundations',
+    modelAssetId: 'perilune-thermoscope',
     name: 'Thermoscope',
     blurb: 'Measures how enthusiastically the environment wants to cook you.',
     category: 'science',
@@ -932,6 +943,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'sci-baro',
     tech: 'exploration-instruments',
+    modelAssetId: 'perilune-pressograph',
     name: 'Pressograph',
     blurb: 'Reads the weight of the sky, where there is any.',
     category: 'science',
@@ -949,6 +961,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'sci-spore',
     tech: 'exploration-instruments',
+    modelAssetId: 'perilune-spore-vault',
     name: 'Spore Vault',
     blurb: 'A sealed capsule of hardy Veyran moss spores. How do they fare out there?',
     category: 'science',
@@ -966,6 +979,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'sci-survey',
     tech: 'precision-science',
+    modelAssetId: 'perilune-starfield-camera',
     name: 'Starfield Camera',
     blurb: 'Photographs worlds from above and stars from everywhere.',
     category: 'science',
@@ -984,6 +998,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'sci-fieldkit',
     tech: 'precision-science',
+    modelAssetId: 'perilune-field-sample-kit',
     name: 'Field Sample Kit',
     blurb: 'Scoops, bags, and labels. Ground truth requires ground.',
     category: 'science',
@@ -1149,6 +1164,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'scan-prospector',
     tech: 'planetary-industry',
+    modelAssetId: 'perilune-prospector-eye',
     name: 'Prospector Eye',
     blurb: 'Sees riches under the surface from a polite orbital distance.',
     category: 'science',

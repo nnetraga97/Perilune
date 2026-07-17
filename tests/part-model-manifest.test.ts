@@ -18,7 +18,7 @@ describe('checkPartModelManifest', () => {
   it('accepts the committed checked artifact and brands it', () => {
     const manifest = checkPartModelManifest(artifact());
     expect(isCheckedPartModelManifest(manifest as unknown as object)).toBe(true);
-    expect(manifest.models).toHaveLength(16);
+    expect(manifest.models).toHaveLength(32);
     expect(manifest.model('shuttle-mule-engine')?.plumeAnchors).toHaveLength(3);
     expect(manifest.model('apollo-colt-engine')?.plumeAnchors).toHaveLength(1);
     expect(manifest.modelForPart('eng-colt')?.assetId).toBe('apollo-colt-engine');

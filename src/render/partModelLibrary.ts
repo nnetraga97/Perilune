@@ -32,7 +32,7 @@ export interface PartModelBackend {
 export interface PartModelLibraryOptions {
   readonly manifest: CheckedPartModelManifest;
   readonly backend: PartModelBackend;
-  readonly resolveAssetUrl: (outputPath: string) => string;
+  readonly resolveAssetUrl: (outputPath: string, sha256: string) => string;
 }
 
 interface CachedModel {
@@ -77,7 +77,7 @@ class SharedPartModelLibrary implements PartModelLibrary {
   }
 
   private async load(model: CheckedPartModel): Promise<void> {
-    const url = this.options.resolveAssetUrl(model.outputPath);
+    const url = this.options.resolveAssetUrl(model.outputPath, model.sha256);
     const bytes = await this.options.backend.fetchBytes(url);
     const actual = await sha256Hex(bytes);
     if (actual !== model.sha256) {
@@ -158,7 +158,7 @@ class SharedPartModelLibrary implements PartModelLibrary {
 
 export interface BrowserPartModelLibraryOptions {
   readonly transcoderPath: string;
-  readonly resolveAssetUrl: (outputPath: string) => string;
+  readonly resolveAssetUrl: (outputPath: string, sha256: string) => string;
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

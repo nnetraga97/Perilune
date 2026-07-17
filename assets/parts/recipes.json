@@ -24,6 +24,36 @@
       "animationPolicy": "none"
     },
     {
+      "assetId": "perilune-tandem-cab",
+      "partId": "pod-tandem",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-tandem-cab.glb",
+      "outputPath": "generated/perilune-tandem-cab.glb",
+      "triangleLimit": 1860,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.50, -0.80, -1.50],
+        "max": [1.50, 0.80, 1.50]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-pilot-chip",
+      "partId": "core-pilot",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-pilot-chip.glb",
+      "outputPath": "generated/perilune-pilot-chip.glb",
+      "triangleLimit": 1070,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.70, -0.22, -0.70],
+        "max": [0.70, 0.22, 0.70]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
       "assetId": "viking-stilt-leg",
       "partId": "leg-lander",
       "sourceIds": [
@@ -32,7 +62,7 @@
       ],
       "authoringPath": "authoring/viking-stilt-leg.glb",
       "outputPath": "generated/viking-stilt-leg.glb",
-      "triangleLimit": 2500,
+      "triangleLimit": 2230,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.45, -0.575, -0.3],
@@ -49,7 +79,7 @@
       ],
       "authoringPath": "authoring/tdrs-longtalk-dish.glb",
       "outputPath": "generated/tdrs-longtalk-dish.glb",
-      "triangleLimit": 3500,
+      "triangleLimit": 2240,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.561, -0.179, -0.561],
@@ -66,7 +96,7 @@
       ],
       "authoringPath": "authoring/mars-mesa-wheel.glb",
       "outputPath": "generated/mars-mesa-wheel.glb",
-      "triangleLimit": 3500,
+      "triangleLimit": 3190,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.51, -0.173, -0.51],
@@ -83,7 +113,7 @@
       ],
       "authoringPath": "authoring/apollo-colt-engine.glb",
       "outputPath": "generated/apollo-colt-engine.glb",
-      "triangleLimit": 2000,
+      "triangleLimit": 500,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.398, -0.230, -0.398],
@@ -95,6 +125,222 @@
       "animationPolicy": "none"
     },
     {
+      "assetId": "perilune-pike-engine",
+      "partId": "eng-pike",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-pike-engine.glb",
+      "outputPath": "generated/perilune-pike-engine.glb",
+      "triangleLimit": 1625,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.10, -1.10, -1.10],
+        "max": [1.10, 1.10, 1.10]
+      },
+      "plumeAnchors": [
+        { "position": [0, -0.55, 0], "rotation": [0, 0, 0, 1], "scale": 1 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-ember-engine",
+      "partId": "eng-ember",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-ember-engine.glb",
+      "outputPath": "generated/perilune-ember-engine.glb",
+      "triangleLimit": 1755,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.10, -1.00, -1.10],
+        "max": [1.10, 1.00, 1.10]
+      },
+      "plumeAnchors": [
+        { "position": [0, -0.45, 0], "rotation": [0, 0, 0, 1], "scale": 1 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-aspen-engine",
+      "partId": "eng-aspen",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-aspen-engine.glb",
+      "outputPath": "generated/perilune-aspen-engine.glb",
+      "triangleLimit": 2225,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.80, -1.60, -1.80],
+        "max": [1.80, 1.60, 1.80]
+      },
+      "plumeAnchors": [
+        { "position": [0, -0.75, 0], "rotation": [0, 0, 0, 1], "scale": 1 }
+      ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-quadjet-rcs",
+      "partId": "rcs-quad",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-quadjet-rcs.glb",
+      "outputPath": "generated/perilune-quadjet-rcs.glb",
+      "triangleLimit": 1160,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.35, -0.35, -0.25],
+        "max": [0.35, 0.35, 0.25]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-cell-pack-s",
+      "partId": "batt-s",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-cell-pack-s.glb",
+      "outputPath": "generated/perilune-cell-pack-s.glb",
+      "triangleLimit": 110,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.18, -0.18, -0.10],
+        "max": [0.18, 0.18, 0.10]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-cell-bank-m",
+      "partId": "batt-m",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-cell-bank-m.glb",
+      "outputPath": "generated/perilune-cell-bank-m.glb",
+      "triangleLimit": 200,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.65, -0.16, -0.65],
+        "max": [0.65, 0.16, 0.65]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-petal-array",
+      "partId": "solar-fold",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-petal-array.glb",
+      "outputPath": "generated/perilune-petal-array.glb",
+      "triangleLimit": 180,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.52, -0.42, -0.13],
+        "max": [0.52, 0.42, 0.10]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-shingle-panel",
+      "partId": "solar-flat",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-shingle-panel.glb",
+      "outputPath": "generated/perilune-shingle-panel.glb",
+      "triangleLimit": 100,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.27, -0.37, -0.06],
+        "max": [0.27, 0.37, 0.07]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-thermoscope",
+      "partId": "sci-thermo",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-thermoscope.glb",
+      "outputPath": "generated/perilune-thermoscope.glb",
+      "triangleLimit": 130,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.07, -0.19, -0.07],
+        "max": [0.07, 0.22, 0.07]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-pressograph",
+      "partId": "sci-baro",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-pressograph.glb",
+      "outputPath": "generated/perilune-pressograph.glb",
+      "triangleLimit": 130,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.13, -0.11, -0.07],
+        "max": [0.13, 0.11, 0.10]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-spore-vault",
+      "partId": "sci-spore",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-spore-vault.glb",
+      "outputPath": "generated/perilune-spore-vault.glb",
+      "triangleLimit": 190,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.23, -0.27, -0.23],
+        "max": [0.23, 0.27, 0.23]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-starfield-camera",
+      "partId": "sci-survey",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-starfield-camera.glb",
+      "outputPath": "generated/perilune-starfield-camera.glb",
+      "triangleLimit": 180,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.15, -0.19, -0.12],
+        "max": [0.15, 0.19, 0.30]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-field-sample-kit",
+      "partId": "sci-fieldkit",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-field-sample-kit.glb",
+      "outputPath": "generated/perilune-field-sample-kit.glb",
+      "triangleLimit": 110,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.20, -0.15, -0.12],
+        "max": [0.20, 0.22, 0.12]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-prospector-eye",
+      "partId": "scan-prospector",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-prospector-eye.glb",
+      "outputPath": "generated/perilune-prospector-eye.glb",
+      "triangleLimit": 200,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.23, -0.23, -0.15],
+        "max": [0.23, 0.23, 0.36]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
       "assetId": "shuttle-mule-engine",
       "partId": "eng-mule",
       "sourceIds": [
@@ -102,7 +348,7 @@
       ],
       "authoringPath": "authoring/shuttle-mule-engine.glb",
       "outputPath": "generated/shuttle-mule-engine.glb",
-      "triangleLimit": 6000,
+      "triangleLimit": 5300,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-1.275, -0.816, -1.275],
@@ -123,7 +369,7 @@
       ],
       "authoringPath": "authoring/shuttle-pl400-tank.glb",
       "outputPath": "generated/shuttle-pl400-tank.glb",
-      "triangleLimit": 4500,
+      "triangleLimit": 2190,
       "textureMaxDimension": 1024,
       "visualBounds": {
         "min": [-0.612, -1.836, -0.612],
@@ -140,7 +386,7 @@
       ],
       "authoringPath": "authoring/orion-homecoming-housing.glb",
       "outputPath": "generated/orion-homecoming-housing.glb",
-      "triangleLimit": 1500,
+      "triangleLimit": 1030,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.306, -0.179, -0.306],
@@ -155,7 +401,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-tank-mule.glb",
       "outputPath": "generated/procedural-tank-mule.glb",
-      "triangleLimit": 9000,
+      "triangleLimit": 8760,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-1.275, -0.97, -1.275],
@@ -170,7 +416,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-tank-pod.glb",
       "outputPath": "generated/procedural-tank-pod.glb",
-      "triangleLimit": 9000,
+      "triangleLimit": 8760,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.615, -0.92, -0.615],
@@ -185,7 +431,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-separator.glb",
       "outputPath": "generated/procedural-separator.glb",
-      "triangleLimit": 6500,
+      "triangleLimit": 5090,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-1.275, -0.09, -1.275],
@@ -200,7 +446,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-fin-mule.glb",
       "outputPath": "generated/procedural-fin-mule.glb",
-      "triangleLimit": 800,
+      "triangleLimit": 750,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.12, -0.71, -0.42],
@@ -215,7 +461,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-fin-pod.glb",
       "outputPath": "generated/procedural-fin-pod.glb",
-      "triangleLimit": 800,
+      "triangleLimit": 660,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.08, -0.41, -0.25],
@@ -230,7 +476,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-radial-decoupler.glb",
       "outputPath": "generated/procedural-radial-decoupler.glb",
-      "triangleLimit": 1800,
+      "triangleLimit": 670,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.16, -0.34, -0.13],
@@ -245,7 +491,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-srb-torch.glb",
       "outputPath": "generated/procedural-srb-torch.glb",
-      "triangleLimit": 4200,
+      "triangleLimit": 3750,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.615, -2.72, -0.615],
@@ -262,7 +508,7 @@
       "authoredInProject": true,
       "authoringPath": "authoring/procedural-srb-nose-cone.glb",
       "outputPath": "generated/procedural-srb-nose-cone.glb",
-      "triangleLimit": 1800,
+      "triangleLimit": 1640,
       "textureMaxDimension": 512,
       "visualBounds": {
         "min": [-0.625, -0.66, -0.625],
