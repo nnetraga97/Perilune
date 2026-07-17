@@ -20,6 +20,12 @@ describe('parseRenderStartupOptions', () => {
     }
   });
 
+  it('defaults entry VFX on and accepts the profiling kill switch', () => {
+    expect(parseRenderStartupOptions('').reentryVfx).toBe(true);
+    expect(parseRenderStartupOptions('?reentryVfx=0').reentryVfx).toBe(false);
+    expect(parseRenderStartupOptions('?reentryVfx=1').reentryVfx).toBe(true);
+  });
+
   it('returns an immutable startup contract', () => {
     expect(Object.isFrozen(parseRenderStartupOptions('?quality=high&renderDebug=1'))).toBe(true);
   });

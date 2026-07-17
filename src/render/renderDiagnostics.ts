@@ -1,7 +1,7 @@
 import type { CoverageTransitionState } from './coverageTransition';
 
 export type DiagnosticQualityTier = 'medium' | 'high';
-export type RenderDiagnosticSubsystem = 'renderer' | 'assets' | 'transition' | 'terrain' | 'clouds';
+export type RenderDiagnosticSubsystem = 'renderer' | 'assets' | 'transition' | 'terrain' | 'clouds' | 'effects';
 export type RenderDiagnosticSeverity = 'sample' | 'state' | 'anomaly' | 'failure';
 export type RenderDiagnosticValue = string | number | boolean | null;
 export type RenderDiagnosticData = Readonly<Record<string, RenderDiagnosticValue>>;

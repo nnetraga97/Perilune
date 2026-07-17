@@ -144,7 +144,7 @@ class PeriluneGame {
       subsystem: 'renderer',
       event: 'render-startup-options',
       severity: 'state',
-      data: { quality: options.quality, renderDebug: options.renderDebug },
+      data: { quality: options.quality, renderDebug: options.renderDebug, reentryVfx: options.reentryVfx },
     });
   }
 
@@ -209,6 +209,7 @@ class PeriluneGame {
     this.world = new WorldScene(this.ctx, this.partModels, {
       quality: this.renderOptions.quality,
       diagnostics: this.diagnostics,
+      reentryEffectsEnabled: this.renderOptions.reentryVfx,
     });
     injectUiStyles();
     this.rendererFailureEl = el('div', 'k-render-failure', this.uiRoot);
@@ -408,6 +409,8 @@ class PeriluneGame {
       plumeCount: (key: number) => this.world.plumeCountForPart(key),
       plumeState: (key: number) => this.world.plumeStateForPart(key),
       smokeParticleCount: () => this.world.smokeParticleCount(),
+      reentryStats: () => this.world.reentryStats(),
+      reentryOcclusionSample: () => Array.from(this.world.reentryOcclusionPixel(192, 192) ?? []),
       partCount: () => this.editor.craft.parts.length,
       stageCount: () => this.editor.craft.stages.length,
       parts: () => this.editor.craft.parts.map((p) => ({ key: p.key, parentKey: p.parentKey, defId: p.defId, x: p.position.x, y: p.position.y, z: p.position.z })),
@@ -681,6 +684,7 @@ class PeriluneGame {
     document.documentElement.style.setProperty('--ui-warn', accents[settings.accent][1]);
     this.world.camera.fov = settings.fov;
     this.world.cameraSmoothing = settings.cameraSmoothing && !settings.reducedMotion;
+    this.world.setReducedMotion(settings.reducedMotion);
     this.world.camera.updateProjectionMatrix();
     this.editor.camera.fov = settings.fov;
     this.editor.camera.updateProjectionMatrix();
@@ -1449,7 +1453,7 @@ class PeriluneGame {
       } else {
         this.world.update(this.game, dt, this.paused ? 0 : realDt);
         if (!this.ctx.renderPaused) {
-          this.gpuProfiler.submit('flight', () => this.ctx.renderer.render(this.world.scene, this.world.camera));
+          this.gpuProfiler.submit('flight', () => this.world.render());
         }
       }
       const maneuver = this.maneuver.current;

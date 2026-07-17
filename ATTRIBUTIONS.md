@@ -25,6 +25,21 @@ gradient-noise fBm, PD attitude control. These are textbook methods
 (Vallado, "Fundamentals of Astrodynamics and Applications" et al.) and the
 implementations here are original code.
 
+## Atmospheric-entry visual reference
+
+Perilune's atmospheric-entry renderer is an original WebGL2 implementation
+informed by Leah Lindner's published *Atmospheric Entry* graphics paper:
+https://leah-lindner.com/blog/atmospheric-entry/
+
+The Firefly KSP mod is acknowledged as prior art and a visual/architectural
+inspiration. No Firefly code, shader text, numeric configuration, textures, or
+other assets are included or translated. Perilune uses independently authored
+procedural geometry, shaders, palettes, and particles.
+
+NASA reentry imagery and descriptions informed the original Veyra palette:
+https://www.nasa.gov/humans-in-space/heat-shield-testing-recycles-waste-on-earth/
+and https://www.nasa.gov/news-release/video-gives-astronauts-eye-view-inside-nasas-orion-spacecraft-2/
+
 ## Planet source assets
 
 - **Natural Earth II 3.2.0** — original public-domain 1:10m land-cover raster

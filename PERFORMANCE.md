@@ -230,3 +230,17 @@ or the complete specification. Veyra's production Low, Medium, and High packs
 are admitted against the checked manifest's transfer, active-body, total, and
 transient ceilings, but final orbit-to-contact journeys and manual art review
 remain required.
+
+### Atmospheric-entry VFX budget
+
+The active-vessel-only entry stack targets at most 0.5 ms CPU and 1 ms GPU on
+the reference desktop at full strength. Low omits the off-screen occlusion
+pass and caps fin sources at 1,200; Medium uses a 384² depth map and 3,200 fin
+sources; High uses 512² and 7,500. All tiers keep draw count independent of
+part count through one merged envelope and one merged two-layer fin buffer.
+
+The occlusion prepass and visible meshes are part of the existing `flight` GPU
+submission. Because WebGL elapsed-time queries cannot nest, certification uses
+matched whole-flight runs with entry VFX enabled and disabled, then reports the
+delta. Renderer diagnostics report activation, strength, pass gates, particle
+count, and geometry bytes; they are not presented as per-pass GPU timings.

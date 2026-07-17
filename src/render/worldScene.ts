@@ -22,10 +22,10 @@ import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import type { PartModelLibrary } from './partModelLibrary';
 import { makeStarfield } from './starfield';
-import { bodyOrientation, inertialToBodyFixed } from '../sim/bodyOrientation';
+import { bodyOrientation, inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
 import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack, VectorCoordinates } from './bodyRenderer';
-import type { BodyRendererKind } from '../content/bodyVisuals';
+import { BODY_VISUALS, DEFAULT_ENTRY_VISUAL, type BodyId, type BodyRendererKind } from '../content/bodyVisuals';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
 import { BodyRendererManager, RendererResourceLedger } from './bodyRendererManager';
 import { compileRendererCandidate } from './shaderCompiler';
@@ -36,6 +36,9 @@ import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import { SrbSmokePool } from './srbSmoke';
 import { bodyFixedFrustumPlanes, type BodyFixedFrustumPlane } from './terrain/terrainFrustum';
+import { ActiveReentryEffect, type ReentryEffectStats } from './reentryEffects';
+import { craftReentryFingerprint } from './reentryGeometry';
+import { signalFromAero, type ReentrySignal } from './reentrySignal';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -73,6 +76,9 @@ const _smokeNozzleBodyRelative = new THREE.Vector3();
 const _smokeDirection = new THREE.Vector3();
 const _smokeUp = new THREE.Vector3();
 const _smokeQuaternion = new THREE.Quaternion();
+const _reentryAtmosphereVelocity = new Vec3();
+const _reentryVelocityOS = new THREE.Vector3(0, 1, 0);
+const _reentryInverseAttitude = new THREE.Quaternion();
 interface MutableVectorCoordinates { x: number; y: number; z: number }
 interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: number }
 interface MutableBodyRenderFrame {
@@ -127,6 +133,7 @@ export interface WorldRendererStats {
 export interface WorldSceneOptions {
   readonly quality: 'medium' | 'high';
   readonly diagnostics: RenderDiagnosticsPort;
+  readonly reentryEffectsEnabled?: boolean;
 }
 
 export const FLIGHT_CAMERA_MODES = ['orbit', 'chase', 'locked', 'free'] as const;
@@ -198,6 +205,14 @@ export class WorldScene {
   private readonly sampledBodyIds = new Set<string>();
   private readonly considerBodies: Body[] = [];
   private effectTime = 0;
+  /** Exactly one v1 reentry stack follows the active vessel. */
+  private reentryEffect: ActiveReentryEffect | null = null;
+  private reentryVesselId: string | null = null;
+  private reentryFingerprint = '';
+  private reentrySignal: ReentrySignal = { strength: 0, transonic: 0 };
+  private reentryVelocityOS = new THREE.Vector3(0, 1, 0);
+  private readonly reentryEffectsEnabled: boolean;
+  private reducedMotion = false;
 
   /** Camera rig: orbit around the active vessel. */
   camYaw = 0.6;
@@ -205,6 +220,8 @@ export class WorldScene {
   camDist = 18;
   cameraMode: FlightCameraMode = 'orbit';
   cameraSmoothing = true;
+
+  setReducedMotion(reduced: boolean): void { this.reducedMotion = reduced; }
 
   cycleCameraMode(): FlightCameraMode {
     const index = FLIGHT_CAMERA_MODES.indexOf(this.cameraMode);
@@ -254,6 +271,7 @@ export class WorldScene {
   ) {
     this.quality = options.quality;
     this.diagnostics = options.diagnostics;
+    this.reentryEffectsEnabled = options.reentryEffectsEnabled ?? true;
     this.srbSmoke = new SrbSmokePool(this.quality);
     this.checkedPlanetManifest = checkPlanetManifest(checkedPlanetArtifact);
     this.diagnostics.record({
@@ -326,8 +344,10 @@ export class WorldScene {
     const tier = typeof q === 'string'
       ? q
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
+    const qualityChanged = this.quality !== tier;
     this.quality = tier;
     this.srbSmoke?.setQuality(tier);
+    if (qualityChanged) this.clearReentryEffect();
     for (const [bodyId, manager] of this.bodyRendererManagers) {
       if (manager.current()?.quality === tier) continue;
       void manager.replaceQuality(tier).then(() => {
@@ -361,6 +381,19 @@ export class WorldScene {
 
   /** Read-only diagnostics probe for the single pooled SRB smoke draw call. */
   smokeParticleCount(): number { return this.srbSmoke.particleCount(); }
+
+  reentryStats(): Readonly<ReentryEffectStats> | null { return this.reentryEffect?.stats() ?? null; }
+
+  /** Explicit diagnostic readback for deterministic occlusion-mask tests/tools. */
+  reentryOcclusionPixel(x: number, y: number): Uint8Array | null {
+    return this.reentryEffect?.debugOcclusionPixel(this.context.renderer, x, y) ?? null;
+  }
+
+  /** One profiled flight submission: occlusion prepass followed by the main scene. */
+  render(): void {
+    this.reentryEffect?.prepareOcclusion(this.context.renderer, this.reentryVelocityOS);
+    this.context.renderer.render(this.scene, this.camera);
+  }
 
   renderStats(): Readonly<WorldRendererStats> {
     const body = this.planetStats();
@@ -607,6 +640,7 @@ export class WorldScene {
         this.vesselVisuals.delete(id);
       }
     }
+    if (this.reentryVesselId && !alive.has(this.reentryVesselId)) this.clearReentryEffect();
   }
 
   /** Rebuild the active vessel visual (after staging/destruction). */
@@ -617,10 +651,114 @@ export class WorldScene {
       disposeVesselVisual(vis);
       this.vesselVisuals.delete(id);
     }
+    if (this.reentryVesselId === id) this.clearReentryEffect();
+  }
+
+  private clearReentryEffect(): void {
+    this.reentryEffect?.dispose();
+    this.reentryEffect = null;
+    this.reentryVesselId = null;
+    this.reentryFingerprint = '';
+    this.reentrySignal = { strength: 0, transonic: 0 };
+  }
+
+  private updateActiveReentry(
+    gv: GameVessel,
+    visual: VesselVisual,
+    body: Body,
+    wallDeltaSeconds: number,
+  ): void {
+    const runtime = gv.runtime;
+    if (!this.reentryEffectsEnabled || !body.def.atmosphere) {
+      this.clearReentryEffect();
+      return;
+    }
+    const fingerprint = `${this.quality}:${craftReentryFingerprint(runtime.craft)}`;
+    if (
+      !this.reentryEffect
+      || this.reentryVesselId !== runtime.id
+      || this.reentryFingerprint !== fingerprint
+    ) {
+      this.clearReentryEffect();
+      const palette = BODY_VISUALS[body.id as BodyId]?.entryVisual ?? DEFAULT_ENTRY_VISUAL;
+      const candidate = new ActiveReentryEffect(runtime.craft, runtime.aeroModel.axialFrac, this.quality, palette);
+      this.reentryEffect = candidate;
+      this.reentryVesselId = runtime.id;
+      this.reentryFingerprint = fingerprint;
+      this.scene.add(this.reentryEffect.group);
+      const compileRoot = this.reentryEffect.compileCandidateRoot();
+      void compileRendererCandidate({
+        renderer: this.context.renderer,
+        camera: this.camera,
+        root: compileRoot,
+        body: body.id,
+        tier: this.quality,
+        channel: 'reentry-effects',
+      }).catch((error) => {
+        if (this.reentryEffect !== candidate) return;
+        this.diagnostics.anomaly('reentry-shader-compile-failed', 'effects', {
+          message: error instanceof Error ? error.message : String(error),
+        }, { bodyId: body.id });
+        this.clearReentryEffect();
+      });
+    }
+    const effect = this.reentryEffect;
+    if (!effect) return;
+    _reentryAtmosphereVelocity.copy(surfaceVelocity(body, runtime.pos, _reentryAtmosphereVelocity));
+    _reentryVelocityOS.set(
+      runtime.vel.x - _reentryAtmosphereVelocity.x,
+      runtime.vel.y - _reentryAtmosphereVelocity.y,
+      runtime.vel.z - _reentryAtmosphereVelocity.z,
+    );
+    _reentryInverseAttitude
+      .set(runtime.att.x, runtime.att.y, runtime.att.z, runtime.att.w)
+      .invert();
+    _reentryVelocityOS.applyQuaternion(_reentryInverseAttitude);
+    if (_reentryVelocityOS.lengthSq() < 1e-8) _reentryVelocityOS.set(0, 1, 0);
+    else _reentryVelocityOS.normalize();
+    this.reentryVelocityOS.copy(_reentryVelocityOS);
+    const palette = BODY_VISUALS[body.id as BodyId]?.entryVisual ?? DEFAULT_ENTRY_VISUAL;
+    this.reentrySignal = signalFromAero(
+      this.reentrySignal,
+      runtime.aero,
+      wallDeltaSeconds,
+      palette.strengthMultiplier,
+    );
+    effect.group.position.copy(visual.group.position);
+    effect.group.quaternion.copy(visual.group.quaternion);
+    effect.update({
+      velocityOS: this.reentryVelocityOS,
+      flowAlign: runtime.aero.flowAlign,
+      signal: this.reentrySignal,
+      time: this.effectTime,
+      wallDeltaSeconds,
+      reducedMotion: this.reducedMotion,
+    });
+    const stats = effect.stats();
+    this.diagnostics.sample('active-reentry-effect', {
+      subsystem: 'effects',
+      event: 'active-reentry-effect',
+      severity: 'sample',
+      data: {
+        active: stats.active,
+        strength: Number(stats.strength.toFixed(4)),
+        transonic: Number(stats.transonic.toFixed(4)),
+        trails: stats.trails,
+        bowshock: stats.bowshock,
+        particles: stats.particles,
+        occlusion: stats.occlusion,
+        geometryBytes: stats.geometryBytes,
+      },
+    }, {
+      simulationTime: this.effectTime,
+      bodyId: body.id,
+      altitudeMeters: runtime.pos.length() - body.radius,
+    });
   }
 
   /** Clear save-specific visuals while retaining loaders and body renderers. */
   resetDynamicState(): void {
+    this.clearReentryEffect();
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);
       disposeVesselVisual(visual);
@@ -640,6 +778,7 @@ export class WorldScene {
     const active = game.active;
     this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
+      this.clearReentryEffect();
       this.setFlightTerrainOwner(null);
       this.lastBodyFrames?.clear();
       this.srbSmoke?.clear();
@@ -714,7 +853,7 @@ export class WorldScene {
     _vesselAbs.copy(_bodyAbs).add(v.pos);
     _camAbs.copy(_vesselAbs).add(camOffset);
     _cameraBodyRelative.copy(v.pos).add(camOffset);
-    this.effectTime += Math.min(1 / 15, Math.max(0, dt));
+    this.effectTime += Math.min(1 / 15, Math.max(0, smokeDt));
     // Keep near-vessel particles in the active body's inertial frame. Root-frame
     // orbital velocity is common to both camera and craft, and retaining it in
     // the particle integrator magnifies a dropped frame into kilometre-scale
@@ -903,6 +1042,7 @@ export class WorldScene {
         rv.crossfeedIndex,
         this.effectTime,
       );
+      if (gv === active) this.updateActiveReentry(gv, vis, vesselBody, smokeDt);
       this.emitSrbSmoke(gv, vis, pressureFrac, rv.vel);
     }
     this.srbSmoke.endFrame();
@@ -991,6 +1131,7 @@ export class WorldScene {
     this.flightPromotedBodyId = null;
     this.flightPromotionPending.clear();
     this.flightPromotionFailed.clear();
+    this.clearReentryEffect();
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);
       disposeVesselVisual(visual);

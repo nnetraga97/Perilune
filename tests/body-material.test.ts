@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AUREN_SYSTEM } from '../src/content/system';
-import { BODY_VISUALS } from '../src/content/bodyVisuals';
+import { BODY_VISUALS, DEFAULT_ENTRY_VISUAL, validateEntryVisual } from '../src/content/bodyVisuals';
 import { bodyFixedUv, bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 
 describe('body visual assignments', () => {
@@ -40,6 +40,21 @@ describe('body visual assignments', () => {
       mote: 'airless',
       farfall: 'airless',
     });
+  });
+
+  it('keeps atmospheric-entry art direction bounded and renderer-owned', () => {
+    expect(BODY_VISUALS.veyra.entryVisual).toMatchObject({
+      particleThreshold: expect.any(Number),
+      strengthMultiplier: expect.any(Number),
+    });
+    expect(DEFAULT_ENTRY_VISUAL.streakProbability).toBeGreaterThanOrEqual(0);
+    expect(DEFAULT_ENTRY_VISUAL.streakProbability).toBeLessThanOrEqual(1);
+    expect(DEFAULT_ENTRY_VISUAL.particleThreshold).toBeGreaterThan(0);
+    expect(DEFAULT_ENTRY_VISUAL.particleThreshold).toBeLessThanOrEqual(1);
+    expect(validateEntryVisual(DEFAULT_ENTRY_VISUAL)).toEqual([]);
+    for (const visual of Object.values(BODY_VISUALS)) {
+      if (visual.entryVisual) expect(validateEntryVisual(visual.entryVisual)).toEqual([]);
+    }
   });
 });
 

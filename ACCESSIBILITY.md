@@ -7,6 +7,8 @@ Current (M1):
   reflexes faster than the player's chosen warp.
 - Scalable text: UI uses rem-relative sizes; browser zoom works.
 - Machine-readable perf overlay (F3) honest to real frame pacing.
+- Reduced motion keeps the atmospheric-entry envelope and static trail shape
+  readable while freezing shader pulsing and disabling ablation sparks.
 
 Committed for M3–M5 (tracked in FEATURES.md):
 
