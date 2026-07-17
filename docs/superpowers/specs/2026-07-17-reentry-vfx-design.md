@@ -99,6 +99,34 @@ Consequence: fin buffers are **static per craft version**; all animation is
 uniform-driven. No transform feedback, no per-frame buffer uploads for
 geometry.
 
+**The bowshock is covered by the same two buffers — no new topology.** Its
+two visual components map onto vertex-shader-feasible draws:
+
+- *Bowl* (the detached shock surface): a second draw of the **merged envelope
+  geometry** whose vertex shader offsets every vertex upstream along the
+  airflow by `offset ≈ k·strength·airflowOS` before projection. This is a pure
+  per-vertex transform of existing topology (the reference effect's bowl is
+  likewise a constant upstream offset of windward triangles). Eligibility
+  (windward facing, occlusion) feeds per-vertex alpha; fragments below the
+  alpha floor `discard`, so leeward regions cost near zero despite being
+  submitted.
+- *Wisps* (side-swept streamers at the rim): a second draw of the **fin
+  buffer** with an alternate extrusion rule selected by material uniforms —
+  extrude outward along the anchor normal and slightly upstream, eligibility
+  window restricted to the rim band (near-tangent `dot(normal, airflow)` plus
+  a fresnel-like view term). Every vertex of a fin carries that fin's anchor
+  attributes (see above), so eligibility evaluates identically across the fin
+  and ineligible fins collapse to true zero-area degenerates, exactly like
+  trail fins.
+
+Degenerate-state contract for both draws: ineligible or below-threshold
+geometry must reach zero fragment cost (degenerate collapse for fins,
+alpha-floor `discard` for the bowl) and the whole pass is skipped CPU-side
+below the bowshock strength gate `s₂`. Budget: the bowshock adds **two draw
+calls and zero bytes of new geometry** (both draws reuse the envelope and fin
+buffers with different materials); its GPU cost is overdraw-bounded and
+counted inside the ≤ 1 ms GPU target in B9.
+
 ### B2 — Envelope triangle count must be budgeted
 
 Fin vertex count scales with envelope triangle count. Imported NASA-style part
@@ -110,8 +138,33 @@ part primitives (`def.shape` — cylinder/cone/capsule/dome/box) exist for
 when the visible part uses an imported model. Benefits: bounded, smooth-normal,
 convex-ish geometry (exactly what the effect wants — Firefly ships hand-made
 simplified envelope meshes for complex crafts for the same reason); shared
-`geoCache` reuse; no dependency on model library residency. With envelope
-tessellation capped (radial segments ≈ 12 for effect purposes):
+`geoCache` reuse; no dependency on model library residency.
+
+**The envelope must also include runtime-derived shrouds.** Interstage shrouds
+are the one piece of vessel geometry that does *not* come from
+`craft.parts × def.shape`: `deriveInterstageShroud` (live, inactive
+separators) and the latched `sanitizeInterstageShroudSpec` produce an
+`InterstageShroudSpec` (`lowerRadius`, `upperRadius`, `lowerY`, `upperY`)
+rendered as an annular shell by `buildInterstageShroud`. The envelope builder
+consumes **the same spec source as the visible mesh** and merges a
+low-tessellation shell proxy (lathe of the same profile, effect-grade radial
+segments) into the envelope, transformed by the owning separator part. Shroud
+proxies participate in **all** effect passes: they occlude in the Phase 3
+depth pass (an enclosed engine reads as shielded) *and* they receive glow and
+trails themselves (a fairing visibly burns during entry). Because the builder
+reads the identical spec-derivation path as `buildPartMesh` and rebuilds on
+the same craft-version bump, the effect envelope cannot drift from the visible
+shroud state. No other non-`def.shape` geometry exists in the vessel visual
+(imported models are approximated by their part primitives by design), so
+this closes the occluder inventory.
+
+Phase 1 caveat, stated openly: the CPU exposure model (`flowAlign` ×
+`axialFrac`) has no shroud knowledge — but neither does the sim's own
+`stepThermal`, so Phase 1 glow is exactly as right or wrong as the
+authoritative thermal model. The *visual* shielding claim attaches to
+Phase 3 only, where the depth pass (with shroud proxies) provides it.
+
+With envelope tessellation capped (radial segments ≈ 12 for effect purposes):
 
 - ~50–160 triangles per part ⇒ 150-part vessel ≈ 8–20 k envelope triangles.
 - Fin buffer ≈ 12 verts/tri ⇒ ~100–240 k static vertices ≈ 4–10 MB once per
@@ -205,8 +258,9 @@ the baseline desktop tier at strength 1.
 Design consequence — merge, don't multiply: unlike Firefly (per-part command
 buffer draws), all envelope geometry for a vessel is merged into **one**
 `BufferGeometry` at build time (part transforms baked into vertices; per-part
-scalars baked as attributes). Result per vessel: 1 glow draw + 1 fin draw +
-1 bowshock draw + (Phase 3) 1 depth-pass draw. Rebuild triggers reuse the
+scalars baked as attributes). Result per vessel: 1 glow draw + 1 trail-fin
+draw + 2 bowshock draws (bowl reuses the envelope buffer, wisps reuse the fin
+buffer — see B1) + (Phase 3) 1 depth-pass draw. Rebuild triggers reuse the
 `craftVersionSeen` mechanism (parts are static between version bumps; staging
 and part loss already bump it).
 
@@ -232,9 +286,25 @@ s   += (raw − s) · (1 − e^(−k·dt))             // adaptive k, faster whe
                                                // (mirrors Firefly's adaptive lerp behavior)
 ```
 
-plus a **transonic state** `m = smoothstep(0.8, 1.2, mach) · (1 − s)` for
-white mach-cone effects at low heat (Firefly's FxState analog; sim already
-provides `mach` and `aoa`). Thresholds gate subsystems: glow > s₀, trails > s₁,
+plus a **transonic state** for white mach-cone effects at low heat (Firefly's
+FxState analog; sim already provides `mach` and `aoa`). This must be a
+**band-pass**, not a one-sided ramp — a `smoothstep` that saturates above the
+band would keep full mach effects on during ordinary supersonic and
+hypersonic flight:
+
+```
+band = smoothstep(0.75, 1.05, mach) · (1 − smoothstep(1.35, 2.5, mach))
+m    = band · smoothstep(Q_LO, Q_HI, dynamicPressure) · (1 − s)
+```
+
+The exact constants are tuning values; the *shape* is normative: an explicit
+falloff above the transonic range, a dynamic-pressure gate so near-vacuum
+hypersonic flight (high Mach, negligible q at the atmosphere boundary) never
+triggers it, and suppression by entry strength `s`. Required unit cases:
+subsonic (`m = 0`), Mach ≈ 1 at meaningful q (`m` peaks), Mach 2+ (`m → 0`),
+and hypersonic thin atmosphere (`m = 0` via the q gate).
+
+Thresholds gate subsystems: glow > s₀, trails > s₁,
 bowshock > s₂, particles > s₃ — all Perilune-tuned constants.
 
 Per-part glow weighting reuses the sim's own exposure model:
@@ -254,9 +324,15 @@ depth pass is active-vessel-only on every tier.
 
 ### B12 — Testing & determinism
 
-- Unit (Vitest): strength/threshold mapping, transonic state, fin-builder
-  geometry invariants (counts, degeneracy, attribute ranges), config
-  validation of per-body palettes.
+- Unit (Vitest): strength/threshold mapping, the transonic band-pass matrix
+  from B10 (subsonic / Mach ≈ 1 / Mach 2+ / hypersonic-thin-atmosphere),
+  fin-builder geometry invariants (counts, degeneracy, attribute ranges)
+  including shroud-proxy inclusion, and config validation of per-body
+  palettes.
+- Canonical shrouded-stack shielding test (Phase 3 gate): a stack with an
+  inactive interstage shroud enclosing an engine enters nose-first; assert via
+  render diagnostics that the enclosed parts' effect contribution is
+  suppressed by the depth pass while the shroud itself is effect-active.
 - e2e (Playwright): extend the existing render-diagnostics pattern — assert
   effect draw counts/active flags during a scripted Veyra entry rather than
   screenshots (two specs are already flaky in this sandbox; animated additive
@@ -308,9 +384,12 @@ ships.
 New modules (names follow existing conventions):
 
 - `src/render/reentryEffects.ts` — envelope/fin geometry builder (from
-  `craft.parts` × `def.shape` primitives), the three `ShaderMaterial`s, the
-  per-frame update (uniforms: airflow-OS, strength, transonic state, palette,
-  time), tier budgets. Owns nothing sim-side.
+  `craft.parts` × `def.shape` primitives **plus interstage-shroud shell
+  proxies from the same `InterstageShroudSpec` source as the visible mesh**,
+  see B2), the effect `ShaderMaterial`s (glow, trail fins, bowshock bowl,
+  bowshock wisps — the bowshock materials reuse the envelope and fin buffers),
+  the per-frame update (uniforms: airflow-OS, strength, transonic state,
+  palette, time), tier budgets. Owns nothing sim-side.
 - `src/render/airstreamDepth.ts` (Phase 3) — depth target + ortho camera +
   layer management; produces the occlusion texture + airstream VP matrix
   uniform consumed by `reentryEffects`.
@@ -333,10 +412,11 @@ flowAlign                          │
 rv.vel, body rotation       ──►    airflow dir (vessel-local uniform)
                                    │
                                    ├─► [Phase 3] airstream depth pass (512², active vessel only)
-                                   ├─► glow pass      (1 draw, merged envelope)
-                                   ├─► trail fin pass (1 draw, static fins, VS extrusion)
-                                   ├─► bowshock pass  (1 draw)
-                                   └─► spark pool     (shared scene-wide, srbSmoke pattern)
+                                   ├─► glow pass       (1 draw, merged envelope incl. shroud proxies)
+                                   ├─► trail fin pass  (1 draw, static fins, VS extrusion)
+                                   ├─► bowshock bowl   (1 draw, envelope buffer, upstream VS offset)
+                                   ├─► bowshock wisps  (1 draw, fin buffer, outward extrusion rule)
+                                   └─► spark pool      (shared scene-wide, srbSmoke pattern)
 ```
 
 ## 7. Phasing (each phase ships independently visible value)
@@ -350,7 +430,9 @@ rv.vel, body rotation       ──►    airflow dir (vessel-local uniform)
    two layers, streaks. The signature Firefly look.
 4. **Phase 3 — airstream occlusion.** Depth target; glow/trails/bowshock gain
    per-pixel shielding (fairings protect payloads visually).
-5. **Phase 4 — bowshock.** Detached bowl + swept wisps upstream.
+5. **Phase 4 — bowshock.** Detached bowl (envelope buffer, upstream vertex
+   offset) + swept rim wisps (fin buffer, outward extrusion rule) per B1 —
+   two extra draws, no new geometry.
 6. **Phase 5 — particles & tiers.** Spark/ablation point sprites on the smoke
    pool pattern; finalize Low/Medium/High budgets; mobile validation.
 7. **Phase 6 — polish & content.** Per-body palettes beyond Veyra, transonic
