@@ -133,7 +133,7 @@ describe('built-in craft library', () => {
       Math.sin(runtime.aero.aoa),
     );
     expect(normalTurn.failures).toEqual([]);
-    expect(normalTurn.maxUtilization).toBeLessThan(0.8);
+    expect(normalTurn.maxUtilization).toBeLessThan(0.46);
 
     const aggressiveTurn = evaluateStructure(
       runtime.craft,
