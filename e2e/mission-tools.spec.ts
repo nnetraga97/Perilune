@@ -18,6 +18,15 @@ test('mission windows connect alarms, transfers, targets, and maneuver sketches'
   await expect.poll(() => page.evaluate(() => window.__TEST__.alarmCount())).toBe(1);
   await expect(page.locator('.mission-row', { hasText: 'Systems check' })).toBeVisible();
 
+  // Transfer sketches are intentionally gated until the craft has a stable
+  // parking orbit, because a surface-state conic produces a meaningless node.
+  await page.getByRole('button', { name: 'Fleet', exact: true }).click();
+  const veyra = page.locator('.body-row').filter({ has: page.locator('strong:text-is("Veyra")') });
+  await veyra.getByRole('button', { name: 'Target', exact: true }).click();
+  await veyra.getByRole('button', { name: 'Orbit', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.situation())).toBe('orbit');
+  await page.getByRole('button', { name: 'Fleet', exact: true }).click();
+
   await page.getByRole('button', { name: 'Transfers', exact: true }).click();
   const palla = page.locator('.transfer-row', { hasText: 'Palla' });
   await expect(palla).toBeVisible();

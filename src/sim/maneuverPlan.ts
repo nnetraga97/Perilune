@@ -10,9 +10,10 @@ import {
 export type ManeuverPhase = 'planned' | 'executing' | 'overdue' | 'complete';
 
 export interface ManeuverPlan {
+  readonly id: string;
   readonly vesselId: string;
   readonly bodyId: string;
-  readonly referenceOrbit: OrbitalElements;
+  referenceOrbit: OrbitalElements;
   node: ManeuverNode;
   targetOrbit: OrbitalElements;
   burnDirection: Vec3;
@@ -44,16 +45,45 @@ export function projectedOrbitAfterRemainingBurn(
 }
 
 /**
- * Transient, single-node maneuver authority.
+ * Transient maneuver-queue authority.
  *
- * The reference orbit is captured once. Editing changes the target derived from
- * that reference; live vessel motion never silently rewrites the plan.
+ * Each vessel/body schedule is ordered by burn time. Later nodes derive from
+ * the previous target orbit, while captured live references let deletion and
+ * post-burn rebasing rebuild the remaining queue safely.
  */
 export class ManeuverPlanController {
-  private plan: ManeuverPlan | null = null;
+  private plans: ManeuverPlan[] = [];
+  private capturedReferences = new Map<string, OrbitalElements>();
+  private selectedId: string | null = null;
+  private nextId = 1;
 
   get current(): Readonly<ManeuverPlan> | null {
-    return this.plan;
+    return this.plans.find((plan) => plan.id === this.selectedId) ?? this.plans[0] ?? null;
+  }
+
+  get all(): readonly Readonly<ManeuverPlan>[] {
+    return [...this.plans].sort((a, b) => a.node.time - b.node.time);
+  }
+
+  scheduledFor(vesselId: string, bodyId: string): readonly Readonly<ManeuverPlan>[] {
+    return this.plans
+      .filter((plan) => plan.vesselId === vesselId && plan.bodyId === bodyId)
+      .sort((a, b) => a.node.time - b.node.time);
+  }
+
+  selectedFor(vesselId: string, bodyId: string): Readonly<ManeuverPlan> | null {
+    const scheduled = this.scheduledFor(vesselId, bodyId);
+    return scheduled.find((plan) => plan.id === this.selectedId) ?? scheduled[0] ?? null;
+  }
+
+  nextFor(vesselId: string, bodyId: string): Readonly<ManeuverPlan> | null {
+    return this.scheduledFor(vesselId, bodyId).find((plan) => plan.phase !== 'complete') ?? null;
+  }
+
+  select(id: string): Readonly<ManeuverPlan> | null {
+    const plan = this.plans.find((candidate) => candidate.id === id) ?? null;
+    if (plan) this.selectedId = plan.id;
+    return plan;
   }
 
   create(
@@ -69,7 +99,9 @@ export class ManeuverPlanController {
     const burnDirection = initialDeltaV > 0
       ? burnVector.scale(1 / initialDeltaV)
       : new Vec3(1, 0, 0);
-    this.plan = {
+    const id = `node-${this.nextId++}`;
+    const plan: ManeuverPlan = {
+      id,
       vesselId,
       bodyId,
       referenceOrbit: reference,
@@ -79,45 +111,52 @@ export class ManeuverPlanController {
       initialDeltaV,
       remainingDeltaV: initialDeltaV,
       phase: 'planned',
-      revision: (this.plan?.revision ?? 0) + 1,
+      revision: 1,
     };
-    return this.plan;
+    this.plans.push(plan);
+    this.capturedReferences.set(id, reference);
+    this.selectedId = id;
+    this.recomputeSchedule(vesselId, bodyId);
+    return plan;
   }
 
-  update(node: ManeuverNode): Readonly<ManeuverPlan> | null {
-    if (!this.plan || this.plan.phase === 'executing' || this.plan.phase === 'complete') return this.plan;
+  update(node: ManeuverNode, id = this.selectedId): Readonly<ManeuverPlan> | null {
+    const plan = this.find(id);
+    if (!plan || plan.phase === 'executing' || plan.phase === 'complete') return plan;
     const copiedNode = copyNode(node);
-    const burnVector = nodeBurnVector(this.plan.referenceOrbit, copiedNode, new Vec3());
-    const initialDeltaV = burnVector.length();
-    this.plan.node = copiedNode;
-    this.plan.targetOrbit = orbitAfterNode(this.plan.referenceOrbit, copiedNode);
-    this.plan.burnDirection = initialDeltaV > 0
-      ? burnVector.scale(1 / initialDeltaV)
-      : new Vec3(1, 0, 0);
-    this.plan.initialDeltaV = initialDeltaV;
-    this.plan.remainingDeltaV = initialDeltaV;
-    this.plan.phase = 'planned';
-    this.plan.revision++;
-    return this.plan;
+    plan.node = copiedNode;
+    plan.phase = 'planned';
+    this.recomputeSchedule(plan.vesselId, plan.bodyId);
+    return plan;
   }
 
-  clear(): void {
-    this.plan = null;
+  clear(id = this.selectedId): void {
+    const plan = this.find(id);
+    if (!plan) return;
+    this.plans = this.plans.filter((candidate) => candidate.id !== plan.id);
+    this.capturedReferences.delete(plan.id);
+    if (this.selectedId === plan.id) {
+      this.selectedId = this.scheduledFor(plan.vesselId, plan.bodyId)[0]?.id ?? this.plans[0]?.id ?? null;
+    }
+    this.recomputeSchedule(plan.vesselId, plan.bodyId);
   }
 
-  beginExecution(): boolean {
-    if (!this.plan || (this.plan.phase !== 'planned' && this.plan.phase !== 'overdue')) return false;
-    this.plan.phase = 'executing';
-    this.plan.revision++;
+  beginExecution(id = this.selectedId): boolean {
+    const plan = this.find(id);
+    if (!plan || (plan.phase !== 'planned' && plan.phase !== 'overdue')) return false;
+    this.selectedId = plan.id;
+    plan.phase = 'executing';
+    plan.revision++;
     return true;
   }
 
-  markOverdue(now: number, burnDuration: number, grace = 3): boolean {
-    if (!this.plan || this.plan.phase !== 'planned') return false;
+  markOverdue(now: number, burnDuration: number, grace = 3, id = this.selectedId): boolean {
+    const plan = this.find(id);
+    if (!plan || plan.phase !== 'planned') return false;
     const halfBurn = Number.isFinite(burnDuration) ? Math.max(0, burnDuration / 2) : 0;
-    if (now <= this.plan.node.time + halfBurn + grace) return false;
-    this.plan.phase = 'overdue';
-    this.plan.revision++;
+    if (now <= plan.node.time + halfBurn + grace) return false;
+    plan.phase = 'overdue';
+    plan.revision++;
     return true;
   }
 
@@ -126,19 +165,21 @@ export class ManeuverPlanController {
     thrustDirection: Readonly<Vec3>,
     dt: number,
     tolerance = 0.5,
+    id = this.selectedId,
   ): number {
-    if (!this.plan || this.plan.phase !== 'executing') return this.plan?.remainingDeltaV ?? 0;
+    const plan = this.find(id);
+    if (!plan || plan.phase !== 'executing') return plan?.remainingDeltaV ?? 0;
     const directionLength = Math.sqrt(Vec3.dot(thrustDirection, thrustDirection));
     const alignment = directionLength > 0
-      ? Math.max(0, Vec3.dot(thrustDirection, this.plan.burnDirection) / directionLength)
+      ? Math.max(0, Vec3.dot(thrustDirection, plan.burnDirection) / directionLength)
       : 0;
     const delivered = Math.max(0, properAcceleration) * alignment * Math.max(0, dt);
-    this.plan.remainingDeltaV = Math.max(0, this.plan.remainingDeltaV - delivered);
-    if (this.plan.remainingDeltaV <= tolerance) {
-      this.plan.remainingDeltaV = 0;
-      this.plan.phase = 'complete';
+    plan.remainingDeltaV = Math.max(0, plan.remainingDeltaV - delivered);
+    if (plan.remainingDeltaV <= tolerance) {
+      plan.remainingDeltaV = 0;
+      plan.phase = 'complete';
     }
-    return this.plan.remainingDeltaV;
+    return plan.remainingDeltaV;
   }
 
   projectedCompletion(
@@ -146,19 +187,59 @@ export class ManeuverPlanController {
     position: Readonly<Vec3>,
     velocity: Readonly<Vec3>,
     time: number,
+    id = this.selectedId,
   ): OrbitalElements | null {
-    if (!this.plan) return null;
+    const plan = this.find(id);
+    if (!plan) return null;
     return projectedOrbitAfterRemainingBurn(
       mu,
       position,
       velocity,
       time,
-      this.plan.burnDirection,
-      this.plan.remainingDeltaV,
+      plan.burnDirection,
+      plan.remainingDeltaV,
     );
   }
 
-  deltaV(): number {
-    return this.plan ? nodeDeltaV(this.plan.node) : 0;
+  deltaV(id = this.selectedId): number {
+    const plan = this.find(id);
+    return plan ? nodeDeltaV(plan.node) : 0;
+  }
+
+  /** Re-anchor the next queued maneuver to the orbit actually achieved. */
+  rebaseFirst(vesselId: string, bodyId: string, referenceOrbit: OrbitalElements): void {
+    const first = this.scheduledFor(vesselId, bodyId)[0];
+    if (!first) return;
+    this.capturedReferences.set(first.id, copyElements(referenceOrbit));
+    this.recomputeSchedule(vesselId, bodyId);
+  }
+
+  private find(id: string | null): ManeuverPlan | null {
+    return id ? this.plans.find((plan) => plan.id === id) ?? null : null;
+  }
+
+  private recomputeSchedule(vesselId: string, bodyId: string): void {
+    const scheduled = this.plans
+      .filter((plan) => plan.vesselId === vesselId && plan.bodyId === bodyId)
+      .sort((a, b) => a.node.time - b.node.time);
+    let previousTarget: OrbitalElements | null = null;
+    for (const plan of scheduled) {
+      if (plan.phase === 'executing' || plan.phase === 'complete') {
+        previousTarget = plan.targetOrbit;
+        continue;
+      }
+      const captured = this.capturedReferences.get(plan.id) ?? plan.referenceOrbit;
+      plan.referenceOrbit = copyElements(previousTarget ?? captured);
+      const burnVector = nodeBurnVector(plan.referenceOrbit, plan.node, new Vec3());
+      const initialDeltaV = burnVector.length();
+      plan.targetOrbit = orbitAfterNode(plan.referenceOrbit, plan.node);
+      plan.burnDirection = initialDeltaV > 0
+        ? burnVector.scale(1 / initialDeltaV)
+        : new Vec3(1, 0, 0);
+      plan.initialDeltaV = initialDeltaV;
+      plan.remainingDeltaV = initialDeltaV;
+      plan.revision++;
+      previousTarget = plan.targetOrbit;
+    }
   }
 }

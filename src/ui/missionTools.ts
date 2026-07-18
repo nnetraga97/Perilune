@@ -4,6 +4,7 @@ import { el } from './kit';
 import type { WindowManager } from './window';
 import { defOf } from '../sim/vessel';
 import { isRecoverable } from '../sim/science';
+import { periapsisOf, stateToElements } from '../core/orbit';
 
 export interface MissionToolCallbacks {
   onSwitchVessel(vesselId: string): void;
@@ -55,7 +56,7 @@ export class MissionTools {
   private fleetSignature = '';
 
   constructor(
-    windows: WindowManager,
+    private readonly windows: WindowManager,
     private readonly game: () => GameState,
     private readonly callbacks: MissionToolCallbacks,
     private readonly uiRoot: HTMLElement,
@@ -226,16 +227,26 @@ export class MissionTools {
     const game = this.game();
     const gv = game.active;
     if (!gv) return;
-    const signature = `${gv.runtime.id}:${gv.target}:${Math.floor(game.time / 5)}:${this.transferSort.value}`;
+    const signature = `${gv.runtime.id}:${gv.target}:${Math.floor(game.time / 30)}:${this.transferSort.value}`;
     if (signature === this.transferSignature) return;
     this.transferSignature = signature;
     const body = game.bodyOf(gv);
+    const liveOrbit = stateToElements(body.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    if (gv.runtime.situation !== 'orbit' || periapsisOf(liveOrbit) <= body.radius) {
+      this.transferList.innerHTML = '';
+      const empty = el('div', 'mission-empty transfer-gate', this.transferList);
+      el('strong', '', empty, 'STABLE ORBIT REQUIRED');
+      el('span', '', empty, 'Transfer sketches use your live parking orbit. Circularize above the atmosphere first.');
+      return;
+    }
     const parkingOrbitDirection =
       gv.runtime.pos.x * gv.runtime.vel.y - gv.runtime.pos.y * gv.runtime.vel.x >= 0 ? 1 : -1;
     const plans = allTransferPlans(game.universe, game.time, body, {
       parkRadius: gv.runtime.pos.length(),
       vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
       parkingOrbitDirection,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
     });
     if (this.transferSort.value === 'dv') plans.sort((a, b) => a.departureDv - b.departureDv);
     else if (this.transferSort.value === 'target') plans.sort((a, b) => a.targetName.localeCompare(b.targetName));
@@ -257,21 +268,51 @@ export class MissionTools {
   private renderTransfer(plan: TransferPlan, targeted: boolean): void {
     const row = el('div', `transfer-row${targeted ? ' targeted' : ''}`, this.transferList!);
     const dial = el('div', 'phase-dial', row);
+    dial.title = 'Current phase and required departure phase';
     const nowNeedle = el('i', 'phase-needle current', dial);
     const neededNeedle = el('i', 'phase-needle needed', dial);
     nowNeedle.style.transform = `rotate(${plan.phaseNow}rad)`;
     neededNeedle.style.transform = `rotate(${plan.phaseNeeded}rad)`;
     const info = el('div', 'transfer-info', row);
-    el('strong', '', info, plan.targetName);
-    el('span', '', info, `window T−${duration(plan.timeToWindow)} · coast ${duration(plan.transferTime)}`);
-    el('span', '', info, `depart ${plan.departureDv.toFixed(0)} m/s · capture ${plan.arrivalDv.toFixed(0)} m/s`);
+    const heading = el('div', 'transfer-heading', info);
+    el('strong', '', heading, plan.targetName);
+    el('span', 'transfer-kind', heading, plan.kind === 'moon' ? 'MOON' : 'PLANET');
+    el('span', 'transfer-window', info, `DEPART T−${duration(plan.burnTime - this.game().time)}`);
+    const metrics = el('div', 'transfer-metrics', info);
+    const metric = (label: string, value: string) => {
+      const cell = el('div', 'transfer-metric', metrics);
+      el('span', '', cell, label);
+      el('strong', '', cell, value);
+    };
+    metric('BURN', `${plan.departureDv.toFixed(0)} m/s`);
+    metric('COAST', duration(plan.transferTime));
+    metric('CAPTURE', `${plan.arrivalDv.toFixed(0)} m/s`);
+    if (plan.approachAltitude !== undefined) {
+      metric('APPROACH', `${(plan.approachAltitude / 1000).toFixed(0)} km`);
+    }
+    el(
+      'span',
+      `transfer-accuracy ${plan.accuracy === 'refined-intercept' ? 'refined' : ''}`,
+      info,
+      plan.accuracy === 'refined-intercept' ? 'INTERCEPT VERIFIED' : 'PHASE ESTIMATE · FINE-TUNE IN MAP',
+    );
     const actions = el('div', 'transfer-actions', row);
-    const target = el('button', 'hud-btn', actions, targeted ? 'Targeted' : 'Target');
+    const target = el('button', 'hud-btn transfer-icon-action', actions, targeted ? 'Targeted' : 'Target');
     target.onclick = () => this.callbacks.onSetTarget(targeted ? null : plan.targetId);
-    const alarm = el('button', 'hud-btn', actions, 'Alarm');
+    const alarm = el('button', 'hud-btn transfer-icon-action', actions, 'Alarm');
     alarm.onclick = () => this.addAlarm(plan.burnTime, `Burn: ${plan.targetName}`, 'transfer');
-    const sketch = el('button', 'hud-btn', actions, 'Sketch node');
-    sketch.onclick = () => this.callbacks.onSketchNode(plan);
+    const sketch = el(
+      'button',
+      `hud-btn transfer-plan-action${plan.accuracy === 'refined-intercept' ? ' verified' : ''}`,
+      actions,
+      plan.accuracy === 'refined-intercept' ? 'Plan intercept' : 'Sketch estimate',
+    );
+    sketch.setAttribute('aria-label', 'Sketch node');
+    sketch.onclick = () => {
+      this.callbacks.onSetTarget(plan.targetId);
+      this.callbacks.onSketchNode(plan);
+      this.windows.close('transfers');
+    };
   }
 
   private buildFleet(content: HTMLElement): void {

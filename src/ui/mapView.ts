@@ -7,6 +7,9 @@
  * Node editing happens in a DOM panel (prograde/normal/radial ± time).
  */
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import {
@@ -144,43 +147,77 @@ export function mapStarDirection(universe: Universe, focusBody: Body, time: numb
   return out.lengthSq() > 0 ? out.normalize() : out.set(1, 0, 0);
 }
 
-function orbitLine(color: string, dashed = false): THREE.Line {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(256 * 3), 3));
-  const mat = dashed
-    ? new THREE.LineDashedMaterial({ color, dashSize: 0.6, gapSize: 0.35, transparent: true, opacity: 0.9 })
-    : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
-  const line = new THREE.Line(geo, mat);
+/** Authoritative map-space body center, relative to the active SOI anchor. */
+export function mapBodyScenePosition(
+  universe: Universe,
+  body: Body,
+  anchor: Body,
+  time: number,
+  out = new THREE.Vector3(),
+): THREE.Vector3 {
+  const position = new Vec3();
+  universe.relativePosition(body, anchor, time, position);
+  return out.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+}
+
+type MapLine = Line2;
+
+function mapLine(color: string, width: number, dashed = false, count = 256): MapLine {
+  const geo = new LineGeometry();
+  const positions = new Float32Array(count * 3);
+  geo.setPositions(positions);
+  const mat = new LineMaterial({
+    color,
+    linewidth: width,
+    dashed,
+    dashSize: 8,
+    gapSize: 5,
+    transparent: true,
+    opacity: dashed ? 0.9 : 0.85,
+    worldUnits: false,
+  });
+  mat.resolution.set(window.innerWidth, window.innerHeight);
+  const line = new Line2(geo, mat);
+  line.userData.mapPositions = positions;
   line.frustumCulled = false;
+  if (dashed) line.computeLineDistances();
   return line;
 }
 
-function entryPathLine(): THREE.Line {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(2048 * 3), 3));
-  geometry.setDrawRange(0, 0);
-  return new THREE.Line(
-    geometry,
-    new THREE.LineBasicMaterial({ color: '#e27a4f', transparent: true, opacity: 0.9 }),
-  );
+function orbitLine(color: string, dashed = false, width = 2): MapLine {
+  return mapLine(color, width, dashed);
 }
 
-function fillEntryPath(line: THREE.Line, samples: readonly Vec3[]): void {
-  const geometry = line.geometry as THREE.BufferGeometry;
-  const positions = geometry.getAttribute('position') as THREE.BufferAttribute;
-  const count = Math.min(samples.length, positions.count);
+function entryPathLine(): MapLine {
+  return mapLine('#e27a4f', 3, false, 2);
+}
+
+function linePositions(line: MapLine): Float32Array {
+  return line.userData.mapPositions as Float32Array;
+}
+
+function commitLinePositions(line: MapLine, positions: Float32Array): void {
+  line.userData.mapPositions = positions;
+  line.geometry.setPositions(positions);
+  if (line.material.dashed) line.computeLineDistances();
+}
+
+function fillEntryPath(line: MapLine, samples: readonly Vec3[]): void {
+  const count = Math.max(2, samples.length);
+  const positions = new Float32Array(count * 3);
   for (let index = 0; index < count; index++) {
-    const sample = samples[index];
-    positions.setXYZ(index, sample.x * SCALE, sample.y * SCALE, sample.z * SCALE);
+    const sample = samples[Math.min(samples.length - 1, index)];
+    if (!sample) continue;
+    positions[index * 3] = sample.x * SCALE;
+    positions[index * 3 + 1] = sample.y * SCALE;
+    positions[index * 3 + 2] = sample.z * SCALE;
   }
-  positions.needsUpdate = true;
-  geometry.setDrawRange(0, count);
+  commitLinePositions(line, positions);
 }
 
 /** Fill a line's positions from a conic around origin (parent-centered). */
-function fillConic(line: THREE.Line, el: OrbitalElements, offset: Vec3 | null): void {
-  const attr = (line.geometry as THREE.BufferGeometry).getAttribute('position') as THREE.BufferAttribute;
-  const arr = attr.array as Float32Array;
+function fillConic(line: MapLine, el: OrbitalElements, offset: Vec3 | null): void {
+  const arr = linePositions(line);
   const r = new Vec3();
   const v = new Vec3();
   const n = 255;
@@ -203,37 +240,30 @@ function fillConic(line: THREE.Line, el: OrbitalElements, offset: Vec3 | null): 
       arr[i * 3 + 2] = (r.z + (offset?.z ?? 0)) * SCALE;
     }
   }
-  attr.needsUpdate = true;
-  line.geometry.setDrawRange(0, attr.count);
-  (line as THREE.Line & { computeLineDistances(): void }).computeLineDistances?.();
+  commitLinePositions(line, arr);
 }
 
 /** Fill a chronological conic patch between two absolute simulation times. */
 function fillConicTimeRange(
-  line: THREE.Line,
+  line: MapLine,
   elements: OrbitalElements,
   startTime: number,
   endTime: number,
   offset: Vec3 | null = null,
 ): void {
-  const attribute = line.geometry.getAttribute('position') as THREE.BufferAttribute;
-  const count = attribute.count;
+  const positions = linePositions(line);
+  const count = positions.length / 3;
   const position = new Vec3();
   const velocity = new Vec3();
   const duration = Math.max(1, endTime - startTime);
   for (let index = 0; index < count; index++) {
     const time = startTime + duration * index / Math.max(1, count - 1);
     elementsAtTime(elements, time, position, velocity);
-    attribute.setXYZ(
-      index,
-      (position.x + (offset?.x ?? 0)) * SCALE,
-      (position.y + (offset?.y ?? 0)) * SCALE,
-      (position.z + (offset?.z ?? 0)) * SCALE,
-    );
+    positions[index * 3] = (position.x + (offset?.x ?? 0)) * SCALE;
+    positions[index * 3 + 1] = (position.y + (offset?.y ?? 0)) * SCALE;
+    positions[index * 3 + 2] = (position.z + (offset?.z ?? 0)) * SCALE;
   }
-  attribute.needsUpdate = true;
-  line.geometry.setDrawRange(0, count);
-  (line as THREE.Line & { computeLineDistances(): void }).computeLineDistances?.();
+  commitLinePositions(line, positions);
 }
 
 function elementsToStateSafe(el: OrbitalElements, nu: number, outR: Vec3, outV: Vec3): void {
@@ -243,6 +273,8 @@ function elementsToStateSafe(el: OrbitalElements, nu: number, outR: Vec3, outV: 
 
 export interface MapCallbacks {
   getManeuverPlan(): Readonly<ManeuverPlan> | null;
+  getManeuverPlans(): readonly Readonly<ManeuverPlan>[];
+  onSelectManeuverNode(id: string): void;
   onCreateManeuverNode(node: ManeuverNode): void;
   onUpdateManeuverNode(node: ManeuverNode): void;
   onDeleteManeuverNode(): void;
@@ -261,13 +293,13 @@ export class MapView {
   visible = false;
 
   private bodyMeshes = new Map<string, THREE.Mesh>();
-  private bodyOrbits = new Map<string, THREE.Line>();
+  private bodyOrbits = new Map<string, MapLine>();
   private soiMeshes = new Map<string, THREE.Mesh>();
-  private vesselLine = orbitLine('#7fd0e8');
-  private currentArcLine = orbitLine('#a9ebff');
-  private nodeLine = orbitLine('#e8c76b', true);
-  private completionLine = orbitLine('#fff0a8', true);
-  private encounterLine = orbitLine('#c88be8', true);
+  private vesselLine = orbitLine('#7fd0e8', false, 3.2);
+  private currentArcLine = orbitLine('#a9ebff', false, 4.2);
+  private nodeLine = orbitLine('#e8c76b', true, 3.4);
+  private completionLine = orbitLine('#fff0a8', true, 3.2);
+  private encounterLine = orbitLine('#c88be8', true, 3.2);
   private entryLine = entryPathLine();
   private vesselMarker: THREE.Sprite;
   private nodeMarker: THREE.Sprite;
@@ -299,6 +331,7 @@ export class MapView {
   private panel: HTMLElement;
   private panelContent: HTMLElement;
   private nodePanel: HTMLElement;
+  private nodeQueue: HTMLElement;
   private encounterInfo: HTMLElement;
   private entryInfo: HTMLElement;
   private dvReadout: HTMLElement;
@@ -334,6 +367,7 @@ export class MapView {
   }));
   private orbitHoverLabel: HTMLElement;
   private handleHoverLabel: HTMLElement;
+  private cameraControls: HTMLElement;
   private readonly projectedPoint = new THREE.Vector3();
   entryPrediction: EntryPrediction | null = null;
   landingTargetDirBF: Vec3 | null = null;
@@ -350,6 +384,9 @@ export class MapView {
     this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
+      this.scene.traverse((object) => {
+        if (object instanceof Line2) object.material.resolution.set(window.innerWidth, window.innerHeight);
+      });
     };
     window.addEventListener('resize', this.resizeHandler);
     this.scene.background = new THREE.Color('#05080c');
@@ -367,7 +404,7 @@ export class MapView {
       this.encounterLine,
       this.entryLine,
     );
-    (this.vesselLine.material as THREE.LineBasicMaterial).opacity = 0.32;
+    this.vesselLine.material.opacity = 0.32;
 
     const mkSprite = (color: string, size: number, glyph = '') => {
       const c = document.createElement('canvas');
@@ -554,6 +591,28 @@ export class MapView {
     this.handleHoverLabel = el('div', 'map-handle-hover', uiRoot);
     this.handleHoverLabel.hidden = true;
 
+    this.cameraControls = el('div', 'map-camera-controls', uiRoot);
+    this.cameraControls.setAttribute('aria-label', 'Map camera controls');
+    const cameraButton = (glyph: string, label: string, action: () => void) => {
+      const button = el('button', 'map-camera-btn', this.cameraControls, glyph) as HTMLButtonElement;
+      button.type = 'button';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.onclick = action;
+      return button;
+    };
+    cameraButton('+', 'Zoom in', () => this.zoomCamera(0.72));
+    cameraButton('−', 'Zoom out', () => this.zoomCamera(1.38));
+    cameraButton('◎', 'Recenter selected body', () => this.recenterCamera());
+    cameraButton('⌂', 'Fit local system', () => this.fitCamera('local'));
+    cameraButton('◇', 'Fit entire system', () => this.fitCamera('system'));
+    cameraButton('▱', 'Near top view', () => {
+      this.camPitch = 1.35;
+      this.predictionDirty = true;
+    });
+    const cameraHint = el('span', 'map-camera-hint', this.cameraControls, 'DRAG ORBIT · RMB PAN · WHEEL ZOOM');
+    cameraHint.setAttribute('aria-hidden', 'true');
+
     // ---- DOM panel: floating desktop window, bottom sheet on touch layouts
     this.panel = el('div', 'map-panel', uiRoot);
     injectUiStyles();
@@ -566,20 +625,29 @@ export class MapView {
     collapse.title = 'Collapse maneuver planner';
     collapse.setAttribute('aria-label', 'Collapse maneuver planner');
     this.panelContent = el('div', 'map-panel-content', this.panel);
-    const btnRow = el('div', 'map-row', this.panelContent);
-    const addBtn = el('button', 'hud-btn', btnRow, '+ Node in 2 min') as HTMLButtonElement;
+    this.nodeQueue = el('div', 'map-node-queue', this.panelContent);
+    const btnRow = el('div', 'map-row map-node-actions', this.panelContent);
+    const addBtn = el('button', 'hud-btn map-action-primary', btnRow, '+ Node') as HTMLButtonElement;
+    addBtn.title = 'Add node in 2 minutes';
+    addBtn.setAttribute('aria-label', 'Add node in 2 minutes');
     addBtn.onclick = () => this.createNode(120);
-    const delBtn = el('button', 'hud-btn', btnRow, 'Delete') as HTMLButtonElement;
+    const delBtn = el('button', 'hud-btn map-icon-btn', btnRow, '⌫') as HTMLButtonElement;
+    delBtn.title = 'Delete selected node';
+    delBtn.setAttribute('aria-label', 'Delete selected node');
     delBtn.onclick = () => {
       cb.onDeleteManeuverNode();
       this.predictionDirty = true;
       this.refreshNodePanel();
     };
-    const warpBtn = el('button', 'hud-btn', btnRow, 'Warp → node') as HTMLButtonElement;
+    const warpBtn = el('button', 'hud-btn map-icon-btn', btnRow, '≫') as HTMLButtonElement;
+    warpBtn.title = 'Warp to selected node';
+    warpBtn.setAttribute('aria-label', 'Warp to selected node');
     warpBtn.onclick = () => {
       if (this.node) cb.onWarpToNode(this.node);
     };
-    const alarmBtn = el('button', 'hud-btn', btnRow, 'Alarm') as HTMLButtonElement;
+    const alarmBtn = el('button', 'hud-btn map-icon-btn', btnRow, '⌁') as HTMLButtonElement;
+    alarmBtn.title = 'Create maneuver alarm';
+    alarmBtn.setAttribute('aria-label', 'Create maneuver alarm');
     alarmBtn.onclick = () => {
       const alarmTime = this.node?.time;
       if (alarmTime !== undefined && alarmTime > (this.gameRef?.time ?? 0)) {
@@ -588,12 +656,15 @@ export class MapView {
     };
 
     this.nodePanel = el('div', 'map-node-panel', this.panelContent);
-    this.dvReadout = el('div', 'map-readout', this.panelContent);
-    this.etaReadout = el('div', 'map-readout', this.panelContent);
-    this.postReadout = el('div', 'map-orbit-after', this.panelContent);
-    this.budgetReadout = el('div', 'map-budget', this.panelContent);
+    const readoutRow = el('div', 'map-node-summary', this.panelContent);
+    this.dvReadout = el('div', 'map-readout', readoutRow);
+    this.etaReadout = el('div', 'map-readout map-readout-eta', readoutRow);
     this.encounterInfo = el('div', 'map-encounter', this.panelContent);
-    this.entryInfo = el('div', 'map-entry-info', this.panelContent);
+    const analysis = el('details', 'map-analysis', this.panelContent) as HTMLDetailsElement;
+    el('summary', '', analysis, 'TRAJECTORY DETAILS');
+    this.postReadout = el('div', 'map-orbit-after', analysis);
+    this.budgetReadout = el('div', 'map-budget', analysis);
+    this.entryInfo = el('div', 'map-entry-info', analysis);
     const resizeHandle = el('div', 'k-window-resize-handle map-panel-resize', this.panel);
     resizeHandle.setAttribute('role', 'separator');
     resizeHandle.setAttribute('aria-label', 'Resize maneuver planner');
@@ -686,6 +757,7 @@ export class MapView {
   setVisible(vis: boolean): void {
     this.visible = vis;
     this.panel.style.display = vis ? '' : 'none';
+    this.cameraControls.style.display = vis ? '' : 'none';
     if (!vis) {
       this.orbitHoverMarker.visible = false;
       this.orbitHoverLabel.hidden = true;
@@ -717,7 +789,7 @@ export class MapView {
   /** Pointer controls (called by game shell). */
   orbitCamera(dx: number, dy: number): void {
     this.camYaw -= dx * 0.005;
-    this.camPitch = Math.max(0.05, Math.min(Math.PI / 2.05, this.camPitch + dy * 0.005));
+    this.camPitch = Math.max(-1.48, Math.min(1.48, this.camPitch + dy * 0.005));
   }
 
   panCamera(dx: number, dy: number): void {
@@ -741,7 +813,34 @@ export class MapView {
       const point = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
       if (point) this.camFocus.lerp(point, 0.12);
     }
-    this.camDist = Math.max(3, Math.min(2.5e5, this.camDist * factor));
+    this.camDist = Math.max(1, Math.min(3e6, this.camDist * factor));
+    this.predictionDirty = true;
+  }
+
+  recenterCamera(): void {
+    this.camFocus.copy(this.desiredFocus);
+    this.predictionDirty = true;
+  }
+
+  fitCamera(scope: 'local' | 'system'): void {
+    if (!this.gameRef) return;
+    const active = this.gameRef.active;
+    if (!active) return;
+    const anchor = this.gameRef.bodyOf(active);
+    const focus = this.gameRef.universe.get(this.focusBodyId);
+    const bodies = scope === 'system'
+      ? [...this.gameRef.universe.bodies.values()]
+      : [focus, ...focus.children];
+    const position = new Vec3();
+    let radius = Math.max(focus.radius * SCALE * 2.5, 18);
+    for (const body of bodies) {
+      this.gameRef.universe.relativePosition(body, anchor, this.gameRef.time, position);
+      const scenePosition = new THREE.Vector3(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+      radius = Math.max(radius, scenePosition.distanceTo(this.desiredFocus) + body.radius * SCALE);
+    }
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
+    this.camDist = Math.max(8, Math.min(3e6, radius / Math.tan(halfFov) * 1.18));
+    this.camFocus.copy(this.desiredFocus);
     this.predictionDirty = true;
   }
 
@@ -749,7 +848,7 @@ export class MapView {
     this.camYaw = 0.8;
     this.camPitch = 0.65;
     this.camDist = 400;
-    this.camFocus.set(0, 0, 0);
+    this.camFocus.copy(this.desiredFocus);
     this.predictionDirty = true;
   }
 
@@ -770,7 +869,7 @@ export class MapView {
     const hoveringOrbit = !!this.orbitHover && !this.dragControl;
     this.orbitHoverMarker.visible = hoveringOrbit;
     this.orbitHoverLabel.hidden = !hoveringOrbit;
-    const material = this.vesselLine.material as THREE.LineBasicMaterial;
+    const material = this.vesselLine.material;
     material.opacity = hoveringOrbit ? 0.72 : (this.node ? 0.32 : 0.85);
     if (hoveringOrbit && this.orbitHover) {
       this.positionAtOrbitPick(this.orbitHover, this.orbitHoverMarker.position);
@@ -974,7 +1073,11 @@ export class MapView {
 
   createNode(inSeconds: number): void {
     const t = this.gameRef?.time ?? 0;
-    this.cb.onCreateManeuverNode({ time: t + inSeconds, prograde: 0, normal: 0, radial: 0 });
+    const afterQueue = this.cb.getManeuverPlans().reduce(
+      (latest, plan) => Math.max(latest, plan.node.time),
+      t,
+    );
+    this.cb.onCreateManeuverNode({ time: afterQueue + inSeconds, prograde: 0, normal: 0, radial: 0 });
     this.predictionDirty = true;
     this.refreshNodePanel();
   }
@@ -1004,23 +1107,27 @@ export class MapView {
   }
 
   private positionAtOrbitPick(pick: OrbitPick, out: THREE.Vector3): void {
-    const positions = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const next = Math.min(positions.count - 1, pick.segmentIndex + 1);
+    const positions = linePositions(this.vesselLine);
+    const count = positions.length / 3;
+    const next = Math.min(count - 1, pick.segmentIndex + 1);
+    const currentOffset = pick.segmentIndex * 3;
+    const nextOffset = next * 3;
     out.set(
-      positions.getX(pick.segmentIndex) + (positions.getX(next) - positions.getX(pick.segmentIndex)) * pick.segmentT,
-      positions.getY(pick.segmentIndex) + (positions.getY(next) - positions.getY(pick.segmentIndex)) * pick.segmentT,
-      positions.getZ(pick.segmentIndex) + (positions.getZ(next) - positions.getZ(pick.segmentIndex)) * pick.segmentT,
+      positions[currentOffset] + (positions[nextOffset] - positions[currentOffset]) * pick.segmentT,
+      positions[currentOffset + 1] + (positions[nextOffset + 1] - positions[currentOffset + 1]) * pick.segmentT,
+      positions[currentOffset + 2] + (positions[nextOffset + 2] - positions[currentOffset + 2]) * pick.segmentT,
     );
   }
 
   private refreshOrbitScreenPoints(): void {
     this.camera.updateMatrixWorld();
-    const positions = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const count = Math.min(positions.count, this.orbitScreenPoints.length);
+    const positions = linePositions(this.vesselLine);
+    const count = Math.min(positions.length / 3, this.orbitScreenPoints.length);
     for (let index = 0; index < count; index++) {
       const point = this.orbitScreenPoints[index];
+      const offset = index * 3;
       this.projectedPoint
-        .set(positions.getX(index), positions.getY(index), positions.getZ(index))
+        .set(positions[offset], positions[offset + 1], positions[offset + 2])
         .project(this.camera);
       point.x = (this.projectedPoint.x + 1) * 0.5 * window.innerWidth;
       point.y = (1 - this.projectedPoint.y) * 0.5 * window.innerHeight;
@@ -1033,6 +1140,17 @@ export class MapView {
   /** Read-only projection samples used by browser interaction checks. */
   orbitInteractionSamples(): Array<{ x: number; y: number; visible: boolean }> {
     return this.orbitScreenPoints.map(({ x, y, visible }) => ({ x, y, visible }));
+  }
+
+  cameraState(): { distance: number; yaw: number; pitch: number; focusX: number; focusY: number; focusZ: number } {
+    return {
+      distance: this.camDist,
+      yaw: this.camYaw,
+      pitch: this.camPitch,
+      focusX: this.camFocus.x,
+      focusY: this.camFocus.y,
+      focusZ: this.camFocus.z,
+    };
   }
 
   /** Projected labeled markers used by browser checks and interaction diagnostics. */
@@ -1087,6 +1205,27 @@ export class MapView {
     this.nodePanel.innerHTML = '';
     this.nodeInputs.clear();
     const node = this.node;
+    const plans = this.cb.getManeuverPlans();
+    this.nodeQueue.innerHTML = '';
+    if (plans.length) {
+      for (let index = 0; index < plans.length; index++) {
+        const plan = plans[index];
+        const button = el('button', 'map-node-chip', this.nodeQueue) as HTMLButtonElement;
+        button.classList.toggle('active', plan.id === this.cb.getManeuverPlan()?.id);
+        button.classList.toggle('overdue', plan.phase === 'overdue');
+        const eta = plan.node.time - (this.gameRef?.time ?? 0);
+        el('span', 'map-node-chip-index', button, String(index + 1).padStart(2, '0'));
+        const copy = el('span', 'map-node-chip-copy', button);
+        el('strong', '', copy, `${nodeDeltaV(plan.node).toFixed(0)} m/s`);
+        el('small', '', copy, eta >= 0 ? `T−${eta.toFixed(0)}s` : 'OVERDUE');
+        button.title = `Select maneuver ${index + 1}`;
+        button.onclick = () => {
+          this.cb.onSelectManeuverNode(plan.id);
+          this.predictionDirty = true;
+          this.refreshNodePanel();
+        };
+      }
+    }
     const phase = this.cb.getManeuverPlan()?.phase ?? null;
     const editingLocked = phase === 'executing' || phase === 'complete';
     this.lastPanelPhase = phase;
@@ -1120,7 +1259,7 @@ export class MapView {
       { key: 'time', label: 'Node ETA' },
     ];
     for (const ax of axes) {
-      const row = el('div', 'map-axis', this.nodePanel);
+      const row = el('div', `map-axis map-axis-${ax.key}`, this.nodePanel);
       el('label', '', row, ax.label);
       const minus = el('button', 'hud-btn', row, '−') as HTMLButtonElement;
       const input = el('input', 'map-number', row) as HTMLInputElement;
@@ -1250,7 +1389,7 @@ export class MapView {
 
     // Bodies in the active body's frame; camera focus may move among them.
     const shown = new Set<string>();
-    const place = (b: Body, pos: Vec3) => {
+    const place = (b: Body, pos: THREE.Vector3) => {
       shown.add(b.id);
       let mesh = this.bodyMeshes.get(b.id);
       const pack = this.cb.getBodyAssetPack?.(b.id) ?? null;
@@ -1267,7 +1406,7 @@ export class MapView {
         this.scene.add(mesh);
       }
       mesh.scale.setScalar(Math.max(b.radius * SCALE, this.camDist * 0.008));
-      mesh.position.set(pos.x * SCALE, pos.y * SCALE, pos.z * SCALE);
+      mesh.position.copy(pos);
       updateCompactBodyOrientation(mesh, b, t);
       const bodyMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of bodyMaterials) {
@@ -1290,18 +1429,18 @@ export class MapView {
       }
     };
 
-    const zero = new Vec3();
+    const zero = new THREE.Vector3();
     place(body, zero);
-    const candidatePos = new Vec3();
+    const candidatePos = new THREE.Vector3();
     const parentOffset = new Vec3();
     for (const candidate of game.universe.bodies.values()) {
       if (candidate === body) continue;
-      game.universe.relativePosition(candidate, body, t, candidatePos);
+      mapBodyScenePosition(game.universe, candidate, body, t, candidatePos);
       place(candidate, candidatePos);
       if (!candidate.orbit || !candidate.parent) continue;
       let line = this.bodyOrbits.get(candidate.id);
       if (!line) {
-        line = orbitLine('#4a6072');
+        line = orbitLine('#4a6072', false, 1.8);
         this.bodyOrbits.set(candidate.id, line);
         this.scene.add(line);
       }
@@ -1360,7 +1499,7 @@ export class MapView {
     const activePlan = plan?.vesselId === v.id && plan.bodyId === body.id ? plan : null;
     const node = activePlan?.node ?? null;
     if ((activePlan?.phase ?? null) !== this.lastPanelPhase) this.refreshNodePanel();
-    (this.vesselLine.material as THREE.LineBasicMaterial).opacity = this.orbitHover
+    this.vesselLine.material.opacity = this.orbitHover
       ? 0.72
       : node ? 0.32 : 0.85;
     this.vesselMarker.position.set(v.pos.x * SCALE, v.pos.y * SCALE, v.pos.z * SCALE);
@@ -1591,12 +1730,13 @@ export class MapView {
       return;
     }
     nodeDirection.normalize();
-    const vertices = this.vesselLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const vertices = linePositions(this.vesselLine);
     const closest = (direction: Readonly<Vec3>): THREE.Vector3 => {
       let best = new THREE.Vector3();
       let bestDot = -Infinity;
-      for (let index = 0; index < vertices.count; index++) {
-        const candidate = new THREE.Vector3(vertices.getX(index), vertices.getY(index), vertices.getZ(index));
+      for (let index = 0; index < vertices.length / 3; index++) {
+        const offset = index * 3;
+        const candidate = new THREE.Vector3(vertices[offset], vertices[offset + 1], vertices[offset + 2]);
         const dot = candidate.clone().normalize().dot(direction);
         if (dot > bestDot) {
           bestDot = dot;
@@ -1725,6 +1865,7 @@ export class MapView {
     this.depositCache.clear();
     this.scene.clear();
     this.panel.remove();
+    this.cameraControls?.remove();
     this.orbitHoverLabel?.remove();
     this.handleHoverLabel?.remove();
     this.gameRef = null;

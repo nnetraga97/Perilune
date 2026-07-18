@@ -64,6 +64,29 @@ describe('map maneuver plan authority', () => {
 
     expect(controller.current?.node).toEqual({ time: 240, prograde: 25, normal: 0, radial: 0 });
   });
+
+  it('queues, selects, and chains multiple maneuver nodes', () => {
+    const controller = new ManeuverPlanController();
+    const first = controller.create('vessel-1', 'veyra', circularOrbit(), {
+      time: 240,
+      prograde: 25,
+      normal: 0,
+      radial: 0,
+    });
+    const second = controller.create('vessel-1', 'veyra', circularOrbit(), {
+      time: 480,
+      prograde: 15,
+      normal: 2,
+      radial: 0,
+    });
+
+    expect(controller.scheduledFor('vessel-1', 'veyra').map((plan) => plan.id)).toEqual([first.id, second.id]);
+    expect(second.referenceOrbit).toEqual(first.targetOrbit);
+    controller.select(first.id);
+    expect(controller.current?.id).toBe(first.id);
+    controller.clear(first.id);
+    expect(controller.current?.id).toBe(second.id);
+  });
 });
 
 describe('screen-space orbit picking', () => {

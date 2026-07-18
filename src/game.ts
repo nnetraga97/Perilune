@@ -102,6 +102,9 @@ class PeriluneGame {
   private editorGesture: EditorGesture | null = null;
   private editorPointers = new Map<number, { x: number; y: number }>();
   private editorPinchDistance = 0;
+  private mapPointers = new Map<number, { x: number; y: number }>();
+  private mapPinchDistance = 0;
+  private mapPinchMidpoint = { x: 0, y: 0 };
   private editorLongPressTimer: number | null = null;
   private lastFrame = performance.now();
   private launchedCraft: Craft | null = null;
@@ -279,7 +282,17 @@ class PeriluneGame {
     });
     this.hud.root.style.display = 'none';
     this.map = new MapView(this.uiRoot, {
-      getManeuverPlan: () => this.maneuver.current,
+      getManeuverPlan: () => {
+        const active = this.game.active;
+        if (!active) return null;
+        return this.maneuver.selectedFor(active.runtime.id, active.runtime.bodyId);
+      },
+      getManeuverPlans: () => {
+        const active = this.game.active;
+        if (!active) return [];
+        return this.maneuver.scheduledFor(active.runtime.id, active.runtime.bodyId);
+      },
+      onSelectManeuverNode: (id) => this.maneuver.select(id),
       onCreateManeuverNode: (node) => this.createManeuverNode(node),
       onUpdateManeuverNode: (node) => this.maneuver.update(node),
       onDeleteManeuverNode: () => this.maneuver.clear(),
@@ -313,12 +326,7 @@ class PeriluneGame {
     this.missionTools = new MissionTools(this.windows, () => this.game, {
       onSwitchVessel: (vesselId) => this.activateVessel(vesselId),
       onSketchNode: (plan) => {
-        this.createManeuverNode({
-          time: plan.burnTime,
-          prograde: plan.departureDv,
-          normal: 0,
-          radial: 0,
-        });
+        this.createManeuverNode(plan.suggestedNode);
         if (!this.map.visible) this.toggleMap();
       },
       onSetTarget: (bodyId) => {
@@ -497,6 +505,8 @@ class PeriluneGame {
       maneuverNode: () => this.maneuver.current ? { ...this.maneuver.current.node } : null,
       mapOrbitSamples: () => this.map.orbitInteractionSamples(),
       mapMarkerSamples: () => this.map.markerInteractionSamples(),
+      mapCameraState: () => this.map.cameraState(),
+      maneuverNodes: () => this.maneuver.all.map((plan) => ({ id: plan.id, ...plan.node })),
       alarmCount: () => this.game.alarms.length,
       fuel: () => {
         const gv = this.game.active;
@@ -1038,6 +1048,23 @@ class PeriluneGame {
         this.editorPointerDown(canvas, e);
         return;
       }
+      if (this.screen === 'flight' && this.map.visible && e.pointerType !== 'mouse') {
+        this.mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (this.mapPointers.size >= 2) {
+          const pointers = [...this.mapPointers.values()].slice(0, 2);
+          this.mapPinchDistance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+          this.mapPinchMidpoint = {
+            x: (pointers[0].x + pointers[1].x) / 2,
+            y: (pointers[0].y + pointers[1].y) / 2,
+          };
+          this.map.cancelPointer();
+          this.draggingMapControl = false;
+          this.dragging = false;
+          canvas.setPointerCapture?.(e.pointerId);
+          e.preventDefault();
+          return;
+        }
+      }
       if (
         this.screen === 'flight' && this.map.visible && e.button === 0 &&
         this.map.beginPointer(e.clientX, e.clientY, e.pointerType)
@@ -1085,6 +1112,24 @@ class PeriluneGame {
         this.editorPointerMove(e);
         return;
       }
+      if (this.screen === 'flight' && this.map.visible && this.mapPointers.has(e.pointerId)) {
+        this.mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (this.mapPointers.size >= 2) {
+          const pointers = [...this.mapPointers.values()].slice(0, 2);
+          const distance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+          const midpoint = {
+            x: (pointers[0].x + pointers[1].x) / 2,
+            y: (pointers[0].y + pointers[1].y) / 2,
+          };
+          if (distance > 0 && this.mapPinchDistance > 0) {
+            this.map.zoomCamera(this.mapPinchDistance / distance, midpoint.x, midpoint.y);
+            this.map.panCamera(this.mapPinchMidpoint.x - midpoint.x, this.mapPinchMidpoint.y - midpoint.y);
+          }
+          this.mapPinchDistance = distance;
+          this.mapPinchMidpoint = midpoint;
+          return;
+        }
+      }
       if (this.screen === 'flight' && this.map.visible && !this.draggingMapControl && e.target === canvas) {
         this.map.updatePointer(e.clientX, e.clientY, e.pointerType);
       }
@@ -1115,6 +1160,8 @@ class PeriluneGame {
         this.editorPointerUp(e);
         return;
       }
+      this.mapPointers.delete(e.pointerId);
+      if (this.mapPointers.size < 2) this.mapPinchDistance = 0;
       if (this.draggingMapControl) {
         this.map.endPointer();
         this.draggingMapControl = false;
@@ -1129,6 +1176,8 @@ class PeriluneGame {
     });
     window.addEventListener('pointercancel', (e) => {
       if (this.screen === 'editor') this.editorPointerUp(e, true);
+      this.mapPointers.delete(e.pointerId);
+      if (this.mapPointers.size < 2) this.mapPinchDistance = 0;
     });
     canvas.addEventListener('pointerleave', (e) => {
       if (this.screen === 'editor' && !this.editorGesture) {
@@ -1463,7 +1512,10 @@ class PeriluneGame {
           this.gpuProfiler.submit('flight', () => this.world.render());
         }
       }
-      const maneuver = this.maneuver.current;
+      const active = this.game.active;
+      const maneuver = active
+        ? this.maneuver.nextFor(active.runtime.id, active.runtime.bodyId)
+        : null;
       this.hud.update(this.game, maneuver?.node ?? null, {
         nodeRemainingDv: maneuver?.remainingDeltaV ?? 0,
         nodeBurnDirection: maneuver?.burnDirection ?? null,
@@ -1504,14 +1556,11 @@ class PeriluneGame {
   /** SAS 'node' mode: aim at the planned burn and track remaining Δv. */
   private updateNodeAssist(dt: number): void {
     const gv = this.game.active;
-    const plan = this.maneuver.current;
-    if (!gv || !plan) return;
+    if (!gv) return;
     const v = gv.runtime;
     const body = this.game.bodyOf(gv);
-    if (plan.vesselId !== v.id || plan.bodyId !== body.id) {
-      this.maneuver.clear();
-      return;
-    }
+    const plan = this.maneuver.nextFor(v.id, body.id);
+    if (!plan) return;
 
     const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
     const powered = analysis.stages.find((stage) => stage.stageIndex >= v.currentStage && stage.thrust > 0)
@@ -1521,20 +1570,28 @@ class PeriluneGame {
       : 0;
     const burnStart = plan.node.time - (Number.isFinite(burnDuration) ? burnDuration / 2 : 0);
     if ((plan.phase === 'planned' || plan.phase === 'overdue') && v.controls.throttle > 0.001 && this.game.time >= burnStart) {
-      this.maneuver.beginExecution();
+      this.maneuver.beginExecution(plan.id);
     }
-    this.maneuver.markOverdue(this.game.time, burnDuration);
+    this.maneuver.markOverdue(this.game.time, burnDuration, 3, plan.id);
 
-    const activePlan = this.maneuver.current;
+    const activePlan = this.maneuver.nextFor(v.id, body.id);
     if (!activePlan) return;
     if (v.sas === 'node') v.sasCustomDir.copy(activePlan.burnDirection);
     if (activePlan.phase === 'executing' && v.controls.throttle > 0.001) {
       const thrustDirection = v.att.rotate(new Vec3(0, 1, 0), new Vec3());
-      this.maneuver.consumeDeliveredDeltaV(v.properAccel, thrustDirection, dt);
-      if (this.maneuver.current?.phase === 'complete') {
+      const remaining = this.maneuver.consumeDeliveredDeltaV(
+        v.properAccel,
+        thrustDirection,
+        dt,
+        0.5,
+        activePlan.id,
+      );
+      if (remaining <= 0) {
         if (v.sas === 'node') v.controls.throttle = 0;
         logEvent(v, this.game.time, 'Maneuver complete.');
-        this.maneuver.clear();
+        this.maneuver.clear(activePlan.id);
+        const achieved = stateToElements(body.mu, v.pos, v.vel, this.game.time);
+        this.maneuver.rebaseFirst(v.id, body.id, achieved);
       }
     }
   }

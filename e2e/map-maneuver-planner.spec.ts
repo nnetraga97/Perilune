@@ -65,6 +65,26 @@ test('map orbit has a forgiving click target and a compact six-direction planner
   await panel.getByRole('spinbutton', { name: 'Tangential value' }).fill('25');
   await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode()?.prograde)).toBeCloseTo(25, 4);
 
+  await panel.getByRole('button', { name: 'Add node in 2 minutes' }).click();
+  await expect(panel.locator('.map-node-chip')).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+    maneuverNodes(): unknown[];
+  }).maneuverNodes().length)).toBe(2);
+  await panel.locator('.map-node-chip').first().click();
+  await expect(panel.locator('.map-node-chip').first()).toHaveClass(/active/);
+
+  const cameraBefore = await page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState());
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState().distance)).toBeLessThan(cameraBefore.distance);
+  await page.getByRole('button', { name: 'Fit entire system' }).click();
+  await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState().distance)).toBeGreaterThan(100_000);
+
   const markers = await page.evaluate(() => (window.__TEST__ as unknown as {
     mapMarkerSamples(): Record<'craft' | 'ap' | 'pe', {
       x: number; y: number; visible: boolean; width: number; height: number;

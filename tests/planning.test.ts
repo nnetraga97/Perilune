@@ -8,6 +8,8 @@ import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { addPart, createCraft, Craft } from '../src/sim/vessel';
 import { planTransfer } from '../src/sim/transfer';
 import { predictEntry } from '../src/sim/entry';
+import { orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
+import { stateToElements } from '../src/core/orbit';
 import { buildAeroModel } from '../src/sim/aero';
 import { computeMassProperties } from '../src/sim/vessel';
 
@@ -58,6 +60,34 @@ describe('transfer planner', () => {
     expect(Math.abs(d)).toBeLessThan(0.05);
   });
 
+  it('refines a live-orbit Palla sketch into a usable non-impact approach', () => {
+    const game = new GameState();
+    const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 105_000);
+    const veyra = game.universe.get('veyra');
+    const palla = game.universe.get('palla');
+    const plan = planTransfer(game.universe, game.time, veyra, palla, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection: 1,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+
+    expect(plan?.accuracy).toBe('refined-intercept');
+    expect(plan?.approachAltitude).toBeGreaterThan(10_000);
+    expect(plan?.approachAltitude).toBeLessThan(100_000);
+    const reference = stateToElements(veyra.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    const prediction = predictTrajectory(
+      game.universe,
+      veyra,
+      orbitAfterNode(reference, plan!.suggestedNode),
+      plan!.suggestedNode.time,
+      plan!.transferTime * 1.45,
+    );
+    expect(prediction.encounter?.bodyId).toBe('palla');
+    expect(prediction.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
+  });
+
   it('plans an interplanetary transfer to Rusk', () => {
     const game = new GameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);
@@ -97,6 +127,24 @@ describe('transfer planner', () => {
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
     expect(Math.abs(d)).toBeLessThan(0.15);
+  });
+
+  it('uses an energy-raising local escape burn for inward planet transfers', () => {
+    const game = new GameState();
+    const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 105_000);
+    const veyra = game.universe.get('veyra');
+    const ashen = game.universe.get('ashen');
+    const plan = planTransfer(game.universe, game.time, veyra, ashen, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection: 1,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+
+    expect(plan?.suggestedNode.prograde).toBeGreaterThan(0);
+    const reference = stateToElements(veyra.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    expect(orbitAfterNode(reference, plan!.suggestedNode).e).toBeGreaterThan(1);
   });
 
   it('returns null for unsupported pairs', () => {

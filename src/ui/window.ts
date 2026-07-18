@@ -275,6 +275,10 @@ export class WindowManager {
     if (win) win.setOpen(!win.open);
   }
 
+  close(id: string): void {
+    this.windows.get(id)?.setOpen(false);
+  }
+
   private applyScreen(): void {
     for (const win of this.windows.values()) {
       const visible = win.def.screen === 'any' || win.def.screen === this.screen;

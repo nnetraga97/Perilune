@@ -9,6 +9,8 @@
  * plenty for planning; the maneuver planner refines the burn.
  */
 import { Vec3 } from '../core/vec3';
+import { periodOf, stateToElements } from '../core/orbit';
+import { orbitAfterNode, predictTrajectory, type ManeuverNode } from './maneuver';
 import type { Body, Universe } from './universe';
 
 export interface TransferPlan {
@@ -34,6 +36,11 @@ export interface TransferPlan {
   departureDv: number;
   /** Capture burn into a low target orbit, when the target has gravity (m/s). */
   arrivalDv: number;
+  /** Node produced for the active vessel. Refined transfers may differ from the textbook estimate. */
+  suggestedNode: ManeuverNode;
+  /** Predicted target periapsis for a numerically verified moon intercept. */
+  approachAltitude?: number;
+  accuracy: 'refined-intercept' | 'phase-estimate';
 }
 
 const _r = new Vec3();
@@ -60,6 +67,79 @@ export interface TransferOptions {
   vesselAngle?: number;
   /** Signed parking-orbit direction. Retrograde is -1. */
   parkingOrbitDirection?: 1 | -1;
+  /** Live vessel state enables numerical intercept refinement. */
+  vesselPosition?: Readonly<Vec3>;
+  vesselVelocity?: Readonly<Vec3>;
+}
+
+function refineMoonIntercept(
+  universe: Universe,
+  time: number,
+  from: Body,
+  moon: Body,
+  opts: TransferOptions,
+  nominalNode: ManeuverNode,
+  transferTime: number,
+): { node: ManeuverNode; approachAltitude: number } | null {
+  type InterceptCandidate = {
+    node: ManeuverNode;
+    approachAltitude: number;
+    score: number;
+  };
+  if (!opts.vesselPosition || !opts.vesselVelocity) return null;
+  const reference = stateToElements(from.mu, opts.vesselPosition, opts.vesselVelocity, time);
+  const parkingPeriod = periodOf(reference);
+  if (!Number.isFinite(parkingPeriod) || reference.e >= 1) return null;
+  const targetAltitude = Math.max(20_000, moon.radius * 0.15);
+  const halfSearch = parkingPeriod * 0.48;
+  const earliest = Math.max(time + 5, nominalNode.time - halfSearch);
+  const latest = nominalNode.time + halfSearch;
+  const horizon = Math.max(transferTime * 1.45, moon.orbitalPeriod * 0.35);
+
+  const evaluate = (burnTime: number): InterceptCandidate | null => {
+    const node = { ...nominalNode, time: burnTime };
+    const postBurn = orbitAfterNode(reference, node);
+    const encounter = predictTrajectory(universe, from, postBurn, burnTime, horizon).encounter;
+    if (!encounter || encounter.bodyId !== moon.id) return null;
+    return {
+      node,
+      approachAltitude: encounter.periapsisAltitude,
+      score: Math.abs(encounter.periapsisAltitude - targetAltitude),
+    };
+  };
+
+  let best: InterceptCandidate | null = null;
+  let bestIndex = 0;
+  const coarseSteps = 24;
+  for (let index = 0; index <= coarseSteps; index++) {
+    const candidate = evaluate(earliest + (latest - earliest) * index / coarseSteps);
+    if (candidate && (!best || candidate.score < best.score)) {
+      best = candidate;
+      bestIndex = index;
+    }
+  }
+  if (!best) return null;
+
+  let lo = earliest + (latest - earliest) * Math.max(0, bestIndex - 1) / coarseSteps;
+  let hi = earliest + (latest - earliest) * Math.min(coarseSteps, bestIndex + 1) / coarseSteps;
+  for (let pass = 0; pass < 5; pass++) {
+    let passBest: InterceptCandidate | null = null;
+    let passIndex = 0;
+    for (let index = 0; index <= 6; index++) {
+      const candidate = evaluate(lo + (hi - lo) * index / 6);
+      if (candidate && (!passBest || candidate.score < passBest.score)) {
+        passBest = candidate;
+        passIndex = index;
+      }
+    }
+    if (!passBest) break;
+    if (passBest.score < best.score) best = passBest;
+    const width = (hi - lo) / 6;
+    const center = lo + width * passIndex;
+    lo = Math.max(earliest, center - width);
+    hi = Math.min(latest, center + width);
+  }
+  return best ? { node: best.node, approachAltitude: best.approachAltitude } : null;
 }
 
 function nearestFuturePhaseTime(
@@ -150,6 +230,14 @@ function planMoonTransfer(
     Math.sqrt(vInf * vInf + (2 * moon.mu) / rCap) - Math.sqrt(moon.mu / rCap);
 
   const windowTime = time + Math.max(0, timeToWindow);
+  const nominalNode: ManeuverNode = {
+    time: windowTime,
+    prograde: departureDv,
+    normal: 0,
+    radial: 0,
+  };
+  const refined = refineMoonIntercept(universe, time, from, moon, opts, nominalNode, tT);
+  const suggestedNode = refined?.node ?? nominalNode;
   return {
     fromId: from.id,
     targetId: moon.id,
@@ -159,10 +247,13 @@ function planMoonTransfer(
     phaseNeeded,
     timeToWindow: Math.max(0, timeToWindow),
     windowTime,
-    burnTime: windowTime,
+    burnTime: suggestedNode.time,
     transferTime: tT,
     departureDv,
     arrivalDv,
+    suggestedNode,
+    approachAltitude: refined?.approachAltitude,
+    accuracy: refined ? 'refined-intercept' : 'phase-estimate',
   };
 }
 
@@ -228,6 +319,15 @@ function planInterplanetary(
   const arrivalDv =
     Math.sqrt(vInfArr * vInfArr + (2 * target.mu) / rCap) - Math.sqrt(target.mu / rCap);
 
+  const suggestedNode: ManeuverNode = {
+    time: burnTime,
+    // The parking-orbit burn always raises local orbital energy. Inward vs.
+    // outward heliocentric motion is selected by the ejection point/asymptote,
+    // not by reversing the local escape burn.
+    prograde: departureDv,
+    normal: 0,
+    radial: 0,
+  };
   return {
     fromId: from.id,
     targetId: target.id,
@@ -242,6 +342,8 @@ function planInterplanetary(
     transferTime: tT,
     departureDv,
     arrivalDv,
+    suggestedNode,
+    accuracy: 'phase-estimate',
   };
 }
 
