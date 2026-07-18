@@ -22,7 +22,7 @@ describe('API error delivery', () => {
     mocks.logger.with.mockReturnValue(mocks.logger);
   });
 
-  it('flushes after a captured exception, but not for typed or direct 5xx responses', async () => {
+  it('flushes telemetry after every request so buffered serverless logs are delivered', async () => {
     await observeApiRequest(new Request('https://perilune.test/api/test'), async () => {
       throw new Error('boom');
     });
@@ -34,6 +34,6 @@ describe('API error delivery', () => {
       throw new HttpError(503, 'UNAVAILABLE', 'Try later');
     });
     await observeApiRequest(new Request('https://perilune.test/api/test'), async () => new Response(null, { status: 503 }));
-    expect(mocks.flush).not.toHaveBeenCalled();
+    expect(mocks.flush).toHaveBeenCalledTimes(2);
   });
 });

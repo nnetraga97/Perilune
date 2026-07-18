@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sentry = vi.hoisted(() => ({
   captureServerError: vi.fn(),
+  captureServerLog: vi.fn(),
   flushServerTelemetry: vi.fn().mockResolvedValue(true),
 }));
 
@@ -13,6 +14,7 @@ describe('server logger', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     sentry.captureServerError.mockClear();
+    sentry.captureServerLog.mockClear();
   });
 
   it('uses console severity and preserves latest validated child request ID', () => {
@@ -28,6 +30,9 @@ describe('server logger', () => {
     info.mockClear();
     log.with({ requestId: 'child-id' }).info('cloud.sync', { result: 'pending', requestId: 'caller-id' });
     expect(info.mock.calls[0]?.[1]).toMatchObject({ requestId: 'child-id' });
+    expect(sentry.captureServerLog).toHaveBeenLastCalledWith('info', 'cloud.sync', expect.objectContaining({
+      event: 'cloud.sync', requestId: 'child-id', result: 'pending',
+    }));
   });
 
   it('captures exactly one supplied exception for error and none for warn', () => {
@@ -40,6 +45,9 @@ describe('server logger', () => {
     expect(sentry.captureServerError).toHaveBeenCalledTimes(1);
     expect(sentry.captureServerError).toHaveBeenCalledWith(error, expect.objectContaining({
       requestId: 'req-1', event: 'api.error',
+    }));
+    expect(sentry.captureServerLog).toHaveBeenCalledWith('error', 'api.error', expect.objectContaining({
+      event: 'api.error', requestId: 'req-1', status: 500,
     }));
   });
 });

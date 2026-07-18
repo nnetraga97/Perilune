@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent, Event } from '@sentry/node';
+import type { LogEvent, LogFields, LogLevel } from '../src/telemetry/logContract.js';
 
 const SAFE_TAGS = new Set(['requestId', 'event', 'operation', 'dependency']);
 const enabled = Boolean(process.env.SENTRY_DSN);
@@ -64,6 +65,7 @@ if (enabled) {
     release: process.env.VERCEL_GIT_COMMIT_SHA,
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
     sendDefaultPii: false,
+    enableLogs: true,
     tracesSampleRate: process.env.VERCEL_ENV === 'production' ? 0.1 : 0,
     beforeSend: scrubServerSentryEvent,
     beforeSendTransaction: scrubServerSentryTransaction,
@@ -82,6 +84,19 @@ export function captureServerError(
     if (context.dependency) scope.setTag('dependency', context.dependency);
     Sentry.captureException(error);
   });
+}
+
+export function captureServerLog(
+  level: LogLevel,
+  event: LogEvent,
+  fields: LogFields = {},
+): void {
+  if (!enabled) return;
+  const attributes = { ...fields, event };
+  if (level === 'error') Sentry.logger.error(event, attributes);
+  else if (level === 'warn') Sentry.logger.warn(event, attributes);
+  else if (level === 'debug') Sentry.logger.debug(event, attributes);
+  else Sentry.logger.info(event, attributes);
 }
 
 export function flushServerTelemetry(timeout = 750): Promise<boolean> {

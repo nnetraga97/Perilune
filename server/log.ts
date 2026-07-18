@@ -7,7 +7,7 @@ import {
   type LogLevel,
   type LogValue,
 } from '../src/telemetry/logContract.js';
-import { captureServerError, flushServerTelemetry } from './sentry.js';
+import { captureServerError, captureServerLog, flushServerTelemetry } from './sentry.js';
 
 export interface Logger {
   debug(event: LogEvent, fields?: LogFields): void;
@@ -53,6 +53,7 @@ class ServerLogger implements Logger {
       ...sanitizeLogFields(event, fields),
       ...this.childFields,
     };
+    captureServerLog(level, event, envelope);
     const method = level === 'error' ? console.error : level === 'warn' ? console.warn : level === 'debug' ? console.debug : console.info;
     if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') method(JSON.stringify(envelope));
     else method(`[${event}]`, envelope);

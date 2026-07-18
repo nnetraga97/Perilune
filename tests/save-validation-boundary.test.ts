@@ -15,7 +15,7 @@ describe('save validation boundary', () => {
     const source = readFileSync(new URL('../src/save/validation.ts', import.meta.url), 'utf8');
     const runtimeImports = [...source.matchAll(/^import(?!\s+type\b)[^'\"]*['\"]([^'\"]+)['\"]/gm)]
       .map((match) => match[1]);
-    expect(runtimeImports).toEqual(['../core/interstageShroud']);
+    expect(runtimeImports).toEqual(['../core/interstageShroud.js']);
     expect(source).not.toMatch(/from ['\"]\.\.\/(?:sim|content|render|telemetry)\//);
   });
 

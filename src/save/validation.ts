@@ -1,4 +1,4 @@
-import { sanitizeInterstageShroudSpec } from '../core/interstageShroud';
+import { sanitizeInterstageShroudSpec } from '../core/interstageShroud.js';
 import type { SaveGame, SavedBufferedResult, SavedLedgerEntry } from './schema';
 
 export const SAVE_VERSION = 9;

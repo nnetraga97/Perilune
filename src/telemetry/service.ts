@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/browser';
 import { inject, track } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
-import type { LogEvent, LogFields } from './logContract';
+import type { LogEvent, LogFields, LogLevel } from './logContract';
 import {
   safeAnalyticsProperties,
   scrubSentryBreadcrumb,
@@ -45,6 +45,15 @@ export class TelemetryService {
     Sentry.addBreadcrumb({ category: `perilune.${event}`, level: 'info', data: { ...fields } });
   }
 
+  captureLog(level: LogLevel, event: LogEvent, fields: LogFields = {}): void {
+    if (!this.enabled || !this.sentryStarted) return;
+    const attributes = { ...fields, event };
+    if (level === 'error') Sentry.logger.error(event, attributes);
+    else if (level === 'warn') Sentry.logger.warn(event, attributes);
+    else if (level === 'debug') Sentry.logger.debug(event, attributes);
+    else Sentry.logger.info(event, attributes);
+  }
+
   track(name: TelemetryEventName, properties: Readonly<Record<string, unknown>> = {}): void {
     if (!this.enabled) return;
     track(name, safeAnalyticsProperties(name, properties));
@@ -74,6 +83,7 @@ export class TelemetryService {
         release: __PERILUNE_RELEASE__,
         environment: import.meta.env.MODE,
         sendDefaultPii: false,
+        enableLogs: true,
         tracesSampleRate: import.meta.env.PROD ? 0.1 : 0,
         integrations: import.meta.env.PROD ? [Sentry.browserTracingIntegration()] : [],
         beforeBreadcrumb: (breadcrumb) => this.enabled ? scrubSentryBreadcrumb(breadcrumb) : null,

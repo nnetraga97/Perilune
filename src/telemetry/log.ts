@@ -37,6 +37,7 @@ class ClientLogger implements BrowserLogger {
     if (!telemetry.isEnabled()) return;
     const safeFields = { ...sanitizeLogFields(event, fields), ...this.childFields };
     telemetry.addBreadcrumb(event, safeFields);
+    telemetry.captureLog(level, event, safeFields);
     if (!import.meta.env.DEV) return;
     const method = level === 'error' ? console.error : level === 'warn' ? console.warn : level === 'debug' ? console.debug : console.info;
     method(`[${event}]`, safeFields);

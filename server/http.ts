@@ -18,7 +18,6 @@ export class HttpError extends Error {
 }
 
 const REQUEST_IDS = new WeakMap<Request, string>();
-const CAPTURED_ERROR_RESPONSES = new WeakSet<Response>();
 
 export function requestId(request: Request): string {
   const existing = REQUEST_IDS.get(request);
@@ -90,9 +89,7 @@ export function methodNotAllowed(allowed: readonly string[], id: string): Respon
 export function safeHandlerError(error: unknown, id: string): Response {
   if (error instanceof HttpError) return jsonError(error.code, error.message, error.status, id);
   log.with({ requestId: id }).error('api.error', error, { status: 500 });
-  const response = jsonError('INTERNAL_ERROR', 'The request could not be completed', 500, id);
-  CAPTURED_ERROR_RESPONSES.add(response);
-  return response;
+  return jsonError('INTERNAL_ERROR', 'The request could not be completed', 500, id);
 }
 
 export async function observeApiRequest(
@@ -115,7 +112,9 @@ export async function observeApiRequest(
     status: response.status,
     durationMs,
   });
-  if (CAPTURED_ERROR_RESPONSES.has(response)) await flushServerTelemetry();
+  // Sentry batches logs. Flush before the serverless invocation can freeze so
+  // successful request logs are delivered as reliably as captured errors.
+  await flushServerTelemetry();
   const headers = new Headers(response.headers);
   headers.set('x-request-id', id);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
