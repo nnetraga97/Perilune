@@ -22,6 +22,7 @@ const EVENT_FIELD_POLICY = {
   'dep.supabase.error': ['operation', 'reason'],
   'ai.briefing.ok': ['model', 'status', 'durationMs', 'inputTokens', 'outputTokens', 'cache'],
   'ai.briefing.fail': ['status', 'reason'],
+  'ai.briefing.audit.fail': ['status', 'reason'],
   'ai.briefing.ratelimited': ['status', 'retryAfterSeconds'],
   'client.boot.error': ['source', 'errorType', 'requestId'],
   'account.request.error': ['operation', 'status', 'reason', 'requestId'],

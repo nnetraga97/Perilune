@@ -48,5 +48,11 @@ describe('structured log field policy', () => {
     })).toEqual({
       model: 'gpt-5.6-luna', status: 200, durationMs: 640, inputTokens: 420, outputTokens: 75, cache: 'miss',
     });
+    expect(sanitizeLogFields('ai.briefing.audit.fail', {
+      status: 503,
+      reason: 'database_write_failed',
+      snapshot: { private: true },
+      advisory: { private: true },
+    })).toEqual({ status: 503, reason: 'database_write_failed' });
   });
 });

@@ -2,6 +2,7 @@ import { createFlightDirectorHandler, createOpenAIFlightDirectorProvider } from 
 import { HttpError, requestId, safeHandlerError } from './http.js';
 import { RateLimiter } from './rateLimit.js';
 import { createCacheStore, type CacheStore } from './redis.js';
+import { createSupabaseFlightDirectorAuditRepository } from './flightDirectorAudit.js';
 
 interface MemoryEntry { value: unknown; expiresAt: number }
 interface MemoryCounter { count: number; expiresAt: number }
@@ -51,11 +52,21 @@ function runtimeHandler(): (request: Request) => Promise<Response> {
   if (production && !redisUrl) {
     throw new HttpError(503, 'CONFIG_UNAVAILABLE', 'Production AI rate limiting is not configured');
   }
+  const supabaseUrl = process.env.SUPABASE_URL?.trim() || null;
+  const supabaseServiceRoleKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY
+  )?.trim() || null;
+  if (production && (!supabaseUrl || !supabaseServiceRoleKey)) {
+    throw new HttpError(503, 'CONFIG_UNAVAILABLE', 'Production AI auditing is not configured');
+  }
   const cache = redisUrl ? createCacheStore({ redisUrl }) : createMemoryCache();
   handler = createFlightDirectorHandler({
     provider: createOpenAIFlightDirectorProvider(apiKey),
     limiter: new RateLimiter(cache),
     cache,
+    audit: supabaseUrl && supabaseServiceRoleKey
+      ? createSupabaseFlightDirectorAuditRepository({ supabaseUrl, supabaseServiceRoleKey })
+      : undefined,
   });
   return handler;
 }

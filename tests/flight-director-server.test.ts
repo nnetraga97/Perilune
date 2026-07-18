@@ -6,6 +6,11 @@ import {
 } from '../server/flightDirector';
 import type { CacheStore } from '../server/redis';
 import {
+  createSupabaseFlightDirectorAuditRepository,
+  type FlightDirectorAuditRecord,
+  type FlightDirectorAuditRepository,
+} from '../server/flightDirectorAudit';
+import {
   FLIGHT_DIRECTOR_MODEL,
   isFlightDirectorAdvisory,
   type FlightDirectorAdvisory,
@@ -88,10 +93,16 @@ function request(body: unknown = { snapshot: snapshot() }): Request {
   });
 }
 
-function dependencies(provider: FlightDirectorProvider, cache = new MemoryCache(), allowed = true) {
+function dependencies(
+  provider: FlightDirectorProvider,
+  cache = new MemoryCache(),
+  allowed = true,
+  audit?: FlightDirectorAuditRepository,
+) {
   return {
     provider,
     cache,
+    audit,
     limiter: {
       consume: vi.fn(async () => ({ allowed, retryAfterSeconds: 60, backendAvailable: true })),
     },
@@ -117,7 +128,10 @@ describe('flight director server', () => {
   it('returns grounded structured guidance and caches identical snapshots', async () => {
     const generate = vi.fn(async () => ({ advisory: advisory(), inputTokens: 420, outputTokens: 75 }));
     const cache = new MemoryCache();
-    const handler = createFlightDirectorHandler(dependencies({ generate }, cache));
+    const auditCreate = vi.fn(
+      async (_record: FlightDirectorAuditRecord): Promise<void> => {},
+    );
+    const handler = createFlightDirectorHandler(dependencies({ generate }, cache, true, { create: auditCreate }));
 
     const first = await handler(request());
     const second = await handler(request());
@@ -129,6 +143,29 @@ describe('flight director server', () => {
     });
     expect(await second.json()).toMatchObject({ ok: true, data: { cached: true } });
     expect(generate).toHaveBeenCalledTimes(1);
+    expect(auditCreate).toHaveBeenCalledTimes(2);
+    expect(auditCreate.mock.calls[0]?.[0]).toMatchObject({
+      model: FLIGHT_DIRECTOR_MODEL,
+      cached: false,
+      inputTokens: 420,
+      outputTokens: 75,
+      snapshot: { phase: { situation: 'suborbital' } },
+      advisory: { nextAction: { actionId: 'raise-periapsis' } },
+    });
+    expect(auditCreate.mock.calls[1]?.[0]).toMatchObject({ cached: true, inputTokens: 0, outputTokens: 0 });
+  });
+
+  it('keeps a database audit failure from interrupting the briefing', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const provider = { generate: async () => ({ advisory: advisory(), inputTokens: 100, outputTokens: 40 }) };
+    const audit = { create: async () => { throw new Error('private database detail'); } };
+
+    const response = await createFlightDirectorHandler(dependencies(provider, new MemoryCache(), true, audit))(request());
+
+    expect(response.status).toBe(200);
+    expect(warning).toHaveBeenCalledOnce();
+    expect(warning.mock.calls[0]?.[0]).toBe('[ai.briefing.audit.fail]');
+    expect(warning.mock.calls[0]?.[1]).toMatchObject({ reason: 'database_write_failed' });
   });
 
   it('rejects evidence that is absent from the supplied snapshot', async () => {
@@ -175,5 +212,44 @@ describe('flight director server', () => {
     });
     expect(body.input).toContain('telemetrySnapshot');
     expect(result).toMatchObject({ advisory: { tone: 'warning' }, inputTokens: 321, outputTokens: 54 });
+  });
+
+  it('writes the exact structured snapshot and advisory through the service-role REST endpoint', async () => {
+    const fetchImpl = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(null, { status: 201 }),
+    );
+    const repository = createSupabaseFlightDirectorAuditRepository({
+      supabaseUrl: 'https://project.supabase.co',
+      supabaseServiceRoleKey: 'test-service-role',
+    }, fetchImpl as typeof fetch);
+
+    await repository.create({
+      requestId: 'iad1::audit-1',
+      createdAt: '2026-07-18T19:30:00.000Z',
+      model: FLIGHT_DIRECTOR_MODEL,
+      cached: false,
+      durationMs: 2_900,
+      inputTokens: 982,
+      outputTokens: 356,
+      snapshot: snapshot(),
+      advisory: advisory(),
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+    const row = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(String(url)).toBe('https://project.supabase.co/rest/v1/flight_director_audits');
+    expect(init?.headers).toMatchObject({
+      apikey: 'test-service-role',
+      authorization: 'Bearer test-service-role',
+      prefer: 'return=minimal',
+    });
+    expect(row).toMatchObject({
+      request_id: 'iad1::audit-1',
+      cached: false,
+      snapshot: { mission: { objective: 'Reach a stable orbit' } },
+      advisory: { headline: 'Periapsis is still below ground' },
+    });
+    expect(JSON.stringify(row)).not.toContain('test-service-role');
   });
 });

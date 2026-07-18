@@ -13,6 +13,7 @@ import { clientIp, HttpError, jsonError, jsonOk, methodNotAllowed, readJsonBody,
 import { log } from './log.js';
 import { rateLimitIpIdentity, type RateLimiter } from './rateLimit.js';
 import type { CacheStore } from './redis.js';
+import type { FlightDirectorAuditRecord, FlightDirectorAuditRepository } from './flightDirectorAudit.js';
 
 const REQUEST_MAX_BYTES = 24 * 1024;
 const CACHE_SECONDS = 15;
@@ -88,6 +89,7 @@ export interface FlightDirectorHandlerDependencies {
   provider: FlightDirectorProvider;
   limiter: Pick<RateLimiter, 'consume'>;
   cache: Pick<CacheStore, 'getJson' | 'setJson'>;
+  audit?: FlightDirectorAuditRepository;
 }
 
 class OpenAIProviderError extends Error {
@@ -184,6 +186,19 @@ function hasGroundedEvidence(advisory: FlightDirectorAdvisory, snapshot: FlightD
   return advisory.evidenceKeys.length > 0 && advisory.evidenceKeys.every((key) => available.has(key));
 }
 
+async function writeAudit(
+  repository: FlightDirectorAuditRepository | undefined,
+  record: FlightDirectorAuditRecord,
+  requestLog: ReturnType<typeof log.with>,
+): Promise<void> {
+  if (!repository) return;
+  try {
+    await repository.create(record);
+  } catch {
+    requestLog.warn('ai.briefing.audit.fail', { status: 503, reason: 'database_write_failed' });
+  }
+}
+
 export function createFlightDirectorHandler(
   dependencies: FlightDirectorHandlerDependencies,
 ): (request: Request) => Promise<Response> {
@@ -219,6 +234,17 @@ export function createFlightDirectorHandler(
       const key = cacheKey(snapshot);
       const cached = await dependencies.cache.getJson<FlightDirectorAdvisory>(key);
       if (isFlightDirectorAdvisory(cached) && hasGroundedEvidence(cached, snapshot)) {
+        await writeAudit(dependencies.audit, {
+          requestId: id,
+          createdAt: new Date().toISOString(),
+          model: FLIGHT_DIRECTOR_MODEL,
+          cached: true,
+          durationMs: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          snapshot,
+          advisory: cached,
+        }, requestLog);
         requestLog.info('ai.briefing.ok', {
           model: FLIGHT_DIRECTOR_MODEL, status: 200, durationMs: 0, inputTokens: 0, outputTokens: 0, cache: 'hit',
         });
@@ -249,10 +275,22 @@ export function createFlightDirectorHandler(
         );
       }
       await dependencies.cache.setJson(key, result.advisory, CACHE_SECONDS);
+      const durationMs = Math.max(0, Math.round(performance.now() - started));
+      await writeAudit(dependencies.audit, {
+        requestId: id,
+        createdAt: new Date().toISOString(),
+        model: FLIGHT_DIRECTOR_MODEL,
+        cached: false,
+        durationMs,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        snapshot,
+        advisory: result.advisory,
+      }, requestLog);
       requestLog.info('ai.briefing.ok', {
         model: FLIGHT_DIRECTOR_MODEL,
         status: 200,
-        durationMs: Math.max(0, Math.round(performance.now() - started)),
+        durationMs,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         cache: 'miss',
