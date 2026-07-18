@@ -1,6 +1,12 @@
 import type { AeroForces } from '../sim/aero';
 
-export const ENTRY_FLUX_REFERENCE = 4.0e8;
+/**
+ * Heat flux (0.5·ρ·v³, W/m²) that saturates the visual signal. Calibrated to
+ * this system's entry regime: Veyra LEO decay (~3.2 km/s) peaks near 0.6 and
+ * a moon/interplanetary return (~4.5–6 km/s) reaches the full stack, instead
+ * of reserving the upper layers for speeds no survivable craft attains.
+ */
+export const ENTRY_FLUX_REFERENCE = 8.0e7;
 
 export const ENTRY_THRESHOLDS = Object.freeze({
   glow: 0.025,
