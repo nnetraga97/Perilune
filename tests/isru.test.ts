@@ -171,6 +171,7 @@ describe('conversion', () => {
     const propMid = tank.resources.propellant ?? 0;
     expect(oreMid).toBeLessThan(60);
     expect(propMid).toBeGreaterThan(0);
+    expect(game.flags['campaign:surface-industry']).toBe(true);
     // Yield: propellant units = ore units × yield × densityRatio.
     const kilnDef = partById('conv-kiln').converter!;
     const expectedRatio = kilnDef.yield * (RESOURCE_DENSITY.ore / RESOURCE_DENSITY.propellant);

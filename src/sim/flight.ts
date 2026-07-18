@@ -948,18 +948,32 @@ function stepThermal(
   }
   // Which end of the craft faces the airflow decides who gets hot.
   const w = (1 + v.aero.flowAlign) / 2; // 1 = nose-first, 0 = tail-first
+  const shieldFracs: number[] = [];
+  for (const part of v.craft.parts) {
+    if (defOf(part).heatShield) shieldFracs.push(v.aeroModel.axialFrac.get(part.key) ?? 0.5);
+  }
   for (const p of v.craft.parts) {
     const def = defOf(p);
     const frac = v.aeroModel.axialFrac.get(p.key) ?? 0.5;
-    const exposure =
+    let exposure =
       0.15 + 0.85 * (w * frac * frac + (1 - w) * (1 - frac) * (1 - frac));
+    // The aero model is axial rather than mesh-resolved: a shield mounted at
+    // either end protects the stack behind it while the shield itself absorbs
+    // and ablates. This keeps protection authoritative even during attitude
+    // transients that the coarse single-axis pressure model cannot resolve.
+    if (
+      !def.heatShield
+      && shieldFracs.some((shieldFrac) => shieldFrac <= 0.5 ? frac > shieldFrac : frac < shieldFrac)
+    ) {
+      exposure *= 0.08;
+    }
     let temp = p.temperature ?? 280;
     // Heat shields facing the flow soak heat into ablator instead.
     // Scale tuned so subsonic flight is warm at most and re-entry at
     // ~2.8 km/s demands a heat shield (see ascent integration test).
-    const heatIn = (flux * exposure) / 6.0e6;
+    const heatIn = (flux * exposure) / 4.0e5;
     if (def.heatShield && (p.resources.ablator ?? 0) > 0 && heatIn > 2) {
-      const ablate = Math.min(p.resources.ablator ?? 0, heatIn * dt * 0.09);
+      const ablate = Math.min(p.resources.ablator ?? 0, heatIn * dt * 0.008);
       p.resources.ablator = (p.resources.ablator ?? 0) - ablate;
       temp += heatIn * dt * 0.12; // shield still warms, slowly
     } else {

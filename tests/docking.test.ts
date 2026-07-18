@@ -54,6 +54,7 @@ describe('docking and undocking', () => {
       }
     }
     expect(merged, 'vessels never docked').toBe(true);
+    expect(game.flags['campaign:first-docking']).toBe(true);
 
     const station = game.vessels[0];
     expect(station.runtime.craft.parts.length).toBe(partsA + partsB);

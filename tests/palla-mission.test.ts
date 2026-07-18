@@ -294,7 +294,8 @@ describe('Palla round trip', () => {
         const horizontal = relative.clone().addScaled(localUp, -radial).length();
         throw new Error(
           `destroyed during re-entry: radial=${radial.toFixed(3)} horizontal=${horizontal.toFixed(3)} ` +
-          v.events.slice(-4).map((e) => e.text).join('; '),
+          `flowAlign=${v.aero.flowAlign.toFixed(3)} parts=${v.craft.parts.map((part) => part.defId).join(',')} ` +
+          v.events.slice(-8).map((e) => e.text).join('; '),
         );
       }
       if (v.situation === 'landed' || v.situation === 'splashed') {

@@ -16,7 +16,8 @@ function buildOrbiter(): Craft {
   const craft = createCraft('Ascent Reference');
   const pod = addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 11.4, z: 0 });
   addPart(craft, 'chute-main', pod.key, 'stack-top', { x: 0, y: 12.1, z: 0 });
-  const decPod = addPart(craft, 'dec-s', pod.key, 'stack-bottom', { x: 0, y: 10.9, z: 0 });
+  const shield = addPart(craft, 'shield-s', pod.key, 'stack-bottom', { x: 0, y: 10.9, z: 0 });
+  const decPod = addPart(craft, 'dec-s', shield.key, 'stack-bottom', { x: 0, y: 10.55, z: 0 });
   const tankU = addPart(craft, 'tank-s4', decPod.key, 'stack-bottom', { x: 0, y: 9.0, z: 0 });
   const engU = addPart(craft, 'eng-aspen', tankU.key, 'stack-bottom', { x: 0, y: 6.9, z: 0 });
   const dec = addPart(craft, 'dec-s', engU.key, 'stack-bottom', { x: 0, y: 6.3, z: 0 });
@@ -215,4 +216,37 @@ describe('full ascent to orbit', () => {
     // Pod survived; crew home.
     expect(v.craft.parts.some((p) => p.defId === 'pod-voyager')).toBe(true);
   }, 120_000);
+});
+
+function flyReferenceEntry(withShield: boolean): { alive: boolean; situation: string } {
+  const craft = createCraft(withShield ? 'Shielded Capsule' : 'Bare Capsule');
+  const pod = addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
+  const chute = addPart(craft, 'chute-main', pod.key, 'stack-top', { x: 0, y: 0.7, z: 0 });
+  if (withShield) addPart(craft, 'shield-s', pod.key, 'stack-bottom', { x: 0, y: -0.55, z: 0 });
+  craft.stages = [{ partKeys: [chute.key] }];
+
+  const game = new GameState();
+  const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
+  const vessel = gv.runtime;
+  vessel.sas = 'retrograde';
+  for (let i = 0; i < 300; i++) game.update(PHYSICS_DT);
+  vessel.pos.set(1_082_000, 0, 0);
+  vessel.vel.set(-250, 2_700, 0);
+  game.fireStage(gv);
+
+  for (
+    let i = 0;
+    i < 150_000 && game.vessels.includes(gv) && vessel.situation !== 'landed' && vessel.situation !== 'splashed';
+    i++
+  ) {
+    game.update(PHYSICS_DT);
+  }
+  return { alive: game.vessels.includes(gv), situation: vessel.situation };
+}
+
+describe('foundations-tier orbital return', () => {
+  it('requires an Emberguard for the reference Veyra entry', () => {
+    expect(flyReferenceEntry(false)).toMatchObject({ alive: false, situation: 'destroyed' });
+    expect(flyReferenceEntry(true)).toMatchObject({ alive: true });
+  });
 });

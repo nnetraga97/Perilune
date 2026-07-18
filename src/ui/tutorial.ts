@@ -33,9 +33,15 @@ const STEPS: TutorialStep[] = [
     done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).pod),
   },
   {
+    title: 'Bring it home intact',
+    highlight: '[data-cat="thermal"]',
+    text: 'Open THERMAL and attach an Emberguard S beneath the pod. Orbital return is fast enough to destroy an unprotected capsule.',
+    done: (ctx) => ctx.editor.craft.parts.some((p) => defOf(p).heatShield),
+  },
+  {
     title: 'Something to burn',
     highlight: '[data-cat="tanks"]',
-    text: 'Rockets are mostly propellant. From TANKS, attach a fuel tank below the pod (click the bottom attachment node).',
+    text: 'Rockets are mostly propellant. From TANKS, attach a fuel tank below the heat shield (click its bottom attachment node).',
     done: (ctx) => ctx.editor.craft.parts.some((p) => (p.resources.propellant ?? 0) > 0),
   },
   {

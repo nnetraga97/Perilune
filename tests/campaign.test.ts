@@ -6,8 +6,11 @@ import {
   craftCost,
   createCampaign,
   isPartUnlocked,
+  PROGRAM_RESERVE_FLOOR,
+  PROGRAM_RESERVE_THRESHOLD,
   purchaseUpgrade,
   REPEATABLE_UPGRADES,
+  requestProgramReserve,
   settleContracts,
   TECHNOLOGIES,
   technologyForPart,
@@ -43,11 +46,43 @@ describe('campaign progression', () => {
     expect(instruments).toEqual({ ok: true, sciencePoints: 5 });
   });
 
+  it('paces late technology beyond a single Palla mission', () => {
+    expect(TECHNOLOGIES.find((technology) => technology.id === 'precision-science')?.scienceCost).toBe(180);
+    expect(TECHNOLOGIES.find((technology) => technology.id === 'crewed-expeditions')?.scienceCost).toBe(240);
+    expect(TECHNOLOGIES.find((technology) => technology.id === 'planetary-industry')?.scienceCost).toBe(300);
+    expect(TECHNOLOGIES.reduce((total, technology) => total + technology.scienceCost, 0)).toBe(985);
+  });
+
   it('charges craft from authoritative part prices', () => {
     const craft = buildTwoStageRocket();
     const expected = craft.parts.reduce((total, part) => total + partById(part.defId).cost, 0);
     expect(craftCost(craft)).toBe(expected);
     expect(craftCost(craft)).toBeGreaterThan(0);
+  });
+
+  it('keeps solid boosters cheaper without erasing liquid-engine progression', () => {
+    const flare = partById('srb-flare');
+    const pike = partById('eng-pike');
+    const torch = partById('srb-torch');
+    const mule = partById('eng-mule');
+    const flareCostPerKn = flare.cost / (flare.engine!.thrustVac / 1_000);
+    const pikeCostPerKn = pike.cost / (pike.engine!.thrustVac / 1_000);
+    const torchCostPerKn = torch.cost / (torch.engine!.thrustVac / 1_000);
+    const muleCostPerKn = mule.cost / (mule.engine!.thrustVac / 1_000);
+
+    expect(flareCostPerKn).toBeLessThan(pikeCostPerKn);
+    expect(pikeCostPerKn / flareCostPerKn).toBeLessThan(2);
+    expect(torchCostPerKn).toBeLessThan(muleCostPerKn);
+    expect(muleCostPerKn / torchCostPerKn).toBeLessThan(2);
+  });
+
+  it('places return, landing, and communications hardware before their missions', () => {
+    expect(partById('shield-s').tech).toBe('foundations');
+    expect(partById('leg-lander').tech).toBe('orbital-engineering');
+    expect(partById('leg-lander').crashTolerance).toBeGreaterThan(partById('girder-s').crashTolerance);
+    expect(partById('ant-wayline').tech).toBe('deep-space-systems');
+    expect(partById('ant-whip').antenna!.range).toBeLessThan(partById('ant-wayline').antenna!.range);
+    expect(partById('ant-wayline').antenna!.range).toBeLessThan(partById('ant-dish').antenna!.range);
   });
 
   it('persists repeatable upgrade levels and charges the authored growth curve', () => {
@@ -91,5 +126,25 @@ describe('space program contracts', () => {
 
     const restored = restoreGame(JSON.parse(JSON.stringify(serializeGame(game, 'program'))));
     expect(restored.campaign).toEqual(game.campaign);
+  });
+
+  it('gates late contracts behind their enabling technology', () => {
+    const campaign = createCampaign('program');
+    expect(acceptContract(campaign, 'first-docking')).toMatchObject({ ok: false });
+    campaign.unlockedTech.push('crewed-expeditions');
+    expect(acceptContract(campaign, 'first-docking')).toEqual({ ok: true });
+  });
+
+  it('restores a fleetless soft-locked program without becoming an ordinary subsidy', () => {
+    const campaign = createCampaign('program');
+    campaign.funds = PROGRAM_RESERVE_THRESHOLD - 1;
+    campaign.reputation = 5;
+
+    expect(requestProgramReserve(campaign, true)).toMatchObject({ ok: false, awarded: 0 });
+    const result = requestProgramReserve(campaign, false);
+    expect(result).toEqual({ ok: true, awarded: PROGRAM_RESERVE_FLOOR - (PROGRAM_RESERVE_THRESHOLD - 1) });
+    expect(campaign.funds).toBe(PROGRAM_RESERVE_FLOOR);
+    expect(campaign.reputation).toBe(3);
+    expect(requestProgramReserve(campaign, false)).toMatchObject({ ok: false, awarded: 0 });
   });
 });

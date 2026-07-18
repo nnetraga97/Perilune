@@ -762,6 +762,7 @@ export function injectUiStyles(): void {
         border-left:3px solid #70818a; background:linear-gradient(135deg,rgba(21,37,44,.94),rgba(8,18,24,.96)); }
       .contract-operation-card.active { border-left-color:#d3aa52; background:linear-gradient(135deg,rgba(48,43,22,.72),rgba(9,21,26,.96)); }
       .contract-operation-card.complete { border-left-color:#67aa83; background:linear-gradient(135deg,rgba(22,50,40,.74),rgba(8,22,25,.96)); }
+      .contract-operation-card.locked { opacity:.62; }
       .contract-state { color:#899aa2; font:6.5px var(--ui-mono); letter-spacing:1px; }
       .contract-operation-card.active .contract-state { color:#d3aa52; }
       .contract-operation-card.complete .contract-state { color:#6db18a; }

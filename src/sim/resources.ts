@@ -87,9 +87,9 @@ function siteDirection(game: GameState, gv: GameVessel, out: Vec3): Vec3 {
  * Runs for every vessel each update — including rails-warped ones — so
  * mining bases keep working while the player is elsewhere.
  */
-export function stepIsru(game: GameState, gv: GameVessel, dt: number): void {
+export function stepIsru(game: GameState, gv: GameVessel, dt: number): number {
   const v = gv.runtime;
-  if (v.isDebris) return;
+  if (v.isDebris) return 0;
 
   let solarRate = 0;
   let hasDrill = false;
@@ -100,7 +100,8 @@ export function stepIsru(game: GameState, gv: GameVessel, dt: number): void {
     if (def.drill && p.activated) hasDrill = true;
     if (def.converter && p.activated) hasConverter = true;
   }
-  if (!hasDrill && !hasConverter) return;
+  if (!hasDrill && !hasConverter) return 0;
+  let totalPropellantMade = 0;
 
   // Background power: rails vessels trickle-charge at the day/night-averaged
   // solar rate (active vessels are charged by the real electrical pass).
@@ -172,6 +173,7 @@ export function stepIsru(game: GameState, gv: GameVessel, dt: number): void {
       if (oreUsed <= 0) continue;
       v.charge.amount -= need;
       let propMade = oreUsed * ratio;
+      totalPropellantMade += propMade;
       // Drain ore.
       for (const bin of v.craft.parts) {
         const have = bin.resources.ore ?? 0;
@@ -195,4 +197,5 @@ export function stepIsru(game: GameState, gv: GameVessel, dt: number): void {
       }
     }
   }
+  return totalPropellantMade;
 }

@@ -39,7 +39,12 @@ export interface ContractDef {
   achievement: string;
   rewardFunds: number;
   rewardReputation: number;
+  requiresTech?: TechId;
 }
+
+export const PROGRAM_RESERVE_THRESHOLD = 6_000;
+export const PROGRAM_RESERVE_FLOOR = 12_000;
+export const PROGRAM_RESERVE_REPUTATION_COST = 2;
 
 export const TECHNOLOGIES: readonly TechnologyDef[] = [
   {
@@ -66,21 +71,21 @@ export const TECHNOLOGIES: readonly TechnologyDef[] = [
   {
     id: 'exploration-instruments',
     name: 'Exploration Instruments',
-    brief: 'Communications, advanced experiments, orbital survey hardware, and autonomous control.',
+    brief: 'Short-range communications, atmospheric readings, and biological exposure experiments.',
     scienceCost: 45,
     requires: 'orbital-engineering',
   },
   {
     id: 'deep-space-systems',
     name: 'Deep-Space Systems',
-    brief: 'Heavy propulsion, docking, thermal protection, large power systems, and crewed expeditions.',
+    brief: 'Heavy propulsion, interplanetary communications, large structures, and thermal protection.',
     scienceCost: 70,
     requires: 'orbital-engineering',
   },
   {
     id: 'surface-operations',
     name: 'Surface Operations',
-    brief: 'Landing systems, rovers, prospecting, extraction, storage, and in-situ refining.',
+    brief: 'Dedicated landing legs and powered rover wheels for sustained surface travel.',
     scienceCost: 85,
     requires: 'exploration-instruments',
   },
@@ -88,21 +93,21 @@ export const TECHNOLOGIES: readonly TechnologyDef[] = [
     id: 'precision-science',
     name: 'Precision Science',
     brief: 'Long-range downlinks, orbital surveys, field sampling, and higher-fidelity instruments.',
-    scienceCost: 80,
+    scienceCost: 180,
     requires: 'exploration-instruments',
   },
   {
     id: 'crewed-expeditions',
     name: 'Crewed Expeditions',
-    brief: 'Docking, large crew systems, heavy thermal protection, and long-duration mission hardware.',
-    scienceCost: 105,
+    brief: 'Docking, multi-crew cabins, large batteries and arrays, and heavy thermal protection.',
+    scienceCost: 240,
     requires: 'deep-space-systems',
   },
   {
     id: 'planetary-industry',
     name: 'Planetary Industry',
     brief: 'Prospecting, extraction, storage, and conversion hardware for sustained surface operations.',
-    scienceCost: 130,
+    scienceCost: 300,
     requires: 'surface-operations',
   },
 ];
@@ -158,6 +163,33 @@ export const CONTRACTS: readonly ContractDef[] = [
     achievement: 'campaign:palla-landed',
     rewardFunds: 18_000,
     rewardReputation: 6,
+  },
+  {
+    id: 'first-docking',
+    name: 'Handshake in the Dark',
+    brief: 'Dock two independently launched vessels in orbit.',
+    achievement: 'campaign:first-docking',
+    rewardFunds: 16_000,
+    rewardReputation: 5,
+    requiresTech: 'crewed-expeditions',
+  },
+  {
+    id: 'outer-moon-landing',
+    name: 'The Giant\'s Shore',
+    brief: 'Land a controlled vessel on Brimm, Glacia, or Mote in the Tyran system.',
+    achievement: 'campaign:outer-moon-landed',
+    rewardFunds: 30_000,
+    rewardReputation: 8,
+    requiresTech: 'deep-space-systems',
+  },
+  {
+    id: 'surface-industry',
+    name: 'Make Fuel Under Another Sky',
+    brief: 'Convert locally mined ore into propellant on a planetary surface.',
+    achievement: 'campaign:surface-industry',
+    rewardFunds: 25_000,
+    rewardReputation: 8,
+    requiresTech: 'planetary-industry',
   },
 ];
 
@@ -265,12 +297,35 @@ export function purchaseUpgrade(
 
 export function acceptContract(campaign: CampaignState, contractId: string): { ok: boolean; reason?: string } {
   if (campaign.mode !== 'program') return { ok: false, reason: 'Contracts are available in Space Program mode.' };
-  if (!CONTRACTS.some((contract) => contract.id === contractId)) return { ok: false, reason: 'Unknown contract.' };
+  const contract = CONTRACTS.find((candidate) => candidate.id === contractId);
+  if (!contract) return { ok: false, reason: 'Unknown contract.' };
+  if (contract.requiresTech && !campaign.unlockedTech.includes(contract.requiresTech)) {
+    return { ok: false, reason: `Unlock ${TECHNOLOGIES.find((technology) => technology.id === contract.requiresTech)?.name ?? 'the required technology'} first.` };
+  }
   if (campaign.completedContracts.includes(contractId)) return { ok: false, reason: 'Contract already completed.' };
   if (campaign.activeContracts.includes(contractId)) return { ok: false, reason: 'Contract already active.' };
   if (campaign.activeContracts.length >= 3) return { ok: false, reason: 'The program can track three active contracts at a time.' };
   campaign.activeContracts.push(contractId);
   return { ok: true };
+}
+
+export function requestProgramReserve(
+  campaign: CampaignState,
+  hasOperationalVessels: boolean,
+): { ok: boolean; awarded: number; reason?: string } {
+  if (campaign.mode !== 'program') {
+    return { ok: false, awarded: 0, reason: 'The program reserve is available only in Space Program mode.' };
+  }
+  if (hasOperationalVessels) {
+    return { ok: false, awarded: 0, reason: 'Recover or operate the vessels already in the field first.' };
+  }
+  if (campaign.funds >= PROGRAM_RESERVE_THRESHOLD) {
+    return { ok: false, awarded: 0, reason: `Reserve review begins below ${PROGRAM_RESERVE_THRESHOLD.toLocaleString()} funds.` };
+  }
+  const awarded = Math.max(0, PROGRAM_RESERVE_FLOOR - campaign.funds);
+  campaign.funds += awarded;
+  campaign.reputation = Math.max(0, campaign.reputation - PROGRAM_RESERVE_REPUTATION_COST);
+  return { ok: true, awarded };
 }
 
 export function settleContracts(campaign: CampaignState, flags: Readonly<Record<string, boolean>>): ContractDef[] {

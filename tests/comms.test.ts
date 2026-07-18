@@ -8,7 +8,7 @@ import { GameState } from '../src/sim/state';
 import { addPart, createCraft, Craft } from '../src/sim/vessel';
 import { evaluateComms, needsCommsForControl, segmentBlocked } from '../src/sim/comms';
 
-function probeCraft(antenna: 'ant-whip' | 'ant-dish' | null): Craft {
+function probeCraft(antenna: 'ant-whip' | 'ant-wayline' | 'ant-dish' | null): Craft {
   const craft = createCraft('Probe');
   const core = addPart(craft, 'core-pilot', null, 'root', { x: 0, y: 0, z: 0 });
   if (antenna) addPart(craft, antenna, core.key, 'surface', { x: 0.5, y: 0, z: 0 });
@@ -40,6 +40,28 @@ describe('comms network', () => {
     const gv = game.spawnInOrbit(probeCraft(null), 'Mute Probe', 'veyra', 200_000);
     const status = evaluateComms(game, gv);
     expect(status.connected).toBe(false);
+  });
+
+  it('uses the Wayline tier for neighboring interplanetary missions', () => {
+    const game = new GameState();
+    const target = game.spawnInOrbit(probeCraft('ant-wayline'), 'Vess Probe', 'vess', 200_000);
+    const body = game.universe.get('vess');
+    const towardHome = new Vec3();
+    game.universe.relativePosition(game.universe.get('veyra'), body, game.time, towardHome);
+    target.runtime.pos.copy(towardHome.normalize()).scale(body.radius + 200_000);
+
+    expect(evaluateComms(game, target).connected).toBe(true);
+  });
+
+  it('lets the Longtalk tier reach the far system without a mandatory range relay', () => {
+    const game = new GameState();
+    const target = game.spawnInOrbit(probeCraft('ant-dish'), 'Farfall Probe', 'farfall', 200_000);
+    const body = game.universe.get('farfall');
+    const towardHome = new Vec3();
+    game.universe.relativePosition(game.universe.get('veyra'), body, game.time, towardHome);
+    target.runtime.pos.copy(towardHome.normalize()).scale(body.radius + 200_000);
+
+    expect(evaluateComms(game, target).connected).toBe(true);
   });
 
   it('is blocked behind Palla and restored via a relay', () => {

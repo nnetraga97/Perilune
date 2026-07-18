@@ -1346,6 +1346,13 @@ class PeriluneGame {
     ) {
       this.game.flags['campaign:palla-landed'] = true;
     }
+    const body = this.game.bodyOf(gv);
+    if (
+      body.parent?.id === 'tyran'
+      && (vessel.situation === 'landed' || vessel.situation === 'prelaunch')
+    ) {
+      this.game.flags['campaign:outer-moon-landed'] = true;
+    }
     this.completeCampaignContracts();
   }
 

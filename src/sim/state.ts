@@ -849,7 +849,15 @@ export class GameState {
 
   /** Slow systems that run for every vessel in any regime (ISRU, etc.). */
   private stepBackgroundSystems(dt: number): void {
-    for (const gv of this.vessels) stepIsru(this, gv, dt);
+    for (const gv of this.vessels) {
+      const propellantMade = stepIsru(this, gv, dt);
+      if (
+        propellantMade > 0
+        && (gv.runtime.situation === 'landed' || gv.runtime.situation === 'prelaunch')
+      ) {
+        this.flags['campaign:surface-industry'] = true;
+      }
+    }
   }
 
   /**
@@ -1181,6 +1189,7 @@ export class GameState {
       angularMomentumCraft.z / va.massProps.inertia.z,
     );
     logEvent(va, this.time, `Docking confirmed: ${vb.name} + ${va.name}`);
+    this.flags['campaign:first-docking'] = true;
     this.vessels = this.vessels.filter((x) => x !== b);
     if (this.activeVesselId === vb.id) this.activeVesselId = va.id;
   }

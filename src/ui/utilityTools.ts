@@ -15,8 +15,12 @@ import type { WindowManager } from './window';
 import {
   acceptContract,
   CONTRACTS,
+  PROGRAM_RESERVE_FLOOR,
+  PROGRAM_RESERVE_REPUTATION_COST,
+  PROGRAM_RESERVE_THRESHOLD,
   purchaseUpgrade,
   REPEATABLE_UPGRADES,
+  requestProgramReserve,
   settleContracts,
   TECHNOLOGIES,
   unlockTechnology,
@@ -229,6 +233,7 @@ export class UtilityTools {
     if (!this.programEl) return;
     const game = this.game();
     const campaign = game.campaign;
+    const operationalVessels = game.vessels.some((vessel) => !vessel.runtime.isDebris);
     if (campaign.mode !== 'program' && this.programView === 'contracts') this.programView = 'tech';
     const signature = JSON.stringify({
       view: this.programView,
@@ -240,6 +245,7 @@ export class UtilityTools {
       upgrades: campaign.upgradeLevels,
       active: campaign.activeContracts,
       complete: campaign.completedContracts,
+      operationalVessels,
     });
     if (signature === this.lastProgramSignature) return;
     this.lastProgramSignature = signature;
@@ -407,6 +413,7 @@ export class UtilityTools {
   }
 
   private renderContracts(parent: HTMLElement, game: GameState): void {
+    const operationalVessels = game.vessels.some((vessel) => !vessel.runtime.isDebris);
     const heading = el('div', 'program-view-heading', parent);
     el('strong', '', heading, 'Contract Operations');
     el('span', '', heading, `${game.campaign.activeContracts.length}/3 active assignments`);
@@ -414,14 +421,24 @@ export class UtilityTools {
     for (const contract of CONTRACTS) {
       const completed = game.campaign.completedContracts.includes(contract.id);
       const active = game.campaign.activeContracts.includes(contract.id);
-      const card = el('article', `contract-operation-card${completed ? ' complete' : active ? ' active' : ''}`, board);
-      el('div', 'contract-state', card, completed ? 'FULFILLED' : active ? 'ACTIVE MISSION' : 'AVAILABLE');
+      const prerequisiteMet = !contract.requiresTech || game.campaign.unlockedTech.includes(contract.requiresTech);
+      const card = el(
+        'article',
+        `contract-operation-card${completed ? ' complete' : active ? ' active' : prerequisiteMet ? '' : ' locked'}`,
+        board,
+      );
+      el(
+        'div',
+        'contract-state',
+        card,
+        completed ? 'FULFILLED' : active ? 'ACTIVE MISSION' : prerequisiteMet ? 'AVAILABLE' : 'TECHNOLOGY LOCKED',
+      );
       el('strong', '', card, contract.name);
       el('p', '', card, contract.brief);
       el('div', 'contract-reward', card, `+${contract.rewardFunds.toLocaleString()} FUNDS · +${contract.rewardReputation} REP`);
       if (!completed && !active) {
         const accept = el('button', 'hud-btn contract-accept', card, 'Accept contract') as HTMLButtonElement;
-        accept.disabled = game.campaign.activeContracts.length >= 3;
+        accept.disabled = !prerequisiteMet || game.campaign.activeContracts.length >= 3;
         accept.onclick = () => {
           const result = acceptContract(game.campaign, contract.id);
           if (!result.ok) return;
@@ -432,6 +449,27 @@ export class UtilityTools {
         };
       }
     }
+
+    const reserveEligible = !operationalVessels && game.campaign.funds < PROGRAM_RESERVE_THRESHOLD;
+    const reserve = el('article', `contract-operation-card${reserveEligible ? ' active' : ''}`, board);
+    el('div', 'contract-state', reserve, reserveEligible ? 'RESERVE REVIEW AVAILABLE' : 'PROGRAM SAFETY NET');
+    el('strong', '', reserve, 'Continuity Reserve');
+    el(
+      'p',
+      '',
+      reserve,
+      `If the fleet is lost below ${PROGRAM_RESERVE_THRESHOLD.toLocaleString()} funds, restore the program to ${PROGRAM_RESERVE_FLOOR.toLocaleString()} funds.`,
+    );
+    el('div', 'contract-reward', reserve, `VARIABLE GRANT · −${PROGRAM_RESERVE_REPUTATION_COST} REP`);
+    const request = el('button', 'hud-btn contract-accept', reserve, 'Request reserve review') as HTMLButtonElement;
+    request.disabled = !reserveEligible;
+    request.onclick = () => {
+      const result = requestProgramReserve(game.campaign, operationalVessels);
+      if (!result.ok) return;
+      this.callbacks.onCampaignChanged();
+      this.lastProgramSignature = '';
+      this.renderProgram();
+    };
   }
 
   private renderScience(): void {
