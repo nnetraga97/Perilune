@@ -331,8 +331,69 @@ export function injectUiStyles(): void {
         padding: 5px 10px; font-size: 12px; animation: hudfade 6s forwards; }
       .hud-event.warning { border-left-color: var(--ui-warn); }
       .hud-event.danger { border-left-color: var(--ui-danger); }
+      .hud-companion { position:absolute; z-index:14; left:50px; bottom:16px; display:flex;
+        align-items:flex-end; gap:9px; max-width:min(390px,calc(100vw - 68px)); pointer-events:auto; }
+      .hud-companion-avatar { position:relative; flex:0 0 58px; width:58px; height:64px; padding:4px 5px 3px;
+        display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden;
+        border:1px solid #42657a; border-radius:15px 15px 10px 10px;
+        background:linear-gradient(155deg,#163242,#08151e 70%); color:#a9d7e7; cursor:pointer;
+        box-shadow:0 10px 28px rgba(0,0,0,.38),inset 0 1px rgba(174,224,240,.12); }
+      .hud-companion-avatar:hover,.hud-companion-avatar:focus-visible { border-color:var(--ui-accent); color:#e9f8fc;
+        transform:translateY(-2px); }
+      .hud-companion-avatar:focus-visible { outline:2px solid var(--ui-accent); outline-offset:2px; }
+      .hud-companion-mark { width:46px; height:46px; overflow:visible; }
+      .pip-shell { fill:#163849; stroke:#72b4ce; stroke-width:2; }
+      .pip-glass { fill:#08151d; stroke:#4f8198; stroke-width:1.5; }
+      .pip-brow,.pip-smile,.pip-ear,.pip-antenna { fill:none; stroke:currentColor; stroke-width:2;
+        stroke-linecap:round; stroke-linejoin:round; }
+      .pip-eye { fill:#f0c75a; stroke:none; }
+      .hud-companion-nameplate { margin-top:-2px; color:#80a7b8; font:700 7px var(--ui-mono); letter-spacing:2px; }
+      .hud-companion-bubble { position:relative; order:2; min-width:220px; max-width:300px; overflow:visible;
+        border:1px solid #3c6074; border-radius:11px 11px 11px 3px;
+        background:linear-gradient(160deg,rgba(13,31,42,.98),rgba(6,15,22,.98));
+        box-shadow:0 14px 38px rgba(0,0,0,.42); animation:hudCompanionIn .18s ease-out both; }
+      .hud-companion-bubble::before { content:''; position:absolute; left:-7px; bottom:12px; width:12px; height:12px;
+        border-left:1px solid #3c6074; border-bottom:1px solid #3c6074; background:#091822;
+        transform:rotate(45deg); }
+      .hud-companion-bubble.warning { border-color:#8e7131; }
+      .hud-companion-bubble.danger { border-color:#9b4d46; }
+      .hud-companion-bubble.success { border-color:#477d68; }
+      .hud-companion-header { min-height:25px; display:flex; align-items:center; gap:6px; padding:3px 5px 3px 9px;
+        border-bottom:1px solid #213744; background:rgba(13,29,39,.92); }
+      .hud-companion-title { flex:1; color:#83a8b9; font:700 7.5px var(--ui-mono); letter-spacing:1.5px; }
+      .hud-companion-source { padding:2px 4px; border:1px solid #35596c; border-radius:3px;
+        color:#8bc9df; font:700 6.5px var(--ui-mono); letter-spacing:1px; }
+      .hud-companion-mute,.hud-companion-close { min-height:23px; border:0; background:none; color:#77909d;
+        cursor:pointer; font:700 7px var(--ui-mono); }
+      .hud-companion-close { width:22px; padding:0; font-size:15px; line-height:1; }
+      .hud-companion-mute:hover,.hud-companion-mute:focus-visible,
+      .hud-companion-close:hover,.hud-companion-close:focus-visible { color:#fff; outline:1px solid #55788b; }
+      .hud-companion-copy { padding:9px 11px 11px; }
+      .hud-companion-headline { display:block; color:#e9f2f5; font-size:12px; letter-spacing:.35px; }
+      .hud-companion-bubble.warning .hud-companion-headline { color:#f0d17d; }
+      .hud-companion-bubble.danger .hud-companion-headline { color:#f1a29b; }
+      .hud-companion-bubble.success .hud-companion-headline { color:#9bd7be; }
+      .hud-companion-message { margin:4px 0 0; color:#b7c7ce; font-size:10.5px; line-height:1.45; }
+      .hud-companion-action { margin-top:8px; padding:6px 7px; border-left:2px solid var(--ui-accent);
+        background:rgba(71,151,181,.08); color:#d9edf4; font:9px/1.4 var(--ui-mono); }
+      .hud-companion-footer { display:flex; justify-content:flex-end; padding:0 8px 8px; }
+      .hud-companion-brief { min-height:27px; padding:4px 8px; border:1px solid #3a6579; border-radius:4px;
+        background:#102936; color:#a8d6e6; cursor:pointer; font:700 7.5px var(--ui-mono); letter-spacing:1.1px; }
+      .hud-companion-brief:hover,.hud-companion-brief:focus-visible { border-color:var(--ui-accent); color:#fff;
+        outline:1px solid var(--ui-accent); outline-offset:1px; }
+      .hud-companion-brief:disabled { cursor:wait; opacity:.62; }
+      .hud-companion.message-hidden { max-width:58px; }
+      .hud-companion.muted .hud-companion-avatar { opacity:.68; filter:saturate(.55); }
+      .hud-companion.muted .pip-eye { transform:scaleY(.28); transform-origin:center; }
       .hud-touch-controls { display:none; }
       @keyframes hudfade { 0% { opacity: 0; } 5% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+      @keyframes hudCompanionIn { from { opacity:0; transform:translate(-5px,4px) scale(.98); }
+        to { opacity:1; transform:none; } }
+
+      @media (prefers-reduced-motion:reduce) {
+        .hud-companion-bubble { animation:none; }
+        .hud-companion-avatar { transition:none; }
+      }
 
       /* ============================== map view */
       .map-panel { position:absolute; z-index:45; left:56px; top:104px; width:292px; max-width:calc(100vw - 64px);
@@ -963,6 +1024,17 @@ export function injectUiStyles(): void {
         .hud-sas-btn { width:auto; height:38px; }
         .hud-events { top:calc(var(--hud-mobile-top) + 196px); left:8px; right:8px; max-width:none; gap:3px; }
         .hud-event { width:fit-content; max-width:100%; padding:4px 8px; font-size:10px; }
+        .hud-companion { position:absolute; left:7px; bottom:calc(61px + env(safe-area-inset-bottom));
+          max-width:calc(100vw - 14px); gap:0; }
+        .hud-companion-avatar { width:48px; height:53px; flex-basis:48px; border-radius:13px 13px 8px 8px; }
+        .hud-companion-mark { width:38px; height:38px; }
+        .hud-companion-nameplate { font-size:6px; }
+        .hud-companion-bubble { position:absolute; left:0; bottom:59px; width:min(294px,calc(100vw - 14px));
+          min-width:0; max-width:none; border-radius:10px 10px 10px 3px; }
+        .hud-companion-bubble::before { left:17px; bottom:-7px; transform:rotate(-45deg); }
+        .hud-companion-copy { padding:8px 10px 10px; }
+        .hud-companion-message { font-size:10px; }
+        .hud-companion-action { font-size:8.5px; }
         .hud-part-popup { left:8px !important; right:8px; width:auto; max-height:48dvh; overflow-y:auto; }
 
         .hud-touch-controls { position:absolute; z-index:10; right:7px;
@@ -1029,6 +1101,7 @@ export function injectUiStyles(): void {
         .hud-data-toggle,.hud-status-strip,.hud-node-panel,.hud-resources,.hud-staging,.hud-entry-card,.hud-systems { grid-column:1; }
         .hud-touch-controls { width:86px; }
         .hud-events { top:calc(var(--hud-mobile-top) + 224px); }
+        .hud-companion-bubble { width:calc(100vw - 14px); }
       }
 
       @media (max-height:500px) and (min-width:600px) {
@@ -1052,6 +1125,7 @@ export function injectUiStyles(): void {
         .hud-touch-controls { right:224px; bottom:calc(60px + env(safe-area-inset-bottom));
           transform:scale(.84); transform-origin:100% 100%; }
         .hud-events { top:calc(var(--hud-mobile-top) + 94px); right:232px; }
+        .hud-companion { bottom:calc(58px + env(safe-area-inset-bottom)); }
       }
 
       /* main menu */

@@ -1,18 +1,59 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 
-const sentryUpload = process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
-  ? sentryVitePlugin({
-    authToken: process.env.SENTRY_AUTH_TOKEN,
-    org: process.env.SENTRY_ORG,
-    project: process.env.SENTRY_PROJECT,
-    sourcemaps: { filesToDeleteAfterUpload: ['dist/**/*.map'] },
-  })
-  : null;
+function flightDirectorDevApi(): Plugin {
+  return {
+    name: 'perilune-flight-director-dev-api',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/api/flight-director', async (request, response) => {
+        try {
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of request) {
+            chunks.push(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : new Uint8Array(chunk));
+          }
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(request.headers)) {
+            if (Array.isArray(value)) value.forEach((item) => headers.append(key, item));
+            else if (value !== undefined) headers.set(key, value);
+          }
+          const bytes = chunks.length ? Buffer.concat(chunks) : null;
+          const webRequest = new Request('http://127.0.0.1/api/flight-director', {
+            method: request.method ?? 'GET',
+            headers,
+            body: bytes?.length ? new Uint8Array(bytes) : undefined,
+          });
+          const route = await import('./api/flight-director.ts');
+          const webResponse = await route.default.fetch(webRequest);
+          response.statusCode = webResponse.status;
+          webResponse.headers.forEach((value, key) => response.setHeader(key, value));
+          response.end(Buffer.from(await webResponse.arrayBuffer()));
+        } catch {
+          response.statusCode = 500;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ ok: false, error: { code: 'DEV_API_ERROR', message: 'Local API failed' } }));
+        }
+      });
+    },
+  };
+}
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const fileEnv = loadEnv(mode, process.cwd(), '');
+  for (const name of ['OPENAI_API_KEY', 'REDIS_URL'] as const) {
+    if (!process.env[name] && fileEnv[name]) process.env[name] = fileEnv[name];
+  }
+  const sentryUpload = process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+    ? sentryVitePlugin({
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      sourcemaps: { filesToDeleteAfterUpload: ['dist/**/*.map'] },
+    })
+    : null;
+  return ({
   base: './',
-  plugins: sentryUpload ? [sentryUpload] : [],
+  plugins: [flightDirectorDevApi(), ...(sentryUpload ? [sentryUpload] : [])],
   define: {
     __SUPABASE_URL__: JSON.stringify(process.env.SUPABASE_URL ?? ''),
     __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(
@@ -55,4 +96,5 @@ export default defineConfig({
       include: ['bench/**/*.bench.ts'],
     },
   },
+  });
 });

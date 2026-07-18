@@ -19,6 +19,9 @@ import { el, injectUiStyles } from './kit';
 import { appendNavballIcon, type NavballIcon } from './icons';
 import type { EntryPrediction } from '../sim/entry';
 import { availableHere, isRecoverable } from '../sim/science';
+import { FlightCompanion, type FlightCompanionAdvisory } from './flightCompanion';
+import { FlightDirectorRequestError, requestFlightDirector } from '../ai/flightDirector';
+import { buildFlightDirectorSnapshot } from './flightDirectorSnapshot';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -179,7 +182,10 @@ export class FlightHud {
   private peakQVesselId: string | null = null;
   private partPopup: HTMLElement | null = null;
   private lastComms: CommsStatus = { connected: false, path: [], strength: 0 };
+  private commsBlocked = false;
   private lastScienceRender = '';
+  private companion: FlightCompanion;
+  private lastDirectorContext: { game: GameState; node: ManeuverNode | null; telemetry: HudTelemetry } | null = null;
 
   constructor(uiRoot: HTMLElement, cb: HudCallbacks) {
     this.cb = cb;
@@ -393,6 +399,9 @@ export class FlightHud {
     // ---- event feed
     this.eventFeed = el('div', 'hud-events', this.root);
 
+    // ---- flight companion: local callouts plus on-demand structured AI advisories
+    this.companion = new FlightCompanion(this.root, () => this.requestAiBriefing());
+
     this.buildTouchControls();
     this.setDetailsCollapsed(compactHud.matches);
     this.setGuidanceOpen(!compactHud.matches);
@@ -404,8 +413,61 @@ export class FlightHud {
 
   private commsEl!: HTMLElement;
 
+  /** Entry point for a server-backed flight-director response. */
+  showCompanionAdvisory(advisory: FlightCompanionAdvisory): void {
+    this.companion.present(advisory);
+  }
+
+  private async requestAiBriefing(): Promise<FlightCompanionAdvisory> {
+    const context = this.lastDirectorContext;
+    if (!context) {
+      return {
+        id: 'ai-no-flight', headline: 'No flight snapshot',
+        message: 'Wait for flight telemetry, then ask Pip again.', tone: 'info', source: 'local',
+      };
+    }
+    const snapshot = buildFlightDirectorSnapshot(
+      context.game,
+      this.missionStart,
+      context.node,
+      context.telemetry,
+      this.lastComms,
+      this.commsBlocked,
+    );
+    if (!snapshot) {
+      return {
+        id: 'ai-no-vessel', headline: 'No active spacecraft',
+        message: 'Select a controllable spacecraft, then ask Pip again.', tone: 'info', source: 'local',
+      };
+    }
+    try {
+      const advisory = await requestFlightDirector(snapshot);
+      const action = advisory.nextAction.actionId === 'none'
+        ? undefined
+        : `${advisory.nextAction.timing.toUpperCase()} — ${advisory.nextAction.instruction}`;
+      const warning = advisory.warnings[0] ? ` Caution: ${advisory.warnings[0]}` : '';
+      return {
+        id: `ai-${Date.now()}`,
+        headline: advisory.headline,
+        message: `${advisory.summary}${warning}`,
+        action,
+        tone: advisory.tone,
+        source: 'ai',
+      };
+    } catch (error) {
+      const message = error instanceof FlightDirectorRequestError
+        ? error.userMessage
+        : 'Pip could not reach flight control. Local guidance is still active.';
+      return {
+        id: 'ai-unavailable', headline: 'Briefing unavailable', message,
+        tone: 'warning', source: 'local',
+      };
+    }
+  }
+
   setComms(status: CommsStatus, blocked: boolean): void {
     this.lastComms = status;
+    this.commsBlocked = blocked;
     if (blocked) {
       this.commsEl.textContent = '⇅ NO SIGNAL';
       this.commsEl.style.color = 'var(--ui-danger)';
@@ -503,6 +565,7 @@ export class FlightHud {
   update(game: GameState, node: ManeuverNode | null, telemetry: HudTelemetry): void {
     const gv = game.active;
     if (!gv) return;
+    this.lastDirectorContext = { game, node, telemetry };
     const v = gv.runtime;
     this.syncVesselSelect(game);
     const throttlePercent = Math.round(v.controls.throttle * 100);
@@ -553,11 +616,13 @@ export class FlightHud {
     this.peEl.textContent = fmtDistance(pe);
 
     // Node info.
+    let nodeBurnStartEta: number | null = null;
     if (node) {
       this.nodeInfoPanel.style.display = '';
       const eta = node.time - game.time;
       const burnDuration = this.estimateNodeBurn(game, telemetry.nodeRemainingDv || nodeDeltaV(node));
       const burnStartEta = eta - burnDuration / 2;
+      nodeBurnStartEta = burnStartEta;
       const cue = burnStartEta <= 0 && eta > -burnDuration / 2 ? 'START BURN' : `burn T−${fmtTime(burnStartEta)}`;
       this.nodeInfoEl.textContent = `NODE  ${telemetry.nodeRemainingDv.toFixed(1)} m/s REM\n${cue} · ${burnDuration.toFixed(1)} s`;
     } else {
@@ -599,6 +664,19 @@ export class FlightHud {
     const orePanel = this.gaugeHosts.get('ore');
     if (orePanel) orePanel.style.display = oreMax > 0 ? '' : 'none';
     if (oreMax > 0) this.setGauge('ore', ore, oreMax);
+
+    this.companion.update({
+      vesselId: v.id,
+      situation: v.situation,
+      fuelFraction: fuelMax > 0 ? fuel / fuelMax : null,
+      chargeFraction: v.charge.capacity > 0 ? v.charge.amount / v.charge.capacity : null,
+      dynamicPressurePa: v.aero.dynamicPressure,
+      properG: v.properAccel / G0,
+      commsBlocked: this.commsBlocked,
+      nodeBurnStartEta,
+      predictedImpactSpeed:
+        telemetry.entryPrediction?.lands ? telemetry.entryPrediction.impactSpeed : null,
+    });
 
     this.updateSystems(game);
     this.updateScienceStatus(game);

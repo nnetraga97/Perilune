@@ -40,4 +40,13 @@ describe('structured log field policy', () => {
     expect(sanitizeChildFields({ requestId: 'token=secret' })).toEqual({});
     expect(sanitizeChildFields({ requestId: { nested: true } })).toEqual({});
   });
+
+  it('keeps AI telemetry logs aggregate-only', () => {
+    expect(sanitizeLogFields('ai.briefing.ok', {
+      model: 'gpt-5.6-luna', status: 200, durationMs: 640, inputTokens: 420, outputTokens: 75,
+      cache: 'miss', snapshot: { altitude: 82_000 }, responseBody: 'private', apiKey: 'secret',
+    })).toEqual({
+      model: 'gpt-5.6-luna', status: 200, durationMs: 640, inputTokens: 420, outputTokens: 75, cache: 'miss',
+    });
+  });
 });
