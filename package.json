@@ -27,6 +27,7 @@
     "compile:part-assets:container": "node scripts/compile-part-assets-container.mjs",
     "sync:renderer-assets": "node scripts/sync-renderer-assets.mjs",
     "profile:feasibility": "node scripts/profile-feasibility.mjs",
+    "profile:reentry": "tsx scripts/profile-reentry.ts",
     "fetch:planet-source": "node scripts/fetch-planet-source.mjs"
   },
   "dependencies": {

@@ -55,4 +55,16 @@ describe('active reentry visual stack', () => {
     expect(effect.stats().occlusion).toBe(false);
     effect.dispose();
   });
+
+  it('scales trail and bowshock shaders to the craft envelope', () => {
+    const craft = createWayfarerDemonstrator();
+    const effect = new ActiveReentryEffect(craft, buildAeroModel(craft).axialFrac, 'medium', BODY_VISUALS.veyra.entryVisual!);
+    const materials: THREE.ShaderMaterial[] = [];
+    effect.group.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material instanceof THREE.ShaderMaterial) materials.push(object.material);
+    });
+    expect(materials.every((material) => material.uniforms.uCraftRadius.value > 1)).toBe(true);
+    expect(materials.some((material) => material.vertexShader.includes('uLength * uCraftRadius'))).toBe(true);
+    effect.dispose();
+  });
 });

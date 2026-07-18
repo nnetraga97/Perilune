@@ -18,10 +18,11 @@ The modding surface will expose exactly those record types:
 Renderer-owned body definitions may provide an `entryVisual` record in
 `src/content/bodyVisuals.ts`. It controls glow, hot-glow, three trail colors,
 streak, wrap-layer and shockwave colors plus bounded strength, length, opacity,
-glow, streak-probability and particle-threshold values. Bodies with a physical
-atmosphere but no override use `DEFAULT_ENTRY_VISUAL`; airless bodies never
-activate the effect. These values are art direction only and cannot change
-heating, drag, ablator use, or destruction.
+glow, streak-probability and particle-threshold values. Vess, Veyra, Rusk, and
+Tyran each ship an explicit entry identity. Newly authored bodies with a
+physical atmosphere but no override use `DEFAULT_ENTRY_VISUAL`; airless bodies
+never activate the effect. These values are art direction only and cannot
+change heating, drag, ablator use, or destruction.
 
 The current TypeScript registry validates this surface at test time. When the
 planned JSON5 mod loader ships, the same bounds must be enforced at the content

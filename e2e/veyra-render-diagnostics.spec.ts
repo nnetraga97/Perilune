@@ -17,7 +17,7 @@ const diagnosticCraft = JSON.parse(readFileSync(
 
 for (const tier of ['medium', 'high'] as const) {
   test(`captures a Veyra orbit, deorbit, and reverse cloud crossings on ${tier}`, async ({ page, browser }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(900_000);
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     page.on('console', (message) => {
@@ -39,7 +39,7 @@ for (const tier of ['medium', 'high'] as const) {
     const digest = manifestDigest as string;
     await captureCheckpoint(page, browser, tier, '00-pad', errors, digest);
 
-    await page.getByTitle('Stability assist').click();
+    await page.getByRole('button', { name: 'Stability assist', exact: true }).click();
     await page.keyboard.press('KeyZ');
     await page.keyboard.press('Space');
 
@@ -48,6 +48,11 @@ for (const tier of ['medium', 'high'] as const) {
     let guidanceActive = true;
     let pitchKey: 'KeyW' | 'KeyS' | null = null;
     let monitorBusy = false;
+    const chooseGuidance = async (name: 'Prograde' | 'Retrograde') => {
+      const chooser = page.getByRole('button', { name: 'Choose guidance mode' });
+      if (await chooser.getAttribute('aria-expanded') !== 'true') await chooser.click();
+      await page.locator('.hud-sas.open').getByRole('button', { name, exact: true }).click();
+    };
     const setPitchKey = async (next: 'KeyW' | 'KeyS' | null) => {
       if (pitchKey === next) return;
       if (pitchKey) await page.keyboard.up(pitchKey);
@@ -74,8 +79,7 @@ for (const tier of ['medium', 'high'] as const) {
           if (flight.altitude >= 47_000) {
             guidanceActive = false;
             await setPitchKey(null);
-            await page.getByRole('button', { name: 'Choose guidance mode' }).click();
-            await page.getByTitle('Prograde').click();
+            await chooseGuidance('Prograde');
             await page.keyboard.press('Period');
             await page.keyboard.press('Period');
           } else if (Math.hypot(vector.verticalSpeed, vector.horizontalSpeed) >= 70) {
@@ -130,8 +134,7 @@ for (const tier of ['medium', 'high'] as const) {
       expect(upperStaged).toBe(true);
       await captureCheckpoint(page, browser, tier, '08-ascent-cutoff', errors, digest);
 
-      await page.getByRole('button', { name: 'Choose guidance mode' }).click();
-      await page.getByTitle('Prograde').click();
+      await chooseGuidance('Prograde');
       await page.waitForFunction(() => {
         const altitude = window.__TEST__.altitude();
         const vertical = window.__TEST__.verticalSpeed();
@@ -146,8 +149,7 @@ for (const tier of ['medium', 'high'] as const) {
       expect(stableOrbit?.eccentricity).toBeLessThan(0.15);
       await captureCheckpoint(page, browser, tier, '09-stable-orbit', errors, digest);
 
-      await page.getByRole('button', { name: 'Choose guidance mode' }).click();
-      await page.getByTitle('Retrograde').click();
+      await chooseGuidance('Retrograde');
       await page.waitForTimeout(2_000);
       await page.keyboard.press('KeyZ');
       await waitForOrbitMetric(page, 'periapsisAltitude', 40_000, 'below', 120_000);

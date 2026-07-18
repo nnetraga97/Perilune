@@ -244,3 +244,25 @@ submission. Because WebGL elapsed-time queries cannot nest, certification uses
 matched whole-flight runs with entry VFX enabled and disabled, then reports the
 delta. Renderer diagnostics report activation, strength, pass gates, particle
 count, and geometry bytes; they are not presented as per-pass GPU timings.
+
+#### 2026-07-17 — M3 Max reentry reference result
+
+Command: `npm run profile:reentry -- --mode=reference --duration=30 --runs=3`
+
+- Host: MacBook Pro `Mac15,10`, Apple M3 Max, 30-core GPU, 36 GiB RAM, AC power.
+- Browser: system Google Chrome 150.0.7871.127, headful, 1920×1080
+  drawing buffer, Medium quality. Live WebGL identity: ANGLE Metal on Apple M3 Max.
+- Fixture: production save/restore and aero/thermal paths drive a paused full
+  glow, trail, bowshock, occlusion, and particle stack around the active
+  Wayfarer craft. Disabled and enabled runs alternate three times.
+- Enabled median frame p95: **9.76 ms** (gate ≤16.7 ms).
+- Enabled median whole-flight GPU: **2.90 ms** (gate ≤8 ms).
+- Enabled-minus-disabled frame-p95 delta: **+0.06 ms** (gate ≤1.5 ms).
+- Enabled-minus-disabled whole-flight GPU delta: **+1.52 ms** (gate ≤2 ms).
+- Cost delta: 5 draw calls and 32,400 triangles.
+- Runtime/shader errors: none. All focused reentry reference gates passed.
+
+The timestamped raw record is written to the ignored
+`artifacts/performance/reentry-vfx-reference-*.json` directory. This is a
+focused entry-stack certification; broader planet/terrain certification
+continues to use `profile:feasibility`.

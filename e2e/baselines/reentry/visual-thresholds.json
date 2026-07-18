@@ -1,0 +1,7 @@
+{
+  "minimumWarmPixels": 3000,
+  "maximumWarmPixels": 30000,
+  "minimumHotPixels": 300,
+  "minimumHorizontalSpread": 200,
+  "minimumVerticalSpread": 80
+}

@@ -69,6 +69,7 @@ function uniforms(palette: Readonly<EntryVisualDef>): Record<string, THREE.IUnif
     uFlowAlign: { value: 1 },
     uTime: { value: 0 },
     uLength: { value: palette.lengthMultiplier },
+    uCraftRadius: { value: 1 },
     uOpacity: { value: palette.opacityMultiplier },
     uGlowMultiplier: { value: palette.glowMultiplier },
     uGlow: { value: new THREE.Color(palette.glow) },
@@ -107,6 +108,7 @@ function envelopeVertex(bowl: boolean): string {
     uniform vec3 uVelocityOS;
     uniform mat4 uOcclusionMatrix;
     uniform float uStrength;
+    uniform float uCraftRadius;
     uniform float uFlowAlign;
     attribute float aExposure;
     attribute float aSeed;
@@ -123,7 +125,7 @@ function envelopeVertex(bowl: boolean): string {
       vIntensity = thermalExposure * (0.22 + 0.78 * vWindward);
       vSeed = aSeed;
       vec3 localPosition = position;
-      ${bowl ? 'localPosition += normalize(uVelocityOS) * (0.12 + uStrength * 0.42) * (0.35 + vWindward * 0.65);' : ''}
+      ${bowl ? 'localPosition += normalize(uVelocityOS) * uCraftRadius * (0.035 + uStrength * 0.12) * (0.35 + vWindward * 0.65);' : ''}
       vOcclusionCoord = uOcclusionMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(localPosition, 1.0);
       #include <logdepthbuf_vertex>
@@ -151,12 +153,12 @@ function glowFragment(bowl: boolean): string {
       float pulse = 0.91 + 0.09 * sin(uTime * 11.0 + vSeed * 31.0);
       float intensity = vIntensity * occlusion * pulse;
       ${bowl
-        ? 'float alpha = uOpacity * smoothstep(0.25, 0.9, uStrength) * intensity * smoothstep(0.04, 0.62, vWindward) * 0.38; vec3 color = mix(uShock, uGlowHot, uStrength * 0.35);'
-        : 'float alpha = uOpacity * uGlowMultiplier * (uStrength + uTransonic * 0.32) * intensity * 0.72; vec3 color = mix(uGlow, uGlowHot, clamp(uStrength * 1.25 + vWindward * 0.3, 0.0, 1.0)); color = mix(color, uShock, uTransonic * 0.86);'}
+        ? 'float alpha = uOpacity * smoothstep(0.25, 0.9, uStrength) * intensity * smoothstep(0.04, 0.62, vWindward) * 0.28; vec3 color = mix(uShock, uGlowHot, uStrength * 0.35);'
+        : 'float alpha = uOpacity * uGlowMultiplier * (uStrength + uTransonic * 0.32) * intensity * 0.42; vec3 color = mix(uGlow, uGlowHot, clamp(uStrength * 1.25 + vWindward * 0.3, 0.0, 1.0)); color = mix(color, uShock, uTransonic * 0.86);'}
       if (alpha < 0.008) discard;
       float dither = fract(gl_FragCoord.x * 0.75487766 + gl_FragCoord.y * 0.56984029);
       alpha *= mix(0.94, 1.0, dither);
-      gl_FragColor = vec4(color * alpha, alpha);
+      gl_FragColor = vec4(color, alpha);
       #include <logdepthbuf_fragment>
     }
   `;
@@ -168,6 +170,7 @@ const FIN_VERTEX = `
   uniform mat4 uOcclusionMatrix;
   uniform float uStrength;
   uniform float uLength;
+  uniform float uCraftRadius;
   uniform float uTime;
   attribute vec3 aCenter;
   attribute float aTrailT;
@@ -189,8 +192,8 @@ const FIN_VERTEX = `
     float layerScale = mix(0.72, 1.18, aLayer);
     vec3 base = aCenter + (position - aCenter) * layerScale;
     float noise = 0.78 + 0.28 * sin(aSeed * 47.0 + uTime * 3.7 + aTrailT * 8.0);
-    vec3 p = base - velocity * aTrailT * uLength * (1.4 + uStrength * 5.8) * noise;
-    p += n * sin(aTrailT * 3.14159) * (0.04 + 0.12 * aLayer) * uStrength;
+    vec3 p = base - velocity * aTrailT * uLength * uCraftRadius * (0.65 + uStrength * 2.6) * noise;
+    p += n * sin(aTrailT * 3.14159) * uCraftRadius * (0.012 + 0.036 * aLayer) * uStrength;
     p = mix(aCenter, p, eligible);
     vTrailT = aTrailT;
     vLayer = aLayer;
@@ -221,9 +224,9 @@ const FIN_FRAGMENT = `
     vec3 core = mix(uTrailPrimary, uTrailSecondary, smoothstep(0.2, 0.72, vTrailT));
     core = mix(core, uTrailTertiary, smoothstep(0.68, 1.0, vTrailT));
     vec3 color = mix(core, uWrap, vLayer * 0.72);
-    float alpha = fade * broken * occlusion * uStrength * uOpacity * mix(0.56, 0.22, vLayer);
+    float alpha = fade * broken * occlusion * uStrength * uOpacity * mix(0.42, 0.16, vLayer);
     if (alpha < 0.006) discard;
-    gl_FragColor = vec4(color * alpha, alpha);
+    gl_FragColor = vec4(color, alpha);
     #include <logdepthbuf_fragment>
   }
 `;
@@ -275,10 +278,10 @@ const WISP_FRAGMENT = `
   ${OCCLUSION_GLSL}
   #include <logdepthbuf_pars_fragment>
   void main() {
-    float alpha = (1.0 - vTrailT) * reentryOcclusion() * uStrength * uOpacity * mix(0.32, 0.16, vLayer);
+    float alpha = (1.0 - vTrailT) * reentryOcclusion() * uStrength * uOpacity * mix(0.22, 0.1, vLayer);
     if (alpha < 0.008) discard;
     vec3 color = mix(uShock, uGlowHot, vTrailT * 0.55);
-    gl_FragColor = vec4(color * alpha, alpha);
+    gl_FragColor = vec4(color, alpha);
     #include <logdepthbuf_fragment>
   }
 `;
@@ -292,6 +295,7 @@ class ReentrySparks {
   private cursor = 0;
   private seed = 0x4f1bbcdc;
   private activeCount = 0;
+  private spawnAccumulator = 0;
 
   constructor(private readonly capacity: number, color: string) {
     this.positions = new Float32Array(capacity * 3);
@@ -326,7 +330,7 @@ class ReentrySparks {
           vec2 q = gl_PointCoord * 2.0 - 1.0;
           float alpha = max(0.0, 1.0 - dot(q, q)) * vDepthFade;
           if (alpha < 0.05) discard;
-          gl_FragColor = vec4(uColor * alpha, alpha);
+          gl_FragColor = vec4(uColor, alpha);
           #include <logdepthbuf_fragment>
         }
       `,
@@ -357,6 +361,7 @@ class ReentrySparks {
     if (!enabled) {
       this.life.fill(0);
       this.activeCount = 0;
+      this.spawnAccumulator = 0;
       this.points.visible = false;
       return;
     }
@@ -378,7 +383,11 @@ class ReentrySparks {
       this.activeCount++;
     }
     if (strength > threshold) {
-      const spawn = Math.min(8, Math.ceil((strength - threshold) * 18));
+      // Emit per second rather than per frame so 60 Hz and 120 Hz produce
+      // comparable density and performance.
+      this.spawnAccumulator += (strength - threshold) * 240 * dt;
+      const spawn = Math.min(8, Math.floor(this.spawnAccumulator));
+      this.spawnAccumulator -= spawn;
       const direction = velocityOS.clone().normalize();
       for (let count = 0; count < spawn; count++) {
         const index = this.cursor++ % this.capacity;
@@ -439,6 +448,8 @@ export class ActiveReentryEffect {
     const bowlMaterial = materialBase(uniforms(palette), envelopeVertex(true), glowFragment(true));
     const wispMaterial = materialBase(uniforms(palette), WISP_VERTEX, WISP_FRAGMENT);
     this.materials = [glowMaterial, trailMaterial, bowlMaterial, wispMaterial];
+    const craftRadius = Math.max(0.5, this.geometry.envelope.boundingSphere?.radius ?? 1);
+    for (const material of this.materials) material.uniforms.uCraftRadius.value = craftRadius;
     this.glow = new THREE.Mesh(this.geometry.envelope, glowMaterial);
     this.trails = new THREE.Mesh(this.geometry.fins, trailMaterial);
     this.bowl = new THREE.Mesh(this.geometry.envelope, bowlMaterial);

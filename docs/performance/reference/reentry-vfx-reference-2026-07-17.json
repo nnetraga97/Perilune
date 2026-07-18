@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-07-18T00:10:25.977Z",
+  "mode": "reference",
+  "durationSeconds": 30,
+  "runCount": 3,
+  "host": {
+    "modelName": "MacBook Pro",
+    "modelIdentifier": "Mac15,10",
+    "chip": "Apple M3 Max",
+    "gpuCoreCount": 30,
+    "memoryBytes": 38654705664,
+    "firmwareVersion": "18000.121.3",
+    "osVersion": "26.5.2",
+    "osBuild": "25F84",
+    "powerSource": "AC Power",
+    "powerMode": 0
+  },
+  "browser": {
+    "executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "version": "150.0.7871.127",
+    "headless": false,
+    "identity": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+      "webglVendor": "Google Inc. (Apple)",
+      "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+      "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+    }
+  },
+  "fixture": {
+    "quality": "medium",
+    "viewport": [
+      1920,
+      1080
+    ],
+    "pausedAfterFullStack": true
+  },
+  "results": [
+    {
+      "run": 1,
+      "enabled": false,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.333316666682562,
+      "frameP95MedianMs": 9.689999997615814,
+      "renderMedianMs": 6.314999997615814,
+      "renderP95Ms": 6.819999992847443,
+      "flightGpuMedianMs": 1.37125,
+      "flightGpuP95Ms": 2.347458,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4135,
+      "drawCallsMedian": 71,
+      "trianglesMedian": 97985
+    },
+    {
+      "run": 1,
+      "enabled": true,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.333516666690509,
+      "frameP95MedianMs": 9.764999985694885,
+      "renderMedianMs": 6.754999995231628,
+      "renderP95Ms": 7.685000002384186,
+      "flightGpuMedianMs": 2.902291,
+      "flightGpuP95Ms": 6.970375,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4107,
+      "drawCallsMedian": 76,
+      "trianglesMedian": 130385
+    },
+    {
+      "run": 2,
+      "enabled": false,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.333333333333334,
+      "frameP95MedianMs": 9.7049999833107,
+      "renderMedianMs": 6.285000026226044,
+      "renderP95Ms": 6.825000047683716,
+      "flightGpuMedianMs": 1.38525,
+      "flightGpuP95Ms": 2.443249,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4148,
+      "drawCallsMedian": 71,
+      "trianglesMedian": 97985
+    },
+    {
+      "run": 2,
+      "enabled": true,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.333316666682562,
+      "frameP95MedianMs": 9.715000033378601,
+      "renderMedianMs": 6.504999995231628,
+      "renderP95Ms": 7.110000014305115,
+      "flightGpuMedianMs": 2.889416,
+      "flightGpuP95Ms": 6.646875,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4123,
+      "drawCallsMedian": 76,
+      "trianglesMedian": 130385
+    },
+    {
+      "run": 3,
+      "enabled": false,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.282316666642824,
+      "frameP95MedianMs": 9.884999990463257,
+      "renderMedianMs": 6.269999980926514,
+      "renderP95Ms": 6.9549999833106995,
+      "flightGpuMedianMs": 1.389958,
+      "flightGpuP95Ms": 1.670666,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4140,
+      "drawCallsMedian": 71,
+      "trianglesMedian": 97985
+    },
+    {
+      "run": 3,
+      "enabled": true,
+      "browserIdentity": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "webglVendor": "Google Inc. (Apple)",
+        "webglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Max, Unspecified Version)",
+        "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
+      },
+      "samples": 117,
+      "errors": [],
+      "frameMeanMedianMs": 8.278416666587194,
+      "frameP95MedianMs": 9.960000038146973,
+      "renderMedianMs": 6.3299999833106995,
+      "renderP95Ms": 6.870000004768372,
+      "flightGpuMedianMs": 3.805916,
+      "flightGpuP95Ms": 6.874,
+      "gpuTimingSupported": true,
+      "gpuQueriesValid": 4150,
+      "drawCallsMedian": 76,
+      "trianglesMedian": 130385
+    }
+  ],
+  "aggregate": {
+    "enabled": {
+      "frameP95MedianMs": 9.764999985694885,
+      "renderP95MedianMs": 7.110000014305115,
+      "flightGpuMedianMs": 2.902291,
+      "drawCallsMedian": 76,
+      "trianglesMedian": 130385
+    },
+    "disabled": {
+      "frameP95MedianMs": 9.7049999833107,
+      "renderP95MedianMs": 6.825000047683716,
+      "flightGpuMedianMs": 1.38525,
+      "drawCallsMedian": 71,
+      "trianglesMedian": 97985
+    },
+    "delta": {
+      "frameP95Ms": 0.06000000238418579,
+      "renderP95Ms": 0.2849999666213989,
+      "flightGpuMs": 1.5170409999999999,
+      "drawCalls": 5,
+      "triangles": 32400
+    }
+  },
+  "gates": [
+    {
+      "name": "reference-hardware",
+      "pass": true
+    },
+    {
+      "name": "browser-identity",
+      "pass": true
+    },
+    {
+      "name": "runtime-errors",
+      "pass": true
+    },
+    {
+      "name": "enabled-frame-p95",
+      "limit": 16.7,
+      "value": 9.764999985694885,
+      "pass": true
+    },
+    {
+      "name": "frame-p95-delta",
+      "limit": 1.5,
+      "value": 0.06000000238418579,
+      "pass": true
+    },
+    {
+      "name": "render-p95-delta",
+      "limit": 1,
+      "value": 0.2849999666213989,
+      "pass": true
+    },
+    {
+      "name": "flight-gpu",
+      "limit": 8,
+      "value": 2.902291,
+      "pass": true
+    },
+    {
+      "name": "flight-gpu-delta",
+      "limit": 2,
+      "value": 1.5170409999999999,
+      "pass": true
+    }
+  ],
+  "passed": true
+}

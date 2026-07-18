@@ -56,6 +56,17 @@ describe('body visual assignments', () => {
       if (visual.entryVisual) expect(validateEntryVisual(visual.entryVisual)).toEqual([]);
     }
   });
+
+  it('gives every atmospheric body an explicit entry identity and no airless body one', () => {
+    for (const body of AUREN_SYSTEM) {
+      const entryVisual = BODY_VISUALS[body.id as keyof typeof BODY_VISUALS].entryVisual;
+      if (body.atmosphere) expect(entryVisual, body.id).toBeDefined();
+      else expect(entryVisual, body.id).toBeUndefined();
+    }
+    expect(new Set(['vess', 'veyra', 'rusk', 'tyran'].map((id) => (
+      BODY_VISUALS[id as 'vess' | 'veyra' | 'rusk' | 'tyran'].entryVisual!.trailPrimary
+    ))).size).toBe(4);
+  });
 });
 
 describe('bodyMaterialDescriptor', () => {
