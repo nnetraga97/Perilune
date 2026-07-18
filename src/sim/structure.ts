@@ -14,7 +14,10 @@ import { Craft, PartInstance, defOf, partWetMass } from './vessel';
 
 /** Joint strength constants (N per m^2 of contact area, and bending factor). */
 const STACK_STRENGTH = 2.6e6;
-const SURFACE_STRENGTH = 9.0e5;
+// Calibrated so ordinary surface hardware survives the stock Wayfarer's
+// ~45 kPa max-Q turn with useful margin, while aggressive high-AoA flight can
+// still tear fins and radial couplings away.
+const SURFACE_STRENGTH = 1.4e6;
 const BENDING_FACTOR = 0.55;
 
 export interface JointLoad {

@@ -7,6 +7,7 @@ import { buildAutoStages } from '../src/sim/vessel';
 import { evaluateStructure } from '../src/sim/structure';
 import { Vec3 } from '../src/core/vec3';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
+import { ascentGuidance } from '../src/sim/guidance';
 
 describe('built-in craft library', () => {
   it('exposes the Wayfarer as a fresh, structurally valid 21-part craft', () => {
@@ -95,6 +96,52 @@ describe('built-in craft library', () => {
     expect(game.vessels.filter((candidate) => (
       candidate.runtime.craft.parts.some((part) => part.defId === 'srb-torch')
     ))).toHaveLength(2);
+  });
+
+  it('keeps fins and radial couplings attached through the normal max-Q envelope', () => {
+    const craft = createWayfarerDemonstrator();
+    const game = new GameState();
+    const vessel = game.spawnOnPad(craft, craft.name);
+    const runtime = vessel.runtime;
+    const body = game.bodyOf(vessel);
+
+    // Let the vehicle settle before following the same full-throttle guidance
+    // path that previously shed its fins and boosters at about 45 kPa.
+    for (let frame = 0; frame < 250; frame++) game.update(PHYSICS_DT);
+    runtime.controls.throttle = 1;
+    expect(game.fireStage(vessel)).toBe(true);
+
+    let peakDynamicPressure = 0;
+    for (let frame = 0; frame < 1_000 && peakDynamicPressure < 45_000; frame++) {
+      game.update(PHYSICS_DT);
+      const command = ascentGuidance(runtime, body);
+      runtime.sas = 'custom';
+      runtime.sasCustomDir.copy(command.dir);
+      peakDynamicPressure = Math.max(peakDynamicPressure, runtime.aero.dynamicPressure);
+    }
+
+    expect(peakDynamicPressure).toBeGreaterThanOrEqual(45_000);
+    expect(runtime.craft.parts.filter((part) => part.defId === 'fin-rudder')).toHaveLength(4);
+    expect(runtime.craft.parts.filter((part) => part.defId === 'fin-swift')).toHaveLength(4);
+    expect(runtime.craft.parts.filter((part) => part.defId === 'dec-radial')).toHaveLength(2);
+    expect(runtime.events.some((event) => event.text.includes('Structural failure'))).toBe(false);
+
+    const normalTurn = evaluateStructure(
+      runtime.craft,
+      new Vec3(0, runtime.properAccel, 0),
+      runtime.aero.dynamicPressure,
+      Math.sin(runtime.aero.aoa),
+    );
+    expect(normalTurn.failures).toEqual([]);
+    expect(normalTurn.maxUtilization).toBeLessThan(0.8);
+
+    const aggressiveTurn = evaluateStructure(
+      runtime.craft,
+      new Vec3(0, 45, 0),
+      60_000,
+      Math.sin(Math.PI / 6),
+    );
+    expect(aggressiveTurn.failures.length).toBeGreaterThan(0);
   });
 
   it('derives the fitted M-to-S envelope through the upper-stage Colt engine', () => {
