@@ -118,6 +118,11 @@ export class GameState {
   campaign: CampaignState;
   /** Delivered science by canonical experiment/body/biome/situation key. */
   scienceLedger = new Map<ScienceKeyId, LedgerEntry>();
+  /**
+   * Last science site auto-collected per vessel id. Transient: it only debounces
+   * automatic collection within a session, so it is deliberately not persisted.
+   */
+  readonly autoScienceSites = new Map<string, string>();
   /** Progress/tutorial flags. */
   flags: Record<string, boolean> = {};
   /** Bodies whose resource fields have been surveyed from orbit. */
@@ -154,6 +159,7 @@ export class GameState {
     this.vessels = [];
     this.activeVesselId = null;
     this.lastDestruction = null;
+    this.autoScienceSites.clear();
     this.setWarp(0, false);
   }
 
@@ -702,6 +708,21 @@ export class GameState {
       );
       component.gv.runtime.crew = crewBefore.slice(crewIndex, crewIndex + capacity);
       crewIndex += capacity;
+    }
+
+    // Buffered results live on the vessel runtime, so a split that hands control
+    // to a new component would otherwise strand the science on the discarded
+    // debris. Move it to the component the player keeps flying.
+    const scienceHeir = componentVessels.find(
+      (component) => !component.gv.runtime.isDebris && component.gv.runtime.crew.length > 0,
+    )
+      ?? componentVessels.find((component) => !component.gv.runtime.isDebris)
+      ?? componentVessels[0];
+    if (scienceHeir && scienceHeir.gv.runtime !== v && v.scienceBuffer.size > 0) {
+      for (const [keyId, result] of v.scienceBuffer) {
+        scienceHeir.gv.runtime.scienceBuffer.set(keyId, { ...result });
+      }
+      v.scienceBuffer.clear();
     }
 
     logEvent(v, this.time, 'Stage separation');

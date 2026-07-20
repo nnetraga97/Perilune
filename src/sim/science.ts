@@ -252,6 +252,23 @@ export function collectScience(game: GameState, vessel: GameVessel): CollectOutc
   return { site: preview.site, collected: preview.results, totalHeld: preview.totalCollectValue };
 }
 
+/**
+ * Collect everything valid here the first time a vessel reaches a given site.
+ *
+ * Returns null when there is nothing to do, so the caller only announces a real
+ * collection. Gating on the site rather than on buffer contents keeps a vessel
+ * from immediately re-collecting the recoverable remainder after a transmit.
+ */
+export function autoCollectScience(game: GameState, vessel: GameVessel): CollectOutcome | null {
+  const preview = availableHere(game, vessel);
+  if (!preview.site) return null;
+  const signature = `${preview.site.body.id}:${preview.site.situation}:${preview.site.biome.id}`;
+  if (game.autoScienceSites.get(vessel.runtime.id) === signature) return null;
+  game.autoScienceSites.set(vessel.runtime.id, signature);
+  if (preview.results.length === 0) return null;
+  return collectScience(game, vessel);
+}
+
 function ledgerForDelivery(game: GameState, keyId: ScienceKeyId, buffered: BufferedResult): LedgerEntry {
   const existing = game.scienceLedger.get(keyId);
   if (existing) return existing;

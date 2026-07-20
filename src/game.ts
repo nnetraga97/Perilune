@@ -49,7 +49,13 @@ import {
   settleContracts,
   type GameMode,
 } from './sim/campaign';
-import { collectScience, recoverScience, transmitScience as transmitBufferedScience } from './sim/science';
+import {
+  autoCollectScience,
+  collectScience,
+  recoverScience,
+  transmitScience as transmitBufferedScience,
+} from './sim/science';
+import type { CollectOutcome } from './sim/science';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -117,6 +123,7 @@ class PeriluneGame {
   private autosaveScheduled = false;
   private comms: CommsStatus = { connected: true, path: [], strength: 1 };
   private lastCommsCheck = 0;
+  private lastAutoScienceCheck = 0;
   private controlBlocked = false;
   private dialogEl: HTMLElement | null = null;
   private input = new InputService();
@@ -717,6 +724,16 @@ class PeriluneGame {
       logEvent(v, this.game.time, 'No valid science situation right now.', 'warning');
       return;
     }
+    this.announceCollectedScience(v, outcome);
+    if (outcome.collected.length === 0) {
+      logEvent(v, this.game.time, 'No collectable science here — the site is exhausted or its result is already aboard.', 'warning');
+      return;
+    }
+    void this.saveSync.write(this.game, 'auto', 'autosave');
+  }
+
+  private announceCollectedScience(v: import('./sim/flight').VesselRuntime, outcome: CollectOutcome): void {
+    if (!outcome.site) return;
     for (const result of outcome.collected) {
       logEvent(
         v,
@@ -724,10 +741,15 @@ class PeriluneGame {
         `${result.experiment.name}: ${result.collectValue} science aboard (${outcome.site.biome.name}, ${outcome.site.situation})`,
       );
     }
-    if (outcome.collected.length === 0) {
-      logEvent(v, this.game.time, 'No collectable science here — the site is exhausted or its result is already aboard.', 'warning');
-      return;
-    }
+  }
+
+  /** Run every valid experiment the moment the active vessel reaches a new site. */
+  private runAutoScience(): void {
+    const gv = this.game.active;
+    if (!gv) return;
+    const outcome = autoCollectScience(this.game, gv);
+    if (!outcome || outcome.collected.length === 0) return;
+    this.announceCollectedScience(gv.runtime, outcome);
     void this.saveSync.write(this.game, 'auto', 'autosave');
   }
 
@@ -1450,6 +1472,10 @@ class PeriluneGame {
         // per-frame catch-up request is bounded to what physics warp can run.
         this.game.update(dt);
         this.updateCampaignAchievements();
+        if (now - this.lastAutoScienceCheck > 500) {
+          this.lastAutoScienceCheck = now;
+          this.runAutoScience();
+        }
         for (const alarm of this.game.consumeFiredAlarms()) {
           const vessel = (alarm.vesselId
             ? this.game.vessels.find((candidate) => candidate.runtime.id === alarm.vesselId)
