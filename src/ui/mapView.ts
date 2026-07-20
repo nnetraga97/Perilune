@@ -147,6 +147,17 @@ export function mapStarDirection(universe: Universe, focusBody: Body, time: numb
   return out.lengthSq() > 0 ? out.normalize() : out.set(1, 0, 0);
 }
 
+/**
+ * Bodies that should carry an orbit ring on the map.
+ *
+ * Deliberately independent of the anchor: the body the vessel is orbiting sits
+ * at the scene origin but still has a real orbit around its own parent, and
+ * hiding it leaves the map with no reference for where that body is going.
+ */
+export function mapOrbitRingBodies(universe: Universe): readonly Body[] {
+  return [...universe.bodies.values()].filter((body) => body.orbit && body.parent);
+}
+
 /** Authoritative map-space body center, relative to the active SOI anchor. */
 export function mapBodyScenePosition(
   universe: Universe,
@@ -1437,15 +1448,18 @@ export class MapView {
       if (candidate === body) continue;
       mapBodyScenePosition(game.universe, candidate, body, t, candidatePos);
       place(candidate, candidatePos);
-      if (!candidate.orbit || !candidate.parent) continue;
+    }
+    // Rings are drawn for every orbiting body, including the anchor, whose own
+    // orbit around its parent is still meaningful even though it sits at origin.
+    for (const candidate of mapOrbitRingBodies(game.universe)) {
       let line = this.bodyOrbits.get(candidate.id);
       if (!line) {
         line = orbitLine('#4a6072', false, 1.8);
         this.bodyOrbits.set(candidate.id, line);
         this.scene.add(line);
       }
-      game.universe.relativePosition(candidate.parent, body, t, parentOffset);
-      fillConic(line, candidate.orbit, parentOffset);
+      game.universe.relativePosition(candidate.parent!, body, t, parentOffset);
+      fillConic(line, candidate.orbit!, parentOffset);
       line.visible = true;
     }
     for (const [id, mesh] of this.bodyMeshes) {
