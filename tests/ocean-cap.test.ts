@@ -5,6 +5,7 @@ import { GameState } from '../src/sim/state';
 import { terrainPresentationBand } from '../src/render/terrainPresentation';
 import {
   oceanCapAngle,
+  oceanCapCoversHorizon,
   oceanCapDirection,
   oceanCapSegments,
 } from '../src/render/terrestrial/oceanMaterial';
@@ -95,5 +96,10 @@ describe('ocean cap geometry', () => {
     expect(oceanCapSegments('low')).toBeLessThan(oceanCapSegments('medium'));
     expect(oceanCapSegments('medium')).toBeLessThan(oceanCapSegments('high'));
     expect(() => oceanCapAngle(0, 10)).toThrow(/radius/i);
+  });
+
+  it('hands high-orbit full-disk rendering back to the global ocean', () => {
+    expect(oceanCapCoversHorizon(RADIUS, RADIUS * 0.05)).toBe(true);
+    expect(oceanCapCoversHorizon(RADIUS, RADIUS * 3.5)).toBe(false);
   });
 });

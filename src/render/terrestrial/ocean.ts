@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
-import { createOceanCapMaterial, oceanCapAngle, oceanCapSegments } from './oceanMaterial';
+import {
+  createOceanCapMaterial,
+  oceanCapAngle,
+  oceanCapCoversHorizon,
+  oceanCapSegments,
+} from './oceanMaterial';
 import { updateTerrestrialAerialPerspective } from './aerialPerspective';
 
 /**
@@ -49,6 +54,11 @@ export class TerrestrialOcean {
     this.mesh.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
 
     const cameraDistance = Math.hypot(camera.x, camera.y, camera.z) || 1;
+    const cameraAltitude = cameraDistance - this.datumRadius;
+    // This pass supplies meter-scale waves near the camera. Once its finite
+    // cap can no longer reach the true horizon, hiding it avoids exposing the
+    // square/circular cap boundary across the global ocean presentation.
+    this.mesh.visible = oceanCapCoversHorizon(this.datumRadius, cameraAltitude);
     this.anchor.set(camera.x / cameraDistance, camera.y / cameraDistance, camera.z / cameraDistance);
     this.east.set(-this.anchor.y, this.anchor.x, 0);
     if (this.east.lengthSq() < 1e-12) this.east.set(1, 0, 0);
@@ -59,7 +69,7 @@ export class TerrestrialOcean {
     (uniforms.uAnchorDirection.value as THREE.Vector3).copy(this.anchor);
     (uniforms.uEast.value as THREE.Vector3).copy(this.east);
     (uniforms.uNorth.value as THREE.Vector3).copy(this.north);
-    uniforms.uCapAngle.value = oceanCapAngle(this.datumRadius, cameraDistance - this.datumRadius);
+    uniforms.uCapAngle.value = oceanCapAngle(this.datumRadius, cameraAltitude);
     (uniforms.uCameraBodyFixed.value as THREE.Vector3).set(camera.x, camera.y, camera.z);
     (uniforms.uSunDirection.value as THREE.Vector3).set(
       frame.bodySunDirection.x,

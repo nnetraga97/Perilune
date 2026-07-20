@@ -161,6 +161,14 @@ export function oceanCapAngle(bodyRadius: number, altitudeMeters: number): numbe
   );
 }
 
+/** Whether the finite near-field cap still extends beyond the geometric horizon. */
+export function oceanCapCoversHorizon(bodyRadius: number, altitudeMeters: number): boolean {
+  if (!(bodyRadius > 0) || !Number.isFinite(bodyRadius)) throw new Error(`Invalid ocean radius ${bodyRadius}`);
+  const altitude = Number.isFinite(altitudeMeters) ? Math.max(0, altitudeMeters) : 0;
+  const horizon = Math.acos(Math.min(1, bodyRadius / (bodyRadius + altitude)));
+  return oceanCapAngle(bodyRadius, altitude) > horizon;
+}
+
 /** Mirror of the cap vertex shader for geometry tests and CPU-side bounds. */
 export function oceanCapDirection(
   anchor: Readonly<{ x: number; y: number; z: number }>,

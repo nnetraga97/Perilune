@@ -115,6 +115,7 @@ class PeriluneGame {
   private precisionControl = false;
   private paused = false;
   private uiHidden = false;
+  private uiHideHeld = false;
   private lastAutosave = 0;
   private autosaveScheduled = false;
   private comms: CommsStatus = { connected: true, path: [], strength: 1 };
@@ -877,7 +878,17 @@ class PeriluneGame {
 
   private toggleUi(): void {
     this.uiHidden = !this.uiHidden;
-    this.uiRoot.classList.toggle('k-ui-hidden', this.uiHidden);
+    this.syncUiHidden();
+  }
+
+  private setUiHideHeld(held: boolean): void {
+    if (this.uiHideHeld === held) return;
+    this.uiHideHeld = held;
+    this.syncUiHidden();
+  }
+
+  private syncUiHidden(): void {
+    this.uiRoot.classList.toggle('k-ui-hidden', this.uiHidden || this.uiHideHeld);
   }
 
   private showDialog(title: string, text: string, actions: Array<{ label: string; fn: () => void }>): void {
@@ -1067,14 +1078,19 @@ class PeriluneGame {
         this.input.dispatch(e, this.screen as BindingScreen);
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'KeyH') this.setUiHideHeld(false);
+    });
     window.addEventListener('blur', () => {
       this.keys.clear();
+      this.setUiHideHeld(false);
       this.resetTouchFlightControls();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         this.keys.clear();
+        this.setUiHideHeld(false);
         this.resetTouchFlightControls();
       }
     });
@@ -1277,6 +1293,7 @@ class PeriluneGame {
         else this.world.resetCamera();
       }) },
       { code: 'F2', screen: flight, group: 'Camera', label: 'Hide screenshot UI', preventDefault: true, handler: () => this.toggleUi() },
+      { code: 'KeyH', screen: flight, group: 'Camera', label: 'Hold to hide all HUD', handler: () => this.setUiHideHeld(true) },
       // ---- flight: held keys (polled in the frame loop; listed for the cheat sheet)
       { code: '', screen: flight, group: 'Control', label: 'Pitch', keyLabel: 'W / S' },
       { code: '', screen: flight, group: 'Control', label: 'Yaw', keyLabel: 'A / D' },
