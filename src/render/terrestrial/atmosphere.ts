@@ -50,11 +50,20 @@ export class TerrestrialAtmosphere {
     }, 0);
   }
 
-  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection'> &
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'orientation' | 'bodySunDirection'> &
     { readonly solarVisibleFraction?: number }): void {
     if (this.disposed) return;
     const { cameraRelativeOrigin: origin, cameraBodyFixed, bodySunDirection: sunDirection } = frame;
     this.mesh.position.set(origin.x, origin.y, origin.z);
+    // Geometry is spherical, but vBodyNormal is also the shader's body-fixed
+    // ray endpoint. Apply the physical body orientation so rasterized shell
+    // points and uCameraBodyFixed remain in the same coordinate frame.
+    this.mesh.quaternion.set(
+      frame.orientation.x,
+      frame.orientation.y,
+      frame.orientation.z,
+      frame.orientation.w,
+    );
     const camera = this.material.uniforms.uCameraBodyFixed.value as THREE.Vector3;
     camera.set(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
     const sun = this.material.uniforms.uSunDirection.value as THREE.Vector3;

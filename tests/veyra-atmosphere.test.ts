@@ -52,9 +52,11 @@ describe('Veyra atmosphere', () => {
     layer.update({
       cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
       cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 },
       bodySunDirection: { x: 0, y: 2, z: 0 },
     });
     expect(layer.mesh.position.toArray()).toEqual([10, 20, 30]);
+    expect(layer.mesh.quaternion.toArray()).toEqual([0, 0, Math.SQRT1_2, Math.SQRT1_2]);
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(1);
     expect(layer.material.side).toBe(THREE.BackSide);
     expect(layer.material.uniforms.uAerialPerspective).toBeUndefined();
@@ -63,6 +65,7 @@ describe('Veyra atmosphere', () => {
     layer.update({
       cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
       cameraBodyFixed: { x: veyra.radius + physical.height + 1, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
       bodySunDirection: { x: 1, y: 0, z: 0 },
     });
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(0);
