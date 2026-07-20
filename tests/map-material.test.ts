@@ -36,7 +36,7 @@ function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAsse
 }
 
 describe('compact map body presentation', () => {
-  test('returns default map focus to the active vessel SOI body', () => {
+  test('returns default map focus to the active vessel inside its SOI frame', () => {
     const game = createLegacyGameState();
     const active = game.spawnInOrbit(createCraft('Map focus probe'), 'Map focus probe', 'palla', 10_000);
     game.activeVesselId = active.runtime.id;
@@ -51,10 +51,15 @@ describe('compact map body presentation', () => {
 
     map.focusActiveVessel(game);
 
+    const expectedFocus = new THREE.Vector3(
+      active.runtime.pos.x * 1e-5,
+      active.runtime.pos.y * 1e-5,
+      active.runtime.pos.z * 1e-5,
+    );
     expect((map as unknown as { focusBodyId: string }).focusBodyId).toBe('palla');
     expect((map as unknown as { followsActiveVessel: boolean }).followsActiveVessel).toBe(true);
-    expect((map as unknown as { desiredFocus: THREE.Vector3 }).desiredFocus).toEqual(new THREE.Vector3());
-    expect((map as unknown as { camFocus: THREE.Vector3 }).camFocus).toEqual(new THREE.Vector3());
+    expect((map as unknown as { desiredFocus: THREE.Vector3 }).desiredFocus).toEqual(expectedFocus);
+    expect((map as unknown as { camFocus: THREE.Vector3 }).camFocus).toEqual(expectedFocus);
   });
 
   test('selects solid, gas, and star materials from the shared descriptor identity', () => {

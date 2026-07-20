@@ -828,11 +828,12 @@ export class MapView {
     const active = game.active;
     if (!active) return;
     this.focusBodyId = game.bodyOf(active).id;
-    // The map coordinate frame is centered on the active vessel's SOI body.
-    // Reset immediately so stale mesh positions from the previous vessel cannot
-    // leave the newly opened map drifting across interplanetary distances.
-    this.desiredFocus.set(0, 0, 0);
-    this.camFocus.set(0, 0, 0);
+    // Vessel state is already relative to its SOI body, which is also the map
+    // coordinate anchor. Snap immediately so opening the map or switching the
+    // active craft cannot spend a frame focused on the body's center.
+    const position = active.runtime.pos;
+    this.desiredFocus.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+    this.camFocus.copy(this.desiredFocus);
   }
 
   /** Pointer controls (called by game shell). */
@@ -849,31 +850,25 @@ export class MapView {
     this.cameraFocusMode = 'free';
   }
 
-  zoomCamera(factor: number, clientX?: number, clientY?: number): void {
-    if (factor < 1 && clientX !== undefined && clientY !== undefined) {
-      const pointer = new THREE.Vector2(
-        (clientX / window.innerWidth) * 2 - 1,
-        -(clientY / window.innerHeight) * 2 + 1,
-      );
-      this.raycaster.setFromCamera(pointer, this.camera);
-      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        this.camera.getWorldDirection(new THREE.Vector3()),
-        this.camFocus,
-      );
-      const point = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
-      if (point) {
-        this.camFocus.lerp(point, 0.12);
-        this.cameraFocusMode = 'free';
-      }
-    }
+  zoomCamera(factor: number): void {
+    // Zoom is a distance-only operation around the current camera target.
+    // Panning is the explicit operation that enters free-focus mode. Moving the
+    // target toward the mouse ray made an off-center wheel event permanently
+    // detach the camera from the selected craft/body.
     this.camDist = Math.max(1, Math.min(3e6, this.camDist * factor));
     this.predictionDirty = true;
   }
 
   recenterCamera(): void {
     this.cameraFocusMode = 'selected';
-    const mesh = this.bodyMeshes.get(this.focusBodyId);
-    if (mesh?.visible) this.desiredFocus.copy(mesh.position);
+    const active = this.gameRef?.active;
+    if (this.followsActiveVessel && active) {
+      const position = active.runtime.pos;
+      this.desiredFocus.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+    } else {
+      const mesh = this.bodyMeshes.get(this.focusBodyId);
+      if (mesh?.visible) this.desiredFocus.copy(mesh.position);
+    }
     this.camFocus.copy(this.desiredFocus);
     this.predictionDirty = true;
   }
@@ -1526,12 +1521,20 @@ export class MapView {
       const bounds = this.currentFitBounds(this.cameraFocusMode === 'fit-local' ? 'local' : 'system');
       if (bounds) this.desiredFocus.copy(bounds.center);
     } else if (this.cameraFocusMode === 'selected') {
-      if (focusMesh?.visible) this.desiredFocus.copy(focusMesh.position);
+      if (this.followsActiveVessel) {
+        this.desiredFocus.set(v.pos.x * SCALE, v.pos.y * SCALE, v.pos.z * SCALE);
+      } else if (focusMesh?.visible) this.desiredFocus.copy(focusMesh.position);
       else this.desiredFocus.set(0, 0, 0);
     } else {
       this.desiredFocus.copy(this.camFocus);
     }
-    if (this.cameraFocusMode !== 'free') this.camFocus.lerp(this.desiredFocus, 0.12);
+    if (this.cameraFocusMode === 'selected' && this.followsActiveVessel) {
+      // Following means the craft remains the exact projection center even at
+      // high time warp; smoothing here creates a visible trailing zoom target.
+      this.camFocus.copy(this.desiredFocus);
+    } else if (this.cameraFocusMode !== 'free') {
+      this.camFocus.lerp(this.desiredFocus, 0.12);
+    }
 
     // Ore deposit markers on the focus body (after an orbital survey).
     if (game.scannedBodies.has(body.id)) {

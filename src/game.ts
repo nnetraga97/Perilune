@@ -1131,7 +1131,7 @@ class PeriluneGame {
             y: (pointers[0].y + pointers[1].y) / 2,
           };
           if (distance > 0 && this.mapPinchDistance > 0) {
-            this.map.zoomCamera(this.mapPinchDistance / distance, midpoint.x, midpoint.y);
+            this.map.zoomCamera(this.mapPinchDistance / distance);
             this.map.panCamera(this.mapPinchMidpoint.x - midpoint.x, this.mapPinchMidpoint.y - midpoint.y);
           }
           this.mapPinchDistance = distance;
@@ -1197,7 +1197,7 @@ class PeriluneGame {
     canvas.addEventListener('wheel', (e) => {
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
       if (this.screen === 'editor') this.editor.zoomCamera(factor);
-      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor, e.clientX, e.clientY);
+      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
         this.world.camDist = Math.max(4, Math.min(2000, this.world.camDist * factor));
