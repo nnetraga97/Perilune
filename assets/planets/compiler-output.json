@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "compilerVersion": "2.3.0",
+  "compilerVersion": "2.4.0",
   "fingerprint": {
     "width": 64,
     "height": 32,
@@ -98,14 +98,14 @@
     "height": 4096,
     "rawHashes": {
       "albedo": "a893da948d0886038d9bf025b12de8e3255e3e6a61012504a3385ed99a1dbce5",
-      "normal": "cf5eb48f452b2535f79400fddbd1b72cb4e7469509693927d153a9492c6e7745",
-      "material": "0539311725e303c60b51a208d60a2f24e1d46b01a9c17bb6e8bdcbd66271ef02",
+      "normal": "92ebe8dcfaeb5c395c87397602843a29ee1c85654c0fc92163cb0267ec5bf5fb",
+      "material": "9baec464e987fdb4aa3018590357dde1d0d8e13a61b01b0377b40ad8cdd40bc6",
       "clouds": "fb3c2eecf329a44ca19b263b686ca0c0279e4a1abfc2abf75e1d958afd816610"
     },
-    "identitySha256": "77819597807ed9a62917b6c1592348c23496ebe301091e8350d183f45a2af7f3",
+    "identitySha256": "8c83eea416ce8321d983a7c339c471bbf1a56539cbfc4c25eefd080e394613c0",
     "heightArtifact": {
       "path": "generated/veyra/canonical/height.s16le",
-      "checksumSha256": "682dd15caead1154458581d2b40f23f9d79697cf401bf723a9adfba063b821e5",
+      "checksumSha256": "9984a1b82c0b5323bf6c590e0924538a7a2f308e3e8b2fa2633069bf10842aed",
       "quantizationMeters": 0.5,
       "byteOrder": "little-endian"
     }

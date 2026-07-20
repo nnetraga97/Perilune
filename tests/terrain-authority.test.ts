@@ -97,7 +97,7 @@ describe('planet surface authority', () => {
         const result = solidHeight(veyra, direction);
         if (result.kind !== 'solid') throw new Error('expected solid Veyra terrain');
         if (Math.abs(result.height) > first.texelHeightRange) {
-          expect(first.material[pixel * 4 + 3] === 255).toBe(result.height < 0);
+          expect(first.material[pixel * 4 + 2] >= 128).toBe(result.height < 0);
         }
         const normal = decodeOctNormal(first.normal[pixel * 2], first.normal[pixel * 2 + 1]);
         expect(normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
@@ -148,7 +148,7 @@ describe('planet surface authority', () => {
         const direction = directionFromEquirectUv((x + 0.5) / width, (y + 0.5) / height);
         const authoritativeHeight = heightAt(direction);
         if (Math.abs(authoritativeHeight) > maps.texelHeightRange) {
-          expect(maps.material[pixel * 4 + 3] === 255).toBe(authoritativeHeight < 0);
+          expect(maps.material[pixel * 4 + 2] >= 128).toBe(authoritativeHeight < 0);
         }
 
         const eastDirection = directionFromEquirectUv((x + 1.5) / width, (y + 0.5) / height);

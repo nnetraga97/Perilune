@@ -242,6 +242,8 @@ describe('createTerrestrialSurfaceMaterial', () => {
     expect(shader.fragmentShader).not.toContain('mix(surfBodyNormal, globalBodyNormal, 0.68');
     expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.uniforms.globalCloudMap.value).toBe(authoredPack.textures.get('clouds'));
+    expect(shader.uniforms.useGlobalIceMap.value).toBe(0);
+    expect(shader.fragmentShader).toContain('authoredMaterial.a * useGlobalIceMap');
     expect(shader.uniforms.surfaceDetailMaxOctave.value).toBe(surfaceDetailTier('medium').maxOctave);
     expect(shader.uniforms.useLocalDetailMap.value).toBe(0);
     expect(material.userData.authored).toBe(true);

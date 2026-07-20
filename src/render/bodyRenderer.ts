@@ -45,6 +45,11 @@ export interface BodyRenderFrame {
   readonly bodySunDirection: VectorCoordinates;
   /** Fraction of the finite solar disk visible after analytic body occultation. */
   readonly solarVisibleFraction: number;
+  /** Strongest finite-disk occulter, in camera-centered inertial coordinates. */
+  readonly solarOccluder?: {
+    readonly direction: VectorCoordinates;
+    readonly angularRadius: number;
+  };
   readonly time: number;
   /** Wall-clock frame delta; never simulation-warp time. */
   readonly deltaSeconds: number;
@@ -96,6 +101,8 @@ export interface BodyRenderer {
   readonly quality: QualityTier;
   readonly root: THREE.Object3D;
   readonly ready: boolean;
+  /** Optional direct-light handle used by the camera-relative shadow policy. */
+  readonly shadowLight?: THREE.DirectionalLight;
   /** Stage borrowed runtime assets before preparation and shader compilation. */
   stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void;
   update(frame: Readonly<BodyRenderFrame>): void;

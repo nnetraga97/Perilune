@@ -12,6 +12,7 @@ import {
   LAUNCH_PAD_TERRAIN_FLAT_RADIUS,
   LAUNCH_SITE_LAT,
   LAUNCH_SITE_LON,
+  LAUNCH_SITE_MINIMUM_GROUND_HEIGHT,
 } from './launchSite';
 import {
   sampleCanonicalLocalRelief,
@@ -44,12 +45,12 @@ export interface TerrainRecipeBounds {
 
 const recipes = new WeakMap<Body, BodyFeatureRecipe>();
 const MASK_64 = (1n << 64n) - 1n;
-const CAPE_SKYWARD = Object.freeze({
+const LAUNCH_SITE = Object.freeze({
   x: Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON),
   y: Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON),
   z: Math.sin(LAUNCH_SITE_LAT),
 });
-const capeSkywardHeight = new Map<string, number>();
+const launchSiteHeight = new Map<string, number>();
 
 function fnv1a64(text: string, offset: bigint): string {
   let hash = offset;
@@ -218,19 +219,22 @@ export function evaluateRecipeHeight(
   const naturalHeight = evaluateNaturalRecipeHeight(recipe, direction);
   if (recipe.bodyId !== 'veyra' && recipe.bodyId !== 'earth') return naturalHeight;
 
-  // Cape Skyward is authored into the same immutable terrain recipe consumed
+  // The launch site is authored into the same immutable terrain recipe consumed
   // by physics, workers, and baked assets. A flat center plus a wide smooth
   // grade ensures nearby LOD vertices cannot bridge a steep hillside over the
   // small physical deck footprint.
   const dot = Math.max(-1, Math.min(1,
-    direction.x * CAPE_SKYWARD.x + direction.y * CAPE_SKYWARD.y + direction.z * CAPE_SKYWARD.z,
+    direction.x * LAUNCH_SITE.x + direction.y * LAUNCH_SITE.y + direction.z * LAUNCH_SITE.z,
   ));
   const distanceMeters = Math.acos(dot) * recipe.radiusMeters;
   if (distanceMeters >= LAUNCH_PAD_TERRAIN_BLEND_RADIUS) return naturalHeight;
-  let plateauHeight = capeSkywardHeight.get(recipe.hash);
+  let plateauHeight = launchSiteHeight.get(recipe.hash);
   if (plateauHeight === undefined) {
-    plateauHeight = evaluateNaturalRecipeHeight(recipe, CAPE_SKYWARD);
-    capeSkywardHeight.set(recipe.hash, plateauHeight);
+    const sourceHeight = evaluateNaturalRecipeHeight(recipe, LAUNCH_SITE);
+    plateauHeight = recipe.bodyId === 'earth'
+      ? Math.max(LAUNCH_SITE_MINIMUM_GROUND_HEIGHT, sourceHeight)
+      : sourceHeight;
+    launchSiteHeight.set(recipe.hash, plateauHeight);
   }
   if (distanceMeters <= LAUNCH_PAD_TERRAIN_FLAT_RADIUS) return plateauHeight;
   const t = (distanceMeters - LAUNCH_PAD_TERRAIN_FLAT_RADIUS)

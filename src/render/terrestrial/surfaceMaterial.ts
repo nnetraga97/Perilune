@@ -362,7 +362,7 @@ float surfLatitude = asin(clamp(abs(normalize(vBodyDirection).z), 0.0, 1.0)) * 0
 float surfBiome = 0.5;
 float surfShore = 0.0;
 float surfOcean = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.b : 0.0;
-float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a : 0.0;
+float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a * useGlobalIceMap : 0.0;
 float surfMoisture = deterministicMoisture(vBodyDirection);
 SurfaceWeights surfWeights = classifyTerrestrialSurface(
   surfBiome, surfShore, surfOcean, vSurfaceAltitude, surfSlope, surfLatitude, surfMoisture);

@@ -34,7 +34,7 @@ const canonicalHeight = 4096;
 const fingerprintWidth = 64;
 const fingerprintHeight = 32;
 const quantizationMeters = 0.5;
-const compilerVersion = '2.3.0';
+const compilerVersion = '2.4.0';
 const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
 const fingerprintsOnly = process.argv.includes('--fingerprints-only');
@@ -82,7 +82,7 @@ interface ChannelOutput {
   fallbackPath: string;
   packageChecksumSha256: string;
   fallbackChecksumSha256: string;
-  gpuFormat: 'etc2-rgb' | 'bc5-rg' | 'bc3-rgba';
+  gpuFormat: 'etc2-rgb' | 'bc5-rg' | 'bc3-rgba' | 'rg8';
   gpuBytes: number;
   fallbackGpuBytes: number;
   fallbackLayout: 'rgb' | 'rgb-rg' | 'rgba';
@@ -134,6 +134,16 @@ function fullMipRgbaBytes(width: number, height: number): number {
   }
 }
 
+function fullMipRgBytes(width: number, height: number): number {
+  let total = 0;
+  for (;;) {
+    total += width * height * 2;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
+}
+
 function relativeAssetPath(path: string): string {
   return relative(assetsRoot, path).split('\\').join('/');
 }
@@ -143,7 +153,9 @@ function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['n
   const colorChannel = channel === 'albedo' || channel === 'emissive';
   const format = colorChannel ? 'R8G8B8_SRGB' :
     channel === 'material' || channel === 'localDetail' ? 'R8G8B8A8_UNORM' : 'R8G8_UNORM';
-  const encoding = colorChannel
+  const encoding = channel === 'heightMacro'
+    ? ['--zstd', '9']
+    : colorChannel
     ? ['--encode', 'basis-lz', '--qlevel', '180']
     : ['--encode', 'uastc', '--uastc-quality', '2', '--zstd', '9'];
   return new Promise((resolvePromise, reject) => {
@@ -250,6 +262,7 @@ async function writeTier(
   });
   for (const { definition, fallbackPath, packagePath } of prepared) {
     const colorChannel = definition.name === 'albedo' || definition.name === 'emissive';
+    const directHeight = definition.name === 'heightMacro';
     const blockBytes = colorChannel ? 8 : 16;
     channels.push({
       name: definition.name,
@@ -260,13 +273,15 @@ async function writeTier(
       fallbackPath: relativeAssetPath(fallbackPath),
       packageChecksumSha256: sha256(readFileSync(packagePath)),
       fallbackChecksumSha256: sha256(readFileSync(fallbackPath)),
-      gpuFormat: colorChannel ? 'etc2-rgb'
+      gpuFormat: directHeight ? 'rg8' : colorChannel ? 'etc2-rgb'
         : definition.name === 'material' || definition.name === 'localDetail' ? 'bc3-rgba' : 'bc5-rg',
-      gpuBytes: fullMipBytes(width, height, blockBytes),
+      gpuBytes: directHeight ? fullMipRgBytes(width, height) : fullMipBytes(width, height, blockBytes),
       fallbackGpuBytes: fullMipRgbaBytes(width, height),
       fallbackLayout: colorChannel ? 'rgb'
         : definition.name === 'material' || definition.name === 'localDetail' ? 'rgba' : 'rgb-rg',
-      transcodeTargets: colorChannel
+      transcodeTargets: directHeight
+        ? ['rg8']
+        : colorChannel
         ? ['etc2-rgb', 'bc1-rgb']
         : definition.name === 'material' || definition.name === 'localDetail'
           ? ['etc2-rgba', 'bc3-rgba', 'astc-rgba']

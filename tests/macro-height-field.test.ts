@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { SOL_SYSTEM } from '../src/content/system';
 import { Vec3 } from '../src/core/vec3';
 import { solidHeight } from '../src/sim/terrain';
+import { launchSiteBodyFixedDirection } from '../src/sim/launchSite';
+import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
 import {
   CHECKED_HEIGHT_AUTHORITY_VERSION,
   sampleSourceMacroHeight,
@@ -47,6 +49,21 @@ describe('checked source macro height authority', () => {
       const surface = solidHeight(body, sampleDirection);
       expect(surface.kind).toBe('solid');
       if (surface.kind === 'solid') expect(Math.abs(surface.height - macro)).toBeLessThan(160);
+    }
+  });
+
+  it('authors the physical Earth launch site above sea level despite the coarse coast cell', () => {
+    const universe = new Universe([...SOL_SYSTEM], 'earth');
+    const earth = universe.get('earth');
+    const direction = launchSiteBodyFixedDirection(new Vec3());
+    expect(evaluateRecipeHeight(recipeForBody(earth), direction)).toBeGreaterThan(0);
+  });
+
+  it('clamps both polar samples to the nearest source row', () => {
+    for (const bodyId of ['earth', 'moon']) {
+      const pole = sampleSourceMacroHeight(bodyId, direction(90, 0));
+      const nearPole = sampleSourceMacroHeight(bodyId, direction(89.9999, 0));
+      expect(nearPole).toBeCloseTo(pole!, 6);
     }
   });
 });

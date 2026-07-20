@@ -207,7 +207,8 @@ function sha256(bytes: Uint8Array): string {
 
 /**
  * Produces every canonical Veyra channel from one body-fixed height grid.
- * The material alpha is the authoritative visual ocean mask: 255 below datum.
+ * Packed material channels match the shared terrestrial shader contract:
+ * roughness, ambient occlusion, ocean mask, ice mask.
  */
 export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): VeyraCanonicalMaps {
   const { width, height, source, radius, heightAt, seed } = options;
@@ -374,7 +375,6 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
       const slope = 1 - radialAgreement;
       material[index * 4] = clampByte((ocean ? 0.24 : 0.76 - slope * 1.8) * 255); // roughness
       material[index * 4 + 1] = clampByte((0.82 - slope * 0.55) * 255); // ambient occlusion
-      material[index * 4 + 2] = ocean ? 0 : terrainHeight > 2_500 ? 220 : terrainHeight > 300 ? 150 : 80;
       const localShoreWidth = Math.max(
         0.5,
         Math.abs(terrainHeight - heights[eastIndex]),
@@ -382,9 +382,12 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
         Math.abs(terrainHeight - heights[northIndex]),
         Math.abs(terrainHeight - heights[southIndex]),
       );
-      material[index * 4 + 3] = clampByte(
+      material[index * 4 + 2] = clampByte(
         smoothstep(localShoreWidth, -localShoreWidth, terrainHeight) * 255,
       );
+      // Keep packed shader RGB opaque through PNG/browser decoding. Veyra's
+      // renderer disables the Earth-only semantic use of this channel.
+      material[index * 4 + 3] = 255;
 
       const warpNoise = fbm3(direction.x * 2.6, direction.y * 2.6, direction.z * 2.6, seed + 211, 3);
       const warpedX = direction.x * 3.4 + warpNoise * 0.72;
@@ -412,7 +415,7 @@ export function generateVeyraCanonicalMaps(options: VeyraCanonicalOptions): Veyr
   for (let index = 0; index < heights.length; index++) {
     if (heights[index] === 0) continue; // datum itself is an intentionally blended shoreline texel
     const heightSaysOcean = heights[index] < 0;
-    const materialSaysOcean = material[index * 4 + 3] >= 128;
+    const materialSaysOcean = material[index * 4 + 2] >= 128;
     if (heightSaysOcean !== materialSaysOcean) {
       const x = index % width;
       const y = Math.floor(index / width);

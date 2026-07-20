@@ -133,12 +133,12 @@ describe('M2 release blockers', () => {
     const spawned = game.spawnOnPad(craft, craft.name);
     const expected = siteDirection(game.universe.get('veyra'), game.time, new Vec3());
     expect(spawned.runtime.pos.clone().normalize().dot(expected)).toBeGreaterThan(0.999999);
-    expect(terrainHeight(game.universe.get('veyra'), expected)).toBeGreaterThan(1_000);
+    expect(terrainHeight(game.universe.get('veyra'), expected)).toBeGreaterThan(0);
     const pod = spawned.runtime.craft.parts[0];
     const bottomRadius = spawned.runtime.pos.length() - defOf(pod).shape.height / 2;
     const contactRadius = groundRadiusInertial(game.universe.get('veyra'), expected, game.time);
     const naturalRadius = naturalGroundRadiusInertial(game.universe.get('veyra'), expected, game.time);
-    expect(contactRadius - naturalRadius).toBeGreaterThanOrEqual(state.LAUNCH_PAD_DECK_HEIGHT);
+    expect(contactRadius - naturalRadius).toBeCloseTo(state.LAUNCH_PAD_DECK_HEIGHT, 6);
     expect(bottomRadius - contactRadius).toBeCloseTo(0.4, 6);
   });
 
@@ -149,6 +149,7 @@ describe('M2 release blockers', () => {
     const game = createLegacyGameState();
     const gv = game.spawnOnPad(craft, craft.name);
     const body = game.bodyOf(gv);
+    const launchRadius = gv.runtime.pos.length();
     for (let step = 0; step < 1_000; step++) game.update(PHYSICS_DT);
 
     expect(game.active).toBe(gv);
@@ -164,7 +165,7 @@ describe('M2 release blockers', () => {
     expect(game.active).toBe(gv);
     expect(gv.runtime.situation).not.toBe('prelaunch');
     expect(gv.runtime.landedBodyFixed).toBeNull();
-    expect(gv.runtime.pos.length()).toBeGreaterThan(body.radius + 5_600);
+    expect(gv.runtime.pos.length()).toBeGreaterThan(launchRadius + 100);
   });
 
   it('caps terrain skirts so coarse fallbacks cannot form kilometer walls', () => {

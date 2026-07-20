@@ -43,6 +43,7 @@ import { computeCelestialProjection, type CelestialProjection } from './celestia
 import { celestialOcclusion } from './celestialOcclusion';
 import {
   adaptExposure,
+  createEnvironmentLightingState,
   environmentLighting,
   localShadowPolicy,
   snapShadowCenter,
@@ -107,6 +108,10 @@ interface MutableBodyRenderFrame {
   cameraSunDirection: MutableVectorCoordinates;
   bodySunDirection: MutableVectorCoordinates;
   solarVisibleFraction: number;
+  solarOccluder?: {
+    direction: MutableVectorCoordinates;
+    angularRadius: number;
+  };
   time: number;
   deltaSeconds: number;
   framePressure: boolean;
@@ -193,6 +198,7 @@ export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   private readonly environment: THREE.HemisphereLight;
+  private readonly environmentState = createEnvironmentLightingState();
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
@@ -392,8 +398,8 @@ export class WorldScene {
   }
 
   private updateLocalSolarShadow(altitude: number): void {
-    const light = this.scene.getObjectByProperty('name', 'solar-direct:sun');
-    if (!(light instanceof THREE.DirectionalLight)) return;
+    const light = this.bodyRenderers.get('sun')?.shadowLight;
+    if (!light) return;
     const policy = localShadowPolicy(this.quality, this.camDist, altitude);
     light.castShadow = policy.enabled;
     if (!policy.enabled) return;
@@ -996,6 +1002,10 @@ export class WorldScene {
           cameraSunDirection: { x: 0, y: 0, z: 0 },
           bodySunDirection: { x: 0, y: 0, z: 0 },
           solarVisibleFraction: 1,
+          solarOccluder: {
+            direction: { x: 0, y: 0, z: 0 },
+            angularRadius: 0,
+          },
           time: 0,
           deltaSeconds: 0,
           framePressure: false,
@@ -1019,6 +1029,11 @@ export class WorldScene {
       copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
       copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
       let solarVisibleFraction = 1;
+      stableFrame.solarOccluder ??= {
+        direction: { x: 0, y: 0, z: 0 },
+        angularRadius: 0,
+      };
+      stableFrame.solarOccluder.angularRadius = 0;
       const solarAngularRadius = game.universe.root.radius > 0
         ? Math.asin(Math.min(1, game.universe.root.radius / Math.max(game.universe.root.radius, _starAbs.distanceTo(_camAbs))))
         : 0;
@@ -1036,7 +1051,13 @@ export class WorldScene {
               angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
             },
           );
-          solarVisibleFraction = Math.min(solarVisibleFraction, occlusion.sourceVisibleFraction);
+          if (occlusion.intersects && occlusion.sourceVisibleFraction < solarVisibleFraction) {
+            solarVisibleFraction = occlusion.sourceVisibleFraction;
+            copyCoordinates(stableFrame.solarOccluder.direction, _occluderDirection);
+            stableFrame.solarOccluder.angularRadius = Math.asin(
+              Math.min(1, occluder.radius / occluderDistance),
+            );
+          }
         }
       }
       stableFrame.solarVisibleFraction = solarVisibleFraction;
@@ -1048,7 +1069,9 @@ export class WorldScene {
         verticalFovRadians,
         drawingBufferHeight,
         physicalFarMeters: this.camera.far,
-        preferredProxyDepth: 3e8,
+        // Keep the solar proxy behind lunar apogee while remaining inside the
+        // projection authority's 0.75-far-plane safety cap.
+        preferredProxyDepth: this.camera.far * 0.74,
         farField: b.def.surfaceKind === 'star',
       });
       stableFrame.time = t;
@@ -1161,6 +1184,7 @@ export class WorldScene {
       dayness,
       solarVisibleFraction,
       sunInFrame,
+      this.environmentState,
     );
     this.environment.color.set(environment.sky);
     this.environment.groundColor.set(environment.ground);

@@ -90,7 +90,7 @@
         "semiMajorAxisMeters": 384400000,
         "eccentricity": 0.0549,
         "inclinationRadians": 0.08979719001510825,
-        "longitudeAscendingNodeRadians": 0,
+        "longitudeAscendingNodeRadians": 2.1824469631563095,
         "argumentPeriapsisRadians": 0,
         "meanAnomalyRadiansAtEpoch": 0
       }

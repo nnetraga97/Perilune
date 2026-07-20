@@ -2,8 +2,6 @@
 import type { BodyDef } from '../sim/universe';
 import { CHECKED_SOL_CONSTANTS } from '../generated/checked-sol-constants';
 
-const DEG = Math.PI / 180;
-
 const { bodies: SOL } = CHECKED_SOL_CONSTANTS;
 
 export const HOME_BODY_ID = 'earth';
@@ -17,7 +15,7 @@ export const SOL_SYSTEM: readonly BodyDef[] = Object.freeze([
     mu: SOL.sun.gmMeters3PerSecond2,
     radius: SOL.sun.meanRadiusMeters,
     rotationPeriod: 86_400 * 360 / SOL.sun.referenceFrame.primeMeridianRateDegreesPerDay,
-    axialTilt: 7.25 * DEG,
+    axialTilt: SOL.sun.obliquityRadians,
     referenceFrame: { epoch: 'J2000', ...SOL.sun.referenceFrame },
     surfaceKind: 'star',
     terrainRecipeVersion: 1,
@@ -42,7 +40,7 @@ export const SOL_SYSTEM: readonly BodyDef[] = Object.freeze([
     mu: SOL.earth.gmMeters3PerSecond2,
     radius: SOL.earth.meanRadiusMeters,
     rotationPeriod: 86_400 * 360 / SOL.earth.referenceFrame.primeMeridianRateDegreesPerDay,
-    axialTilt: 23.4392811 * DEG,
+    axialTilt: SOL.earth.obliquityRadians,
     referenceFrame: { epoch: 'J2000', ...SOL.earth.referenceFrame },
     surfaceKind: 'solid',
     terrainRecipeVersion: 3,
@@ -98,7 +96,7 @@ export const SOL_SYSTEM: readonly BodyDef[] = Object.freeze([
     mu: SOL.moon.gmMeters3PerSecond2,
     radius: SOL.moon.meanRadiusMeters,
     rotationPeriod: 86_400 * 360 / SOL.moon.referenceFrame.primeMeridianRateDegreesPerDay,
-    axialTilt: 6.68 * DEG,
+    axialTilt: SOL.moon.obliquityRadians,
     referenceFrame: { epoch: 'J2000', ...SOL.moon.referenceFrame },
     surfaceKind: 'solid',
     terrainRecipeVersion: 2,

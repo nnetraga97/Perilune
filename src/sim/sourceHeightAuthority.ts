@@ -55,13 +55,13 @@ export function sampleSourceMacroHeight(
   const u = fract(Math.atan2(direction.y, direction.x) / (Math.PI * 2) + 0.5);
   const v = Math.max(0, Math.min(1, 0.5 - Math.asin(Math.max(-1, Math.min(1, direction.z / length))) / Math.PI));
   const x = u * grid.width - 0.5;
-  const y = v * grid.height - 0.5;
+  const y = Math.max(0, Math.min(grid.height - 1, v * grid.height - 0.5));
   const x0 = Math.floor(x);
-  const y0 = Math.max(0, Math.min(grid.height - 1, Math.floor(y)));
+  const y0 = Math.floor(y);
   const x1 = x0 + 1;
   const y1 = Math.max(0, Math.min(grid.height - 1, y0 + 1));
   const tx = x - x0;
-  const ty = y - Math.floor(y);
+  const ty = y - y0;
   const at = (px: number, py: number): number => (
     grid.samples[py * grid.width + ((px % grid.width) + grid.width) % grid.width] * 0.5
   );

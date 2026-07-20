@@ -7,6 +7,7 @@ import { bodyMaterialDescriptor } from '../render/bodyMaterial';
 import type { BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from '../render/bodyRenderer';
 import { createBodyRendererCandidate } from '../render/bodyRendererFactory';
 import { computeCelestialProjection } from '../render/celestialProjection';
+import { celestialOcclusion } from '../render/celestialOcclusion';
 import { createRenderContext } from '../render/context';
 import { environmentLighting, localShadowPolicy } from '../render/lightingPolicy';
 import { checkPlanetManifest } from '../render/planetAssetLoader';
@@ -151,6 +152,22 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     physicalFarMeters: camera.far,
     farField: station.bodyId === 'sun' || observerDistance - body.radius > camera.far,
   });
+  let solarVisibleFraction = 1;
+  let solarOccluder: BodyRenderFrame['solarOccluder'];
+  if (station.id === 'sun-partial-occultation') {
+    const moon = universe.get('moon');
+    const lunarAngularRadius = Math.asin(moon.radius / 384_400_000);
+    const offset = projection.angularRadius * 0.7;
+    const center = bodyOrigin.clone().normalize();
+    const right = new THREE.Vector3().crossVectors(center, camera.up).normalize();
+    const occultingDirection = center.clone().multiplyScalar(Math.cos(offset))
+      .addScaledVector(right, Math.sin(offset));
+    solarOccluder = { direction: occultingDirection, angularRadius: lunarAngularRadius };
+    solarVisibleFraction = celestialOcclusion(
+      { direction: center, angularRadius: projection.angularRadius },
+      solarOccluder,
+    ).sourceVisibleFraction;
+  }
   const frame: BodyRenderFrame = {
     cameraRelativeOrigin: bodyOrigin,
     cameraBodyFixed: cameraDirectionBodyFixed.clone().multiplyScalar(observerDistance),
@@ -163,31 +180,14 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: station.bodyId === 'sun' ? bodyOrigin.clone().normalize() : sunDirection,
     bodySunDirection: sunDirection,
-    solarVisibleFraction: 1,
+    solarVisibleFraction,
+    solarOccluder,
     time: station.timeSeconds,
     deltaSeconds: 1 / 60,
     framePressure: false,
     altitude: observerAltitude,
     allowFlightTerrain: station.presentation === 'surface' || station.presentation === 'orbit',
   };
-  if (station.id === 'sun-partial-occultation') {
-    const moon = universe.get('moon');
-    const lunarAngularRadius = Math.asin(moon.radius / 384_400_000);
-    const offset = projection.angularRadius * 0.7;
-    const center = bodyOrigin.clone().normalize();
-    const right = new THREE.Vector3().crossVectors(center, camera.up).normalize();
-    const occultingDirection = center.clone().multiplyScalar(Math.cos(offset)).addScaledVector(right, Math.sin(offset));
-    const lunarDisk = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 128),
-      new THREE.MeshBasicMaterial({ color: '#000000', depthTest: false, depthWrite: false }),
-    );
-    lunarDisk.name = 'reference-lunar-occulting-disk';
-    lunarDisk.position.copy(occultingDirection).multiplyScalar(projection.proxyDepth * 0.99);
-    lunarDisk.scale.setScalar(Math.tan(lunarAngularRadius) * projection.proxyDepth);
-    lunarDisk.lookAt(0, 0, 0);
-    lunarDisk.renderOrder = 100;
-    scene.add(lunarDisk);
-  }
   const environment = environmentLighting(
     BODY_VISUALS[station.bodyId].renderer,
     body.def.atmosphere?.height ?? 0,

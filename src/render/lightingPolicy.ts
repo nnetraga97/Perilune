@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import type { QualityTier } from './bodyRenderer';
 
-export { adaptExposure, environmentLighting } from './exposurePolicy';
-export type { EnvironmentLighting } from './exposurePolicy';
+export { adaptExposure, createEnvironmentLightingState, environmentLighting } from './exposurePolicy';
+export type { EnvironmentLighting, MutableEnvironmentLighting } from './exposurePolicy';
+
+const _shadowForward = new THREE.Vector3();
+const _shadowReferenceUp = new THREE.Vector3();
+const _shadowRight = new THREE.Vector3();
+const _shadowUp = new THREE.Vector3();
 
 export interface ShadowPolicy {
   readonly enabled: boolean;
@@ -52,12 +57,12 @@ export function snapShadowCenter(
   out = new THREE.Vector3(),
 ): THREE.Vector3 {
   if (!(mapSize > 0)) return out.copy(center);
-  const forward = new THREE.Vector3().copy(lightDirection).normalize();
+  const forward = _shadowForward.copy(lightDirection).normalize();
   const referenceUp = Math.abs(forward.z) < 0.9
-    ? new THREE.Vector3(0, 0, 1)
-    : new THREE.Vector3(0, 1, 0);
-  const right = new THREE.Vector3().crossVectors(referenceUp, forward).normalize();
-  const up = new THREE.Vector3().crossVectors(forward, right).normalize();
+    ? _shadowReferenceUp.set(0, 0, 1)
+    : _shadowReferenceUp.set(0, 1, 0);
+  const right = _shadowRight.crossVectors(referenceUp, forward).normalize();
+  const up = _shadowUp.crossVectors(forward, right).normalize();
   const texel = (extent * 2) / mapSize;
   const rightOffset = Math.round(right.dot(center) / texel) * texel;
   const upOffset = Math.round(up.dot(center) / texel) * texel;

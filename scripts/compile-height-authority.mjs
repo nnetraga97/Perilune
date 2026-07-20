@@ -71,6 +71,14 @@ ${entries.map((entry) => `  Object.freeze({
 ]);
 `;
 const outputPath = path.join(ROOT, 'src/generated/checked-height-authority.ts');
-await mkdir(path.dirname(outputPath), { recursive: true });
-await writeFile(outputPath, output);
-console.log(`Wrote ${path.relative(ROOT, outputPath)} (${WIDTH}x${HEIGHT}, ${digest})`);
+if (process.argv.includes('--check')) {
+  const current = await readFile(outputPath, 'utf8').catch(() => '');
+  if (current !== output) {
+    throw new Error('checked-height-authority.ts is stale; run npm run compile:height-authority');
+  }
+  console.log(`Checked ${path.relative(ROOT, outputPath)} source hashes (${digest})`);
+} else {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, output);
+  console.log(`Wrote ${path.relative(ROOT, outputPath)} (${WIDTH}x${HEIGHT}, ${digest})`);
+}

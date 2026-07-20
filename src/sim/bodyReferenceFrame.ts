@@ -6,6 +6,8 @@ export const JULIAN_CENTURY_SECONDS = 36_525 * JULIAN_DAY_SECONDS;
 
 export interface BodyReferenceFrameDef {
   readonly epoch: 'J2000';
+  /** Coordinate system shared with the production orbit elements. */
+  readonly inertialFrame: 'ecliptic-j2000';
   readonly poleRightAscensionDegrees: number;
   readonly poleRightAscensionRateDegreesPerCentury: number;
   readonly poleDeclinationDegrees: number;
@@ -76,7 +78,7 @@ export function referenceFrameAngles(
   };
 }
 
-/** IAU body-fixed +X/+Y/+Z basis expressed in the J2000 inertial frame. */
+/** IAU body-fixed +X/+Y/+Z basis expressed in the ecliptic J2000 game frame. */
 export function referenceFrameOrientation(
   frame: Readonly<BodyReferenceFrameDef>,
   secondsSinceJ2000: number,

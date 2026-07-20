@@ -18,7 +18,7 @@ function clampByte(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
 
-/** Encode signed metre heights into loss-tolerant high/low RG bytes. */
+/** Encode signed metre heights into exact high/low RG bytes. The KTX2 path is lossless RG8. */
 export function encodeMacroHeight(heights: Float32Array): Uint8Array {
   const encoded = new Uint8Array(heights.length * 2);
   const span = MACRO_HEIGHT_MAX_METERS - MACRO_HEIGHT_MIN_METERS;

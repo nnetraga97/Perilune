@@ -49,6 +49,7 @@ uniform sampler2D globalCloudMap;
 uniform sampler2D globalEmissiveMap;
 uniform float useAuthoredGlobalMaps;
 uniform float useGlobalEmissiveMap;
+uniform float useGlobalIceMap;
 uniform vec3 globalSunDirection;
 uniform float globalCloudDriftAngle;
 uniform float globalCloudShadowStrength;
@@ -181,6 +182,7 @@ export interface TerrestrialAuthoredTextures {
   readonly authored: boolean;
   readonly hasEmissive: boolean;
   readonly hasHeightMacro: boolean;
+  readonly hasIceMask: boolean;
   /** Textures the material owns and must dispose (only present on the fallback path). */
   readonly owned: readonly THREE.Texture[];
 }
@@ -221,6 +223,7 @@ export function resolveTerrestrialAuthoredTextures(
     authored: pack !== null,
     hasEmissive: pack?.textures.has('emissive') === true,
     hasHeightMacro: pack?.textures.has('heightMacro') === true,
+    hasIceMask: bodyId === 'earth' && pack !== null,
     owned,
   };
 }
@@ -296,6 +299,7 @@ export function bindTerrestrialAuthoredUniforms(
   shader.uniforms.useGlobalHeightMap = { value: textures.hasHeightMacro ? 1 : 0 };
   shader.uniforms.useAuthoredGlobalMaps = { value: textures.authored ? 1 : 0 };
   shader.uniforms.useGlobalEmissiveMap = { value: textures.hasEmissive ? 1 : 0 };
+  shader.uniforms.useGlobalIceMap = { value: textures.hasIceMask ? 1 : 0 };
   shader.uniforms.globalSunDirection = cloudLighting.sunDirection;
   shader.uniforms.globalCloudDriftAngle = cloudLighting.driftAngle;
   shader.uniforms.globalCloudShadowStrength = cloudLighting.shadowStrength;

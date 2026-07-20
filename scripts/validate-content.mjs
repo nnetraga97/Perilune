@@ -97,7 +97,7 @@ const channelContracts = {
   },
   heightMacro: {
     colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png', fallbackLayout: 'rgb-rg',
-    transcodeTargets: ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
+    transcodeTargets: ['rg8'],
   },
   emissive: {
     colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
@@ -202,8 +202,11 @@ function validateKtx2(packageFile, pack, channel) {
   if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
     errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`);
   }
-  if (vkFormat !== 0 || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
-    errors.push(`${label} must be a 2D transcodable texture with vkFormat 0, typeSize 1, and one face`);
+  const directHeight = channel.name === 'heightMacro';
+  const expectedVkFormat = directHeight ? 16 : 0; // VK_FORMAT_R8G8_UNORM
+  if (vkFormat !== expectedVkFormat || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
+    errors.push(`${label} must be a 2D ${directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
+      `with vkFormat ${expectedVkFormat}, typeSize 1, and one face`);
   }
   if (levelCount !== expectedLevels) {
     errors.push(`${label} must contain exactly ${expectedLevels} mip levels, got ${levelCount}`);
@@ -240,11 +243,17 @@ function validateKtx2(packageFile, pack, channel) {
       descriptorBlockSize < 40 || descriptorBlockSize > dfdLength - 4) {
       errors.push(`${label} DFD descriptor is malformed`);
     }
-    const expectedEncoding = channel.name === 'albedo' || channel.name === 'emissive'
+    const expectedEncoding = directHeight
+      ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 2, blockWidth: 0, blockHeight: 0,
+        name: 'lossless RG8 with Zstd' }
+      : channel.name === 'albedo' || channel.name === 'emissive'
       ? { scheme: 1, model: 163, transfer: 2, bytesPlane: 8, name: 'BasisLZ with ETC1S' }
-      : { scheme: 2, model: 166, transfer: 1, bytesPlane: 16, name: 'UASTC with Zstd' };
+      : { scheme: 2, model: 166, transfer: 1, bytesPlane: 16, blockWidth: 3, blockHeight: 3,
+        name: 'UASTC with Zstd' };
     if (supercompressionScheme !== expectedEncoding.scheme || colorModel !== expectedEncoding.model ||
-      transferFunction !== expectedEncoding.transfer || blockWidth !== 3 || blockHeight !== 3 ||
+      transferFunction !== expectedEncoding.transfer ||
+      blockWidth !== (expectedEncoding.blockWidth ?? 3) ||
+      blockHeight !== (expectedEncoding.blockHeight ?? 3) ||
       bytesPlane0 !== expectedEncoding.bytesPlane) {
       errors.push(`${label} ${channel.name} must use ${expectedEncoding.name} and its matching DFD`);
     }
@@ -301,11 +310,13 @@ function validateKtx2(packageFile, pack, channel) {
     if (supercompressionScheme === 2) {
       const mipWidth = Math.max(1, pack.width >> level);
       const mipHeight = Math.max(1, pack.height >> level);
-      const expectedUastcBytes = Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
-      if (uncompressedByteLength !== expectedUastcBytes) {
+      const expectedUncompressedBytes = directHeight
+        ? mipWidth * mipHeight * 2
+        : Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
+      if (uncompressedByteLength !== expectedUncompressedBytes) {
         errors.push(
-          `${label} UASTC mip ${level} uncompressed size ${uncompressedByteLength} ` +
-          `does not match ${expectedUastcBytes}`,
+          `${label} mip ${level} uncompressed size ${uncompressedByteLength} ` +
+          `does not match ${expectedUncompressedBytes}`,
         );
       }
     }

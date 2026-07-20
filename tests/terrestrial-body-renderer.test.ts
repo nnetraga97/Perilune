@@ -144,8 +144,9 @@ describe('TerrestrialBodyRenderer integration', () => {
     const approach = { cameraBodyFixed: { x: veyra.radius + 1_000, y: 0, z: 0 }, altitude: 1_000 };
     renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
     expect(renderer.stats()).toMatchObject({ terrainActive: false, coverageProgress: 0 });
-    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
-    renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    for (let update = 0; update < 12; update++) {
+      renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0 }));
+    }
     renderer.update(frame(veyra.radius, { ...approach, deltaSeconds: 0.175 }));
     const compact = renderer.root.getObjectByName('terrestrial-compact:veyra') as THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
     const terrain = renderer.root.getObjectByName('terrestrial-terrain:veyra')!;

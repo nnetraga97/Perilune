@@ -11,28 +11,28 @@ import type {
 } from './bodyRenderer';
 import { createCoronaMaterial, type CoronaMaterial } from './solar/coronaMaterial';
 import { createPhotosphereMaterial, type PhotosphereMaterial } from './solar/photosphereMaterial';
-import { solarPresentationBlend } from './solar/solarPresentation';
+
+const _occluderDirection = new THREE.Vector3();
+const _inverseProxyRotation = new THREE.Quaternion();
 
 export class SolarBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
   readonly kind = 'star' as const;
   readonly root = new THREE.Group();
   readonly exposure = 1;
+  readonly shadowLight: THREE.DirectionalLight;
   private readonly proxy = new THREE.Group();
-  private readonly physical = new THREE.Group();
   private readonly diskGeometry = new THREE.CircleGeometry(1, 128);
-  private readonly sphereGeometry: THREE.SphereGeometry;
   private readonly coronaGeometry = new THREE.CircleGeometry(1.85, 128);
   private readonly diskMaterial: PhotosphereMaterial;
-  private readonly sphereMaterial: PhotosphereMaterial;
   private readonly coronaMaterial: CoronaMaterial;
   private readonly light = new THREE.DirectionalLight('#fff4df', 3.1);
-  private lastMode: 'physical' | 'transition' | 'proxy' = 'proxy';
+  private readonly lastMode = 'proxy' as const;
   private lastAngularRadius = 0;
   private disposed = false;
 
   constructor(
-    private readonly body: Body,
+    body: Body,
     descriptor: Readonly<BodyMaterialDescriptor>,
     readonly caps: Readonly<RenderCaps>,
     readonly quality: QualityTier,
@@ -40,10 +40,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.bodyId = body.id;
     this.proxy.name = `solar-proxy:${body.id}`;
     this.proxy.userData.starPresentation = true;
-    this.physical.name = `solar-physical:${body.id}`;
     this.diskMaterial = createPhotosphereMaterial(descriptor.albedo.high);
-    this.sphereMaterial = createPhotosphereMaterial(descriptor.albedo.high);
-    this.sphereMaterial.uniforms.uSphereMode.value = 1;
     this.coronaMaterial = createCoronaMaterial();
     const disk = new THREE.Mesh(this.diskGeometry, this.diskMaterial);
     disk.renderOrder = 20;
@@ -51,13 +48,11 @@ export class SolarBodyRenderer implements BodyRenderer {
     corona.renderOrder = 19;
     this.proxy.add(corona, disk);
 
-    const segments = quality === 'low' ? 48 : quality === 'medium' ? 96 : 128;
-    this.sphereGeometry = new THREE.SphereGeometry(1, segments, Math.max(32, segments / 2));
-    this.physical.add(new THREE.Mesh(this.sphereGeometry, this.sphereMaterial));
     this.light.name = `solar-direct:${body.id}`;
     this.light.userData.solarDirect = true;
     this.light.castShadow = quality !== 'low';
-    this.root.add(this.proxy, this.physical, this.light, this.light.target);
+    this.shadowLight = this.light;
+    this.root.add(this.proxy, this.light, this.light.target);
   }
 
   get ready(): boolean { return !this.disposed; }
@@ -69,12 +64,11 @@ export class SolarBodyRenderer implements BodyRenderer {
   update(frame: Readonly<BodyRenderFrame>): void {
     if (this.disposed) return;
     const { projection } = frame;
-    const distanceInRadii = projection.trueObserverDistance / this.body.radius;
-    const blend = solarPresentationBlend(distanceInRadii);
-    this.lastMode = blend.mode;
     this.lastAngularRadius = projection.angularRadius;
 
-    this.proxy.visible = blend.proxyOpacity > 0 && projection.visibility !== 'subpixel';
+    // A single angular-size-preserving proxy remains valid everywhere outside
+    // the photosphere and cannot fall beyond the camera far plane.
+    this.proxy.visible = projection.visibility !== 'subpixel' && projection.visibility !== 'inside';
     this.proxy.position.set(
       frame.cameraSunDirection.x * projection.proxyDepth,
       frame.cameraSunDirection.y * projection.proxyDepth,
@@ -82,20 +76,11 @@ export class SolarBodyRenderer implements BodyRenderer {
     );
     this.proxy.scale.setScalar(projection.proxyRadius);
     this.proxy.lookAt(0, 0, 0);
-    this.diskMaterial.uniforms.uOpacity.value = blend.proxyOpacity;
+    this.diskMaterial.uniforms.uOpacity.value = 1;
     this.diskMaterial.uniforms.uTime.value = frame.time;
-    this.coronaMaterial.uniforms.uOpacity.value = 0.18 * blend.proxyOpacity;
+    this.coronaMaterial.uniforms.uOpacity.value = 0.18;
     this.coronaMaterial.uniforms.uVisibleSolarFraction.value = frame.solarVisibleFraction;
-
-    this.physical.visible = blend.physicalOpacity > 0;
-    this.physical.position.set(
-      frame.cameraRelativeOrigin.x,
-      frame.cameraRelativeOrigin.y,
-      frame.cameraRelativeOrigin.z,
-    );
-    this.physical.scale.setScalar(this.body.radius);
-    this.sphereMaterial.uniforms.uOpacity.value = blend.physicalOpacity;
-    this.sphereMaterial.uniforms.uTime.value = frame.time;
+    this.updateOccluderMask(frame);
 
     this.light.position.set(
       frame.cameraSunDirection.x * 1e4,
@@ -105,6 +90,34 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.light.target.position.set(0, 0, 0);
     this.light.intensity = 3.1 * frame.solarVisibleFraction;
     this.light.target.updateMatrixWorld();
+  }
+
+  private updateOccluderMask(frame: Readonly<BodyRenderFrame>): void {
+    const occluder = frame.solarOccluder;
+    const tangentSolarRadius = Math.tan(frame.projection.angularRadius);
+    if (!occluder || !(occluder.angularRadius > 0) || !(tangentSolarRadius > 0)) {
+      this.diskMaterial.uniforms.uUseOccluder.value = 0;
+      return;
+    }
+    _occluderDirection.set(
+      occluder.direction.x,
+      occluder.direction.y,
+      occluder.direction.z,
+    ).normalize();
+    _inverseProxyRotation.copy(this.proxy.quaternion).invert();
+    _occluderDirection.applyQuaternion(_inverseProxyRotation);
+    const forward = -_occluderDirection.z;
+    if (!(forward > 0)) {
+      this.diskMaterial.uniforms.uUseOccluder.value = 0;
+      return;
+    }
+    this.diskMaterial.uniforms.uOccluderCenter.value.set(
+      _occluderDirection.x / (forward * tangentSolarRadius),
+      _occluderDirection.y / (forward * tangentSolarRadius),
+    );
+    this.diskMaterial.uniforms.uOccluderRadius.value =
+      Math.tan(occluder.angularRadius) / (forward * tangentSolarRadius);
+    this.diskMaterial.uniforms.uUseOccluder.value = 1;
   }
 
   stats(): Readonly<BodyRendererStats> {
@@ -128,10 +141,8 @@ export class SolarBodyRenderer implements BodyRenderer {
     if (this.disposed) return;
     this.disposed = true;
     this.diskGeometry.dispose();
-    this.sphereGeometry.dispose();
     this.coronaGeometry.dispose();
     this.diskMaterial.dispose();
-    this.sphereMaterial.dispose();
     this.coronaMaterial.dispose();
     this.light.dispose();
     this.root.clear();

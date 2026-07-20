@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestSha256": "1c27fbfc02d0b4e49f3e9ae4d01c48d872cf252ba123ff456869be075db41bd1",
+  "manifestSha256": "5ab8f88248dd149c10959a63019f0f82ef5fa38d307735821b0ad940f8c93933",
   "manifest": {
     "schemaVersion": 1,
     "compiler": {
@@ -1229,7 +1229,7 @@
         "tier": "low",
         "width": 1024,
         "height": 512,
-        "compressedBytes": 1494603,
+        "compressedBytes": 1478887,
         "transientBytes": 8912896,
         "bootCritical": false,
         "channels": [
@@ -1314,16 +1314,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/earth/low/heightMacro.ktx2",
             "fallbackPath": "generated/earth/low/heightMacro.png",
-            "packageChecksumSha256": "37909ac4bc324c018db76248c91c29b84f1203b5f42b3ff09766bd17e6bf9353",
+            "packageChecksumSha256": "181f00b80933911d356d66d51175aaab44e894abd242f3857af9500a14ac2876",
             "fallbackChecksumSha256": "05d085029ad8b822d794da658824ce4b696498dfc047ad4c889225bd227ffcd8",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 699088,
+            "gpuFormat": "rg8",
+            "gpuBytes": 1398102,
             "fallbackGpuBytes": 2796204,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -1353,7 +1351,7 @@
         "tier": "medium",
         "width": 2048,
         "height": 1024,
-        "compressedBytes": 5525262,
+        "compressedBytes": 5480988,
         "transientBytes": 41943040,
         "bootCritical": true,
         "channels": [
@@ -1438,16 +1436,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/earth/medium/heightMacro.ktx2",
             "fallbackPath": "generated/earth/medium/heightMacro.png",
-            "packageChecksumSha256": "7ed29bf7fa787b0e84532c36df46cd066b24280c5e739f470b97277fc2eb24fb",
+            "packageChecksumSha256": "2afac02f4acf37148c0d8d7a99e907ba61f6f7d9bf4e401a65a48daebe2517f5",
             "fallbackChecksumSha256": "df203631caf12ddd00857bf2a2fa8a0dda6e47510b195b3aa2b331a48fdf4837",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 2796240,
+            "gpuFormat": "rg8",
+            "gpuBytes": 5592406,
             "fallbackGpuBytes": 11184812,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -1495,7 +1491,7 @@
         "tier": "high",
         "width": 4096,
         "height": 2048,
-        "compressedBytes": 20827921,
+        "compressedBytes": 20709781,
         "transientBytes": 167772160,
         "bootCritical": false,
         "channels": [
@@ -1580,16 +1576,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/earth/high/heightMacro.ktx2",
             "fallbackPath": "generated/earth/high/heightMacro.png",
-            "packageChecksumSha256": "317577004f05e24e52c5246c7be85c7bcf1d94313d18f35ccf8d54d72df2beef",
+            "packageChecksumSha256": "3f4a71e0c7cede7e20c6e1394e37127fc9e8ef5b1f434f604236974a43c18239",
             "fallbackChecksumSha256": "a024bd26de071184bb3a1b68222d1a5049c0e424b2260a4f9f7563ecc4d96cde",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 11184848,
+            "gpuFormat": "rg8",
+            "gpuBytes": 22369622,
             "fallbackGpuBytes": 44739244,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -1637,7 +1631,7 @@
         "tier": "low",
         "width": 1024,
         "height": 512,
-        "compressedBytes": 1611274,
+        "compressedBytes": 1650830,
         "transientBytes": 7864320,
         "bootCritical": false,
         "channels": [
@@ -1703,16 +1697,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/moon/low/heightMacro.ktx2",
             "fallbackPath": "generated/moon/low/heightMacro.png",
-            "packageChecksumSha256": "f4390081cff0e49c4b167f52810f6566e9b75556b37887577a06e80eb70030fd",
+            "packageChecksumSha256": "ab40670e73a57612797f4aaa97588aef49de9cee3d45e73ddc99110654f4d642",
             "fallbackChecksumSha256": "e078c1ebf3316341fa641cc191f1ce4323f7fdec2bb92e5bfd4a29207c89d8c4",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 699088,
+            "gpuFormat": "rg8",
+            "gpuBytes": 1398102,
             "fallbackGpuBytes": 2796204,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -1742,7 +1734,7 @@
         "tier": "medium",
         "width": 2048,
         "height": 1024,
-        "compressedBytes": 6218324,
+        "compressedBytes": 6266932,
         "transientBytes": 31457280,
         "bootCritical": false,
         "channels": [
@@ -1808,16 +1800,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/moon/medium/heightMacro.ktx2",
             "fallbackPath": "generated/moon/medium/heightMacro.png",
-            "packageChecksumSha256": "e35c53716faf02811ae6093f450efa059de5058c9fc8bc05a86d8993ae38e452",
+            "packageChecksumSha256": "795e8c907ab6cc274dc52759a6730014fc054a4b2383654845ca05c1f63aa40d",
             "fallbackChecksumSha256": "718dfb868a18678417b579d36ac28b2f340159ddaaac1a7fae438f8633b7ba64",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 2796240,
+            "gpuFormat": "rg8",
+            "gpuBytes": 5592406,
             "fallbackGpuBytes": 11184812,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -1847,7 +1837,7 @@
         "tier": "high",
         "width": 4096,
         "height": 2048,
-        "compressedBytes": 23426732,
+        "compressedBytes": 23297808,
         "transientBytes": 125829120,
         "bootCritical": false,
         "channels": [
@@ -1913,16 +1903,14 @@
             "logicalFormat": "RG8",
             "packagePath": "generated/moon/high/heightMacro.ktx2",
             "fallbackPath": "generated/moon/high/heightMacro.png",
-            "packageChecksumSha256": "d1b8817ac469e3334d68a0691fa099e05e71c9b03e8dc1fce69e8970d6c5f3f2",
+            "packageChecksumSha256": "d7741242034fe33ce166785b63575997370f8d827885bd7d7b33a6e65c5fd884",
             "fallbackChecksumSha256": "0d234d53a7fbdc9f048ee344b4713fd108076f9672e3c9f2dd76565aac568a93",
-            "gpuFormat": "bc5-rg",
-            "gpuBytes": 11184848,
+            "gpuFormat": "rg8",
+            "gpuBytes": 22369622,
             "fallbackGpuBytes": 44739244,
             "fallbackLayout": "rgb-rg",
             "transcodeTargets": [
-              "etc2-rgba",
-              "bc5-rg",
-              "astc-rgba"
+              "rg8"
             ],
             "mipmapped": true
           },
@@ -2019,8 +2007,8 @@
         "tier": "low",
         "width": 1024,
         "height": 512,
-        "compressedBytes": 923885,
-        "transientBytes": 11534336,
+        "compressedBytes": 1101634,
+        "transientBytes": 5767168,
         "bootCritical": false,
         "channels": [
           {
@@ -2066,8 +2054,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/low/material.ktx2",
             "fallbackPath": "generated/veyra/low/material.png",
-            "packageChecksumSha256": "4a1283d97d894a6915ce7d06d4ce8cd40f00c4407671665ffe5e10b41fb9b6e9",
-            "fallbackChecksumSha256": "640ed71f5c00993d5e2fdd2c2b6b8d6adf2e7d822171a4a4ecb3616faa8899a8",
+            "packageChecksumSha256": "c5ccb5ca27d74497f7173dd4d5926526a99e28c63379e02a84a8160be1d26133",
+            "fallbackChecksumSha256": "313ed0b3020e4c3edafa60d749604fb59ac4367f5f21398a1ba9f029d9ad87f0",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 699088,
             "fallbackGpuBytes": 2796204,
@@ -2105,8 +2093,8 @@
         "tier": "medium",
         "width": 2048,
         "height": 1024,
-        "compressedBytes": 3015914,
-        "transientBytes": 46137344,
+        "compressedBytes": 3766576,
+        "transientBytes": 23068672,
         "bootCritical": false,
         "channels": [
           {
@@ -2152,8 +2140,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/medium/material.ktx2",
             "fallbackPath": "generated/veyra/medium/material.png",
-            "packageChecksumSha256": "3337a2ad2017b1bc41dcf22c291f75d6704ac66a8c2a2892e31c6b92452a5fcf",
-            "fallbackChecksumSha256": "215e24eeb0e35d72853cd27899ef96ec7f01e333f00ad3b646f63d197bff4d5e",
+            "packageChecksumSha256": "30df3d58eca60410e658c1c80eaf847baf4934bb6b2b6fb5026da17076cc68a5",
+            "fallbackChecksumSha256": "677f0622a9aaf1b9f0b1a351d5d012a209f0896e7888c216d3ff8588eb2ca81c",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 2796240,
             "fallbackGpuBytes": 11184812,
@@ -2191,8 +2179,8 @@
         "tier": "high",
         "width": 4096,
         "height": 2048,
-        "compressedBytes": 9714243,
-        "transientBytes": 184549376,
+        "compressedBytes": 12865654,
+        "transientBytes": 92274688,
         "bootCritical": false,
         "channels": [
           {
@@ -2238,8 +2226,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/high/material.ktx2",
             "fallbackPath": "generated/veyra/high/material.png",
-            "packageChecksumSha256": "64d057c0f7bc2f4b1a27cf8425c8035b3b6f3ec0e1809fb4a7cabcd505dd0224",
-            "fallbackChecksumSha256": "c6c64ec87bb70d5c41affe3eb1c98e38dea808f1da2bc81063ace16267b77c28",
+            "packageChecksumSha256": "e4caa9297430f65a38bd68d71a98668bafb323178595f5949164b68a751f40bf",
+            "fallbackChecksumSha256": "53cacf794f3c4d0ef6e5bb50398281644d8a94450635e48c6ceb87942e391d06",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 11184848,
             "fallbackGpuBytes": 44739244,
@@ -2350,11 +2338,11 @@
         "quantizationMeters": 0.5,
         "offsetMeters": 0,
         "byteOrder": "little-endian",
-        "checksumSha256": "682dd15caead1154458581d2b40f23f9d79697cf401bf723a9adfba063b821e5",
-        "identitySha256": "77819597807ed9a62917b6c1592348c23496ebe301091e8350d183f45a2af7f3",
+        "checksumSha256": "9984a1b82c0b5323bf6c590e0924538a7a2f308e3e8b2fa2633069bf10842aed",
+        "identitySha256": "8c83eea416ce8321d983a7c339c471bbf1a56539cbfc4c25eefd080e394613c0",
         "recipeHash": "44abd8aeafa906052576df19f768536e",
         "sourceChecksumSha256": "3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919",
-        "compilerVersion": "2.3.0",
+        "compilerVersion": "2.4.0",
         "containerImage": "node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf"
       },
       {

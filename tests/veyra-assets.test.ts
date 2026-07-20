@@ -163,14 +163,15 @@ describe('Veyra authored asset contracts', () => {
       },
       seed: veyra.def.terrain.seed,
     });
-    const masks = Array.from({ length: width * height }, (_, pixel) => maps.material[pixel * 4 + 3]);
+    const masks = Array.from({ length: width * height }, (_, pixel) => maps.material[pixel * 4 + 2]);
     expect(masks.some((mask) => mask > 0 && mask < 255)).toBe(true);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const direction = veyraMaps.directionFromEquirectUv((x + 0.5) / width, (y + 0.5) / height);
         const surface = solidHeight(veyra, direction);
         if (surface.kind !== 'solid' || Math.abs(surface.height) <= maps.texelHeightRange) continue;
-        expect(maps.material[(y * width + x) * 4 + 3] > 127).toBe(surface.height < 0);
+        expect(maps.material[(y * width + x) * 4 + 2] > 127).toBe(surface.height < 0);
+        expect(maps.material[(y * width + x) * 4 + 3]).toBe(255);
       }
     }
   });

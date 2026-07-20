@@ -101,6 +101,7 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);
     expect(shader.uniforms.globalCloudMap.value).toBe(clouds);
+    expect(shader.uniforms.useGlobalIceMap.value).toBe(0);
     expect((shader.uniforms.globalSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
     expect(shader.uniforms.globalCloudDriftAngle.value).toBe(0.4);
   });
