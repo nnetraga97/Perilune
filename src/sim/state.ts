@@ -62,6 +62,8 @@ export {
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
 export const RAILS_WARP_RATES = [1, 5, 25, 100, 1000, 10_000];
+/** Fleet-tab debug placement: far enough away to inspect a complete body disk. */
+const FLEET_FULL_DISK_ALTITUDE_RADII = 3.5;
 
 export interface RailsState {
   elements: OrbitalElements | null;
@@ -320,7 +322,10 @@ export class GameState {
     const atmosphereTop = body.def.atmosphere?.height ?? 0;
     const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
     const clearance = Math.max(atmosphereTop, terrainTop);
-    const preferredAltitude = preferredOrbitAltitude(body);
+    const preferredAltitude = Math.max(
+      preferredOrbitAltitude(body),
+      body.radius * FLEET_FULL_DISK_ALTITUDE_RADII,
+    );
     const soiAltitudeLimit = Number.isFinite(body.soiRadius)
       ? body.soiRadius * 0.25 - body.radius
       : preferredAltitude;
