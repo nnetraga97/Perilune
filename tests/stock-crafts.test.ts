@@ -1,16 +1,56 @@
 import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_CRAFTS, createWayfarerDemonstrator } from '../src/content/crafts';
+import {
+  BUILT_IN_CRAFTS,
+  createOdysseyOrbiter,
+  createWayfarerDemonstrator,
+} from '../src/content/crafts';
 import { partById } from '../src/content/parts';
 import { validateCraftFile } from '../src/save/persistence';
 import { deriveInterstageShroud } from '../src/sim/interstage';
-import { buildAutoStages } from '../src/sim/vessel';
+import { analyzeCraft, buildAutoStages } from '../src/sim/vessel';
 import { evaluateStructure } from '../src/sim/structure';
 import { Vec3 } from '../src/core/vec3';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { ascentGuidance } from '../src/sim/guidance';
 
 describe('built-in craft library', () => {
+  it('offers Odyssey as a complete launch-to-orbit vehicle with an orbital reserve stage', () => {
+    expect(BUILT_IN_CRAFTS.map((craft) => craft.id)).toContain('odyssey-orbital-vehicle');
+    const craft = createOdysseyOrbiter();
+    expect(validateCraftFile(JSON.parse(JSON.stringify(craft)))).not.toBeNull();
+
+    const definitions = craft.parts.map((part) => partById(part.defId));
+    const engines = definitions.filter((part) => part.engine).map((part) => part.engine!);
+    expect(engines.every((engine) => engine.gimbalDeg > 0 || engine.propellant === 'solidFuel')).toBe(true);
+    expect(definitions.filter((part) => part.solar)).toHaveLength(4);
+    expect(definitions.some((part) => part.battery && part.battery.capacity >= 1_000)).toBe(true);
+    expect(definitions.filter((part) => part.rcs)).toHaveLength(4);
+    expect(definitions.some((part) => part.id === 'dock-port-s')).toBe(true);
+    expect(definitions.filter((part) => part.decoupler && !part.decoupler.radial)).toHaveLength(2);
+    expect(craft.stages.map((stage) => stage.partKeys.map((key) => (
+      craft.parts.find((part) => part.key === key)!.defId
+    )))).toEqual([
+      ['eng-mule', 'srb-torch', 'srb-torch', 'srb-torch', 'srb-torch'],
+      ['dec-radial', 'dec-radial', 'dec-radial', 'dec-radial'],
+      ['dec-m', 'eng-aspen'],
+      ['dec-interstage-ms', 'eng-colt'],
+    ]);
+
+    const launchLoad = evaluateStructure(craft, new Vec3(0, 25, 0), 45_000, 0.05);
+    expect(launchLoad.failures).toEqual([]);
+    expect(launchLoad.maxUtilization).toBeLessThan(0.3);
+
+    const launchAnalysis = analyzeCraft(craft, 9.80665, 101_325);
+    const vacuumAnalysis = analyzeCraft(craft, 9.80665, 0);
+    const propulsionStages = vacuumAnalysis.stages.filter((stage) => stage.deltaV > 0);
+    expect(propulsionStages).toHaveLength(3);
+    expect(launchAnalysis.stages[0].twrStart).toBeGreaterThan(1.8);
+    expect(vacuumAnalysis.totalDeltaV).toBeGreaterThan(9_500);
+    expect(propulsionStages.at(-1)!.deltaV).toBeGreaterThan(3_500);
+    expect(vacuumAnalysis.warnings).toEqual([]);
+  });
+
   it('exposes the Wayfarer as a fresh, structurally valid 21-part craft', () => {
     expect(BUILT_IN_CRAFTS.map((craft) => craft.id)).toContain('wayfarer-heavy-demonstrator');
     const first = createWayfarerDemonstrator();
