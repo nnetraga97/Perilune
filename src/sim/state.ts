@@ -308,7 +308,7 @@ export class GameState {
     return gv;
   }
 
-  /** Move the currently controlled craft into a safe circular equatorial orbit. */
+  /** Move the active craft into a stable equatorial debug ellipse, starting at apoapsis. */
   placeActiveInOrbit(bodyId: string): boolean {
     const gv = this.active;
     if (!gv) return false;
@@ -322,26 +322,29 @@ export class GameState {
     const atmosphereTop = body.def.atmosphere?.height ?? 0;
     const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
     const clearance = Math.max(atmosphereTop, terrainTop);
-    const preferredAltitude = Math.max(
-      preferredOrbitAltitude(body),
+    const periapsisAltitude = preferredOrbitAltitude(body);
+    const preferredApoapsisAltitude = Math.max(
+      periapsisAltitude,
       body.radius * FLEET_FULL_DISK_ALTITUDE_RADII,
     );
     const soiAltitudeLimit = Number.isFinite(body.soiRadius)
       ? body.soiRadius * 0.25 - body.radius
-      : preferredAltitude;
-    const altitude = Math.min(preferredAltitude, soiAltitudeLimit);
-    if (!(altitude > clearance)) return false;
+      : preferredApoapsisAltitude;
+    const apoapsisAltitude = Math.min(preferredApoapsisAltitude, soiAltitudeLimit);
+    if (!(periapsisAltitude > clearance) || !(apoapsisAltitude > periapsisAltitude)) return false;
 
-    const radius = body.radius + altitude;
-    const speed = Math.sqrt(body.mu / radius);
+    const periapsisRadius = body.radius + periapsisAltitude;
+    const apoapsisRadius = body.radius + apoapsisAltitude;
+    const semiMajorAxis = (periapsisRadius + apoapsisRadius) * 0.5;
+    const speedAtApoapsis = Math.sqrt(body.mu * (2 / apoapsisRadius - 1 / semiMajorAxis));
     const previousPhase = Math.atan2(v.pos.y, v.pos.x);
     const phase = Number.isFinite(previousPhase) ? previousPhase : 0;
     const cosPhase = Math.cos(phase);
     const sinPhase = Math.sin(phase);
 
     v.bodyId = body.id;
-    v.pos.set(radius * cosPhase, radius * sinPhase, 0);
-    v.vel.set(-speed * sinPhase, speed * cosPhase, 0);
+    v.pos.set(apoapsisRadius * cosPhase, apoapsisRadius * sinPhase, 0);
+    v.vel.set(-speedAtApoapsis * sinPhase, speedAtApoapsis * cosPhase, 0);
     v.att.setLookRotation(new Vec3(0, 0, 1), v.vel);
     v.angVel.set(0, 0, 0);
     v.landedBodyFixed = null;
@@ -365,7 +368,7 @@ export class GameState {
     gv.rails.landedAtt = null;
     gv.target = null;
     this.lastDestruction = null;
-    logEvent(v, this.time, `Placed in orbit around ${body.name}`);
+    logEvent(v, this.time, `Placed in high/low debug orbit around ${body.name}`);
     return true;
   }
 
