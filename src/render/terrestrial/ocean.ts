@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
 import { createOceanCapMaterial, oceanCapAngle, oceanCapSegments } from './oceanMaterial';
+import { updateTerrestrialAerialPerspective } from './aerialPerspective';
 
 /**
  * Camera-anchored gnomonic ocean cap. Every generated vertex lies on the exact
@@ -40,7 +41,8 @@ export class TerrestrialOcean {
 
   update(frame: Pick<BodyRenderFrame,
     'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection' | 'time' | 'orientation'> &
-    { readonly solarVisibleFraction?: number }): void {
+    { readonly solarVisibleFraction?: number },
+  aerialPerspectiveLut?: THREE.Texture): void {
     if (this.disposed) return;
     const { cameraRelativeOrigin: origin, cameraBodyFixed: camera, orientation } = frame;
     this.mesh.position.set(origin.x, origin.y, origin.z);
@@ -66,6 +68,12 @@ export class TerrestrialOcean {
     ).normalize();
     uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
     uniforms.uTime.value = frame.time;
+    updateTerrestrialAerialPerspective(
+      this.material,
+      this.body,
+      { ...frame, solarVisibleFraction: frame.solarVisibleFraction ?? 1 },
+      aerialPerspectiveLut,
+    );
   }
 
   dispose(): void {

@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import type { BodyMaterialDescriptor } from '../bodyMaterial';
 import type { RuntimeBodyAssetPack } from '../bodyRenderer';
-import type { Body } from '../../sim/universe';
-import type { BodyRenderFrame } from '../bodyRenderer';
 import { BODY_FIXED_UV_GLSL } from './globalCoordinates';
+import {
+  attachTerrestrialAerialPerspective,
+  bindTerrestrialAerialPerspectiveUniforms,
+  createTerrestrialAerialPerspectiveState,
+  TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
+} from './aerialPerspective';
 
 export interface TerrestrialGlobalMaterial extends THREE.MeshStandardMaterial {
   readonly userData: {
@@ -38,7 +42,7 @@ if (useGlobalHeightMap > 0.5) {
   float globalHeightQuantized = globalHeightRg.r * 65280.0 + globalHeightRg.g * 255.0;
   float globalHeightMeters = -12000.0 + globalHeightQuantized / 65535.0 * 24000.0;
   vGlobalSurfaceAltitude = globalHeightMeters;
-  transformed += globalHeightDirection * (globalHeightMeters / max(globalBodyRadius, 1.0));
+  transformed += globalHeightDirection * (globalHeightMeters / max(terrestrialAerialBodyRadius, 1.0));
 }`;
 
 export const GLOBAL_FRAGMENT_HEADER = /* glsl */ `
@@ -53,13 +57,6 @@ uniform float useGlobalIceMap;
 uniform vec3 globalSunDirection;
 uniform float globalCloudDriftAngle;
 uniform float globalCloudShadowStrength;
-uniform vec3 globalCameraBodyFixed;
-uniform float globalBodyRadius;
-uniform float globalAtmosphereHeight;
-uniform float globalScaleHeight;
-uniform float globalSolarVisibleFraction;
-uniform sampler2D globalAerialPerspectiveLut;
-uniform float useGlobalAerialPerspectiveLut;
 uniform mat3 normalMatrix;
 varying vec3 vBodyDirection;
 varying float vGlobalSurfaceAltitude;
@@ -113,32 +110,6 @@ if (useAuthoredGlobalMaps > 0.5) {
 }`;
 
 /** Distance- and altitude-aware aerial perspective for opaque Earth pixels. */
-export const GLOBAL_AERIAL_APPLY = /* glsl */ `
-if (globalAtmosphereHeight > 0.0) {
-  vec3 globalSurfacePoint = normalize(vBodyDirection) * (globalBodyRadius + vGlobalSurfaceAltitude);
-  vec3 globalViewSegment = globalCameraBodyFixed - globalSurfacePoint;
-  float globalViewDistance = length(globalViewSegment);
-  vec3 globalViewRay = globalViewDistance > 0.0 ? globalViewSegment / globalViewDistance : normalize(vBodyDirection);
-  float globalViewUpCosine = max(0.025, abs(dot(globalViewRay, normalize(vBodyDirection))));
-  float globalAirPath = min(globalViewDistance, globalAtmosphereHeight / globalViewUpCosine);
-  float globalCameraAltitude = max(0.0, length(globalCameraBodyFixed) - globalBodyRadius);
-  float globalObserverDensity = exp(-min(globalCameraAltitude, globalAtmosphereHeight) / max(globalScaleHeight, 1.0));
-  float globalOpticalDepth = globalAirPath * 0.0000105 * mix(0.52, 1.0, globalObserverDensity);
-  float globalAerial = clamp(1.0 - exp(-globalOpticalDepth), 0.0, 0.94);
-  vec2 globalAerialUv = vec2(clamp(globalAirPath / 200000.0, 0.0, 1.0),
-    clamp(globalCameraAltitude / max(globalAtmosphereHeight, 1.0), 0.0, 1.0));
-  vec4 globalAerialLut = texture2D(globalAerialPerspectiveLut, globalAerialUv);
-  globalAerial = mix(globalAerial, min(0.94, globalAerialLut.a * 1.18), useGlobalAerialPerspectiveLut);
-  float globalSunElevation = dot(normalize(vBodyDirection), normalize(globalSunDirection));
-  vec3 globalHazeColor = mix(vec3(0.30, 0.43, 0.62), vec3(0.48, 0.68, 0.96),
-    smoothstep(-0.18, 0.34, globalSunElevation));
-  globalHazeColor = mix(globalHazeColor, max(globalHazeColor, globalAerialLut.rgb * 1.7),
-    useGlobalAerialPerspectiveLut);
-  float globalOcclusionLight = mix(0.08, 1.0, globalSolarVisibleFraction);
-  outgoingLight = outgoingLight * (1.0 - globalAerial * 0.86)
-    + globalHazeColor * globalAerial * globalOcclusionLight;
-}`;
-
 function dataTexture(bytes: number[], colorSpace: THREE.ColorSpace): THREE.DataTexture {
   const texture = new THREE.DataTexture(new Uint8Array(bytes), 1, 1, THREE.RGBAFormat);
   texture.colorSpace = colorSpace;
@@ -232,13 +203,6 @@ export interface TerrestrialCloudLightingState {
   readonly sunDirection: { value: THREE.Vector3 };
   readonly driftAngle: { value: number };
   readonly shadowStrength: { value: number };
-  readonly cameraBodyFixed: { value: THREE.Vector3 };
-  readonly bodyRadius: { value: number };
-  readonly atmosphereHeight: { value: number };
-  readonly scaleHeight: { value: number };
-  readonly solarVisibleFraction: { value: number };
-  readonly aerialPerspectiveLut: { value: THREE.Texture | null };
-  readonly useAerialPerspectiveLut: { value: number };
 }
 
 export function createTerrestrialCloudLightingState(): TerrestrialCloudLightingState {
@@ -246,13 +210,6 @@ export function createTerrestrialCloudLightingState(): TerrestrialCloudLightingS
     sunDirection: { value: new THREE.Vector3(1, 0, 0) },
     driftAngle: { value: 0 },
     shadowStrength: { value: 0.28 },
-    cameraBodyFixed: { value: new THREE.Vector3() },
-    bodyRadius: { value: 1 },
-    atmosphereHeight: { value: 0 },
-    scaleHeight: { value: 1 },
-    solarVisibleFraction: { value: 1 },
-    aerialPerspectiveLut: { value: null },
-    useAerialPerspectiveLut: { value: 0 },
   };
 }
 
@@ -265,23 +222,6 @@ export function updateTerrestrialCloudLighting(
   if (!state) return;
   state.sunDirection.value.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
   state.driftAngle.value = driftAngle;
-}
-
-export function updateTerrestrialEnvironment(
-  material: THREE.Material,
-  body: Readonly<Body>,
-  frame: Pick<BodyRenderFrame, 'cameraBodyFixed' | 'solarVisibleFraction'>,
-  aerialPerspectiveLut?: THREE.Texture,
-): void {
-  const state = material.userData.terrestrialCloudLighting as TerrestrialCloudLightingState | undefined;
-  if (!state) return;
-  state.cameraBodyFixed.value.set(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z);
-  state.bodyRadius.value = body.radius;
-  state.atmosphereHeight.value = body.def.atmosphere?.height ?? 0;
-  state.scaleHeight.value = body.def.atmosphere?.scaleHeight ?? 1;
-  state.solarVisibleFraction.value = Math.max(0, Math.min(1, frame.solarVisibleFraction));
-  state.aerialPerspectiveLut.value = aerialPerspectiveLut ?? null;
-  state.useAerialPerspectiveLut.value = aerialPerspectiveLut ? 1 : 0;
 }
 
 /** Bind the authored sampling uniforms shared by both terrestrial programs. */
@@ -303,13 +243,6 @@ export function bindTerrestrialAuthoredUniforms(
   shader.uniforms.globalSunDirection = cloudLighting.sunDirection;
   shader.uniforms.globalCloudDriftAngle = cloudLighting.driftAngle;
   shader.uniforms.globalCloudShadowStrength = cloudLighting.shadowStrength;
-  shader.uniforms.globalCameraBodyFixed = cloudLighting.cameraBodyFixed;
-  shader.uniforms.globalBodyRadius = cloudLighting.bodyRadius;
-  shader.uniforms.globalAtmosphereHeight = cloudLighting.atmosphereHeight;
-  shader.uniforms.globalScaleHeight = cloudLighting.scaleHeight;
-  shader.uniforms.globalSolarVisibleFraction = cloudLighting.solarVisibleFraction;
-  shader.uniforms.globalAerialPerspectiveLut = cloudLighting.aerialPerspectiveLut;
-  shader.uniforms.useGlobalAerialPerspectiveLut = cloudLighting.useAerialPerspectiveLut;
 }
 
 /**
@@ -324,7 +257,7 @@ export function createTerrestrialGlobalMaterial(
 ): TerrestrialGlobalMaterial {
   const textures = resolveTerrestrialAuthoredTextures(pack, fallback.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
-  cloudLighting.bodyRadius.value = bodyRadius;
+  const aerialPerspective = createTerrestrialAerialPerspectiveState('compact-land', bodyRadius);
 
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -347,24 +280,26 @@ export function createTerrestrialGlobalMaterial(
     maps,
     terrestrialCloudLighting: cloudLighting,
   });
-  material.customProgramCacheKey = () => `terrestrial-global-v2:${pack ? 'authored' : 'palette'}`;
+  attachTerrestrialAerialPerspective(material, aerialPerspective);
+  material.customProgramCacheKey = () => `terrestrial-global-v3:${pack ? 'authored' : 'palette'}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
+    bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
 ${GLOBAL_VERTEX_COMMON}
 uniform sampler2D globalHeightMap;
 uniform float useGlobalHeightMap;
-uniform float globalBodyRadius;`)
+uniform float terrestrialAerialBodyRadius;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GLOBAL_COMPACT_HEIGHT_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}`)
+      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}`)
       .replace('#include <map_fragment>', GLOBAL_ALBEDO_APPLY)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}`)
       .replace('#include <normal_fragment_maps>', GLOBAL_NORMAL_APPLY);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <opaque_fragment>', `${GLOBAL_AERIAL_APPLY}\n#include <opaque_fragment>`);
+      .replace('#include <opaque_fragment>', `outgoingLight = applyTerrestrialAerialPerspective(\n  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude),\n  outgoingLight\n);\n#include <opaque_fragment>`);
   };
 
   let released = false;

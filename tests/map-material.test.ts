@@ -97,7 +97,7 @@ describe('compact map body presentation', () => {
     expect(material.userData.maps.albedo.anisotropy).toBe(8);
     expect(mesh.geometry.parameters).toMatchObject({ widthSegments: 160, heightSegments: 96 });
     expect(mesh.userData.assetPack).toBe(pack);
-    expect((material.userData.terrestrialCloudLighting as { bodyRadius: { value: number } }).bodyRadius.value)
+    expect((material.userData.terrestrialAerialPerspective as { bodyRadius: { value: number } }).bodyRadius.value)
       .toBe(body.radius);
   });
 

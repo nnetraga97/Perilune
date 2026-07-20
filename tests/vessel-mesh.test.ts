@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { addPart, createCraft } from '../src/sim/vessel';
 import { PARTS, partById } from '../src/content/parts';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import type { PartModelLibrary, InstantiatedPartModel } from '../src/render/partModelLibrary';
 import type { PartEffectAnchor } from '../src/render/partModelManifest';
+import {
+  FLIGHT_AERIAL_USER_DATA_KEY,
+  FlightAerialPerspectiveController,
+} from '../src/render/flightAerialPerspective';
 
 const EXPECTED_MODEL_IDS: Record<string, string> = {
   'pod-voyager': 'orion-voyager-pod',
@@ -100,6 +104,44 @@ describe('part definitions', () => {
 });
 
 describe('buildVesselVisual', () => {
+  it('owns flight-only material variants without mutating imported library resources', () => {
+    const baseGeometry = new THREE.BoxGeometry();
+    const borrowedTexture = new THREE.Texture();
+    const baseMaterial = new THREE.MeshStandardMaterial({ map: borrowedTexture });
+    const library: PartModelLibrary = {
+      preload: async () => {},
+      dispose() {},
+      instantiateForPart: () => null,
+      instantiate: () => ({
+        object: new THREE.Mesh(baseGeometry, baseMaterial),
+        plumeAnchors: [],
+      }),
+    };
+    const craft = createCraft('aerial');
+    addPart(craft, 'tank-s4', null, 'root', { x: 0, y: 0, z: 0 });
+    const controller = new FlightAerialPerspectiveController();
+    const visual = buildVesselVisual(craft, library, controller);
+    const mesh = visual.group.getObjectByProperty('isMesh', true) as THREE.Mesh;
+    const variant = mesh.material as THREE.MeshStandardMaterial;
+    expect(variant).not.toBe(baseMaterial);
+    expect(variant.map).toBe(borrowedTexture);
+    expect(variant.userData[FLIGHT_AERIAL_USER_DATA_KEY]).toBe(controller);
+    expect(baseMaterial.userData[FLIGHT_AERIAL_USER_DATA_KEY]).toBeUndefined();
+    expect(visual.ownedMaterials.has(variant)).toBe(true);
+    const variantDispose = vi.spyOn(variant, 'dispose');
+    const geometryDispose = vi.spyOn(baseGeometry, 'dispose');
+    const textureDispose = vi.spyOn(borrowedTexture, 'dispose');
+    disposeVesselVisual(visual);
+    disposeVesselVisual(visual);
+    expect(variantDispose).toHaveBeenCalledOnce();
+    expect(geometryDispose).not.toHaveBeenCalled();
+    expect(textureDispose).not.toHaveBeenCalled();
+    baseGeometry.dispose();
+    baseMaterial.dispose();
+    borrowedTexture.dispose();
+    controller.dispose();
+  });
+
   it('selects the imported body and suppresses the procedural accent when a model exists', () => {
     const craft = createCraft('t');
     const tank = addPart(craft, 'tank-s4', null, 'root', { x: 0, y: 0, z: 0 });

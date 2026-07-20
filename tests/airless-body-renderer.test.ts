@@ -6,6 +6,8 @@ import { AirlessBodyRenderer } from '../src/render/airlessBodyRenderer';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import type { RenderCaps } from '../src/render/context';
+import { DEFAULT_TERRAIN_GEOMETRY_BUDGET } from '../src/render/resourceAccounting';
+import { FlightAerialPerspectiveController } from '../src/render/flightAerialPerspective';
 
 const caps: RenderCaps = {
   backend: 'webgl2', fragmentHighp: { precision: 23, rangeMin: 127, rangeMax: 127 },
@@ -81,5 +83,73 @@ describe('AirlessBodyRenderer', () => {
     renderer.dispose();
     expect(renderer.root.children).toHaveLength(0);
     for (const dispose of borrowedDisposals) expect(dispose).not.toHaveBeenCalled();
+  });
+
+  it('shows lunar regolith scatter only after complete flight-terrain coverage', () => {
+    const body = moon();
+    const flightAerial = new FlightAerialPerspectiveController();
+    const renderer = new AirlessBodyRenderer(
+      body,
+      bodyMaterialDescriptor(body),
+      caps,
+      'medium',
+      undefined,
+      flightAerial,
+    );
+    renderer.stageAssets(pack());
+    const near = {
+      cameraBodyFixed: { x: body.radius + 15, y: 0, z: 0 },
+      cameraRelativeOrigin: { x: body.radius + 15, y: 0, z: 0 },
+      altitude: 15,
+      allowFlightTerrain: true,
+    };
+    renderer.update(frame(body, { ...near, deltaSeconds: 0 }));
+    expect(renderer.stats()).toMatchObject({ coverageProgress: 0, visualScatter: 0 });
+    for (let index = 0; index < 16; index++) renderer.update(frame(body, { ...near, deltaSeconds: 0 }));
+    renderer.update(frame(body, { ...near, deltaSeconds: 0.175 }));
+    expect(renderer.stats().coverageProgress).toBeGreaterThan(0);
+    expect(renderer.stats().coverageProgress).toBeLessThan(1);
+    expect(renderer.stats().visualScatter).toBe(0);
+    renderer.update(frame(body, { ...near, deltaSeconds: 0.35 }));
+    expect(renderer.stats().coverageProgress).toBe(1);
+    expect(renderer.stats().visualScatter).toBeGreaterThan(0);
+    expect(renderer.root.getObjectByName('terrestrial-scatter')?.visible).toBe(true);
+
+    renderer.update(frame(body, { ...near, allowFlightTerrain: false }));
+    expect(renderer.stats().visualScatter).toBe(0);
+    expect(renderer.root.getObjectByName('terrestrial-scatter')?.visible).toBe(false);
+    expect(flightAerial.snapshot()).toMatchObject({ active: false, bodyId: 'moon' });
+    renderer.dispose();
+    flightAerial.dispose();
+  });
+
+  it('charges lunar scatter before terrain allocation and follows the shadow tier', () => {
+    const body = moon();
+    const renderer = new AirlessBodyRenderer(body, bodyMaterialDescriptor(body), caps, 'medium');
+    const assets = pack();
+    renderer.stageAssets(assets);
+    const scatter = renderer.root.getObjectByName('terrestrial-scatter')!;
+    const scatterMeshes: THREE.InstancedMesh[] = [];
+    scatter.traverse((object) => {
+      if (object instanceof THREE.InstancedMesh) scatterMeshes.push(object);
+    });
+    expect(scatterMeshes.length).toBeGreaterThan(0);
+    for (const mesh of scatterMeshes) {
+      expect(mesh.castShadow).toBe(true);
+      expect(mesh.receiveShadow).toBe(true);
+    }
+    const stats = renderer.stats();
+    expect(stats.scatterBytes).toBeGreaterThan(0);
+    const expectedAllocation = DEFAULT_TERRAIN_GEOMETRY_BUDGET - stats.scatterBytes!;
+    expect(stats.terrainAllocationBytes).toBe(expectedAllocation);
+    renderer.dispose();
+
+    const low = new AirlessBodyRenderer(body, bodyMaterialDescriptor(body), caps, 'low');
+    low.root.getObjectByName('terrestrial-scatter')?.traverse((object) => {
+      if (!(object instanceof THREE.InstancedMesh)) return;
+      expect(object.castShadow).toBe(false);
+      expect(object.receiveShadow).toBe(false);
+    });
+    low.dispose();
   });
 });

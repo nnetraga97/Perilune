@@ -18,37 +18,48 @@ import { createGlobalSphereGeometry } from './terrestrial/globalGeometry';
 import {
   createTerrestrialGlobalMaterial,
   updateTerrestrialCloudLighting,
-  updateTerrestrialEnvironment,
 } from './terrestrial/globalMaterial';
+import { updateTerrestrialAerialPerspective } from './terrestrial/aerialPerspective';
 import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial';
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
 import { TerrestrialCloudDeck, WEATHER_CLOUD_DRIFT_RATE } from './terrestrial/cloudLayer';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
-import { geometryByteLength, terrainGeometryAllocation } from './resourceAccounting';
+import {
+  DEFAULT_ACTIVE_BODY_BUDGET,
+  objectGeometryBytes,
+  terrainGeometryAllocation,
+} from './resourceAccounting';
 import { launchPadTerrainEnvelope, naturalContactSurface } from '../sim/terrain';
 import { launchSiteBodyFixedDirection } from '../sim/launchSite';
 import { terrainPresentationBand } from './terrainPresentation';
 import { sampleSourceMacroHeight, sourceHeightCacheBytes } from '../sim/sourceHeightAuthority';
 import { localShadowPolicy } from './lightingPolicy';
+import { LAUNCH_PAD_FOOTPRINT_RADIUS } from '../sim/launchSite';
+import { recipeForBody } from '../sim/terrainRecipe';
+import {
+  createRecipeSurfaceSampler,
+  scatterProfileByName,
+  scatterStreamCeiling,
+  TerrestrialScatter,
+  type SuppressionSphere,
+} from './terrestrial/scatter';
+import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
 
-const DEFAULT_ACTIVE_BODY_BUDGET: Readonly<Record<QualityTier, number>> = Object.freeze({
-  low: 64 * 1024 * 1024,
-  medium: 128 * 1024 * 1024,
-  high: 320 * 1024 * 1024,
-});
-
-function uniqueGeometryBytes(objects: readonly THREE.Object3D[]): number {
-  const geometries = new Set<THREE.BufferGeometry>();
-  for (const root of objects) {
-    root.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.Points) geometries.add(object.geometry);
-    });
+/** Visual-only exclusion volume covering an authored launch-pad foundation. */
+export function launchPadScatterSuppressionSphere(body: Body): SuppressionSphere {
+  if (!body.def.launchSite || body.def.surfaceKind !== 'solid') {
+    throw new Error(`${body.name} has no launch-pad scatter footprint`);
   }
-  let bytes = 0;
-  for (const geometry of geometries) bytes += geometryByteLength(geometry);
-  return bytes;
+  const direction = launchSiteBodyFixedDirection(new Vec3());
+  const centerRadius = body.radius + launchPadTerrainEnvelope(body).centerHeight;
+  return Object.freeze({
+    x: direction.x * centerRadius,
+    y: direction.y * centerRadius,
+    z: direction.z * centerRadius,
+    radius: LAUNCH_PAD_FOOTPRINT_RADIUS,
+  });
 }
 
 export class TerrestrialBodyRenderer implements BodyRenderer {
@@ -62,6 +73,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private atmosphere!: TerrestrialAtmosphere;
   private ocean!: TerrestrialOcean;
   private clouds!: TerrestrialCloudDeck;
+  private scatter: TerrestrialScatter | null = null;
+  private scatterSuppression: readonly SuppressionSphere[] = Object.freeze([]);
   private fallbackCloudTexture: THREE.DataTexture | null = null;
   private disposed = false;
   private initialized = false;
@@ -75,6 +88,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private readonly launchSiteDirection = new Vec3();
   private stagedAssetBytes = 0;
   private lastAngularRadius = 0;
+  private terrainAllocationBytes = 0;
+  private scatterVisible = false;
   private readonly workerPool = typeof Worker === 'undefined'
     ? undefined
     : new TerrainChunkWorkerPool();
@@ -86,6 +101,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     readonly quality: QualityTier,
     private readonly diagnostics?: RenderDiagnosticsPort,
     private readonly activeBodyBudgetBytes = DEFAULT_ACTIVE_BODY_BUDGET[quality],
+    private readonly flightAerial?: FlightAerialPerspectiveController,
   ) {
     this.bodyId = body.id;
     this.compactRadius = body.radius;
@@ -147,7 +163,29 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.caps.maxAnisotropy,
     );
 
-    const fixedPassBytes = uniqueGeometryBytes([
+    // The current Sol rollout enables neutral geology for Earth only. Veyra's
+    // existing presentation remains unchanged even though its legacy profile
+    // is retained as the deterministic compatibility reference.
+    const scatterProfileName = this.bodyId === 'earth'
+      ? BODY_VISUALS[this.body.id as BodyId].scatterProfile
+      : undefined;
+    this.scatter = scatterProfileName
+      ? new TerrestrialScatter(
+        this.body.radius,
+        this.body.def.terrain.seed,
+        createRecipeSurfaceSampler(recipeForBody(this.body)),
+        this.quality,
+        scatterProfileByName(scatterProfileName),
+        this.flightAerial,
+      )
+      : null;
+    this.scatter?.setShadows(this.quality !== 'low');
+    this.scatterSuppression = this.scatter && this.body.def.launchSite
+      ? Object.freeze([launchPadScatterSuppressionSphere(this.body)])
+      : Object.freeze([]);
+    const scatterBytes = this.scatter?.stats().bufferBytes ?? 0;
+
+    const fixedPassBytes = objectGeometryBytes([
       this.compact,
       this.ocean.mesh,
       this.atmosphere.mesh,
@@ -157,9 +195,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       activeBodyBudgetBytes: this.activeBodyBudgetBytes,
       committedTextureBytes: pack?.gpuBytes ?? 0,
       fixedPassBytes,
-      scatterBytes: 0,
+      scatterBytes,
       effectBytes: 0,
     });
+    this.terrainAllocationBytes = allocation.allocationBytes;
     const terrainMaterial = createTerrestrialSurfaceMaterial(
       pack,
       this.descriptor,
@@ -186,6 +225,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.atmosphere.mesh,
       this.clouds.group,
     );
+    if (this.scatter) {
+      this.scatter.group.visible = false;
+      this.root.add(this.scatter.group);
+    }
     this.transition.requestCompact();
     this.applyCoverage(0, false);
     this.initialized = true;
@@ -204,11 +247,28 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const cloudDriftAngle = frame.time * WEATHER_CLOUD_DRIFT_RATE;
     updateTerrestrialCloudLighting(this.compact.material, frame.bodySunDirection, cloudDriftAngle);
     updateTerrestrialCloudLighting(this.surfaceMaterial, frame.bodySunDirection, cloudDriftAngle);
-    updateTerrestrialEnvironment(this.compact.material, this.body, frame, this.atmosphere.aerialPerspectiveTexture);
-    updateTerrestrialEnvironment(this.surfaceMaterial, this.body, frame, this.atmosphere.aerialPerspectiveTexture);
+    updateTerrestrialAerialPerspective(
+      this.compact.material,
+      this.body,
+      frame,
+      this.atmosphere.aerialPerspectiveTexture,
+    );
+    updateTerrestrialAerialPerspective(
+      this.surfaceMaterial,
+      this.body,
+      frame,
+      this.atmosphere.aerialPerspectiveTexture,
+    );
     this.atmosphere.update(frame);
-    this.ocean.update(frame);
+    this.ocean.update(frame, this.atmosphere.aerialPerspectiveTexture);
     this.clouds.update(frame);
+    if (frame.allowFlightTerrain) {
+      this.flightAerial?.update(
+        this.body,
+        frame,
+        this.atmosphere.aerialPerspectiveTexture,
+      );
+    }
 
     if (prewarm) {
       this.terrain.group.visible = true;
@@ -243,6 +303,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       frame.framePressure,
     );
     this.applyCoverage(snapshot.progress, prewarm);
+    this.updateScatter(frame);
     const diagnosticNow = performance.now();
     if (this.diagnostics && (this.diagnostics.detailed || diagnosticNow - this.lastDiagnosticObservationAt >= 100)) {
       this.lastDiagnosticObservationAt = diagnosticNow;
@@ -269,6 +330,22 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         compactAnchorSource: this.compactAnchorSource,
       });
     }
+  }
+
+  private updateScatter(frame: Readonly<BodyRenderFrame>): void {
+    if (!this.scatter) return;
+    this.scatterVisible = frame.allowFlightTerrain
+      && this.terrainActive
+      && this.coverageProgress >= 1
+      && frame.altitude <= scatterStreamCeiling(this.quality);
+    this.scatter.group.visible = this.scatterVisible;
+    if (!this.scatterVisible) return;
+    this.scatter.update({
+      cameraBodyFixed: frame.cameraBodyFixed,
+      orientation: frame.orientation,
+      cameraRelativeOrigin: frame.cameraRelativeOrigin,
+      suppression: this.scatterSuppression,
+    });
   }
 
   /**
@@ -339,13 +416,14 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   stats(): Readonly<BodyRendererStats> {
     if (!this.ready) return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 });
+    const scatterStats = this.scatter?.stats();
     return Object.freeze({
       chunks: this.terrain.stats.chunks,
       visible: this.terrainActive ? this.terrain.stats.visible : 0,
       terrainActive: this.terrainActive,
       exposure: 0,
       coverageProgress: this.coverageProgress,
-      visualScatter: 0,
+      visualScatter: this.scatterVisible ? scatterStats?.total ?? 0 : 0,
       decals: 0,
       dust: 0,
       physicalProxies: 0,
@@ -357,8 +435,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       terrainSelectionReused: this.terrain.stats.selectionReused,
       terrainPending: this.terrain.stats.pending,
       terrainTransitions: this.terrain.stats.activeTransitions,
-      scatterBytes: 0,
+      scatterBytes: scatterStats?.bufferBytes ?? 0,
       effectBytes: 0,
+      terrainAllocationBytes: this.terrainAllocationBytes,
       presentationMode: this.coverageProgress <= 0 ? 'proxy' : this.coverageProgress >= 1 ? 'physical' : 'transition',
       angularRadius: this.lastAngularRadius,
       assetTier: this.stagedAssetBytes > 0 ? this.quality : 'procedural',
@@ -367,6 +446,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       cloudHistoryBytes: 0,
       heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
       shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
+      aerialConsumers: Object.freeze(['compact-land', 'streamed-land', 'ocean']),
     });
   }
 
@@ -379,12 +459,17 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.atmosphere.dispose();
     this.ocean.dispose();
     this.clouds.dispose();
+    this.scatter?.dispose();
+    this.scatter = null;
+    this.scatterSuppression = Object.freeze([]);
     this.fallbackCloudTexture?.dispose();
     this.fallbackCloudTexture = null;
     this.initialized = false;
     this.terrainActive = false;
     this.coverageProgress = 0;
+    this.scatterVisible = false;
     this.stagedAssetBytes = 0;
+    this.terrainAllocationBytes = 0;
   }
 
   dispose(): void {

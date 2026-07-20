@@ -84,6 +84,8 @@ export interface BodyRendererStats {
   /** Renderer-owned surface resource bytes by category. */
   readonly scatterBytes?: number;
   readonly effectBytes?: number;
+  /** Hard byte reservation left for streamed terrain after fixed allocations. */
+  readonly terrainAllocationBytes?: number;
   readonly presentationMode?: 'physical' | 'transition' | 'proxy';
   readonly angularRadius?: number;
   /** Committed authored pack and renderer-owned auxiliary allocations. */
@@ -93,6 +95,8 @@ export interface BodyRendererStats {
   readonly cloudHistoryBytes?: number;
   readonly heightCacheBytes?: number;
   readonly shadowBytes?: number;
+  /** Stable names of material paths updated by the terrestrial aerial state. */
+  readonly aerialConsumers?: readonly string[];
 }
 
 export interface BodyRenderer {

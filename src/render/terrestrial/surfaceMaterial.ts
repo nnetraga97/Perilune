@@ -7,13 +7,18 @@ import {
   GLOBAL_EMISSIVE_APPLY,
   GLOBAL_NORMAL_APPLY,
   GLOBAL_ROUGHNESS_APPLY,
-  GLOBAL_AERIAL_APPLY,
   GLOBAL_VERTEX_BEGIN,
   GLOBAL_VERTEX_COMMON,
   bindTerrestrialAuthoredUniforms,
   createTerrestrialCloudLightingState,
   resolveTerrestrialAuthoredTextures,
 } from './globalMaterial';
+import {
+  attachTerrestrialAerialPerspective,
+  bindTerrestrialAerialPerspectiveUniforms,
+  createTerrestrialAerialPerspectiveState,
+  TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
+} from './aerialPerspective';
 
 /** Body-fixed period over which local surface detail repeats exactly (meters). */
 export const SURFACE_DETAIL_PERIOD_METERS = 8192;
@@ -375,12 +380,12 @@ if (surfIce > 0.35) surfLocalCell = vec2(1.0, 1.0);
 // Reconstruct the atlas anchor from the continuous body direction. Chunk-local
 // origins are ideal for vertex precision but differ across LODs; using them as
 // texture coordinates makes the quadtree visible at handoff boundaries.
-vec3 surfStableAnchor = surfRadialProjection * (globalBodyRadius + vSurfaceAltitude);
+vec3 surfStableAnchor = surfRadialProjection * (terrestrialAerialBodyRadius + vSurfaceAltitude);
 float surfLocalFootprint = max(max(length(fwidth(surfStableAnchor.yz / 24.0)), length(fwidth(surfStableAnchor.xz / 24.0))), length(fwidth(surfStableAnchor.xy / 24.0)));
 // textureGrad is the frequency gate. A derivative-based amplitude gate would
 // switch on per terrain tile because adjacent LODs interpolate different
 // footprints, exposing the quadtree as bright rectangles.
-vec3 surfViewDirectionBody = normalize(globalCameraBodyFixed - surfStableAnchor);
+vec3 surfViewDirectionBody = normalize(terrestrialAerialCameraBodyFixed - surfStableAnchor);
 float surfLocalGrazingFade = smoothstep(0.08, 0.32, abs(dot(surfRadialProjection, surfViewDirectionBody)));
 float surfLocalFade = useLocalDetailMap * surfLocalGrazingFade;
 vec4 surfLocalDetail = sampleLocalDetailTriplanar(surfStableAnchor, surfRadialProjection, surfLocalCell);
@@ -427,6 +432,7 @@ export function createTerrestrialSurfaceMaterial(
 ): TerrestrialSurfaceMaterial {
   const textures = resolveTerrestrialAuthoredTextures(pack, descriptor.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
+  const aerialPerspective = createTerrestrialAerialPerspectiveState('streamed-land');
   const maxOctave = SURFACE_DETAIL_TIERS[tier].maxOctave;
   const localDetail = pack?.textures.get('localDetail') ?? null;
   if (localDetail) {
@@ -452,9 +458,11 @@ export function createTerrestrialSurfaceMaterial(
     tier,
     terrestrialCloudLighting: cloudLighting,
   });
-  material.customProgramCacheKey = () => `terrestrial-surface-v2:${pack ? 'authored' : 'palette'}:${tier}`;
+  attachTerrestrialAerialPerspective(material, aerialPerspective);
+  material.customProgramCacheKey = () => `terrestrial-surface-v3:${pack ? 'authored' : 'palette'}:${tier}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
+    bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
     shader.uniforms.surfaceDetailMaxOctave = { value: maxOctave };
     shader.uniforms.localDetailMap = { value: localDetail };
     shader.uniforms.useLocalDetailMap = { value: localDetail ? 1 : 0 };
@@ -477,7 +485,7 @@ export function createTerrestrialSurfaceMaterial(
           + 'vGlobalSurfaceAltitude = surfaceAltitude;',
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
+      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
       .replace('#include <map_fragment>', `${GLOBAL_ALBEDO_APPLY}\n${SURFACE_ALBEDO_APPLY}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
       .replace(
@@ -486,7 +494,7 @@ export function createTerrestrialSurfaceMaterial(
       )
       .replace('#include <normal_fragment_maps>', `${GLOBAL_NORMAL_APPLY}\n${SURFACE_NORMAL_APPLY}`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <opaque_fragment>', `${GLOBAL_AERIAL_APPLY}\n#include <opaque_fragment>`);
+      .replace('#include <opaque_fragment>', `outgoingLight = applyTerrestrialAerialPerspective(\n  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude),\n  outgoingLight\n);\n#include <opaque_fragment>`);
   };
 
   let released = false;

@@ -48,6 +48,10 @@ import {
   localShadowPolicy,
   snapShadowCenter,
 } from './lightingPolicy';
+import {
+  bindFlightAerialPerspective,
+  FlightAerialPerspectiveController,
+} from './flightAerialPerspective';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -211,6 +215,7 @@ export class WorldScene {
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly srbSmoke: SrbSmokePool;
   private readonly launchSite: THREE.Group;
+  private readonly flightAerial = new FlightAerialPerspectiveController();
   private quality: QualityTier;
   private readonly diagnostics: RenderDiagnosticsPort;
   private readonly resizeHandler: () => void;
@@ -350,6 +355,8 @@ export class WorldScene {
     const group = new THREE.Group();
     const concrete = new THREE.MeshStandardMaterial({ color: '#68717a', roughness: 0.92, metalness: 0.05 });
     const structure = new THREE.MeshStandardMaterial({ color: '#c7d0d5', roughness: 0.65, metalness: 0.35 });
+    bindFlightAerialPerspective(concrete, this.flightAerial);
+    bindFlightAerialPerspective(structure, this.flightAerial);
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(LAUNCH_PAD_CONTACT_RADIUS, LAUNCH_PAD_FOOTPRINT_RADIUS, 1, 32),
       concrete,
@@ -501,6 +508,7 @@ export class WorldScene {
         quality: tier,
         diagnostics: this.diagnostics,
         activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(tier),
+        flightAerial: this.flightAerial,
       }),
       loadAssets: async (candidateBody, tier) => {
         if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
@@ -555,6 +563,7 @@ export class WorldScene {
       quality: this.quality,
       diagnostics: this.diagnostics,
       activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(this.quality),
+      flightAerial: this.flightAerial,
     });
     const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
@@ -666,7 +675,7 @@ export class WorldScene {
   visualFor(gv: GameVessel): VesselVisual {
     let vis = this.vesselVisuals.get(gv.runtime.id);
     if (!vis) {
-      vis = buildVesselVisual(gv.runtime.craft, this.partModels);
+      vis = buildVesselVisual(gv.runtime.craft, this.partModels, this.flightAerial);
       this.vesselVisuals.set(gv.runtime.id, vis);
       this.scene.add(vis.group);
     }
@@ -1273,6 +1282,7 @@ export class WorldScene {
     this.vesselVisuals.clear();
     this.scene.remove(this.srbSmoke.points);
     this.srbSmoke.dispose();
+    this.flightAerial.dispose();
     disposeOwnedGroup(this.launchSite);
     this.starfield.geometry.dispose();
     const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];

@@ -52,7 +52,8 @@ describe('Veyra ocean', () => {
     expect(low.material.userData.shoreMaskFallback).toBe(true);
     expect(low.material.fragmentShader).toContain('float shore');
     expect(low.material).toMatchObject({ transparent: false, depthWrite: true, opacity: 1 });
-    expect(low.material.fragmentShader).toContain('gl_FragColor = vec4(depthTint + foam * 0.64 + glitter * 0.62, 1.0)');
+    expect(low.material.fragmentShader).toContain('applyTerrestrialAerialPerspective');
+    expect(low.material.fragmentShader).toContain('gl_FragColor = vec4(oceanShadedColor, 1.0)');
     expect(low.material.vertexShader).toContain('#include <common>');
     expect(low.material.vertexShader).toContain('#include <logdepthbuf_vertex>');
     expect(low.material.fragmentShader).toContain('#include <logdepthbuf_fragment>');

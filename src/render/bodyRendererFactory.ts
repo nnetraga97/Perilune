@@ -9,6 +9,7 @@ import { SolarBodyRenderer } from './solarBodyRenderer';
 import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
 import { AirlessBodyRenderer } from './airlessBodyRenderer';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
+import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
 
 export interface BodyRendererCandidateOptions {
   readonly body: Body;
@@ -17,6 +18,7 @@ export interface BodyRendererCandidateOptions {
   readonly legacyDependencies?: LegacyBodyRendererDependencies;
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly activeBodyBudgetBytes?: number;
+  readonly flightAerial?: FlightAerialPerspectiveController;
 }
 
 export function createBodyRendererCandidate(options: BodyRendererCandidateOptions): BodyRenderer {
@@ -36,6 +38,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.quality,
         options.diagnostics,
         options.activeBodyBudgetBytes,
+        options.flightAerial,
       );
     case 'airless':
       return new AirlessBodyRenderer(
@@ -44,6 +47,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.caps,
         options.quality,
         options.diagnostics,
+        options.flightAerial,
       );
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);

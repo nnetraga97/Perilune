@@ -38,6 +38,11 @@ async function boot(): Promise<void> {
     await runSolVisualReferenceProto();
     return;
   }
+  if (proto === 'local-cloud-composite') {
+    const { runLocalCloudCompositeProto } = await import('./proto/localCloudCompositeProto');
+    await runLocalCloudCompositeProto();
+    return;
+  }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
   await startGame(renderStartupOptions);

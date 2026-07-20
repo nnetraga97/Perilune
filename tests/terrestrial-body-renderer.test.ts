@@ -1,17 +1,28 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
+import { SOL_SYSTEM } from '../src/content/system';
 import { Body } from '../src/sim/universe';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
-import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
+import {
+  launchPadScatterSuppressionSphere,
+  TerrestrialBodyRenderer,
+} from '../src/render/terrestrialBodyRenderer';
 import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 import { Vec3 } from '../src/core/vec3';
-import { launchSiteBodyFixedDirection } from '../src/sim/launchSite';
+import {
+  LAUNCH_PAD_FOOTPRINT_RADIUS,
+  launchSiteBodyFixedDirection,
+} from '../src/sim/launchSite';
 import { solidHeight } from '../src/sim/terrain';
 import { globalSphereSegments } from '../src/render/terrestrial/globalGeometry';
+import {
+  FLIGHT_AERIAL_USER_DATA_KEY,
+  FlightAerialPerspectiveController,
+} from '../src/render/flightAerialPerspective';
 
 const caps: RenderCaps = {
   backend: 'webgl2',
@@ -24,7 +35,8 @@ const caps: RenderCaps = {
 };
 
 function body(id: string): Body {
-  return new Body(structuredClone(AUREN_SYSTEM.find((candidate) => candidate.id === id)!), null);
+  const definition = [...SOL_SYSTEM, ...AUREN_SYSTEM].find((candidate) => candidate.id === id);
+  return new Body(structuredClone(definition!), null);
 }
 
 function texture(bytes = [128, 128, 128, 255]): THREE.DataTexture {
@@ -212,6 +224,100 @@ describe('TerrestrialBodyRenderer integration', () => {
     expect(renderer.root.getObjectByName('terrestrial-surface-effects')).toBeUndefined();
     renderer.update(frame(veyra.radius, { cameraBodyFixed: { x: veyra.radius * 3, y: 0, z: 0 }, altitude: veyra.radius, allowFlightTerrain: false }));
     expect(renderer.stats().visualScatter).toBe(0);
+    renderer.dispose();
+  });
+
+  it('streams neutral Earth geology only after complete terrain coverage', () => {
+    const earth = body('earth');
+    const flightAerial = new FlightAerialPerspectiveController();
+    const renderer = createBodyRendererCandidate({
+      body: earth, caps, quality: 'medium', flightAerial,
+    }) as TerrestrialBodyRenderer;
+    const direction = launchSiteBodyFixedDirection(new Vec3());
+    const launchSurface = solidHeight(earth, direction);
+    expect(launchSurface.kind).toBe('solid');
+    const anchor = new Vec3().copy(direction).scale(
+      earth.radius + (launchSurface.kind === 'solid' ? launchSurface.height : 0),
+    );
+    const camera = new Vec3().copy(direction).scale(anchor.length() + 15);
+    const near = {
+      cameraBodyFixed: camera,
+      cameraRelativeOrigin: camera,
+      surfaceAnchorBodyFixed: anchor,
+      altitude: 15,
+      allowFlightTerrain: true,
+    };
+    renderer.update(frame(earth.radius, { ...near, deltaSeconds: 0 }));
+    expect(renderer.stats()).toMatchObject({ coverageProgress: 0, visualScatter: 0 });
+    for (let update = 0; update < 16; update++) {
+      renderer.update(frame(earth.radius, { ...near, deltaSeconds: 0 }));
+    }
+    renderer.update(frame(earth.radius, { ...near, deltaSeconds: 0.175 }));
+    expect(renderer.stats().coverageProgress).toBeGreaterThan(0);
+    expect(renderer.stats().coverageProgress).toBeLessThan(1);
+    expect(renderer.stats().visualScatter).toBe(0);
+    renderer.update(frame(earth.radius, { ...near, deltaSeconds: 0.35 }));
+    expect(renderer.stats().coverageProgress).toBe(1);
+    expect(renderer.stats().visualScatter).toBeGreaterThan(0);
+    expect(renderer.stats().scatterBytes).toBeGreaterThan(0);
+    const scatter = renderer.root.getObjectByName('terrestrial-scatter')!;
+    expect(scatter.visible).toBe(true);
+    scatter.traverse((object) => {
+      if (!(object instanceof THREE.InstancedMesh)) return;
+      expect(['terrestrial-scatter:stone', 'terrestrial-scatter:clast']).toContain(object.name);
+      expect(object.castShadow).toBe(true);
+      expect(object.receiveShadow).toBe(true);
+      expect((object.material as THREE.Material).userData[FLIGHT_AERIAL_USER_DATA_KEY])
+        .toBe(flightAerial);
+    });
+    expect(flightAerial.snapshot()).toMatchObject({ active: true, bodyId: 'earth' });
+
+    renderer.update(frame(earth.radius, { ...near, allowFlightTerrain: false }));
+    expect(renderer.stats().visualScatter).toBe(0);
+    expect(scatter.visible).toBe(false);
+    renderer.dispose();
+    flightAerial.dispose();
+  });
+
+  it('derives the Earth scatter exclusion from the authored launch-pad footprint', () => {
+    const earth = body('earth');
+    const direction = launchSiteBodyFixedDirection(new Vec3());
+    const suppression = launchPadScatterSuppressionSphere(earth);
+    const centerLength = Math.hypot(suppression.x, suppression.y, suppression.z);
+    expect(suppression.radius).toBe(LAUNCH_PAD_FOOTPRINT_RADIUS);
+    expect(suppression.x / centerLength).toBeCloseTo(direction.x, 12);
+    expect(suppression.y / centerLength).toBeCloseTo(direction.y, 12);
+    expect(suppression.z / centerLength).toBeCloseTo(direction.z, 12);
+  });
+
+  it('does not emit Earth geology over the ocean reference location', () => {
+    const earth = body('earth');
+    const renderer = createBodyRendererCandidate({
+      body: earth, caps, quality: 'low',
+    }) as TerrestrialBodyRenderer;
+    const latitude = 18 * Math.PI / 180;
+    const longitude = -155 * Math.PI / 180;
+    const direction = new Vec3(
+      Math.cos(latitude) * Math.cos(longitude),
+      Math.cos(latitude) * Math.sin(longitude),
+      Math.sin(latitude),
+    );
+    const oceanSurface = solidHeight(earth, direction);
+    expect(oceanSurface.kind).toBe('solid');
+    expect(oceanSurface.kind === 'solid' ? oceanSurface.height : 0).toBeLessThan(0);
+    const camera = new Vec3().copy(direction).scale(earth.radius + 25);
+    const ocean = {
+      cameraBodyFixed: camera,
+      cameraRelativeOrigin: camera,
+      surfaceAnchorBodyFixed: new Vec3().copy(direction).scale(earth.radius),
+      altitude: 25,
+      allowFlightTerrain: true,
+    };
+    for (let update = 0; update < 16; update++) {
+      renderer.update(frame(earth.radius, { ...ocean, deltaSeconds: 0 }));
+    }
+    renderer.update(frame(earth.radius, { ...ocean, deltaSeconds: 0.35 }));
+    expect(renderer.stats()).toMatchObject({ coverageProgress: 1, visualScatter: 0 });
     renderer.dispose();
   });
 

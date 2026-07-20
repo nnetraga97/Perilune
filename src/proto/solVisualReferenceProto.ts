@@ -57,6 +57,10 @@ export async function runSolVisualReferenceProto(): Promise<void> {
   const quality: QualityTier = requestedTier === 'low' || requestedTier === 'high' ? requestedTier : 'medium';
   const station = solVisualReferenceStation(params.get('station') ?? 'earth-day-full');
   const diagnosticLayer = params.get('diagnostic');
+  const requestedTime = Number(params.get('time'));
+  const referenceTimeSeconds = params.has('time') && Number.isFinite(requestedTime)
+    ? requestedTime
+    : station.timeSeconds;
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const context = await createRenderContext(canvas);
   const boot = document.getElementById('boot');
@@ -136,7 +140,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
       cameraSunDirection: new THREE.Vector3(...station.sunDirection).normalize(),
       bodySunDirection: new THREE.Vector3(...station.sunDirection).normalize(),
       solarVisibleFraction: 1,
-      time: station.timeSeconds,
+      time: referenceTimeSeconds,
       deltaSeconds: 1 / 60,
       framePressure: false,
       altitude: moonObserverDistance - moon.radius,
@@ -182,7 +186,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     bodySunDirection: sunDirection,
     solarVisibleFraction,
     solarOccluder,
-    time: station.timeSeconds,
+    time: referenceTimeSeconds,
     deltaSeconds: 1 / 60,
     framePressure: false,
     altitude: observerAltitude,
@@ -305,6 +309,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
       api.ready = true;
       api.metadata = Object.freeze({
         station,
+        referenceTimeSeconds,
         quality,
         diagnosticLayer,
         viewport: [innerWidth, innerHeight],
@@ -323,6 +328,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
           renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL),
         } : { vendor: gl.getParameter(gl.VENDOR), renderer: gl.getParameter(gl.RENDERER) },
         frameTimeMs: { p50: percentile(0.5), p95: percentile(0.95), p99: percentile(0.99) },
+        aerialConsumers: rendererStats.aerialConsumers ?? [],
         settledFrames,
         capturedAfterFrames: frames,
         rendererStats,

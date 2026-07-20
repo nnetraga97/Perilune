@@ -248,6 +248,7 @@ describe('body renderer adapters', () => {
       partMeshes: new Map(),
       plumes: new Map(),
       ownedGeometries: new Set([ownedGeometry]),
+      ownedMaterials: new Set(),
       craftVersionSeen: 0,
     };
     const sharedDispose = vi.spyOn(sharedGeometry, 'dispose');

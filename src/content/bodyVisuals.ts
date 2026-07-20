@@ -58,6 +58,8 @@ export interface BodyVisualDef {
   renderer: BodyRendererKind;
   targetArchetype: Exclude<BodyRendererKind, 'legacy'>;
   materialId: string;
+  /** Renderer-only deterministic near-surface detail profile. */
+  scatterProfile?: 'veyra' | 'earth-geology' | 'moon-regolith';
   atmosphereVisual?: {
     /** Art-direction color only; physical density and thickness stay in AtmosphereDef. */
     wavelengthTint: readonly [number, number, number];
@@ -91,10 +93,14 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
     renderer: 'terrestrial',
     targetArchetype: 'terrestrial',
     materialId: 'earth-terrestrial',
+    scatterProfile: 'earth-geology',
     atmosphereVisual: { wavelengthTint: [0.36, 0.62, 1], strength: 1 },
     entryVisual: { ...DEFAULT_ENTRY_VISUAL },
   },
-  moon: { renderer: 'airless', targetArchetype: 'airless', materialId: 'moon-airless' },
+  moon: {
+    renderer: 'airless', targetArchetype: 'airless', materialId: 'moon-airless',
+    scatterProfile: 'moon-regolith',
+  },
   auren: { renderer: 'star', targetArchetype: 'star', materialId: 'auren-star' },
   ashen: { renderer: 'legacy', targetArchetype: 'airless', materialId: 'ashen-airless' },
   vess: {
@@ -122,6 +128,7 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
     renderer: 'terrestrial',
     targetArchetype: 'terrestrial',
     materialId: 'veyra-terrestrial',
+    scatterProfile: 'veyra',
     atmosphereVisual: { wavelengthTint: [0.42, 0.68, 1], strength: 1 },
     entryVisual: {
       ...DEFAULT_ENTRY_VISUAL,

@@ -6,6 +6,7 @@ import type { QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
 import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import { DEFAULT_TERRAIN_GEOMETRY_BUDGET } from './resourceAccounting';
 import { PlanetTerrainEngine } from './terrain/planetTerrainEngine';
 import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from './terrain/terrainPolicy';
 import { createBodySurfaceProvider } from './terrain/surfaceProvider';
@@ -26,7 +27,6 @@ import {
 
 export { terrainGridIndices } from './terrain/chunkGeometry';
 
-const DEFAULT_TERRAIN_ALLOCATION_BYTES = 128 * 1024 * 1024;
 
 export interface PlanetQuality {
   /** Grid resolution per streamed tile edge. */
@@ -230,7 +230,7 @@ export class PlanetRenderer {
       provider,
       quality: policy,
       material: this.material,
-      terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_ALLOCATION_BYTES,
+      terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_GEOMETRY_BUDGET,
       workerPool: options.workerPool,
       ownsWorkerPool: options.ownsWorkerPool,
       now: options.now,
