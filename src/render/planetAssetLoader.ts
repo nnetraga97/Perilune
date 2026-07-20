@@ -155,6 +155,8 @@ export interface PlanetAssetLoaderOptions {
   readonly resolveAssetUrl: (manifestPath: string) => string;
   readonly loadConventional: (path: string) => Promise<THREE.Texture>;
   readonly diagnostics?: RenderDiagnosticsPort;
+  /** Defaults to true for standalone loaders; false when the application shares the decoder. */
+  readonly ownsKtx2?: boolean;
 }
 
 export interface LoadedPlanetPack {
@@ -275,6 +277,6 @@ export class PlanetAssetLoader {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.options.ktx2.dispose();
+    if (this.options.ownsKtx2 ?? true) this.options.ktx2.dispose();
   }
 }

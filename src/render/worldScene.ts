@@ -153,6 +153,8 @@ export interface WorldSceneOptions {
   readonly quality: 'medium' | 'high';
   readonly diagnostics: RenderDiagnosticsPort;
   readonly reentryEffectsEnabled?: boolean;
+  /** Application-owned decoder shared with part models. */
+  readonly ktx2Loader?: KTX2Loader;
 }
 
 export const FLIGHT_CAMERA_MODES = ['orbit', 'chase', 'locked', 'free'] as const;
@@ -310,7 +312,8 @@ export class WorldScene {
     this.planetAssetLoader = new PlanetAssetLoader({
       renderer: context.renderer,
       manifest: this.checkedPlanetManifest,
-      ktx2: new KTX2Loader(),
+      ktx2: options.ktx2Loader ?? new KTX2Loader(),
+      ownsKtx2: options.ktx2Loader === undefined,
       compressedSupported: Object.values(context.caps.compressedTextures).some(Boolean),
       transcoderPath: `${baseUrl}basis/`,
       resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,

@@ -4,6 +4,7 @@
  * quicksave/load, maneuver execution, time warp).
  */
 import * as THREE from 'three';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { Vec3 } from './core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
 import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
@@ -74,6 +75,7 @@ class PeriluneGame {
   private game = new GameState();
   private world!: WorldScene;
   private partModels!: PartModelLibrary;
+  private ktx2Loader: KTX2Loader | null = null;
   private editor!: Editor;
   private hud!: FlightHud;
   private map!: MapView;
@@ -165,6 +167,8 @@ class PeriluneGame {
     // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
     this.partModels.dispose();
+    this.ktx2Loader?.dispose();
+    this.ktx2Loader = null;
     if (window.__RENDER_DIAGNOSTICS__) delete window.__RENDER_DIAGNOSTICS__;
   };
 
@@ -202,8 +206,12 @@ class PeriluneGame {
     const configuredBaseUrl = import.meta.env.BASE_URL;
     const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
     const checkedParts = checkPartModelManifest(checkedPartArtifact);
+    this.ktx2Loader = new KTX2Loader()
+      .setTranscoderPath(`${baseUrl}basis/`)
+      .detectSupport(this.ctx.renderer);
     this.partModels = createBrowserPartModelLibrary(this.ctx.renderer, checkedParts, {
       transcoderPath: `${baseUrl}basis/`,
+      ktx2: this.ktx2Loader,
       // Content-address the request so a regenerated GLB cannot be confused with
       // an older browser-cached response at the same public path.
       resolveAssetUrl: (path, sha256) => `${baseUrl}parts/${path}?v=${sha256}`,
@@ -213,6 +221,7 @@ class PeriluneGame {
       quality: this.renderOptions.quality,
       diagnostics: this.diagnostics,
       reentryEffectsEnabled: this.renderOptions.reentryVfx,
+      ktx2Loader: this.ktx2Loader,
     });
     injectUiStyles();
     this.rendererFailureEl = el('div', 'k-render-failure', this.uiRoot);

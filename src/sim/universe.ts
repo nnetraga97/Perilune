@@ -186,6 +186,8 @@ export class Body {
 
 const _pr = new Vec3();
 const _pv = new Vec3();
+const _relativeAnchorR = new Vec3();
+const _relativeAnchorV = new Vec3();
 
 export class Universe {
   readonly bodies = new Map<string, Body>();
@@ -259,8 +261,10 @@ export class Universe {
     // most ancestors so the differences of large terms cancel in f64
     // comfortably within our system scale (~1e11 m => 1e-5 m ulp).
     this.absolutePosition(a, t, outR, outV);
-    this.absolutePosition(b, t, _pr, _pv);
-    outR.sub(_pr);
-    outV?.sub(_pv);
+    // Do not pass _pr/_pv as absolutePosition outputs: that method uses them
+    // for each orbital term, so aliasing would double the anchor position.
+    this.absolutePosition(b, t, _relativeAnchorR, _relativeAnchorV);
+    outR.sub(_relativeAnchorR);
+    outV?.sub(_relativeAnchorV);
   }
 }

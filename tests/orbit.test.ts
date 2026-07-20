@@ -237,6 +237,21 @@ describe('universe hierarchy', () => {
     }
   });
 
+  it('computes a child position relative to its parent without anchor scratch aliasing', () => {
+    const parent = universe.get('veyra');
+    const child = universe.get('palla');
+    const relative = new Vec3();
+    const local = new Vec3();
+
+    for (const time of [0, 123_456, 9_876_543]) {
+      universe.relativePosition(child, parent, time, relative);
+      universe.localPosition(child, time, local);
+      expect(relative.x).toBeCloseTo(local.x, 4);
+      expect(relative.y).toBeCloseTo(local.y, 4);
+      expect(relative.z).toBeCloseTo(local.z, 4);
+    }
+  });
+
   it('atmosphere model is monotonic and terminates', () => {
     const veyra = universe.get('veyra');
     let prev = Infinity;
