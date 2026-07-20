@@ -13,6 +13,7 @@ import {
   VEYRA_SCATTER_PROFILE,
   type SurfaceSampler,
 } from '../src/render/terrestrial/scatter';
+import { SurfaceClass } from '../src/render/terrestrial/surfaceClass';
 
 const RADIUS = 600_000;
 const flat = (height: number): SurfaceSampler => () => ({
@@ -54,8 +55,12 @@ describe('surface scatter profiles', () => {
 
   it('keeps Earth geology dry and neutral', () => {
     const args = [7, 1, 2, 3, 6_378_137, SCATTER_TIERS.high] as const;
-    expect(generateScatterCell(...args, flat(-1), EARTH_GEOLOGY_SCATTER_PROFILE)).toHaveLength(0);
-    const land = generateScatterCell(...args, flat(20), EARTH_GEOLOGY_SCATTER_PROFILE);
+    expect(generateScatterCell(
+      ...args, flat(20), EARTH_GEOLOGY_SCATTER_PROFILE, () => SurfaceClass.EstuarineDeepwater,
+    )).toHaveLength(0);
+    const land = generateScatterCell(
+      ...args, flat(-20), EARTH_GEOLOGY_SCATTER_PROFILE, () => SurfaceClass.Land,
+    );
     expect(land.length).toBeGreaterThan(0);
     for (const instance of land) expect(['stone', 'clast']).toContain(instance.cls);
   });

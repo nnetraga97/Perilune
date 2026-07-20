@@ -27,6 +27,7 @@ import {
 import { screenSpaceErrorPixels } from './terrainPolicy';
 import type { PlanetSurfaceProvider, TerrainTileDescriptor } from './surfaceProvider';
 import { terrainTileParent } from './tile';
+import type { TerrainTileId } from './tile';
 
 export interface PlanetTerrainFrame extends TerrainSelectionFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
@@ -570,6 +571,10 @@ export class PlanetTerrainEngine {
   }
 
   coverageReady(): boolean { return this.stats.coverageReady; }
+
+  detailDemand(): readonly TerrainTileId[] {
+    return Object.freeze((this.cachedSelection?.balanced ?? []).map((tile) => tile.id));
+  }
 
   setShadowReceiver(enabled: boolean): void {
     this.shadowReceiver = enabled;

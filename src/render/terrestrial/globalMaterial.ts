@@ -8,6 +8,17 @@ import {
   createTerrestrialAerialPerspectiveState,
   TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
 } from './aerialPerspective';
+import {
+  SURFACE_CLASS_GLSL,
+  bindSurfaceClassUniforms,
+  resolveSurfaceClassTextures,
+  type SurfaceClassTextureSet,
+} from './surfaceClass';
+import {
+  PLANET_DETAIL_GLSL,
+  bindPlanetDetailUniforms,
+  createPlanetDetailMaterialState,
+} from '../planetDetail/detailMaterial';
 
 export interface TerrestrialGlobalMaterial extends THREE.MeshStandardMaterial {
   readonly userData: {
@@ -21,6 +32,8 @@ export interface TerrestrialGlobalMaterial extends THREE.MeshStandardMaterial {
       clouds: THREE.Texture;
       emissive: THREE.Texture;
       heightMacro: THREE.Texture;
+      surfaceClass: THREE.Texture;
+      surfaceClassRegional: THREE.Texture;
     }>;
   } & Record<string, unknown>;
 }
@@ -61,6 +74,8 @@ uniform mat3 normalMatrix;
 varying vec3 vBodyDirection;
 varying float vGlobalSurfaceAltitude;
 ${BODY_FIXED_UV_GLSL}
+${SURFACE_CLASS_GLSL}
+${PLANET_DETAIL_GLSL}
 vec3 decodeGlobalOctNormal(vec2 encoded) {
   vec2 f = encoded * 2.0 - 1.0;
   vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
@@ -71,11 +86,17 @@ vec3 decodeGlobalOctNormal(vec2 encoded) {
 export const GLOBAL_ALBEDO_APPLY = /* glsl */ `
 vec2 globalUv = bodyFixedUv(vBodyDirection);
 vec4 authoredMaterial = texture2D(globalMaterialMap, globalUv);
+float authoredSurfaceClass = resolvedSurfaceClass(vBodyDirection);
+float globalOceanOwnership = useGlobalSurfaceClassMap > 0.5
+  ? surfaceClassOcean(authoredSurfaceClass)
+  : authoredMaterial.b;
 if (useAuthoredGlobalMaps > 0.5) {
   vec4 authoredAlbedo = texture2D(globalAlbedoMap, globalUv);
+  vec4 globalDetail = samplePlanetDetail(vBodyDirection);
+  vec3 globalLandAlbedo = mix(authoredAlbedo.rgb, globalDetail.rgb, globalDetail.a);
   vec3 globalOceanColor = mix(vec3(0.008, 0.035, 0.075), vec3(0.018, 0.09, 0.16),
     0.5 + 0.5 * abs(normalize(vBodyDirection).z));
-  diffuseColor.rgb *= mix(authoredAlbedo.rgb, globalOceanColor, authoredMaterial.b);
+  diffuseColor.rgb *= mix(globalLandAlbedo, globalOceanColor, globalOceanOwnership);
   diffuseColor.rgb *= mix(0.55, 1.0, authoredMaterial.g);
   float cloudCos = cos(globalCloudDriftAngle);
   float cloudSin = sin(globalCloudDriftAngle);
@@ -98,7 +119,7 @@ if (useAuthoredGlobalMaps > 0.5 && useGlobalEmissiveMap > 0.5) {
 
 export const GLOBAL_ROUGHNESS_APPLY = /* glsl */ `
 if (useAuthoredGlobalMaps > 0.5) {
-  float globalResolvedRoughness = max(authoredMaterial.r, authoredMaterial.b * 0.42);
+  float globalResolvedRoughness = max(authoredMaterial.r, globalOceanOwnership * 0.42);
   roughnessFactor *= mix(0.2, 1.0, globalResolvedRoughness);
 }`;
 
@@ -150,6 +171,7 @@ export interface TerrestrialAuthoredTextures {
   readonly clouds: THREE.Texture;
   readonly emissive: THREE.Texture;
   readonly heightMacro: THREE.Texture;
+  readonly surfaceClasses: SurfaceClassTextureSet;
   readonly authored: boolean;
   readonly hasEmissive: boolean;
   readonly hasHeightMacro: boolean;
@@ -178,9 +200,11 @@ export function resolveTerrestrialAuthoredTextures(
   const emissive = pack?.textures.get('emissive') ?? dataTexture([0, 0, 0, 255], THREE.SRGBColorSpace);
   // RG = 32768, the exact zero-datum code in the signed height contract.
   const heightMacro = pack?.textures.get('heightMacro') ?? dataTexture([128, 0, 0, 255], THREE.NoColorSpace);
+  const surfaceClasses = resolveSurfaceClassTextures(pack?.textures ?? null);
   if (!pack) owned.push(albedo, normal, packedMaterial, clouds);
   if (!pack?.textures.has('emissive')) owned.push(emissive);
   if (!pack?.textures.has('heightMacro')) owned.push(heightMacro);
+  owned.push(...surfaceClasses.owned);
   const requestedAnisotropy = pack?.tier === 'high' ? 8 : pack?.tier === 'medium' ? 4 : pack ? 2 : 1;
   const anisotropy = Math.max(1, Math.min(maxAnisotropy, requestedAnisotropy));
   configureTexture(albedo, THREE.SRGBColorSpace, anisotropy, pack !== null);
@@ -190,7 +214,7 @@ export function resolveTerrestrialAuthoredTextures(
   configureTexture(emissive, THREE.SRGBColorSpace, anisotropy, pack?.textures.has('emissive') === true);
   configureTexture(heightMacro, THREE.NoColorSpace, anisotropy, pack?.textures.has('heightMacro') === true);
   return {
-    albedo, normal, packedMaterial, clouds, emissive, heightMacro,
+    albedo, normal, packedMaterial, clouds, emissive, heightMacro, surfaceClasses,
     authored: pack !== null,
     hasEmissive: pack?.textures.has('emissive') === true,
     hasHeightMacro: pack?.textures.has('heightMacro') === true,
@@ -236,6 +260,7 @@ export function bindTerrestrialAuthoredUniforms(
   shader.uniforms.globalCloudMap = { value: textures.clouds };
   shader.uniforms.globalEmissiveMap = { value: textures.emissive };
   shader.uniforms.globalHeightMap = { value: textures.heightMacro };
+  bindSurfaceClassUniforms(shader, textures.surfaceClasses);
   shader.uniforms.useGlobalHeightMap = { value: textures.hasHeightMacro ? 1 : 0 };
   shader.uniforms.useAuthoredGlobalMaps = { value: textures.authored ? 1 : 0 };
   shader.uniforms.useGlobalEmissiveMap = { value: textures.hasEmissive ? 1 : 0 };
@@ -258,6 +283,7 @@ export function createTerrestrialGlobalMaterial(
   const textures = resolveTerrestrialAuthoredTextures(pack, fallback.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
   const aerialPerspective = createTerrestrialAerialPerspectiveState('compact-land', bodyRadius);
+  const detail = createPlanetDetailMaterialState();
 
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -272,6 +298,8 @@ export function createTerrestrialGlobalMaterial(
     clouds: textures.clouds,
     emissive: textures.emissive,
     heightMacro: textures.heightMacro,
+    surfaceClass: textures.surfaceClasses.global,
+    surfaceClassRegional: textures.surfaceClasses.regional,
   });
   Object.assign(material.userData, {
     terrestrialGlobal: true,
@@ -279,6 +307,7 @@ export function createTerrestrialGlobalMaterial(
     authored: pack !== null,
     maps,
     terrestrialCloudLighting: cloudLighting,
+    planetDetail: detail,
   });
   attachTerrestrialAerialPerspective(material, aerialPerspective);
   // Body-space oct normals have unavoidable fold discontinuities. Orbital mip
@@ -288,6 +317,7 @@ export function createTerrestrialGlobalMaterial(
   material.customProgramCacheKey = () => `terrestrial-global-v4:${pack ? 'authored' : 'palette'}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
+    bindPlanetDetailUniforms(shader, detail);
     bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>

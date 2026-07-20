@@ -27,8 +27,12 @@ describe('checked source macro height authority', () => {
     for (const bodyId of ['earth', 'moon']) {
       const grid = sourceHeightGrid(bodyId)!;
       expect(grid).toMatchObject({ bodyId, width: 512, height: 256 });
+      expect(grid.sourcePath).toMatch(/^assets\/planets\/sources\//);
+      expect(grid.sourcePath).not.toContain('/generated/');
       expect(grid.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
       expect(grid.samples.length).toBe(512 * 256);
+      expect(grid.noDataCount).toBe(0);
+      expect(grid.quantizationScaleMeters).toBe(0.5);
     }
   });
 

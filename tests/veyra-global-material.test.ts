@@ -97,7 +97,9 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.fragmentShader).toContain('decodeGlobalOctNormal');
     expect(shader.fragmentShader).not.toContain('vec3 globalBodyNormal =');
     expect(shader.fragmentShader).toContain('#include <normal_fragment_maps>');
-    expect(shader.fragmentShader).toContain('mix(authoredAlbedo.rgb, globalOceanColor, authoredMaterial.b)');
+    expect(shader.fragmentShader).toContain('mix(globalLandAlbedo, globalOceanColor, globalOceanOwnership)');
+    expect(shader.fragmentShader).toContain('samplePlanetDetail(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('useGlobalSurfaceClassMap > 0.5');
     expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);

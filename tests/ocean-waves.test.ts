@@ -60,7 +60,7 @@ describe('body-fixed ocean wave normals', () => {
     expect(medium.vertexShader).not.toContain('uTime');
     expect(medium.vertexShader).not.toContain('wave');
     expect(medium.uniforms.uWaveComponentCount.value).toBe(2);
-    expect(medium.customProgramCacheKey()).toContain('terrestrial-ocean-v3');
+    expect(medium.customProgramCacheKey()).toContain('terrestrial-ocean-v4');
     medium.dispose();
   });
 });

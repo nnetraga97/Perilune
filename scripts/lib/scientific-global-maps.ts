@@ -12,6 +12,14 @@ export interface ScientificGlobalMaps {
   readonly emissive?: Uint8Array;
   /** Linear RGBA atlas: albedo luminance, OpenGL normal X/Y, roughness. */
   readonly localDetail?: Uint8Array;
+  /** Exact categorical codes. Never filtered, resized, or mipmapped. */
+  readonly surfaceClass?: Uint8Array;
+  readonly surfaceClassRegional?: {
+    readonly data: Uint8Array;
+    readonly width: number;
+    readonly height: number;
+    readonly bounds: readonly [number, number, number, number];
+  };
 }
 
 function clampByte(value: number): number {

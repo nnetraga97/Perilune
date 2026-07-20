@@ -51,6 +51,15 @@ async function loadFallbackPack(bodyId: 'earth' | 'moon', tier: QualityTier): Pr
   });
 }
 
+function fallbackReferenceBudget(pack: Readonly<RuntimeBodyAssetPack>): number {
+  const manifest = checkPlanetManifest(checkedPlanetArtifact);
+  // The reference harness intentionally decodes conventional PNG/WebP files,
+  // whose RGBA allocation is much larger than the production KTX2 pack. Give
+  // that harness-only fallback enough room for the proven terrain pool without
+  // changing the production active-body ledger.
+  return Math.max(manifest.budgets.activeBodyGpuBytes[pack.tier], pack.gpuBytes + 32 * 1024 * 1024);
+}
+
 export async function runSolVisualReferenceProto(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const requestedTier = params.get('quality');
@@ -102,13 +111,17 @@ export async function runSolVisualReferenceProto(): Promise<void> {
   }
   camera.updateMatrixWorld(true);
 
+  const primaryPack = station.bodyId === 'earth' || station.bodyId === 'moon'
+    ? await loadFallbackPack(station.bodyId, quality)
+    : null;
   const renderer = createBodyRendererCandidate({
     body,
     caps: context.caps,
     quality,
+    activeBodyBudgetBytes: primaryPack ? fallbackReferenceBudget(primaryPack) : undefined,
   });
   if (station.bodyId === 'earth' || station.bodyId === 'moon') {
-    renderer.stageAssets(await loadFallbackPack(station.bodyId, quality));
+    renderer.stageAssets(primaryPack);
   }
   scene.add(renderer.root);
   let secondaryRenderer: ReturnType<typeof createBodyRendererCandidate> | null = null;
@@ -118,8 +131,9 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     const meanSeparation = moon.def.orbit?.a ?? 384_400_000;
     const moonOrigin = bodyOrigin.clone().add(new THREE.Vector3(0, meanSeparation, 0));
     const moonObserverDistance = moonOrigin.length();
+    const moonPack = await loadFallbackPack('moon', quality);
     secondaryRenderer = createBodyRendererCandidate({ body: moon, caps: context.caps, quality });
-    secondaryRenderer.stageAssets(await loadFallbackPack('moon', quality));
+    secondaryRenderer.stageAssets(moonPack);
     scene.add(secondaryRenderer.root);
     secondaryFrame = {
       cameraRelativeOrigin: moonOrigin,
@@ -226,6 +240,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
   const terrainDiagnosticMaterial = diagnosticLayer === 'terrain-basic'
     ? new THREE.MeshBasicMaterial({ color: '#8a6b45' })
     : null;
+  const classDebugMaterials = new WeakSet<THREE.Material>();
   let frames = 0;
   let settledFrames = 0;
   let terrainStableFrames = 0;
@@ -241,7 +256,42 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     previousFrameAt = frameAt;
     renderer.update(frame);
     if (secondaryRenderer && secondaryFrame) secondaryRenderer.update(secondaryFrame);
-    if (diagnosticLayer === 'no-ocean') {
+    if (diagnosticLayer === 'surface-class') {
+      renderer.root.getObjectByName(`terrestrial-ocean:${station.bodyId}`)?.removeFromParent();
+      renderer.root.getObjectByName(`terrestrial-cloud-deck:${station.bodyId}`)?.removeFromParent();
+      renderer.root.getObjectByName(`terrestrial-atmosphere:${station.bodyId}`)?.removeFromParent();
+      renderer.root.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (classDebugMaterials.has(material)
+            || (!material.userData.terrestrialGlobal && !material.userData.terrestrialSurface)) continue;
+          classDebugMaterials.add(material);
+          const compile = material.onBeforeCompile.bind(material);
+          material.onBeforeCompile = (
+            shader: THREE.WebGLProgramParametersWithUniforms,
+            rendererContext: THREE.WebGLRenderer,
+          ) => {
+            compile(shader, rendererContext);
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <opaque_fragment>',
+              `float surfaceClassDebugCode = resolvedSurfaceClass(vBodyDirection);
+vec3 surfaceClassDebugColor = surfaceClassDebugCode < 0.5 ? vec3(0.0)
+  : abs(surfaceClassDebugCode - 1.0) < 0.25 ? vec3(0.36, 0.24, 0.10)
+  : abs(surfaceClassDebugCode - 2.0) < 0.25 ? vec3(0.02, 0.22, 0.82)
+  : abs(surfaceClassDebugCode - 3.0) < 0.25 ? vec3(0.04, 0.72, 0.78)
+  : abs(surfaceClassDebugCode - 4.0) < 0.25 ? vec3(0.95, 0.56, 0.08)
+  : abs(surfaceClassDebugCode - 5.0) < 0.25 ? vec3(0.22, 0.82, 0.96)
+  : vec3(0.18, 0.72, 0.24);
+outgoingLight = surfaceClassDebugColor;
+#include <opaque_fragment>`,
+            );
+          };
+          material.customProgramCacheKey = () => `surface-class-debug:${material.uuid}`;
+          material.needsUpdate = true;
+        }
+      });
+    } else if (diagnosticLayer === 'no-ocean') {
       renderer.root.getObjectByName(`terrestrial-ocean:${station.bodyId}`)?.removeFromParent();
     } else if (diagnosticLayer === 'no-clouds') {
       renderer.root.getObjectByName(`terrestrial-cloud-deck:${station.bodyId}`)?.removeFromParent();
@@ -278,6 +328,8 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     frames++;
     const rendererStats = renderer.stats();
     const secondaryRendererStats = secondaryRenderer?.stats() ?? null;
+    const detailSettled = !['requesting', 'reprojecting', 'crossfading'].includes(rendererStats.detailState ?? '')
+      && !['requesting', 'reprojecting', 'crossfading'].includes(rendererStats.terrainDetailState ?? '');
     const coverageReady = station.presentation !== 'surface'
       || (rendererStats.coverageProgress ?? 0) >= 1;
     const terrainSignature = [
@@ -295,9 +347,15 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     const terrainSettled = station.presentation !== 'surface'
       || terrainStableFrames >= 30
       || frames >= 240;
-    settledFrames = renderer.ready && (secondaryRenderer?.ready ?? true) && coverageReady && terrainSettled
+    settledFrames = renderer.ready && (secondaryRenderer?.ready ?? true) && coverageReady && terrainSettled && detailSettled
       ? settledFrames + 1
       : 0;
+    if (frames % 60 === 0) {
+      api.metadata = Object.freeze({
+        status: 'settling', frames, settledFrames, coverageReady, terrainSettled, detailSettled,
+        terrainStableFrames, rendererReady: renderer.ready, rendererStats,
+      });
+    }
     if (frames >= 90 && settledFrames >= 30) {
       const info = context.renderer.info;
       const gl = context.renderer.getContext();

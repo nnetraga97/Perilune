@@ -6,6 +6,12 @@ import {
   createTerrestrialAerialPerspectiveState,
   TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
 } from './aerialPerspective';
+import {
+  KSC_SURFACE_CLASS_BOUNDS_DEGREES,
+  SURFACE_CLASS_GLSL,
+  configureSurfaceClassTexture,
+  type SurfaceClassTextureSet,
+} from './surfaceClass';
 
 const GLITTER_BY_QUALITY: Readonly<Record<QualityTier, number>> = Object.freeze({
   low: 0.16,
@@ -210,6 +216,8 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
     return vec2(fract(longitude),
       0.5 - asin(clamp(direction.z, -1.0, 1.0)) / 3.141592653589793);
   }
+  vec2 bodyFixedUv(vec3 direction) { return bodyUv(direction); }
+  ${SURFACE_CLASS_GLSL}
 
   vec3 oceanWaveContribution(
     vec3 bodyPoint,
@@ -266,8 +274,11 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    float oceanMask = uHasShoreMask > 0.5 ? texture2D(uShoreMask, bodyUv(vBodyDirection)).b : 1.0;
-    if (uHasShoreMask > 0.5 && oceanMask <= 0.01) discard;
+    float exactClass = resolvedSurfaceClass(vBodyDirection);
+    float oceanMask = useGlobalSurfaceClassMap > 0.5
+      ? surfaceClassOcean(exactClass)
+      : (uHasShoreMask > 0.5 ? texture2D(uShoreMask, bodyUv(vBodyDirection)).b : 1.0);
+    if (oceanMask < 0.5) discard;
     #include <logdepthbuf_fragment>
     float shore = 4.0 * oceanMask * (1.0 - oceanMask);
     vec3 bodyPoint = normalize(vBodyDirection) * uBodyRadius;
@@ -296,8 +307,13 @@ export function createOceanCapMaterial(
   shoreMask: THREE.Texture | null,
   oceanColor: THREE.ColorRepresentation,
   bodyRadius: number,
+  surfaceClasses: Readonly<SurfaceClassTextureSet> | null = null,
 ): THREE.ShaderMaterial {
   configureShoreMask(shoreMask);
+  if (surfaceClasses) {
+    configureSurfaceClassTexture(surfaceClasses.global);
+    configureSurfaceClassTexture(surfaceClasses.regional);
+  }
   const aerialPerspective = createTerrestrialAerialPerspectiveState('ocean', bodyRadius);
   const wavePolicy = oceanWavePolicy(quality);
   const material = new THREE.ShaderMaterial({
@@ -317,6 +333,16 @@ export function createOceanCapMaterial(
       uEast: { value: new THREE.Vector3(1, 0, 0) },
       uNorth: { value: new THREE.Vector3(0, 1, 0) },
       uCapAngle: { value: HORIZON_MARGIN_RADIANS },
+      globalSurfaceClassMap: { value: surfaceClasses?.global ?? shoreMask },
+      regionalSurfaceClassMap: { value: surfaceClasses?.regional ?? shoreMask },
+      useGlobalSurfaceClassMap: { value: surfaceClasses?.hasGlobal ? 1 : 0 },
+      useRegionalSurfaceClassMap: { value: surfaceClasses?.hasRegional ? 1 : 0 },
+      regionalSurfaceClassBoundsRadians: { value: new THREE.Vector4(
+        THREE.MathUtils.degToRad(KSC_SURFACE_CLASS_BOUNDS_DEGREES[0]),
+        THREE.MathUtils.degToRad(KSC_SURFACE_CLASS_BOUNDS_DEGREES[1]),
+        THREE.MathUtils.degToRad(KSC_SURFACE_CLASS_BOUNDS_DEGREES[2]),
+        THREE.MathUtils.degToRad(KSC_SURFACE_CLASS_BOUNDS_DEGREES[3]),
+      ) },
     },
     vertexShader: /* glsl */ `
       #include <common>
@@ -354,6 +380,6 @@ export function createOceanCapMaterial(
   material.userData.oceanCap = true;
   attachTerrestrialAerialPerspective(material, aerialPerspective);
   bindTerrestrialAerialPerspectiveUniforms(material, aerialPerspective);
-  material.customProgramCacheKey = () => `terrestrial-ocean-v3:${quality}`;
+  material.customProgramCacheKey = () => `terrestrial-ocean-v4:${quality}:${surfaceClasses?.hasGlobal ? 'class' : 'legacy'}`;
   return material;
 }

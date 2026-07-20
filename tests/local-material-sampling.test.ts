@@ -45,6 +45,12 @@ describe('sourced local material sampling', () => {
     expect(shader.fragmentShader).toContain('surfLocalDetail.r), surfLocalFade * 0.5');
     expect(shader.fragmentShader).toContain('textureGrad(localDetailMap');
     expect(shader.fragmentShader).toContain('surfLocalFade * 0.12');
+    expect(shader.fragmentShader).toContain('sampleTerrainDetail(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('sampleTerrainDetailNormal(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('terrainDetailNormalStrength');
+    expect(shader.uniforms.terrainDetailPageCount.value).toBe(0);
+    expect(shader.uniforms.terrainDetailPageAtlas.value).toBeNull();
+    expect(shader.uniforms.terrainDetailEnabled.value).toBe(0);
     // One dominant atlas cell with three packed material projections and
     // three oriented-normal projections: six bounded fetches rather than a
     // class-by-axis explosion (plus the helper declaration).
@@ -66,6 +72,12 @@ describe('sourced local material sampling', () => {
     expect(shader.fragmentShader).toContain('sampleAirlessLocalTriplanar');
     expect(shader.fragmentShader).toContain('airlessLocalFade');
     expect(shader.vertexShader).not.toContain('airlessLocalDetailMap');
+    expect(shader.fragmentShader).toContain('sampleTerrainDetail(vAirlessBodyDirection)');
+    expect(shader.fragmentShader).toContain('sampleTerrainDetailNormal(vAirlessBodyDirection)');
+    expect(shader.fragmentShader).toContain('terrainDetailNormalStrength');
+    expect(shader.uniforms.terrainDetailPageCount.value).toBe(0);
+    expect(shader.uniforms.terrainDetailNormalAtlas.value).toBeNull();
+    expect(shader.uniforms.terrainDetailEnabled.value).toBe(0);
     material.dispose();
   });
 });

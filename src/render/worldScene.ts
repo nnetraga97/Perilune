@@ -73,6 +73,35 @@ const _cameraOrbitUp = new Vec3();
 const _craftRight = new Vec3();
 const _craftNose = new Vec3();
 const _craftUp = new Vec3();
+
+async function loadSurfaceClassTexture(path: string): Promise<THREE.DataTexture> {
+  const response = await fetch(path, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`Surface-class PNG failed: HTTP ${response.status}`);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Surface-class PNG requires a 2D decode context');
+    context.drawImage(bitmap, 0, 0);
+    const rgba = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const codes = new Uint8Array(bitmap.width * bitmap.height);
+    for (let index = 0; index < codes.length; index++) {
+      const offset = index * 4;
+      const code = rgba[offset];
+      if (code > 6 || rgba[offset + 1] !== code || rgba[offset + 2] !== code) {
+        throw new Error(`Surface-class PNG contains invalid code ${code}`);
+      }
+      codes[index] = code;
+    }
+    const texture = new THREE.DataTexture(codes, bitmap.width, bitmap.height, THREE.RedFormat, THREE.UnsignedByteType);
+    texture.flipY = false;
+    return texture;
+  } finally {
+    bitmap.close();
+  }
+}
 const _chaseForward = new Vec3();
 const _chaseRight = new Vec3();
 const _cameraFromBody = new Vec3();
@@ -330,6 +359,7 @@ export class WorldScene {
       transcoderPath: `${baseUrl}basis/`,
       resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,
       loadConventional: (path) => textureLoader.loadAsync(path),
+      loadSurfaceClassConventional: (path) => loadSurfaceClassTexture(path),
       diagnostics: this.diagnostics,
     });
     this.camera = new THREE.PerspectiveCamera(

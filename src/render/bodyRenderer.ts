@@ -95,6 +95,38 @@ export interface BodyRendererStats {
   readonly cloudHistoryBytes?: number;
   readonly heightCacheBytes?: number;
   readonly shadowBytes?: number;
+  readonly detailGpuBytes?: number;
+  readonly detailPages?: number;
+  readonly detailLevel?: number;
+  readonly detailState?: 'disabled' | 'resident-parent' | 'requesting' | 'crossfading' | 'ready' | 'failed';
+  readonly detailDatasetId?: string;
+  readonly detailRequestBytes?: number;
+  readonly detailGeneration?: number;
+  readonly detailFallbackReason?: string;
+  readonly terrainDetailGpuBytes?: number;
+  readonly terrainDetailPages?: number;
+  readonly terrainDetailLevel?: number;
+  readonly terrainDetailState?: 'disabled' | 'resident-parent' | 'requesting' | 'reprojecting' | 'crossfading' | 'ready' | 'failed';
+  readonly terrainDetailDatasetId?: string;
+  readonly terrainDetailRequestBytes?: number;
+  readonly terrainDetailGeneration?: number;
+  readonly terrainDetailFallbackReason?: string;
+  readonly terrainDetailTileKeys?: readonly string[];
+  readonly terrainDetailNormalPages?: number;
+  readonly terrainDetailNumericDatasetId?: string;
+  readonly terrainDetailNumericDatum?: string;
+  readonly terrainDetailHeightMode?: 'resident' | 'shading-only';
+  readonly terrainDetailDecodedCpuBytes?: number;
+  readonly terrainDetailPersistentBytes?: number;
+  readonly terrainDetailRequestCount?: number;
+  readonly terrainDetailCacheHits?: Readonly<{ memory: number; persistent: number; network: number }>;
+  readonly terrainDetailTimingsMs?: Readonly<{ fetch: number; decode: number; reproject: number; upload: number }>;
+  readonly terrainDetailSourceCellMeters?: number;
+  readonly terrainDetailHeightRangeMeters?: readonly [number, number];
+  readonly detailProxyRequests?: number;
+  readonly detailProxyBytes?: number;
+  readonly surfaceClassCode?: number;
+  readonly surfaceClassSource?: 'regional-or-global-exact' | 'not-applicable';
   /** Stable names of material paths updated by the terrestrial aerial state. */
   readonly aerialConsumers?: readonly string[];
 }

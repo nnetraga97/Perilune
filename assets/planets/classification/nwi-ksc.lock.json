@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "usfws-nwi-ksc-snapshot-2026-07-20",
+  "sourceUrl": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query",
+  "stateArtifactUrl": "https://documentst.ecosphere.fws.gov/wetlands/data/State-Downloads/FL_geopackage_wetlands.zip",
+  "stateArtifactObservedBytes": 1273011918,
+  "acquisition": "bounded ArcGIS FeatureServer snapshot; statewide artifact retained as provenance only",
+  "observedAt": "2026-07-20",
+  "coverage": [
+    -80.8,
+    28.45,
+    -80.2,
+    28.75
+  ],
+  "projection": "EPSG:4326",
+  "featureCount": 8752,
+  "snapshotPath": "assets/planets/sources/usfws-nwi-ksc/nwi-ksc-2026-07-20.geojson",
+  "snapshotSha256": "fba4859b81c6bbde032bb6168cca6f9b314d3c07ed24546de6f6eb8e3fb34e8d"
+}

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { RuntimeBodyAssetPack } from '../bodyRenderer';
 import { BODY_FIXED_UV_GLSL } from '../terrestrial/globalCoordinates';
+import { PLANET_DETAIL_GLSL, bindPlanetDetailUniforms, createPlanetDetailMaterialState } from '../planetDetail/detailMaterial';
 
 export interface AirlessGlobalMaterial extends THREE.MeshStandardMaterial {
   readonly userData: {
@@ -47,7 +48,8 @@ export function createAirlessGlobalMaterial(
   if (pack.textures.has('heightMacro')) configureTexture(heightMacro, THREE.NoColorSpace, anisotropy);
 
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 }) as AirlessGlobalMaterial;
-  Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId, bodyRadius });
+  const detail = createPlanetDetailMaterialState();
+  Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId, bodyRadius, planetDetail: detail });
   material.customProgramCacheKey = () => 'airless-global-v1:authored';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.airlessAlbedoMap = { value: albedo };
@@ -56,6 +58,7 @@ export function createAirlessGlobalMaterial(
     shader.uniforms.airlessHeightMap = { value: heightMacro };
     shader.uniforms.airlessUseHeightMap = { value: pack.textures.has('heightMacro') ? 1 : 0 };
     shader.uniforms.airlessBodyRadius = { value: bodyRadius };
+    bindPlanetDetailUniforms(shader, detail);
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -84,7 +87,8 @@ uniform sampler2D airlessNormalMap;
 uniform sampler2D airlessMaterialMap;
 uniform mat3 normalMatrix;
 varying vec3 vAirlessBodyDirection;
-${BODY_FIXED_UV_GLSL}
+	${BODY_FIXED_UV_GLSL}
+	${PLANET_DETAIL_GLSL}
 vec3 decodeAirlessOctNormal(vec2 encoded) {
   vec2 f = encoded * 2.0 - 1.0;
   vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
@@ -94,9 +98,11 @@ vec3 decodeAirlessOctNormal(vec2 encoded) {
       )
       .replace(
         '#include <map_fragment>',
-        `vec2 airlessUv = bodyFixedUv(vAirlessBodyDirection);
-vec4 airlessPackedMaterial = texture2D(airlessMaterialMap, airlessUv);
-diffuseColor.rgb *= texture2D(airlessAlbedoMap, airlessUv).rgb * 0.30;
+	`vec2 airlessUv = bodyFixedUv(vAirlessBodyDirection);
+	vec4 airlessPackedMaterial = texture2D(airlessMaterialMap, airlessUv);
+	vec4 airlessDetail = samplePlanetDetail(vAirlessBodyDirection);
+	vec3 airlessResolvedAlbedo = mix(texture2D(airlessAlbedoMap, airlessUv).rgb, airlessDetail.rgb, airlessDetail.a);
+	diffuseColor.rgb *= airlessResolvedAlbedo * 0.30;
 diffuseColor.rgb *= mix(0.72, 1.0, airlessPackedMaterial.g);`,
       )
       .replace(

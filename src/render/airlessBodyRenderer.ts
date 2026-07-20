@@ -34,6 +34,9 @@ import {
   TerrestrialScatter,
 } from './terrestrial/scatter';
 import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
+import { CompactDetailController } from './planetDetail/compactDetailController';
+import { PlanetDetailSessionBudget, planetDetailBudget } from './planetDetail/detailBudget';
+import { TerrainDetailController } from './planetDetail/terrainDetailController';
 
 export class AirlessBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
@@ -44,6 +47,9 @@ export class AirlessBodyRenderer implements BodyRenderer {
   private compact!: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
   private terrain!: PlanetRenderer;
   private scatter: TerrestrialScatter | null = null;
+  private detail: CompactDetailController | null = null;
+  private terrainDetail: TerrainDetailController | null = null;
+  private detailSessionBudget: PlanetDetailSessionBudget | null = null;
   private disposed = false;
   private initialized = false;
   private terrainActive = false;
@@ -117,7 +123,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
       // directly against the geometry reservation it competes with.
       activeBodyBudgetBytes: DEFAULT_TERRAIN_GEOMETRY_BUDGET,
       committedTextureBytes: 0,
-      fixedPassBytes: 0,
+      fixedPassBytes: planetDetailBudget(this.quality).activeGpuBytes,
       scatterBytes,
       effectBytes: 0,
     });
@@ -129,6 +135,16 @@ export class AirlessBodyRenderer implements BodyRenderer {
       this.quality,
       this.caps.maxAnisotropy,
     );
+    const detailSessionBudget = new PlanetDetailSessionBudget(planetDetailBudget(this.quality));
+    this.detailSessionBudget = detailSessionBudget;
+    this.detail = pack ? new CompactDetailController(
+      this.bodyId,
+      this.body.radius,
+      this.quality,
+      [compactMaterial],
+      this.diagnostics,
+      detailSessionBudget,
+    ) : null;
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
@@ -138,6 +154,15 @@ export class AirlessBodyRenderer implements BodyRenderer {
       diagnostics: this.diagnostics,
       diagnosticSource: this.root.uuid,
     });
+    this.terrainDetail = pack ? new TerrainDetailController(
+      this.bodyId,
+      this.body.radius,
+      this.quality,
+      terrainMaterial,
+      () => this.terrain.detailDemand(),
+      this.diagnostics,
+      detailSessionBudget,
+    ) : null;
     this.terrain.group.name = `airless-terrain:${this.bodyId}`;
     this.terrain.setShadowReceiver(this.quality !== 'low');
     this.root.add(this.compact, this.terrain.group);
@@ -152,6 +177,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (!this.ready) return;
+    this.detail?.update(frame);
     if (frame.allowFlightTerrain) this.flightAerial?.disable(this.body, frame);
     this.lastAngularRadius = frame.projection.angularRadius;
     const band = terrainPresentationBand(this.body);
@@ -186,6 +212,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
           framePressure: frame.framePressure,
         },
       );
+      this.terrainDetail?.update(frame);
     }
     if (visibleBand) this.transition.requestTerrain();
     else this.transition.requestCompact();
@@ -241,6 +268,9 @@ export class AirlessBodyRenderer implements BodyRenderer {
   stats(): Readonly<BodyRendererStats> {
     if (!this.ready) return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 });
     const scatterStats = this.scatter?.stats();
+    const detailStats = this.detail?.stats();
+    const terrainDetailStats = this.terrainDetail?.stats();
+    const detailSessionStats = this.detailSessionBudget?.stats();
     return Object.freeze({
       chunks: this.terrain.stats.chunks,
       visible: this.terrainActive ? this.terrain.stats.visible : 0,
@@ -265,6 +295,37 @@ export class AirlessBodyRenderer implements BodyRenderer {
       cloudHistoryBytes: 0,
       heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
       shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
+      detailGpuBytes: detailStats?.gpuBytes ?? 0,
+      detailPages: detailStats?.pages ?? 0,
+      detailLevel: detailStats?.level ?? 0,
+      detailState: detailStats?.state ?? 'disabled',
+      detailDatasetId: detailStats?.datasetId,
+      detailRequestBytes: detailStats?.requestBytes ?? 0,
+      detailGeneration: detailStats?.generation ?? 0,
+      detailFallbackReason: detailStats?.fallbackReason,
+      terrainDetailGpuBytes: terrainDetailStats?.gpuBytes ?? 0,
+      terrainDetailPages: terrainDetailStats?.pages ?? 0,
+      terrainDetailLevel: terrainDetailStats?.sourceLevel ?? 0,
+      terrainDetailState: terrainDetailStats?.state ?? 'disabled',
+      terrainDetailDatasetId: terrainDetailStats?.datasetId,
+      terrainDetailRequestBytes: terrainDetailStats?.requestBytes ?? 0,
+      terrainDetailGeneration: terrainDetailStats?.generation ?? 0,
+      terrainDetailFallbackReason: terrainDetailStats?.fallbackReason,
+      terrainDetailTileKeys: terrainDetailStats?.tileKeys,
+      terrainDetailNormalPages: terrainDetailStats?.normalPages ?? 0,
+      terrainDetailNumericDatasetId: terrainDetailStats?.numericDatasetId,
+      terrainDetailNumericDatum: terrainDetailStats?.numericDatum,
+      terrainDetailHeightMode: terrainDetailStats?.heightMode ?? 'resident',
+      terrainDetailDecodedCpuBytes: terrainDetailStats?.decodedCpuBytes ?? 0,
+      terrainDetailPersistentBytes: terrainDetailStats?.persistentBytes ?? 0,
+      terrainDetailRequestCount: terrainDetailStats?.requestCount ?? 0,
+      terrainDetailCacheHits: terrainDetailStats?.cacheHits,
+      terrainDetailTimingsMs: terrainDetailStats?.timingsMs,
+      terrainDetailSourceCellMeters: terrainDetailStats?.sourceCellMeters,
+      terrainDetailHeightRangeMeters: terrainDetailStats?.heightRangeMeters,
+      detailProxyRequests: detailSessionStats?.proxyRequests ?? 0,
+      detailProxyBytes: detailSessionStats?.proxyBytes ?? 0,
+      surfaceClassSource: 'not-applicable',
     });
   }
 
@@ -276,6 +337,11 @@ export class AirlessBodyRenderer implements BodyRenderer {
     this.terrain.dispose();
     this.scatter?.dispose();
     this.scatter = null;
+    this.detail?.dispose();
+    this.detail = null;
+    this.terrainDetail?.dispose();
+    this.terrainDetail = null;
+    this.detailSessionBudget = null;
     this.initialized = false;
     this.terrainActive = false;
     this.coverageProgress = 0;

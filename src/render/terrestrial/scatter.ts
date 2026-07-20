@@ -17,6 +17,7 @@ import {
   bindFlightAerialPerspective,
   type FlightAerialPerspectiveController,
 } from '../flightAerialPerspective';
+import { surfaceClassPermitsEarthScatter } from './surfaceClass';
 
 /** Terrain query in body-fixed space: raw height (m) and unit surface normal. */
 export type SurfaceSampler = (
@@ -24,6 +25,7 @@ export type SurfaceSampler = (
   dirY: number,
   dirZ: number,
 ) => { height: number; normalX: number; normalY: number; normalZ: number };
+export type SurfaceClassSampler = (dirX: number, dirY: number, dirZ: number) => number;
 
 /** Body-fixed sphere whose overlapping visual instances are suppressed. */
 export interface SuppressionSphere {
@@ -267,6 +269,7 @@ export function generateScatterCell(
   tier: Readonly<ScatterTierParams>,
   sampler: SurfaceSampler,
   profile: Readonly<ScatterProfile> = VEYRA_SCATTER_PROFILE,
+  surfaceClassSampler?: SurfaceClassSampler,
 ): ScatterInstanceData[] {
   const random = mulberry32(hashCellSeed(seed, cx, cy, cz));
   const instances: ScatterInstanceData[] = [];
@@ -293,11 +296,15 @@ export function generateScatterCell(
     const dy = by / length;
     const dz = bz / length;
     const surface = sampler(dx, dy, dz);
+    const earthClassRejected = profile.name === 'earth-geology' && surfaceClassSampler
+      ? !surfaceClassPermitsEarthScatter(surfaceClassSampler(dx, dy, dz))
+      : false;
     if (!Number.isFinite(surface.height)
       || !Number.isFinite(surface.normalX)
       || !Number.isFinite(surface.normalY)
       || !Number.isFinite(surface.normalZ)
-      || (profile.placement === 'dry-land' && surface.height < 0)) continue;
+      || earthClassRejected
+      || (profile.placement === 'dry-land' && !surfaceClassSampler && surface.height < 0)) continue;
     const surfaceRadius = radius + surface.height;
     let cursor = 0;
     const classDef = profile.classes.find((candidate) => {
@@ -393,6 +400,7 @@ export class TerrestrialScatter {
     tier: QualityTier,
     private readonly profile: Readonly<ScatterProfile> = VEYRA_SCATTER_PROFILE,
     private readonly aerialController?: FlightAerialPerspectiveController,
+    private readonly surfaceClassSampler?: SurfaceClassSampler,
   ) {
     this.tier = tier;
     this.group.name = 'terrestrial-scatter';
@@ -502,6 +510,7 @@ export class TerrestrialScatter {
           try {
             instances = generateScatterCell(
               this.seed, cx, cy, cz, this.radius, tier, this.sampler, this.profile,
+              this.surfaceClassSampler,
             );
           } catch {
             this.failedRetryAt.set(key, this.frameIndex + FAILED_CELL_RETRY_FRAMES);

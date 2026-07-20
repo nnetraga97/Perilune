@@ -515,6 +515,51 @@
       "derivedRecipe": "earth-source-pack-v1"
     },
     {
+      "id": "noaa-gshhg-2-3-7-full",
+      "url": "https://www.soest.hawaii.edu/pwessel/gshhg/gshhg-shp-2.3.7.zip",
+      "author": "Paul Wessel and Walter H. F. Smith; NOAA distribution",
+      "license": "LGPL-3.0",
+      "licenseUrl": "https://www.soest.hawaii.edu/pwessel/gshhg/",
+      "attribution": "GSHHG 2.3.7 full-resolution shoreline hierarchy",
+      "checksumSha256": "8dbbe7e071e77e9e75f2d639239099ebca8d5c16d6a07df8169729d49f15cf41",
+      "localPath": "sources/noaa-gshhg-2.3.7/gshhg-shp-2.3.7.zip",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        360,
+        180
+      ],
+      "transformations": [
+        "ESRI polygon decode",
+        "sample-center categorical rasterization",
+        "exact-code R8 packaging without mipmaps"
+      ],
+      "bodies": [
+        "earth"
+      ],
+      "channels": [
+        "surfaceClass",
+        "surfaceClassRegional"
+      ],
+      "datum": "WGS84 spherical presentation; source datum retained during authoring",
+      "projection": "EPSG:4326 plate-carree",
+      "axisOrder": "longitude,latitude",
+      "longitudeDirection": "east-positive",
+      "seamLongitudeDegrees": -180,
+      "uvOrigin": "north-west",
+      "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+      "verticalDatum": "not-applicable",
+      "valueScale": 1,
+      "valueOffset": 0,
+      "noDataValue": null,
+      "validRange": [
+        0,
+        6
+      ],
+      "observation": "GSHHG release 2.3.7 (2017)",
+      "productKind": "measured",
+      "derivedRecipe": "earth-surface-class-v1"
+    },
+    {
       "id": "polyhaven-dirt-diff-1k",
       "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt/dirt_diff_1k.jpg",
       "author": "Charlotte Baglioni",
@@ -1218,6 +1263,51 @@
       "productKind": "measured",
       "derivedRecipe": "local-pbr-atlas-v1",
       "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+    },
+    {
+      "id": "usfws-nwi-ksc-snapshot-2026-07-20",
+      "url": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query",
+      "author": "U.S. Fish and Wildlife Service National Wetlands Inventory",
+      "license": "Public-Domain",
+      "licenseUrl": "https://www.fws.gov/program/national-wetlands-inventory/data-download",
+      "attribution": "USFWS NWI Cowardin classification, bounded KSC snapshot",
+      "checksumSha256": "fba4859b81c6bbde032bb6168cca6f9b314d3c07ed24546de6f6eb8e3fb34e8d",
+      "localPath": "sources/usfws-nwi-ksc/nwi-ksc-2026-07-20.geojson",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        3840,
+        2160
+      ],
+      "transformations": [
+        "bounded EPSG:4326 FeatureServer snapshot",
+        "Cowardin system class mapping",
+        "sample-center categorical rasterization",
+        "GSHHG parent fallback"
+      ],
+      "bodies": [
+        "earth"
+      ],
+      "channels": [
+        "surfaceClassRegional"
+      ],
+      "datum": "WGS84 spherical presentation; source datum retained during authoring",
+      "projection": "EPSG:4326 plate-carree",
+      "axisOrder": "longitude,latitude",
+      "longitudeDirection": "east-positive",
+      "seamLongitudeDegrees": -180,
+      "uvOrigin": "north-west",
+      "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+      "verticalDatum": "not-applicable",
+      "valueScale": 1,
+      "valueOffset": 0,
+      "noDataValue": 0,
+      "validRange": [
+        0,
+        6
+      ],
+      "observation": "2026-07-20",
+      "productKind": "measured",
+      "derivedRecipe": "earth-surface-class-v1"
     }
   ],
   "packs": [
@@ -1226,8 +1316,8 @@
       "tier": "low",
       "width": 1024,
       "height": 512,
-      "compressedBytes": 1478887,
-      "transientBytes": 8912896,
+      "compressedBytes": 1479762,
+      "transientBytes": 9961472,
       "bootCritical": false,
       "channels": [
         {
@@ -1340,6 +1430,48 @@
             "astc-rgba"
           ],
           "mipmapped": true
+        },
+        {
+          "name": "surfaceClass",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/low/surfaceClass.ktx2",
+          "fallbackPath": "generated/earth/low/surfaceClass.png",
+          "packageChecksumSha256": "5e568c3496ca4ee18054c685f1c6bc4061f795ac7338674c0541fb9158891d9e",
+          "fallbackChecksumSha256": "01f8ff86346185aea8e7f4c12dea468582fb664952ba6fab7f05d82a3539a59d",
+          "gpuFormat": "r8",
+          "gpuBytes": 524288,
+          "fallbackGpuBytes": 524288,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false
+        },
+        {
+          "name": "surfaceClassRegional",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/low/surfaceClassRegional.ktx2",
+          "fallbackPath": "generated/earth/low/surfaceClassRegional.png",
+          "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+          "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+          "gpuFormat": "r8",
+          "gpuBytes": 8294400,
+          "fallbackGpuBytes": 8294400,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false,
+          "width": 3840,
+          "height": 2160,
+          "bounds": [
+            -80.8,
+            28.45,
+            -80.2,
+            28.75
+          ]
         }
       ]
     },
@@ -1348,8 +1480,8 @@
       "tier": "medium",
       "width": 2048,
       "height": 1024,
-      "compressedBytes": 5480988,
-      "transientBytes": 41943040,
+      "compressedBytes": 5481911,
+      "transientBytes": 46137344,
       "bootCritical": true,
       "channels": [
         {
@@ -1480,6 +1612,48 @@
             "astc-rgba"
           ],
           "mipmapped": true
+        },
+        {
+          "name": "surfaceClass",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/medium/surfaceClass.ktx2",
+          "fallbackPath": "generated/earth/medium/surfaceClass.png",
+          "packageChecksumSha256": "0b4c868e85ac880cf225037a6fa227cf8f474b6dba97ad6135d68144812f279f",
+          "fallbackChecksumSha256": "852764845b0a05dee28f21fea1e0b11545adcbe74c18a4813f928acc83e16cf3",
+          "gpuFormat": "r8",
+          "gpuBytes": 2097152,
+          "fallbackGpuBytes": 2097152,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false
+        },
+        {
+          "name": "surfaceClassRegional",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/medium/surfaceClassRegional.ktx2",
+          "fallbackPath": "generated/earth/medium/surfaceClassRegional.png",
+          "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+          "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+          "gpuFormat": "r8",
+          "gpuBytes": 8294400,
+          "fallbackGpuBytes": 8294400,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false,
+          "width": 3840,
+          "height": 2160,
+          "bounds": [
+            -80.8,
+            28.45,
+            -80.2,
+            28.75
+          ]
         }
       ]
     },
@@ -1488,8 +1662,8 @@
       "tier": "high",
       "width": 4096,
       "height": 2048,
-      "compressedBytes": 20709781,
-      "transientBytes": 167772160,
+      "compressedBytes": 20710897,
+      "transientBytes": 184549376,
       "bootCritical": false,
       "channels": [
         {
@@ -1620,6 +1794,48 @@
             "astc-rgba"
           ],
           "mipmapped": true
+        },
+        {
+          "name": "surfaceClass",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/high/surfaceClass.ktx2",
+          "fallbackPath": "generated/earth/high/surfaceClass.png",
+          "packageChecksumSha256": "95297b32c77b1dbab0afde04a8b19c8f4896977699d1404c62ad098a4ca0886d",
+          "fallbackChecksumSha256": "925af64375126c50ee3623dffd932d05c96c99686bbb28c4cdb4092f6cc8f1b4",
+          "gpuFormat": "r8",
+          "gpuBytes": 8388608,
+          "fallbackGpuBytes": 8388608,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false
+        },
+        {
+          "name": "surfaceClassRegional",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/earth/high/surfaceClassRegional.ktx2",
+          "fallbackPath": "generated/earth/high/surfaceClassRegional.png",
+          "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+          "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+          "gpuFormat": "r8",
+          "gpuBytes": 8294400,
+          "fallbackGpuBytes": 8294400,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": false,
+          "width": 3840,
+          "height": 2160,
+          "bounds": [
+            -80.8,
+            28.45,
+            -80.2,
+            28.75
+          ]
         }
       ]
     },

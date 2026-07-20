@@ -16,7 +16,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:4173',
     viewport: { width: 1280, height: 720 },
     launchOptions: {
       executablePath,

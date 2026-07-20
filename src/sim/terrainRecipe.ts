@@ -15,6 +15,7 @@ import {
   LAUNCH_SITE_MINIMUM_GROUND_HEIGHT,
 } from './launchSite';
 import {
+  CHECKED_HEIGHT_AUTHORITY_VERSION,
   sampleCanonicalLocalRelief,
   sampleSourceMacroHeight,
   sourceHeightGrid,
@@ -75,6 +76,7 @@ function recipeContent(body: Body, craters: readonly CraterFeature[]): string {
     terrain.colorMid,
     terrain.colorHigh,
     terrain.colorOcean ?? null,
+    ...(body.id === 'earth' || body.id === 'moon' ? [CHECKED_HEIGHT_AUTHORITY_VERSION] : []),
     craters,
   ]);
 }

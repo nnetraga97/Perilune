@@ -3,6 +3,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256Bytes, sha256File } from './lib/canonical-json.mjs';
 import { validateCheckedPartManifest, validatePartAssetInputs } from './lib/part-asset-schema.mjs';
+import { validatePlanetSourceLock } from './lib/planet-source-registry.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = resolve(
@@ -44,6 +45,16 @@ const recipeFile = loadJson(recipesPath, 'Terrain recipes');
 const compilerLock = loadJson(compilerLockPath, 'Planet compiler lock');
 const packageJson = loadJson(packagePath, 'package.json');
 const compilerOutput = loadJson(compilerOutputPath, 'Planet compiler output');
+const detailSourceLock = loadJson(
+  resolve(root, 'assets/planets/sol-detail-source-lock.json'),
+  'Sol detail source lock',
+);
+
+if (detailSourceLock) {
+  for (const error of validatePlanetSourceLock(detailSourceLock)) {
+    errors.push(`Sol detail source lock: ${error}`);
+  }
+}
 
 const expectedRecipeBodies = new Set([
   'auren', 'ashen', 'vess', 'veyra', 'palla', 'wisp',
@@ -76,8 +87,8 @@ if (recipeFile) {
   }
 }
 
-const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL']);
-const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'emissive', 'localDetail']);
+const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL', 'LGPL-3.0']);
+const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'emissive', 'localDetail', 'surfaceClass', 'surfaceClassRegional']);
 const channelContracts = {
   albedo: {
     colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
@@ -107,6 +118,14 @@ const channelContracts = {
     colorSpace: 'linear', logicalFormat: 'RGBA8', fallback: '.png', fallbackLayout: 'rgba',
     transcodeTargets: ['etc2-rgba', 'bc3-rgba', 'astc-rgba'],
   },
+  surfaceClass: {
+    colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
+    transcodeTargets: ['r8'], mipmapped: false,
+  },
+  surfaceClassRegional: {
+    colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
+    transcodeTargets: ['r8'], mipmapped: false,
+  },
 };
 const tierDimensions = {
   low: [1024, 512],
@@ -123,6 +142,7 @@ const gpuFormats = {
   rgba8: { blockWidth: 1, blockHeight: 1, blockBytes: 4 },
   rgb8: { blockWidth: 1, blockHeight: 1, blockBytes: 3 },
   rg8: { blockWidth: 1, blockHeight: 1, blockBytes: 2 },
+  r8: { blockWidth: 1, blockHeight: 1, blockBytes: 1 },
 };
 
 function fullMipChainBytes(width, height, format) {
@@ -197,15 +217,18 @@ function validateKtx2(packageFile, pack, channel) {
   const faceCount = packageFile.readUInt32LE(36);
   const levelCount = packageFile.readUInt32LE(40);
   const supercompressionScheme = packageFile.readUInt32LE(44);
-  const expectedLevels = fullMipLevelCount(pack.width, pack.height);
+  const channelWidth = channel.width ?? pack.width;
+  const channelHeight = channel.height ?? pack.height;
+  const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
+  const expectedLevels = classChannel ? 1 : fullMipLevelCount(channelWidth, channelHeight);
 
-  if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
-    errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`);
+  if (pixelWidth !== channelWidth || pixelHeight !== channelHeight) {
+    errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${channelWidth}x${channelHeight}`);
   }
   const directHeight = channel.name === 'heightMacro';
-  const expectedVkFormat = directHeight ? 16 : 0; // VK_FORMAT_R8G8_UNORM
+  const expectedVkFormat = classChannel ? 9 : directHeight ? 16 : 0; // VK_FORMAT_R8_UNORM / R8G8_UNORM
   if (vkFormat !== expectedVkFormat || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
-    errors.push(`${label} must be a 2D ${directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
+    errors.push(`${label} must be a 2D ${classChannel ? 'lossless R8' : directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
       `with vkFormat ${expectedVkFormat}, typeSize 1, and one face`);
   }
   if (levelCount !== expectedLevels) {
@@ -243,7 +266,10 @@ function validateKtx2(packageFile, pack, channel) {
       descriptorBlockSize < 40 || descriptorBlockSize > dfdLength - 4) {
       errors.push(`${label} DFD descriptor is malformed`);
     }
-    const expectedEncoding = directHeight
+    const expectedEncoding = classChannel
+      ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 1, blockWidth: 0, blockHeight: 0,
+        name: 'lossless R8 with Zstd' }
+      : directHeight
       ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 2, blockWidth: 0, blockHeight: 0,
         name: 'lossless RG8 with Zstd' }
       : channel.name === 'albedo' || channel.name === 'emissive'
@@ -308,9 +334,11 @@ function validateKtx2(packageFile, pack, channel) {
       errors.push(`${label} BasisLZ mip ${level} must use zero uncompressedByteLength`);
     }
     if (supercompressionScheme === 2) {
-      const mipWidth = Math.max(1, pack.width >> level);
-      const mipHeight = Math.max(1, pack.height >> level);
-      const expectedUncompressedBytes = directHeight
+      const mipWidth = Math.max(1, channelWidth >> level);
+      const mipHeight = Math.max(1, channelHeight >> level);
+      const expectedUncompressedBytes = classChannel
+        ? mipWidth * mipHeight
+        : directHeight
         ? mipWidth * mipHeight * 2
         : Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
       if (uncompressedByteLength !== expectedUncompressedBytes) {
@@ -756,6 +784,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
       }
       if (pack.bodyId === 'earth') {
         const exactChannels = ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail',
+          'surfaceClass', 'surfaceClassRegional',
           ...(pack.tier === 'low' ? [] : ['emissive'])];
         const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
         if (presentChannels.length !== exactChannels.length ||
@@ -796,8 +825,11 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (!channel.fallbackPath?.endsWith(contract.fallback)) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} fallback has wrong format`);
         }
+        const channelWidth = channel.width ?? pack.width;
+        const channelHeight = channel.height ?? pack.height;
+        const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
         const derivedFallbackGpuBytes = dimensions
-          ? fullMipRgbaBytes(pack.width, pack.height)
+          ? classChannel ? channelWidth * channelHeight : fullMipRgbaBytes(channelWidth, channelHeight)
           : null;
         if (channel.fallbackGpuBytes !== derivedFallbackGpuBytes) {
           errors.push(
@@ -816,15 +848,17 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (!arraysEqual(channel.transcodeTargets, contract.transcodeTargets)) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has incorrect transcode targets`);
         }
-        if (channel.mipmapped !== true) {
-          errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} requires mipmaps`);
+        if (channel.mipmapped !== (contract.mipmapped ?? true)) {
+          errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has incorrect mip policy`);
         }
         requirePositiveInteger(channel.gpuBytes, `Pack ${pack.bodyId}/${pack.tier} ${channel.name} gpuBytes`);
         const gpuFormat = gpuFormats[channel.gpuFormat];
         if (!gpuFormat) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has unknown GPU format`);
         } else if (dimensions) {
-          const derivedGpuBytes = fullMipChainBytes(pack.width, pack.height, gpuFormat);
+          const derivedGpuBytes = classChannel
+            ? channelWidth * channelHeight * gpuFormat.blockBytes
+            : fullMipChainBytes(channelWidth, channelHeight, gpuFormat);
           if (channel.gpuBytes !== derivedGpuBytes) {
             errors.push(
               `Pack ${pack.bodyId}/${pack.tier} ${channel.name} memory mismatch: ` +

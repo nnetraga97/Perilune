@@ -7,6 +7,7 @@ import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import { DEFAULT_TERRAIN_GEOMETRY_BUDGET } from '../src/render/resourceAccounting';
+import { planetDetailBudget } from '../src/render/planetDetail/detailBudget';
 import { FlightAerialPerspectiveController } from '../src/render/flightAerialPerspective';
 
 const caps: RenderCaps = {
@@ -140,7 +141,9 @@ describe('AirlessBodyRenderer', () => {
     }
     const stats = renderer.stats();
     expect(stats.scatterBytes).toBeGreaterThan(0);
-    const expectedAllocation = DEFAULT_TERRAIN_GEOMETRY_BUDGET - stats.scatterBytes!;
+    const expectedAllocation = DEFAULT_TERRAIN_GEOMETRY_BUDGET
+      - stats.scatterBytes!
+      - planetDetailBudget('medium').gpuBytes;
     expect(stats.terrainAllocationBytes).toBe(expectedAllocation);
     renderer.dispose();
 

@@ -8,6 +8,7 @@ import {
   oceanCapSegments,
 } from './oceanMaterial';
 import { updateTerrestrialAerialPerspective } from './aerialPerspective';
+import { resolveSurfaceClassTextures, type SurfaceClassTextureSet } from './surfaceClass';
 
 /**
  * Camera-anchored gnomonic ocean cap. Every generated vertex lies on the exact
@@ -21,11 +22,13 @@ export class TerrestrialOcean {
   private readonly east = new THREE.Vector3(1, 0, 0);
   private readonly north = new THREE.Vector3(0, 1, 0);
   private disposed = false;
+  private readonly surfaceClasses: SurfaceClassTextureSet;
 
   constructor(
     readonly body: Body,
     readonly quality: QualityTier,
     shoreMask: THREE.Texture | null,
+    classTextures: ReadonlyMap<string, THREE.Texture> | null = null,
   ) {
     if (body.def.surfaceKind !== 'solid' || body.def.terrain.oceanLevel <= 0 || !body.def.terrain.colorOcean) {
       throw new Error(`${body.id} has no solid ocean datum`);
@@ -33,7 +36,10 @@ export class TerrestrialOcean {
     this.datumRadius = body.radius;
     const segments = oceanCapSegments(quality);
     const geometry = new THREE.PlaneGeometry(2, 2, segments, segments);
-    const material = createOceanCapMaterial(quality, shoreMask, body.def.terrain.colorOcean, body.radius);
+    this.surfaceClasses = resolveSurfaceClassTextures(classTextures);
+    const material = createOceanCapMaterial(
+      quality, shoreMask, body.def.terrain.colorOcean, body.radius, this.surfaceClasses,
+    );
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.name = `terrestrial-ocean:${body.id}`;
     this.mesh.scale.setScalar(this.datumRadius);
@@ -91,5 +97,6 @@ export class TerrestrialOcean {
     this.disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    for (const texture of this.surfaceClasses.owned) texture.dispose();
   }
 }

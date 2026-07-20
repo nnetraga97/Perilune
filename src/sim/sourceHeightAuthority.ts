@@ -63,7 +63,8 @@ export function sampleSourceMacroHeight(
   const tx = x - x0;
   const ty = y - y0;
   const at = (px: number, py: number): number => (
-    grid.samples[py * grid.width + ((px % grid.width) + grid.width) % grid.width] * 0.5
+    grid.samples[py * grid.width + ((px % grid.width) + grid.width) % grid.width]
+      * grid.quantizationScaleMeters + grid.quantizationOffsetMeters
   );
   const a = at(x0, y0) * (1 - tx) + at(x1, y0) * tx;
   const b = at(x0, y1) * (1 - tx) + at(x1, y1) * tx;

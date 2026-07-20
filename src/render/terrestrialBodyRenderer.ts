@@ -23,6 +23,11 @@ import { updateTerrestrialAerialPerspective } from './terrestrial/aerialPerspect
 import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial';
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
+import { createEarthSurfaceClassSampler } from './terrestrial/surfaceClassAuthority';
+import { CompactDetailController } from './planetDetail/compactDetailController';
+import { PlanetDetailSessionBudget, planetDetailBudget } from './planetDetail/detailBudget';
+import { TerrainDetailController } from './planetDetail/terrainDetailController';
+import { sampleEarthSurfaceClass } from './terrestrial/surfaceClassAuthority';
 import { TerrestrialCloudDeck, WEATHER_CLOUD_DRIFT_RATE } from './terrestrial/cloudLayer';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
@@ -74,6 +79,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private ocean!: TerrestrialOcean;
   private clouds!: TerrestrialCloudDeck;
   private scatter: TerrestrialScatter | null = null;
+  private detail: CompactDetailController | null = null;
+  private terrainDetail: TerrainDetailController | null = null;
+  private lastSurfaceClassCode: number | undefined;
+  private detailSessionBudget: PlanetDetailSessionBudget | null = null;
   private scatterSuppression: readonly SuppressionSphere[] = Object.freeze([]);
   private fallbackCloudTexture: THREE.DataTexture | null = null;
   private disposed = false;
@@ -122,7 +131,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     }
     if (pack) {
       const requiredChannels = this.bodyId === 'earth'
-        ? ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail']
+        ? ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail', 'surfaceClass', 'surfaceClassRegional']
         : ['albedo', 'normal', 'material', 'clouds'];
       for (const channel of requiredChannels) {
         if (!pack.textures.has(channel)) throw new Error(`${pack.bodyId}/${pack.tier} is missing required ${channel} texture`);
@@ -143,7 +152,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const visual = BODY_VISUALS[this.body.id as BodyId].atmosphereVisual!;
     this.atmosphere = new TerrestrialAtmosphere(this.body, this.caps, visual, this.quality);
     const materialMap = pack?.textures.get('material') ?? null;
-    this.ocean = new TerrestrialOcean(this.body, this.quality, materialMap);
+    this.ocean = new TerrestrialOcean(this.body, this.quality, materialMap, pack?.textures ?? null);
 
     let cloudMap = pack?.textures.get('clouds') ?? null;
     if (!cloudMap) {
@@ -177,6 +186,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         this.quality,
         scatterProfileByName(scatterProfileName),
         this.flightAerial,
+        createEarthSurfaceClassSampler(),
       )
       : null;
     this.scatter?.setShadows(this.quality !== 'low');
@@ -190,7 +200,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.ocean.mesh,
       this.atmosphere.mesh,
       this.clouds.group,
-    ]) + (this.fallbackCloudTexture ? 4 : 0);
+    ]) + (this.fallbackCloudTexture ? 4 : 0) + planetDetailBudget(this.quality).activeGpuBytes;
     const allocation = terrainGeometryAllocation({
       activeBodyBudgetBytes: this.activeBodyBudgetBytes,
       committedTextureBytes: pack?.gpuBytes ?? 0,
@@ -206,6 +216,16 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       this.caps.maxAnisotropy,
     );
     this.surfaceMaterial = terrainMaterial;
+    const detailSessionBudget = new PlanetDetailSessionBudget(planetDetailBudget(this.quality));
+    this.detailSessionBudget = detailSessionBudget;
+    this.detail = pack ? new CompactDetailController(
+      this.bodyId,
+      this.body.radius,
+      this.quality,
+      [compactMaterial],
+      this.diagnostics,
+      detailSessionBudget,
+    ) : null;
     this.terrain = new PlanetRenderer(this.body, PLANET_QUALITY[this.quality], {
       material: terrainMaterial,
       oceanEnabled: false,
@@ -215,6 +235,15 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       diagnostics: this.diagnostics,
       diagnosticSource: this.root.uuid,
     });
+    this.terrainDetail = pack ? new TerrainDetailController(
+      this.bodyId,
+      this.body.radius,
+      this.quality,
+      terrainMaterial,
+      () => this.terrain.detailDemand(),
+      this.diagnostics,
+      detailSessionBudget,
+    ) : null;
     this.terrain.group.name = `terrestrial-terrain:${this.bodyId}`;
     this.terrain.setShadowReceiver(this.quality !== 'low');
 
@@ -236,6 +265,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (!this.ready) return;
+    this.lastSurfaceClassCode = this.bodyId === 'earth'
+      ? sampleEarthSurfaceClass(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z)
+      : undefined;
+    this.detail?.update(frame);
     this.lastAngularRadius = frame.projection.angularRadius;
     const band = terrainPresentationBand(this.body);
     const prewarm = frame.allowFlightTerrain && frame.altitude < band.prewarmAltitude;
@@ -291,6 +324,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
           framePressure: frame.framePressure,
         },
       );
+      this.terrainDetail?.update(frame);
     } else {
       this.terrain.group.visible = false;
     }
@@ -417,6 +451,9 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   stats(): Readonly<BodyRendererStats> {
     if (!this.ready) return Object.freeze({ chunks: 0, visible: 0, terrainActive: false, exposure: 0 });
     const scatterStats = this.scatter?.stats();
+    const detailStats = this.detail?.stats();
+    const terrainDetailStats = this.terrainDetail?.stats();
+    const detailSessionStats = this.detailSessionBudget?.stats();
     return Object.freeze({
       chunks: this.terrain.stats.chunks,
       visible: this.terrainActive ? this.terrain.stats.visible : 0,
@@ -446,6 +483,38 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       cloudHistoryBytes: 0,
       heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
       shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
+      detailGpuBytes: detailStats?.gpuBytes ?? 0,
+      detailPages: detailStats?.pages ?? 0,
+      detailLevel: detailStats?.level ?? 0,
+      detailState: detailStats?.state ?? 'disabled',
+      detailDatasetId: detailStats?.datasetId,
+      detailRequestBytes: detailStats?.requestBytes ?? 0,
+      detailGeneration: detailStats?.generation ?? 0,
+      detailFallbackReason: detailStats?.fallbackReason,
+      terrainDetailGpuBytes: terrainDetailStats?.gpuBytes ?? 0,
+      terrainDetailPages: terrainDetailStats?.pages ?? 0,
+      terrainDetailLevel: terrainDetailStats?.sourceLevel ?? 0,
+      terrainDetailState: terrainDetailStats?.state ?? 'disabled',
+      terrainDetailDatasetId: terrainDetailStats?.datasetId,
+      terrainDetailRequestBytes: terrainDetailStats?.requestBytes ?? 0,
+      terrainDetailGeneration: terrainDetailStats?.generation ?? 0,
+      terrainDetailFallbackReason: terrainDetailStats?.fallbackReason,
+      terrainDetailTileKeys: terrainDetailStats?.tileKeys,
+      terrainDetailNormalPages: terrainDetailStats?.normalPages ?? 0,
+      terrainDetailNumericDatasetId: terrainDetailStats?.numericDatasetId,
+      terrainDetailNumericDatum: terrainDetailStats?.numericDatum,
+      terrainDetailHeightMode: terrainDetailStats?.heightMode ?? 'resident',
+      terrainDetailDecodedCpuBytes: terrainDetailStats?.decodedCpuBytes ?? 0,
+      terrainDetailPersistentBytes: terrainDetailStats?.persistentBytes ?? 0,
+      terrainDetailRequestCount: terrainDetailStats?.requestCount ?? 0,
+      terrainDetailCacheHits: terrainDetailStats?.cacheHits,
+      terrainDetailTimingsMs: terrainDetailStats?.timingsMs,
+      terrainDetailSourceCellMeters: terrainDetailStats?.sourceCellMeters,
+      terrainDetailHeightRangeMeters: terrainDetailStats?.heightRangeMeters,
+      detailProxyRequests: detailSessionStats?.proxyRequests ?? 0,
+      detailProxyBytes: detailSessionStats?.proxyBytes ?? 0,
+      surfaceClassCode: this.lastSurfaceClassCode,
+      surfaceClassSource: this.lastSurfaceClassCode === undefined ? 'not-applicable' : 'regional-or-global-exact',
       aerialConsumers: Object.freeze(['compact-land', 'streamed-land', 'ocean']),
     });
   }
@@ -461,6 +530,11 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.clouds.dispose();
     this.scatter?.dispose();
     this.scatter = null;
+    this.detail?.dispose();
+    this.detail = null;
+    this.terrainDetail?.dispose();
+    this.terrainDetail = null;
+    this.detailSessionBudget = null;
     this.scatterSuppression = Object.freeze([]);
     this.fallbackCloudTexture?.dispose();
     this.fallbackCloudTexture = null;

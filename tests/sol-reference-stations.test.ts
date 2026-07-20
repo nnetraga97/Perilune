@@ -23,8 +23,9 @@ describe('Sol visual reference stations', () => {
     for (const required of [
       'sun-from-earth', 'sun-partial-occultation',
       'earth-day-full', 'earth-terminator-full', 'earth-night-full',
-      'earth-limb-2000km', 'earth-low-orbit', 'earth-100km', 'earth-20km',
-      'earth-10km', 'earth-1km', 'earth-ground', 'earth-ocean-horizon',
+      'earth-limb-2000km', 'earth-low-orbit', 'earth-low-orbit-alt-sun', 'earth-100km', 'earth-20km',
+      'earth-10km', 'earth-ksc-1km', 'earth-ksc-ground', 'earth-ksc-coast-transect',
+      'earth-1km', 'earth-ground', 'earth-ocean-horizon',
       'moon-from-earth', 'moon-near-full', 'moon-far-full', 'moon-polar',
       'moon-low-orbit', 'moon-surface',
     ]) expect(ids.has(required), required).toBe(true);

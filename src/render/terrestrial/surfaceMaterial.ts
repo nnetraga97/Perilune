@@ -19,6 +19,12 @@ import {
   createTerrestrialAerialPerspectiveState,
   TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
 } from './aerialPerspective';
+import { bindPlanetDetailUniforms, createPlanetDetailMaterialState } from '../planetDetail/detailMaterial';
+import {
+  bindTerrainDetailUniforms,
+  createTerrainDetailMaterialState,
+  TERRAIN_DETAIL_GLSL,
+} from '../planetDetail/terrainDetailMaterial';
 
 /** Body-fixed period over which local surface detail repeats exactly (meters). */
 export const SURFACE_DETAIL_PERIOD_METERS = 8192;
@@ -366,7 +372,9 @@ float surfSlope = 1.0 - clamp(dot(surfClassificationNormal, surfRadialProjection
 float surfLatitude = asin(clamp(abs(normalize(vBodyDirection).z), 0.0, 1.0)) * 0.6366197723675814;
 float surfBiome = 0.5;
 float surfShore = 0.0;
-float surfOcean = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.b : 0.0;
+float surfOcean = useGlobalSurfaceClassMap > 0.5
+  ? surfaceClassOcean(authoredSurfaceClass)
+  : (useAuthoredGlobalMaps > 0.5 ? authoredMaterial.b : 0.0);
 float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a * useGlobalIceMap : 0.0;
 float surfMoisture = deterministicMoisture(vBodyDirection);
 SurfaceWeights surfWeights = classifyTerrestrialSurface(
@@ -394,6 +402,8 @@ vec3 surfTint = surfWeights.soil * vec3(1.0, 0.98, 0.95)
   + surfWeights.sand * vec3(1.12, 1.06, 0.92)
   + surfWeights.vegetation * vec3(0.9, 1.02, 0.86);
 diffuseColor.rgb *= surfTint;
+vec4 surfTerrainDetail = sampleTerrainDetail(vBodyDirection);
+diffuseColor.rgb = mix(diffuseColor.rgb, surfTerrainDetail.rgb * surfTint, surfTerrainDetail.a * (1.0 - surfOcean));
 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.94, 0.98, 1.03), surfIce * 0.32);
 diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock);
 diffuseColor.rgb *= mix(1.0, mix(0.9, 1.1, surfLocalDetail.r), surfLocalFade * 0.5);
@@ -415,6 +425,8 @@ float surfBump = mix(80.0, 240.0, surfWeights.rock);
 vec3 surfPerturbed = normalize(surfMacroNormal - surfTangentGradient * surfBump);
 vec3 surfLocalNormal = sampleLocalDetailNormal(surfStableAnchor, surfRadialProjection, surfLocalCell);
 surfPerturbed = normalize(mix(surfPerturbed, surfLocalNormal, surfLocalFade * 0.12));
+vec4 surfSourceNormal = sampleTerrainDetailNormal(vBodyDirection);
+surfPerturbed = normalize(mix(surfPerturbed, surfSourceNormal.rgb, surfSourceNormal.a * terrainDetailNormalStrength));
 normal = normalize(normalMatrix * surfPerturbed);
 `;
 
@@ -433,6 +445,8 @@ export function createTerrestrialSurfaceMaterial(
   const textures = resolveTerrestrialAuthoredTextures(pack, descriptor.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
   const aerialPerspective = createTerrestrialAerialPerspectiveState('streamed-land');
+  const detail = createPlanetDetailMaterialState();
+  const terrainDetail = createTerrainDetailMaterialState();
   const maxOctave = SURFACE_DETAIL_TIERS[tier].maxOctave;
   const localDetail = pack?.textures.get('localDetail') ?? null;
   if (localDetail) {
@@ -457,11 +471,15 @@ export function createTerrestrialSurfaceMaterial(
     authored: pack !== null,
     tier,
     terrestrialCloudLighting: cloudLighting,
+    planetDetail: detail,
+    terrainDetail,
   });
   attachTerrestrialAerialPerspective(material, aerialPerspective);
-  material.customProgramCacheKey = () => `terrestrial-surface-v3:${pack ? 'authored' : 'palette'}:${tier}`;
+  material.customProgramCacheKey = () => `terrestrial-surface-v4:${pack ? 'authored' : 'palette'}:${tier}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
+    bindPlanetDetailUniforms(shader, detail);
+    bindTerrainDetailUniforms(shader, terrainDetail);
     bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
     shader.uniforms.surfaceDetailMaxOctave = { value: maxOctave };
     shader.uniforms.localDetailMap = { value: localDetail };
@@ -485,7 +503,7 @@ export function createTerrestrialSurfaceMaterial(
           + 'vGlobalSurfaceAltitude = surfaceAltitude;',
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
+      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRAIN_DETAIL_GLSL}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
       .replace('#include <map_fragment>', `${GLOBAL_ALBEDO_APPLY}\n${SURFACE_ALBEDO_APPLY}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
       .replace(

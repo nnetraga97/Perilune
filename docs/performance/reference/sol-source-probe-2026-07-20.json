@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "sourceLockObservedAt": "2026-07-20T20:35:05Z",
+  "probedAt": "2026-07-20T20:39:36.420Z",
+  "results": [
+    {
+      "datasetId": "nasa-gibs-bmng-500m-v1",
+      "operationId": "root-tile",
+      "url": "https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/0/0/0.jpeg",
+      "status": 200,
+      "mime": "image/jpeg",
+      "cors": "*",
+      "cacheControl": "public, max-age=259200",
+      "etag": "00sp2007lvkro",
+      "bytes": 29474,
+      "sha256": "a2b07f9617b14d3e11b56434f58525a9a927e1438e7bf00b47af3c3fc8406f95",
+      "decoded": {
+        "format": "jpeg",
+        "width": 512,
+        "height": 512
+      }
+    },
+    {
+      "datasetId": "usgs-3dep-ksc-1m-86037",
+      "operationId": "locked-pad-height",
+      "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox=-80.6210%2C28.6271%2C-80.6208%2C28.6273&bboxSR=4326&f=image&format=tiff&imageSR=4326&interpolation=RSP_NearestNeighbor&mosaicRule=%7B%22mosaicMethod%22%3A%22esriMosaicLockRaster%22%2C%22lockRasterIds%22%3A%5B86037%5D%7D&pixelType=F32&size=8%2C8",
+      "status": 200,
+      "mime": "image/tiff",
+      "cors": "*",
+      "cacheControl": "max-age=43200",
+      "etag": "\"9dbd633c\"",
+      "bytes": 66342,
+      "sha256": "41d253ade87bbc4f318200bf9f13cc9a75c26c5593ab98a4094c895df6d1b967",
+      "decoded": {
+        "format": "tiff",
+        "width": 8,
+        "height": 8,
+        "numeric": {
+          "minimum": 2.8996453285217285,
+          "maximum": 15.658510208129883,
+          "channels": 3
+        }
+      }
+    },
+    {
+      "datasetId": "usda-naip-ksc-2025-29992",
+      "operationId": "locked-pad-image",
+      "url": "https://apps.geo.fpac.usda.gov/geo-imagery/rest/services/naip/conus_naip/ImageServer/exportImage?bbox=-80.6211%2C28.6270%2C-80.6207%2C28.6274&bboxSR=4326&f=image&format=jpgpng&imageSR=4326&interpolation=RSP_BilinearInterpolation&mosaicRule=%7B%22mosaicMethod%22%3A%22esriMosaicLockRaster%22%2C%22lockRasterIds%22%3A%5B29992%5D%7D&size=64%2C64",
+      "status": 200,
+      "mime": "image/jpeg",
+      "cors": null,
+      "cacheControl": "max-age=43200",
+      "etag": "\"d68a30a2\"",
+      "bytes": 1557,
+      "sha256": "fcc30acf55f13530b82e338dfd5fe06da8a287d72f8a3d5687ca954aef23713d",
+      "decoded": {
+        "format": "jpeg",
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "datasetId": "usfws-nwi-ksc-snapshot-2026-07-20",
+      "operationId": "classification-service-metadata",
+      "url": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0?f=pjson",
+      "status": 200,
+      "mime": "text/plain",
+      "cors": null,
+      "cacheControl": "must-revalidate,max-age=0,public",
+      "etag": "\"c530224f\"",
+      "bytes": 21276,
+      "sha256": "975c06d4c44ecedf23d1d5930ac1316913234ed0fd5b3a76fc365d07db466459",
+      "decoded": {
+        "jsonFingerprint": {
+          "type": "Feature Layer",
+          "geometryType": "esriGeometryPolygon",
+          "supportedQueryFormats": "JSON, geoJSON, PBF"
+        }
+      }
+    },
+    {
+      "datasetId": "nasa-moontrek-wac-303ppd-v02",
+      "operationId": "root-tile",
+      "url": "https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/0/0/0.jpg",
+      "status": 200,
+      "mime": "image/jpeg",
+      "cors": "*",
+      "cacheControl": null,
+      "etag": "\"c143-565e3cd2e8ca0\"",
+      "bytes": 49475,
+      "sha256": "de4dcb39468cc7210da9e6a49912049235fc88d1584d9ac72c2889e039d352d0",
+      "decoded": {
+        "format": "jpeg",
+        "width": 256,
+        "height": 256
+      }
+    },
+    {
+      "datasetId": "nasa-moontrek-lola-global-128ppd-v04",
+      "operationId": "equator-height",
+      "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_Global_128ppd_v04/ImageServer/exportImage?bbox=-0.03125%2C-0.03125%2C0.03125%2C0.03125&bboxSR=104903&f=image&format=tiff&imageSR=104903&interpolation=RSP_NearestNeighbor&pixelType=F32&size=8%2C8",
+      "status": 200,
+      "mime": "image/tiff",
+      "cors": "*",
+      "cacheControl": "max-age=43200",
+      "etag": "d5a56852",
+      "bytes": 66366,
+      "sha256": "456ed2539f7eac6ae44cd09d3bd86b78fa715e883b5180b8a8662ca73d2a734a",
+      "decoded": {
+        "format": "tiff",
+        "width": 8,
+        "height": 8,
+        "numeric": {
+          "minimum": -728.5,
+          "maximum": -716.5,
+          "channels": 3
+        }
+      }
+    },
+    {
+      "datasetId": "nasa-moontrek-lola-spole-5m-v04",
+      "operationId": "metadata",
+      "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_SPole875_5mp_v04_EQ/ImageServer?f=pjson",
+      "status": 200,
+      "mime": "text/plain",
+      "cors": "*",
+      "cacheControl": "max-age=0,must-revalidate",
+      "etag": "5a7363bd",
+      "bytes": 2732,
+      "sha256": "8be3d81368e4899d0ab57ca3e0137354443ca7d945e0141c83475fe525bd8109",
+      "decoded": {
+        "jsonFingerprint": {
+          "name": "LRO_LOLA_DEM_SPole875_5mp_v04_EQ",
+          "pixelType": "S16"
+        }
+      }
+    },
+    {
+      "datasetId": "nasa-moontrek-lola-spole-100m-v04",
+      "operationId": "metadata",
+      "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_SPole45_100mp_v04/ImageServer?f=pjson",
+      "status": 200,
+      "mime": "text/plain",
+      "cors": "*",
+      "cacheControl": "max-age=0,must-revalidate",
+      "etag": "7c1b840c",
+      "bytes": 3677,
+      "sha256": "df5fc8139d7c77c0373266cf8ccb10e6f4e0ef126db26532654c71355abfaf88",
+      "decoded": {
+        "jsonFingerprint": {
+          "name": "LRO_LOLA_DEM_SPole45_100mp_v04",
+          "pixelType": "F32"
+        }
+      }
+    }
+  ],
+  "failures": []
+}

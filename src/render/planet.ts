@@ -277,6 +277,7 @@ export class PlanetRenderer {
   }
 
   coverageReady(): boolean { return this.engine.coverageReady(); }
+  detailDemand(): readonly TerrainTileId[] { return this.engine.detailDemand(); }
 
   resourceGeometryBytes(): Readonly<{
     terrainGeometryBytes: number;

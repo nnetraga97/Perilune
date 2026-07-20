@@ -2,6 +2,8 @@
 
 Completion record for `docs/superpowers/plans/2026-07-20-near-ground-visual-completion.md` on `feature/sol-earth-moon-visuals`.
 
+The subsequent source-authority correction begins from the numeric and categorical baseline in `docs/performance/reference/sol-source-authority-baseline-2026-07.md`.
+
 ## Outcome
 
 The visual-only pass is complete for every unconditional task. Earth and Moon now use deterministic, profile-driven geological scatter close to resolved terrain; land and ocean share one aerial-perspective contract; ocean motion is represented by bounded, footprint-filtered normal waves; and flight-owned solid materials receive the same Earth haze without mutating shared part-library materials. No simulation terrain, collision height, body scale, orbit, persistence, or gameplay authority changed.

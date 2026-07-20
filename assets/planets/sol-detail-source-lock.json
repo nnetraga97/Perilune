@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-07-20T20:35:05Z",
+  "allowedHosts": [
+    "gibs.earthdata.nasa.gov",
+    "elevation.nationalmap.gov",
+    "apps.geo.fpac.usda.gov",
+    "www.ngdc.noaa.gov",
+    "www.soest.hawaii.edu",
+    "fwspublicservices.wim.usgs.gov",
+    "trek.nasa.gov",
+    "vdatum.noaa.gov"
+  ],
+  "sources": [
+    {
+      "id": "nasa-gibs-bmng-500m-v1",
+      "body": "earth",
+      "role": "albedo",
+      "coverage": [-180, -90, 180, 90],
+      "version": "BlueMarble_NextGeneration/default/500m",
+      "projection": "EPSG:4326",
+      "verticalDatum": "not-applicable",
+      "license": "NASA media usage guidelines",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "root-tile",
+          "url": "https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/0/0/0.jpeg",
+          "expectedMime": "image/jpeg",
+          "expectedCors": "*",
+          "maximumBytes": 65536,
+          "sha256": "a2b07f9617b14d3e11b56434f58525a9a927e1438e7bf00b47af3c3fc8406f95",
+          "image": { "width": 512, "height": 512 }
+        }
+      ]
+    },
+    {
+      "id": "usgs-3dep-ksc-1m-86037",
+      "body": "earth",
+      "role": "height",
+      "coverage": [-80.75, 28.50, -80.50, 28.75],
+      "version": "OBJECTID 86037; FL_Peninsular_FDEM_2018_D19_DRRA",
+      "projection": "source mosaic EPSG:3857; exports EPSG:4326",
+      "verticalDatum": "NAVD88",
+      "engineDatum": "EGM2008 orthometric presentation height",
+      "datumConversion": {
+        "tool": "NOAA VDatum 4.8 Full API",
+        "endpoint": "https://vdatum.noaa.gov/vdatumweb/api/convert",
+        "sourceHorizontalFrame": "NAD83_2011",
+        "targetHorizontalFrame": "WGS84_G1674",
+        "sourceVerticalFrame": "NAVD88",
+        "sourceGeoid": "GEOID18",
+        "targetVerticalFrame": "EGM2008",
+        "targetGeoid": "EGM2008",
+        "coverage": [-80.75, 28.5, -80.5, 28.75],
+        "gridSize": [3, 3],
+        "sampleLongitudes": [-80.75, -80.625, -80.5],
+        "sampleLatitudes": [28.5, 28.625, 28.75],
+        "correctionsMeters": [-0.03, -0.053, -0.067, -0.047, -0.07, -0.081, -0.059, -0.072, -0.079],
+        "reportedUncertaintyMeters": 0.16,
+        "observedAt": "2026-07-20"
+      },
+      "license": "USGS public domain",
+      "licenseUrl": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "locked-pad-height",
+          "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+          "params": {
+            "bbox": "-80.6210,28.6271,-80.6208,28.6273",
+            "bboxSR": "4326",
+            "imageSR": "4326",
+            "size": "8,8",
+            "format": "tiff",
+            "pixelType": "F32",
+            "interpolation": "RSP_NearestNeighbor",
+            "mosaicRule": "{\"mosaicMethod\":\"esriMosaicLockRaster\",\"lockRasterIds\":[86037]}",
+            "f": "image"
+          },
+          "expectedMime": "image/tiff",
+          "expectedCors": "*",
+          "maximumBytes": 131072,
+          "sha256": "41d253ade87bbc4f318200bf9f13cc9a75c26c5593ab98a4094c895df6d1b967",
+          "image": { "width": 8, "height": 8 },
+          "numeric": { "minimum": 2.89, "maximum": 15.67, "tolerance": 0.05 }
+        }
+      ]
+    },
+    {
+      "id": "usda-naip-ksc-2025-29992",
+      "body": "earth",
+      "role": "albedo",
+      "coverage": [-80.69, 28.56, -80.58, 28.69],
+      "version": "OBJECTID 29992; m_2808020_sw_17_030_20250730",
+      "projection": "EPSG:4326",
+      "verticalDatum": "not-applicable",
+      "license": "USDA public domain",
+      "licenseUrl": "https://www.usda.gov/policies-and-links",
+      "delivery": "same-origin-proxy",
+      "operations": [
+        {
+          "id": "locked-pad-image",
+          "url": "https://apps.geo.fpac.usda.gov/geo-imagery/rest/services/naip/conus_naip/ImageServer/exportImage",
+          "params": {
+            "bbox": "-80.6211,28.6270,-80.6207,28.6274",
+            "bboxSR": "4326",
+            "imageSR": "4326",
+            "size": "64,64",
+            "format": "jpgpng",
+            "interpolation": "RSP_BilinearInterpolation",
+            "mosaicRule": "{\"mosaicMethod\":\"esriMosaicLockRaster\",\"lockRasterIds\":[29992]}",
+            "f": "image"
+          },
+          "expectedMime": "image/jpeg",
+          "maximumBytes": 65536,
+          "sha256": "fcc30acf55f13530b82e338dfd5fe06da8a287d72f8a3d5687ca954aef23713d",
+          "image": { "width": 64, "height": 64 }
+        }
+      ]
+    },
+    {
+      "id": "noaa-gshhg-2-3-7-full",
+      "body": "earth",
+      "role": "surface-class",
+      "coverage": [-180, -90, 180, 90],
+      "version": "2.3.7; 2017-06-15",
+      "projection": "WGS84 geographic",
+      "verticalDatum": "not-applicable",
+      "license": "LGPL-3.0-or-later",
+      "licenseUrl": "https://www.ngdc.noaa.gov/mgg/shorelines/shorelines.html",
+      "delivery": "offline-build",
+      "artifactUrl": "https://www.soest.hawaii.edu/pwessel/gshhg/gshhg-shp-2.3.7.zip",
+      "artifactBytes": 149157845,
+      "artifactEtag": "8e3f7d5-55205ac34aa40",
+      "operations": []
+    },
+    {
+      "id": "usfws-nwi-ksc-snapshot-2026-07-20",
+      "body": "earth",
+      "role": "surface-class",
+      "coverage": [-80.75, 28.50, -80.50, 28.75],
+      "version": "bounded KSC snapshot observed 2026-07-20",
+      "projection": "source EPSG:3857; snapshot EPSG:4326",
+      "verticalDatum": "not-applicable",
+      "license": "USFWS public domain",
+      "licenseUrl": "https://www.fws.gov/program/national-wetlands-inventory/wetlands-data",
+      "delivery": "offline-build",
+      "operations": [
+        {
+          "id": "classification-service-metadata",
+          "url": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0",
+          "params": { "f": "pjson" },
+          "expectedMime": "text/plain",
+          "maximumBytes": 262144,
+          "json": {
+            "type": "Feature Layer",
+            "geometryType": "esriGeometryPolygon",
+            "supportedQueryFormats": "JSON, geoJSON, PBF"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nasa-moontrek-wac-303ppd-v02",
+      "body": "moon",
+      "role": "albedo",
+      "coverage": [-180, -90, 180, 90],
+      "version": "LRO_WAC_Mosaic_Global_303ppd_v02; UUID f0d436fb-c2a8-4c33-ba1c-afdf55bbd688",
+      "projection": "Moon 2000 equirectangular; radius 1737400 m",
+      "verticalDatum": "not-applicable",
+      "license": "NASA public domain",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "root-tile",
+          "url": "https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/0/0/0.jpg",
+          "expectedMime": "image/jpeg",
+          "expectedCors": "*",
+          "maximumBytes": 65536,
+          "sha256": "de4dcb39468cc7210da9e6a49912049235fc88d1584d9ac72c2889e039d352d0",
+          "image": { "width": 256, "height": 256 }
+        }
+      ]
+    },
+    {
+      "id": "nasa-moontrek-lola-global-128ppd-v04",
+      "body": "moon",
+      "role": "height",
+      "coverage": [-180, -90, 180, 90],
+      "version": "LRO_LOLA_DEM_Global_128ppd_v04; UUID 26ec7aa9-97e4-44e8-95f8-7aa220e5b206",
+      "projection": "EPSG:104903 Moon 2000 equirectangular",
+      "verticalDatum": "1737400 m Moon reference sphere",
+      "license": "NASA public domain",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "equator-height",
+          "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_Global_128ppd_v04/ImageServer/exportImage",
+          "params": {
+            "bbox": "-0.03125,-0.03125,0.03125,0.03125",
+            "bboxSR": "104903",
+            "imageSR": "104903",
+            "size": "8,8",
+            "format": "tiff",
+            "pixelType": "F32",
+            "interpolation": "RSP_NearestNeighbor",
+            "f": "image"
+          },
+          "expectedMime": "image/tiff",
+          "expectedCors": "*",
+          "maximumBytes": 131072,
+          "sha256": "456ed2539f7eac6ae44cd09d3bd86b78fa715e883b5180b8a8662ca73d2a734a",
+          "image": { "width": 8, "height": 8 },
+          "numeric": { "minimum": -728.5, "maximum": -716.5, "tolerance": 0.1 }
+        }
+      ]
+    },
+    {
+      "id": "nasa-moontrek-lola-spole-5m-v04",
+      "body": "moon",
+      "role": "height",
+      "coverage": [-180, -90, 180, -86.4641138],
+      "version": "LRO_LOLA_DEM_SPole875_5mp_v04_EQ; UUID 52bac771-64e8-4db8-8614-b28c40cd1366",
+      "projection": "Moon 2000 equirectangular",
+      "verticalDatum": "1737400 m Moon reference sphere",
+      "license": "NASA public domain",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "metadata",
+          "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_SPole875_5mp_v04_EQ/ImageServer",
+          "params": { "f": "pjson" },
+          "expectedMime": "text/plain",
+          "expectedCors": "*",
+          "maximumBytes": 262144,
+          "json": { "name": "LRO_LOLA_DEM_SPole875_5mp_v04_EQ", "pixelType": "S16" }
+        }
+      ]
+    },
+    {
+      "id": "noaa-vdatum-4-8-ksc-navd88-egm2008",
+      "body": "earth",
+      "role": "height",
+      "coverage": [-80.75, 28.5, -80.5, 28.75],
+      "version": "VDatum 4.8; bounded 3x3 KSC correction grid observed 2026-07-20",
+      "projection": "NAD83(2011) geographic to WGS84(G1674) geographic",
+      "verticalDatum": "NAVD88/GEOID18 to EGM2008/EGM2008",
+      "license": "NOAA public domain",
+      "licenseUrl": "https://www.noaa.gov/disclaimer",
+      "delivery": "offline-build",
+      "operations": [
+        {
+          "id": "ksc-center-zero-height-conversion",
+          "url": "https://vdatum.noaa.gov/vdatumweb/api/convert",
+          "params": {
+            "s_x": "-80.625",
+            "s_y": "28.625",
+            "s_z": "0",
+            "region": "contiguous",
+            "s_h_frame": "NAD83_2011",
+            "s_coor": "geo",
+            "s_h_unit": "m",
+            "s_v_frame": "NAVD88",
+            "s_v_unit": "m",
+            "s_v_elevation": "height",
+            "s_v_geoid": "geoid18",
+            "t_h_frame": "WGS84_G1674",
+            "t_coor": "geo",
+            "t_h_unit": "m",
+            "t_v_frame": "EGM2008",
+            "t_v_unit": "m",
+            "t_v_elevation": "height",
+            "t_v_geoid": "egm2008"
+          },
+          "expectedMime": "application/json",
+          "maximumBytes": 16384,
+          "json": {
+            "s_v_frame": "NAVD88",
+            "s_v_geoid": "geoid18",
+            "t_v_frame": "EGM2008",
+            "t_v_geoid": "egm2008",
+            "t_z": "-0.070",
+            "uncertainty": "0.160"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nasa-moontrek-lola-spole-100m-v04",
+      "body": "moon",
+      "role": "height",
+      "coverage": [-180, -90, 180, -45],
+      "version": "LRO_LOLA_DEM_SPole45_100mp_v04; UUID 9541d883-03c9-4db6-8ac6-168a9c496fe3",
+      "projection": "Moon 2000 south-polar stereographic",
+      "verticalDatum": "1737400 m Moon reference sphere",
+      "license": "NASA public domain",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "delivery": "direct-cors",
+      "operations": [
+        {
+          "id": "metadata",
+          "url": "https://trek.nasa.gov/moon/trekarcgis/rest/services/LRO_LOLA_DEM_SPole45_100mp_v04/ImageServer",
+          "params": { "f": "pjson" },
+          "expectedMime": "text/plain",
+          "expectedCors": "*",
+          "maximumBytes": 262144,
+          "json": { "name": "LRO_LOLA_DEM_SPole45_100mp_v04", "pixelType": "F32" }
+        }
+      ]
+    }
+  ]
+}

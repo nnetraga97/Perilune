@@ -43,6 +43,11 @@ async function boot(): Promise<void> {
     await runLocalCloudCompositeProto();
     return;
   }
+  if (proto === 'planet-detail') {
+    const { runPlanetDetailProto } = await import('./proto/planetDetailProto');
+    await runPlanetDetailProto();
+    return;
+  }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
   await startGame(renderStartupOptions);

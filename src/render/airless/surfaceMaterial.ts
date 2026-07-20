@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { BodyMaterialDescriptor } from '../bodyMaterial';
 import type { QualityTier, RuntimeBodyAssetPack } from '../bodyRenderer';
 import { BODY_FIXED_UV_GLSL } from '../terrestrial/globalCoordinates';
+import { PLANET_DETAIL_GLSL, bindPlanetDetailUniforms, createPlanetDetailMaterialState } from '../planetDetail/detailMaterial';
+import { bindTerrainDetailUniforms, createTerrainDetailMaterialState, TERRAIN_DETAIL_GLSL } from '../planetDetail/terrainDetailMaterial';
 
 function requiredTexture(pack: Readonly<RuntimeBodyAssetPack>, channel: string): THREE.Texture {
   const texture = pack.textures.get(channel);
@@ -46,13 +48,17 @@ export function createAirlessSurfaceMaterial(
     roughness: 1,
     metalness: 0,
   }) as AirlessSurfaceMaterial;
+  const detail = createPlanetDetailMaterialState();
+  const terrainDetail = createTerrainDetailMaterialState();
   Object.assign(material.userData, {
     airlessSurface: true,
     bodyId: descriptor.bodyId,
     authored: pack !== null,
     tier,
+    planetDetail: detail,
+    terrainDetail,
   });
-  material.customProgramCacheKey = () => `airless-surface-v1:${pack ? 'authored' : 'fallback'}:${tier}`;
+  material.customProgramCacheKey = () => `airless-surface-v2:${pack ? 'authored' : 'fallback'}:${tier}`;
   if (!pack) return material;
 
   const albedo = requiredTexture(pack, 'albedo');
@@ -81,6 +87,8 @@ export function createAirlessSurfaceMaterial(
     shader.uniforms.airlessLocalDetailMap = { value: localDetail };
     shader.uniforms.airlessUseLocalDetail = { value: localDetail ? 1 : 0 };
     shader.uniforms.airlessMacroNormalWeight = { value: tier === 'low' ? 0.2 : tier === 'medium' ? 0.32 : 0.42 };
+    bindPlanetDetailUniforms(shader, detail);
+    bindTerrainDetailUniforms(shader, terrainDetail);
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -108,7 +116,9 @@ uniform mat3 normalMatrix;
 varying vec3 vAirlessBodyDirection;
 varying vec3 vAirlessGeometryNormal;
 varying vec3 vAirlessDetailAnchor;
-${BODY_FIXED_UV_GLSL}
+	${BODY_FIXED_UV_GLSL}
+	${PLANET_DETAIL_GLSL}
+	${TERRAIN_DETAIL_GLSL}
 vec3 decodeAirlessSurfaceOctNormal(vec2 encoded) {
   vec2 f = encoded * 2.0 - 1.0;
   vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
@@ -150,12 +160,16 @@ vec3 sampleAirlessLocalNormal(vec3 anchor, vec3 bodyNormal) {
       )
       .replace(
         '#include <map_fragment>',
-        `vec2 airlessSurfaceUv = bodyFixedUv(vAirlessBodyDirection);
-vec4 airlessSurfaceMaterial = texture2D(airlessMaterialMap, airlessSurfaceUv);
+	`vec2 airlessSurfaceUv = bodyFixedUv(vAirlessBodyDirection);
+	vec4 airlessSurfaceMaterial = texture2D(airlessMaterialMap, airlessSurfaceUv);
+	vec4 airlessSurfaceDetail = samplePlanetDetail(vAirlessBodyDirection);
+	vec4 airlessTerrainDetail = sampleTerrainDetail(vAirlessBodyDirection);
 float airlessLocalFootprint = max(max(length(fwidth(vAirlessDetailAnchor.yz / 6.0)), length(fwidth(vAirlessDetailAnchor.xz / 6.0))), length(fwidth(vAirlessDetailAnchor.xy / 6.0)));
 float airlessLocalFade = airlessUseLocalDetail * (1.0 - smoothstep(0.035, 0.28, airlessLocalFootprint));
 vec4 airlessLocal = sampleAirlessLocalTriplanar(vAirlessDetailAnchor, normalize(vAirlessGeometryNormal));
-diffuseColor.rgb *= texture2D(airlessAlbedoMap, airlessSurfaceUv).rgb * 0.30;
+	vec3 airlessSurfaceAlbedo = mix(texture2D(airlessAlbedoMap, airlessSurfaceUv).rgb, airlessSurfaceDetail.rgb, airlessSurfaceDetail.a);
+	airlessSurfaceAlbedo = mix(airlessSurfaceAlbedo, airlessTerrainDetail.rgb, airlessTerrainDetail.a);
+	diffuseColor.rgb *= airlessSurfaceAlbedo * 0.30;
 diffuseColor.rgb *= mix(0.76, 1.0, airlessSurfaceMaterial.g);
 diffuseColor.rgb *= mix(1.0, mix(0.88, 1.1, airlessLocal.r), airlessLocalFade * 0.45);`,
       )
@@ -173,6 +187,8 @@ vec3 airlessMacroDelta = airlessMacroNormal - airlessRadialNormal * dot(airlessM
 vec3 airlessComposedNormal = normalize(normalize(vAirlessGeometryNormal) + airlessMacroDelta * airlessMacroNormalWeight);
 vec3 airlessLocalNormal = sampleAirlessLocalNormal(vAirlessDetailAnchor, normalize(vAirlessGeometryNormal));
 airlessComposedNormal = normalize(mix(airlessComposedNormal, airlessLocalNormal, airlessLocalFade * 0.14));
+vec4 airlessSourceNormal = sampleTerrainDetailNormal(vAirlessBodyDirection);
+airlessComposedNormal = normalize(mix(airlessComposedNormal, airlessSourceNormal.rgb, airlessSourceNormal.a * terrainDetailNormalStrength));
 normal = normalize(normalMatrix * airlessComposedNormal);`,
       );
   };

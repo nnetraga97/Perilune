@@ -187,6 +187,35 @@ export function terrainTileUvBounds(tile: Readonly<TerrainTileId>): TerrainTileU
   });
 }
 
+/** Resolve the unique cube-quadtree tile containing a body-fixed direction. */
+export function terrainTileAtDirection(
+  direction: Readonly<{ x: number; y: number; z: number }>,
+  depth: number,
+): TerrainTileId {
+  let face: CubeFace = 0;
+  let faceScale = -Infinity;
+  for (let candidate = 0; candidate < 6; candidate++) {
+    const basis = CUBE_FACE_BASES[candidate as CubeFace];
+    const scale = direction.x * basis.n[0] + direction.y * basis.n[1] + direction.z * basis.n[2];
+    if (scale > faceScale) { face = candidate as CubeFace; faceScale = scale; }
+  }
+  if (!(faceScale > 0)) throw new RangeError('Terrain tile direction must be nonzero');
+  const basis = CUBE_FACE_BASES[face];
+  const u = Math.atan(
+    (direction.x * basis.u[0] + direction.y * basis.u[1] + direction.z * basis.u[2]) / faceScale,
+  ) / (Math.PI / 4);
+  const v = Math.atan(
+    (direction.x * basis.v[0] + direction.y * basis.v[1] + direction.z * basis.v[2]) / faceScale,
+  ) / (Math.PI / 4);
+  const count = 2 ** depth;
+  return createTerrainTileId(
+    face,
+    depth,
+    Math.max(0, Math.min(count - 1, Math.floor((u + 1) * 0.5 * count))),
+    Math.max(0, Math.min(count - 1, Math.floor((v + 1) * 0.5 * count))),
+  );
+}
+
 export function edgeNeighbor(
   tile: Readonly<TerrainTileId>,
   edge: TerrainTileEdge,
