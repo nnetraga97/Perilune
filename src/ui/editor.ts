@@ -61,6 +61,22 @@ const CATEGORIES: Array<{ id: PartDef['category']; label: string }> = [
 
 const SNAP_ANGLES = [0, 5, 15, 45, 90] as const;
 
+const NEW_CRAFT_NAMES = Object.freeze([
+  'Orion',
+  'Columbia',
+  'Odyssey',
+  'Kitty Hawk',
+  'Endeavour',
+  'Discovery',
+]);
+let nextCraftNameIndex = 0;
+
+function nextCraftName(): string {
+  const name = NEW_CRAFT_NAMES[nextCraftNameIndex];
+  nextCraftNameIndex = (nextCraftNameIndex + 1) % NEW_CRAFT_NAMES.length;
+  return name;
+}
+
 /** Remove selected descendants whose ancestor is already selected. */
 export function normalizedBranchRoots(craft: Readonly<Craft>, keys: Iterable<number>): number[] {
   const selected = new Set(keys);
@@ -105,7 +121,7 @@ export class Editor {
   readonly camera: THREE.PerspectiveCamera;
   readonly root: HTMLElement;
   readonly utilityHost: HTMLElement;
-  craft: Craft = createCraft('Untitled Craft');
+  craft: Craft = createCraft(nextCraftName());
 
   private visual: VesselVisual | null = null;
   private ghost: THREE.Object3D | null = null;
@@ -253,7 +269,9 @@ export class Editor {
     this.nameInput = el('input', 'ed-name', topPrimary) as HTMLInputElement;
     this.nameInput.value = this.craft.name;
     this.nameInput.onchange = () => {
-      this.craft.name = this.nameInput.value || 'Untitled Craft';
+      const name = this.nameInput.value.trim();
+      if (name) this.craft.name = name;
+      this.nameInput.value = this.craft.name;
     };
     this.campaignEl = el('div', 'ed-campaign-balance', topPrimary);
     this.launchBtn = el('button', 'hud-btn ed-launch', topPrimary, '▲ LAUNCH') as HTMLButtonElement;
@@ -285,7 +303,7 @@ export class Editor {
     const clear = el('button', 'hud-btn', topScroll, 'New');
     clear.onclick = () => {
       this.pushHistory();
-      this.craft = createCraft('Untitled Craft');
+      this.craft = createCraft(nextCraftName());
       this.nameInput.value = this.craft.name;
       this.setSelection([], null);
       this.statsDirty = true;

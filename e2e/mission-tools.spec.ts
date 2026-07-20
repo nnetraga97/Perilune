@@ -37,7 +37,7 @@ test('mission windows connect alarms, transfers, targets, and maneuver sketches'
   await expect(page.locator('.map-panel')).toBeVisible();
 
   await page.getByRole('button', { name: 'Fleet', exact: true }).click();
-  await expect(page.locator('.fleet-row .fleet-name')).toHaveValue('Untitled Craft');
+  await expect(page.locator('.fleet-row .fleet-name')).toHaveValue('Orion');
   const pallaTarget = page.locator('.body-row', { hasText: 'Palla' });
   await expect(pallaTarget.getByRole('button', { name: 'Orbit', exact: true })).toBeVisible();
   await pallaTarget.getByRole('button', { name: 'Orbit', exact: true }).click();
