@@ -260,10 +260,18 @@ export class TerrainDetailController {
     const cacheHits = { memory: 0, persistent: 0, network: 0 };
     const timings = { fetch: 0, decode: 0, reproject: 0, upload: 0 };
     let numericFallback: string | undefined;
+    const heightSource = planetHeightDetailSource(this.bodyId);
+    const heightTiles = heightSource && (this.bodyId === 'moon' || source.datasetId === 'usda-naip-ksc-2025-29992')
+      ? tiles.filter((tile) => intersectsCoverage(geographicBoundsForTerrainTile(tile), heightSource.coverage))
+      : [];
     try {
-      if (jobs.length > this.budget.maximumRequestsPerGeneration) throw new Error('Terrain detail request budget exceeded');
+      if (jobs.length > this.budget.maximumVisualRequestsPerGeneration) throw new Error('Terrain visual-detail request budget exceeded');
+      if (heightTiles.length > this.budget.maximumNumericRequestsPerGeneration
+        || jobs.length + heightTiles.length > this.budget.maximumRequestsPerGeneration) {
+        throw new Error('Terrain numeric-detail request budget exceeded');
+      }
       const fetchStarted = performance.now();
-      await Promise.all(Array.from({ length: Math.min(this.budget.concurrentRequests, jobs.length) }, async () => {
+      const workers = Array.from({ length: Math.min(this.budget.concurrentRequests, jobs.length) }, async () => {
         for (;;) {
           const job = jobs[next++];
           if (!job) return;
@@ -278,7 +286,10 @@ export class TerrainDetailController {
           }
           decoded.push({ x: job.x, y: job.y, bitmap });
         }
-      }));
+      });
+      const workerResults = await Promise.allSettled(workers);
+      const rejectedWorker = workerResults.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (rejectedWorker) throw rejectedWorker.reason;
       timings.fetch += performance.now() - fetchStarted;
       if (signal.aborted || generation !== this.generation || this.disposed) return;
       const decodeStarted = performance.now();
@@ -293,12 +304,10 @@ export class TerrainDetailController {
       const colorTransform = detailColorTransform(source.datasetId, image.data);
       timings.decode += performance.now() - decodeStarted;
 
-      const heightSource = planetHeightDetailSource(this.bodyId);
       const heightAtlases = new Map<string, LoadedHeightAtlas>();
-      if (heightSource && (this.bodyId === 'moon' || source.datasetId === 'usda-naip-ksc-2025-29992')) {
-        for (const tile of tiles) {
+      if (heightSource) {
+        for (const tile of heightTiles) {
           const bounds = geographicBoundsForTerrainTile(tile);
-          if (!intersectsCoverage(bounds, heightSource.coverage)) continue;
           try {
             const started = performance.now();
             const address = heightSource.request(bounds, 258, 258);
@@ -424,6 +433,11 @@ export class TerrainDetailController {
       const nextTextures = [colorTexture];
       const nextNormalTextures = normalTexture ? [normalTexture] : [];
       const gpuBytes = atlasWidth * atlasHeight * 4 * 4 / 3 * (normalTexture ? 2 : 1);
+      if (gpuBytes > this.budget.gpuBytes) {
+        colorTexture.dispose();
+        normalTexture?.dispose();
+        throw new Error('Terrain detail GPU budget exceeded');
+      }
       // All requested visual pages are installed in one material-state commit.
       state.pageAtlas.value = colorTexture;
       state.normalAtlas.value = normalTexture;
@@ -437,7 +451,6 @@ export class TerrainDetailController {
       previousTextures.forEach((texture) => texture.dispose());
       previousNormals.forEach((texture) => texture.dispose());
       timings.upload = performance.now() - uploadStarted;
-      if (gpuBytes > this.budget.gpuBytes) throw new Error('Terrain detail GPU budget exceeded');
       const heightRangeMeters = Number.isFinite(minimumHeight) && Number.isFinite(maximumHeight)
         ? Object.freeze([minimumHeight, maximumHeight] as const)
         : undefined;

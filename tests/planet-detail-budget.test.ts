@@ -6,11 +6,13 @@ describe('planet visual-detail budgets', () => {
     expect(planetDetailBudget('low')).toMatchObject({ enabled: false, activeGpuBytes: 0, gpuBytes: 0, concurrentRequests: 0 });
     expect(planetDetailBudget('medium')).toMatchObject({
       enabled: true, activeGpuBytes: 16 * 1024 * 1024, gpuBytes: 32 * 1024 * 1024, decodedCpuBytes: 24 * 1024 * 1024,
-      persistentBytes: 256 * 1024 * 1024, concurrentRequests: 4, maximumRequestsPerGeneration: 9,
+      persistentBytes: 256 * 1024 * 1024, concurrentRequests: 4,
+      maximumVisualRequestsPerGeneration: 9, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 13,
     });
     expect(planetDetailBudget('high')).toMatchObject({
       enabled: true, activeGpuBytes: 16 * 1024 * 1024, gpuBytes: 64 * 1024 * 1024, decodedCpuBytes: 48 * 1024 * 1024,
-      persistentBytes: 512 * 1024 * 1024, concurrentRequests: 6, maximumRequestsPerGeneration: 9,
+      persistentBytes: 512 * 1024 * 1024, concurrentRequests: 6,
+      maximumVisualRequestsPerGeneration: 9, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 13,
     });
   });
 

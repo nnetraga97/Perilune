@@ -32,9 +32,9 @@ export interface AirlessSurfaceMaterial extends THREE.MeshStandardMaterial {
 
 /**
  * Terrain material for the Moon and future airless bodies. Geometric terrain
- * normals remain authoritative; the source macro normal contributes only its
- * tangent-space departure from the datum sphere, so it cannot flatten local
- * crater rims or streamed terrain slopes.
+ * normals remain authoritative; resident and streamed source normals contribute
+ * only their tangent-space departure from the datum sphere, so they cannot
+ * replace local crater rims or streamed terrain slopes with a coarser normal.
  */
 export function createAirlessSurfaceMaterial(
   pack: Readonly<RuntimeBodyAssetPack> | null,
@@ -188,7 +188,8 @@ vec3 airlessComposedNormal = normalize(normalize(vAirlessGeometryNormal) + airle
 vec3 airlessLocalNormal = sampleAirlessLocalNormal(vAirlessDetailAnchor, normalize(vAirlessGeometryNormal));
 airlessComposedNormal = normalize(mix(airlessComposedNormal, airlessLocalNormal, airlessLocalFade * 0.14));
 vec4 airlessSourceNormal = sampleTerrainDetailNormal(vAirlessBodyDirection);
-airlessComposedNormal = normalize(mix(airlessComposedNormal, airlessSourceNormal.rgb, airlessSourceNormal.a * terrainDetailNormalStrength));
+vec3 airlessSourceDelta = airlessSourceNormal.rgb - airlessRadialNormal * dot(airlessSourceNormal.rgb, airlessRadialNormal);
+airlessComposedNormal = normalize(airlessComposedNormal + airlessSourceDelta * airlessSourceNormal.a * terrainDetailNormalStrength);
 normal = normalize(normalMatrix * airlessComposedNormal);`,
       );
   };

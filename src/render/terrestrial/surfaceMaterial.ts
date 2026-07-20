@@ -426,7 +426,8 @@ vec3 surfPerturbed = normalize(surfMacroNormal - surfTangentGradient * surfBump)
 vec3 surfLocalNormal = sampleLocalDetailNormal(surfStableAnchor, surfRadialProjection, surfLocalCell);
 surfPerturbed = normalize(mix(surfPerturbed, surfLocalNormal, surfLocalFade * 0.12));
 vec4 surfSourceNormal = sampleTerrainDetailNormal(vBodyDirection);
-surfPerturbed = normalize(mix(surfPerturbed, surfSourceNormal.rgb, surfSourceNormal.a * terrainDetailNormalStrength));
+vec3 surfSourceDelta = surfSourceNormal.rgb - surfRadialNormal * dot(surfSourceNormal.rgb, surfRadialNormal);
+surfPerturbed = normalize(surfPerturbed + surfSourceDelta * surfSourceNormal.a * terrainDetailNormalStrength);
 normal = normalize(normalMatrix * surfPerturbed);
 `;
 

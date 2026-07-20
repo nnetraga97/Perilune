@@ -98,10 +98,10 @@ export class CompactDetailController {
     let requestBytes = 0;
     const decoded: Array<{ x: number; y: number; bitmap: ImageBitmap }> = [];
     try {
-      if (jobs.length > this.budget.maximumRequestsPerGeneration) {
-        throw new Error(`Planet detail selection exceeds ${this.budget.maximumRequestsPerGeneration} requests`);
+      if (jobs.length > this.budget.maximumVisualRequestsPerGeneration) {
+        throw new Error(`Planet detail selection exceeds ${this.budget.maximumVisualRequestsPerGeneration} visual requests`);
       }
-      await Promise.all(Array.from({ length: Math.min(this.budget.concurrentRequests, jobs.length) }, async () => {
+      const workers = Array.from({ length: Math.min(this.budget.concurrentRequests, jobs.length) }, async () => {
         for (;;) {
           const job = jobs[next++];
           if (!job) return;
@@ -114,7 +114,10 @@ export class CompactDetailController {
           }
           decoded.push({ x: job.x, y: job.y, bitmap });
         }
-      }));
+      });
+      const workerResults = await Promise.allSettled(workers);
+      const rejectedWorker = workerResults.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (rejectedWorker) throw rejectedWorker.reason;
       if (signal.aborted || generation !== this.generation || this.disposed) return;
       const canvas = document.createElement('canvas');
       canvas.width = source.tileSize * selection.gridWidth;

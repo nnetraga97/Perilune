@@ -47,6 +47,8 @@ describe('sourced local material sampling', () => {
     expect(shader.fragmentShader).toContain('surfLocalFade * 0.12');
     expect(shader.fragmentShader).toContain('sampleTerrainDetail(vBodyDirection)');
     expect(shader.fragmentShader).toContain('sampleTerrainDetailNormal(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('surfSourceDelta');
+    expect(shader.fragmentShader).not.toContain('mix(surfPerturbed, surfSourceNormal.rgb');
     expect(shader.fragmentShader).toContain('terrainDetailNormalStrength');
     expect(shader.uniforms.terrainDetailPageCount.value).toBe(0);
     expect(shader.uniforms.terrainDetailPageAtlas.value).toBeNull();
@@ -74,6 +76,8 @@ describe('sourced local material sampling', () => {
     expect(shader.vertexShader).not.toContain('airlessLocalDetailMap');
     expect(shader.fragmentShader).toContain('sampleTerrainDetail(vAirlessBodyDirection)');
     expect(shader.fragmentShader).toContain('sampleTerrainDetailNormal(vAirlessBodyDirection)');
+    expect(shader.fragmentShader).toContain('airlessSourceDelta');
+    expect(shader.fragmentShader).not.toContain('mix(airlessComposedNormal, airlessSourceNormal.rgb');
     expect(shader.fragmentShader).toContain('terrainDetailNormalStrength');
     expect(shader.uniforms.terrainDetailPageCount.value).toBe(0);
     expect(shader.uniforms.terrainDetailNormalAtlas.value).toBeNull();

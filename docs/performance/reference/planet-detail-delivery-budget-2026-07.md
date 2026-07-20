@@ -10,7 +10,13 @@ detail allocations remain reported and checked against the tier ceiling.
 
 The proxy-backed KSC NAIP adapter remains disabled unless deployment explicitly
 sets `PLANET_DETAIL_MONTHLY_COST_CEILING_USD` to at least **$400**. Direct-CORS
-GIBS and Moon Trek pages do not use this proxy gate.
+GIBS visual pages, Moon Trek visual/LOLA pages, and USGS 3DEP requests to
+`elevation.nationalmap.gov` do not use this proxy gate.
+
+Each terrain generation is limited to nine visual requests plus four numeric
+height requests, with a hard combined ceiling of thirteen. Compact rendering
+uses only the nine-request visual allowance. The proxy session ceilings below
+continue to apply independently to KSC NAIP requests.
 
 The authorization threshold is deliberately conservative. The production route
 also fails closed without Redis, caps the rolling 30-day global function budget

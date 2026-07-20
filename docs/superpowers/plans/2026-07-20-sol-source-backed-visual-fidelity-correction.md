@@ -353,7 +353,7 @@ This milestone fixes false water and the derivation chain with no runtime networ
 **Verification:**
 
 ```bash
-npm run check:height-authority
+npm run check:height-authority:source
 npm run validate:content
 npx vitest run tests/scientific-height-derivation.test.ts tests/macro-height-field.test.ts tests/terrain-authority.test.ts tests/scientific-global-maps.test.ts tests/surface-classification.test.ts tests/veyra-assets.test.ts tests/sol-asset-provenance.test.ts tests/veyra-global-material.test.ts tests/veyra-ocean.test.ts tests/scatter-profile.test.ts tests/scatter-recipe.test.ts tests/ocean-cap.test.ts tests/terrestrial-body-renderer.test.ts tests/map-material.test.ts tests/map-body-placement.test.ts
 npm test
@@ -437,7 +437,7 @@ Do not raise the existing active-body budget silently. Detail allocations are ch
 
 **Rules:**
 
-- Use direct CORS access for immutable/pinned GIBS and Moon Trek products when policy permits. Use the same-origin route for NAIP and any normalized response format.
+- Use direct CORS access for the locked GIBS, Moon Trek visual/LOLA, and USGS 3DEP products when policy permits. Use the same-origin route for NAIP and any normalized response format.
 - The API accepts a checked dataset ID plus validated tile/image coordinates. It never accepts a URL, host, protocol, path traversal, arbitrary ArcGIS endpoint, auth header, or caller-selected response size.
 - Each dataset adapter defines its upstream host, path template, maximum dimensions, format, timeout, maximum bytes, and allowed query parameters.
 - The production handler enforces a 10-second upstream timeout and a 2 MiB maximum decoded response body per invocation; a dataset may set stricter bounds but not looser ones.

@@ -8,6 +8,7 @@
 
 - Milestone 0 source locks, live probes, authority inspection, numeric oracles, and categorical surface-class oracles.
 - Direct-source Earth and Moon resident height derivation. Visual derivatives are no longer accepted as numeric height authority.
+- Deploy validation checks the committed generated height artifact and its internal digest without requiring ignored authoring TIFFs. `npm run check:height-authority:source` remains the source-backed freshness check for authoring environments that hold those originals.
 - Exact Earth `surfaceClass` products with a complete global parent and a KSC regional override. Ocean ownership and scatter eligibility resolve exact class codes rather than height sign or filtered color.
 - Bounded GIBS, Moon Trek WAC, and allowlisted KSC NAIP adapters; tier budgets; abort/retry behavior; in-memory and persistent caches; generation keys; and deterministic resident-parent fallback.
 - A same-origin `/api/planet-data` route that accepts only the locked NAIP dataset and computed tile coordinates. It enforces coverage, response size, timeout, cost gating, rate limiting, cache headers, and fail-closed production behavior.
@@ -39,5 +40,5 @@
 
 - Proxy-backed detail defaults off unless `PLANET_DETAIL_MONTHLY_COST_CEILING_USD` is at least the documented conservative threshold.
 - Production requires the configured external limiter; missing limiter state fails closed.
-- Direct-source CSP access is limited to the locked NASA GIBS and Moon Trek hosts. NAIP remains same-origin through the allowlisted API.
+- Direct-source CSP access is limited to the locked NASA GIBS, Moon Trek visual/LOLA, and USGS 3DEP (`elevation.nationalmap.gov`) hosts. NAIP remains same-origin through the allowlisted API.
 - Cost assumptions and stop rules are recorded in `docs/performance/reference/planet-detail-delivery-budget-2026-07.md`.
