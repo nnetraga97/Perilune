@@ -179,6 +179,9 @@ export class Body {
 
 const _pr = new Vec3();
 const _pv = new Vec3();
+/** Dedicated to relativePosition so it never aliases absolutePosition's scratch. */
+const _anchorR = new Vec3();
+const _anchorV = new Vec3();
 
 export class Universe {
   readonly bodies = new Map<string, Body>();
@@ -230,17 +233,32 @@ export class Universe {
     elementsAtTime(body.orbit, t, outR, outV ?? _pv);
   }
 
-  /** Absolute (root-frame) position of a body at time t. Only for map-scale math. */
+  /**
+   * Absolute (root-frame) position of a body at time t. Only for map-scale math.
+   *
+   * Accumulates into locals and writes the outputs once at the end, so the call
+   * stays correct even when `outR`/`outV` alias this module's scratch vectors.
+   */
   absolutePosition(body: Body, t: number, outR: Vec3, outV?: Vec3): void {
-    outR.set(0, 0, 0);
-    outV?.set(0, 0, 0);
+    let rx = 0;
+    let ry = 0;
+    let rz = 0;
+    let vx = 0;
+    let vy = 0;
+    let vz = 0;
     let b: Body | null = body;
     while (b && b.orbit) {
       elementsAtTime(b.orbit, t, _pr, _pv);
-      outR.add(_pr);
-      outV?.add(_pv);
+      rx += _pr.x;
+      ry += _pr.y;
+      rz += _pr.z;
+      vx += _pv.x;
+      vy += _pv.y;
+      vz += _pv.z;
       b = b.parent;
     }
+    outR.set(rx, ry, rz);
+    outV?.set(vx, vy, vz);
   }
 
   /**
@@ -252,8 +270,8 @@ export class Universe {
     // most ancestors so the differences of large terms cancel in f64
     // comfortably within our system scale (~1e11 m => 1e-5 m ulp).
     this.absolutePosition(a, t, outR, outV);
-    this.absolutePosition(b, t, _pr, _pv);
-    outR.sub(_pr);
-    outV?.sub(_pv);
+    this.absolutePosition(b, t, _anchorR, _anchorV);
+    outR.sub(_anchorR);
+    outV?.sub(_anchorV);
   }
 }
