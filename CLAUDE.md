@@ -28,4 +28,4 @@ Use test-first development for simulation changes. Rendering may consume simulat
 
 ## Current Work
 
-The interrupted M2 planning baseline has been restored: transfer windows, mission alarms with warp interlock and save persistence, and pure atmospheric-entry prediction are implemented. The approved planet-graphics redesign is specified in `docs/superpowers/specs/2026-07-10-planet-graphics-design.md` and is being delivered in its numbered sequence.
+The interrupted M2 planning baseline has been restored: transfer windows, mission alarms with warp interlock and save persistence, and pure atmospheric-entry prediction are implemented. Active planet-visual work now follows `docs/superpowers/plans/2026-07-19-sol-earth-moon-visuals-and-scale.md`: a physically scaled Sun/Earth/Moon visual foundation with gameplay and Artemis mission work deferred. The earlier `docs/superpowers/specs/2026-07-10-planet-graphics-design.md` remains architectural history but its fictional-system delivery sequence is superseded.

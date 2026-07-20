@@ -2,7 +2,12 @@
 
 **Date:** 2026-07-10
 
-**Status:** Revision 4 approved — implementation-first sequencing, hardware certification last
+**Status:** Revision 4 historical — fictional-system delivery sequence superseded on 2026-07-19
+
+> The reusable rendering architecture in this document remains background context.
+> Active planet-visual delivery is governed by
+> `docs/superpowers/plans/2026-07-19-sol-earth-moon-visuals-and-scale.md`, which changes
+> the target system to physically scaled Sun, Earth, and Moon and defers gameplay work.
 
 **Scope:** Restore the interrupted M2 baseline, then build a scalable hybrid planet-rendering pipeline centered on orbit-to-ground flight and detailed surface operations.
 
