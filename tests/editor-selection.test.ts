@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import { addPart, createCraft } from '../src/sim/vessel';
-import { expandedBranchKeys, normalizedBranchRoots } from '../src/ui/editor';
+import {
+  expandedBranchKeys,
+  normalizedBranchRoots,
+  surfaceSymmetryPlacements,
+} from '../src/ui/editor';
 
 function branchedCraft() {
   const craft = createCraft('Selection graph');
@@ -30,5 +34,46 @@ describe('VAB branch selection', () => {
 
     expect(expanded).toEqual(new Set([left.key, right.key, leftBooster.key, rightBooster.key]));
     expect(expanded.has(tank.key)).toBe(false);
+  });
+});
+
+describe('VAB surface symmetry placement', () => {
+  test('propagates children across matching radial decoupler parents', () => {
+    const craft = createCraft('Radial parent symmetry');
+    const tank = addPart(craft, 'tank-s2', null, 'root', { x: 0, y: 2, z: 0 });
+    const group = 42;
+    const right = addPart(craft, 'dec-radial', tank.key, 'surface', { x: 1, y: 2, z: 0 }, undefined, group);
+    const left = addPart(craft, 'dec-radial', tank.key, 'surface', { x: -1, y: 2, z: 0 }, undefined, group);
+
+    const placements = surfaceSymmetryPlacements(
+      craft,
+      right.key,
+      { x: 2, y: 2, z: 0 },
+      2,
+      'radial',
+    );
+
+    expect(placements.map((placement) => placement.parentKey)).toEqual([right.key, left.key]);
+    expect(placements[0].position).toMatchObject({ x: 2, y: 2, z: 0 });
+    expect(placements[1].position.x).toBeCloseTo(-2);
+    expect(placements[1].position.y).toBeCloseTo(2);
+    expect(placements[1].position.z).toBeCloseTo(0);
+  });
+
+  test('retains ordinary radial placement when the parent is not symmetric', () => {
+    const craft = createCraft('Direct radial symmetry');
+    const tank = addPart(craft, 'tank-s2', null, 'root', { x: 0, y: 2, z: 0 });
+
+    const placements = surfaceSymmetryPlacements(
+      craft,
+      tank.key,
+      { x: 1, y: 2, z: 0 },
+      2,
+      'radial',
+    );
+
+    expect(placements.map((placement) => placement.parentKey)).toEqual([tank.key, tank.key]);
+    expect(placements[0].position.x).toBeCloseTo(1);
+    expect(placements[1].position.x).toBeCloseTo(-1);
   });
 });

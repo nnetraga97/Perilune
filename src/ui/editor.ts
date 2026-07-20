@@ -111,6 +111,81 @@ export function expandedBranchKeys(craft: Readonly<Craft>, roots: Iterable<numbe
   return expanded;
 }
 
+export interface SurfaceSymmetryPlacement {
+  parentKey: number;
+  position: Vec3;
+  yaw: number;
+}
+
+/**
+ * Plan surface copies, propagating them across an existing parent symmetry
+ * group when its size matches the active placement symmetry.
+ */
+export function surfaceSymmetryPlacements(
+  craft: Readonly<Craft>,
+  parentKey: number,
+  position: Readonly<{ x: number; y: number; z: number }>,
+  symmetry: number,
+  mode: 'radial' | 'mirror',
+): SurfaceSymmetryPlacement[] {
+  const parent = craft.parts.find((part) => part.key === parentKey);
+  if (!parent) return [];
+  const count = Math.max(1, Math.trunc(symmetry));
+  const relX = position.x - parent.position.x;
+  const relY = position.y - parent.position.y;
+  const relZ = position.z - parent.position.z;
+  const baseAngle = Math.atan2(relX, relZ);
+  const radius = Math.hypot(relX, relZ);
+
+  const parentPeers = parent.symmetry === 0 ? [] : craft.parts.filter((part) => (
+    part.symmetry === parent.symmetry
+    && part.defId === parent.defId
+    && part.attach === parent.attach
+  ));
+  if (count > 1 && parentPeers.length === count) {
+    const centerX = parentPeers.reduce((sum, part) => sum + part.position.x, 0) / count;
+    const centerZ = parentPeers.reduce((sum, part) => sum + part.position.z, 0) / count;
+    const sourceX = parent.position.x - centerX;
+    const sourceZ = parent.position.z - centerZ;
+    if (Math.hypot(sourceX, sourceZ) > 1e-6 && parentPeers.every((peer) => (
+      Math.hypot(peer.position.x - centerX, peer.position.z - centerZ) > 1e-6
+    ))) {
+      const sourceAngle = Math.atan2(sourceX, sourceZ);
+      return [parent, ...parentPeers.filter((peer) => peer.key !== parent.key)].map((peer) => {
+        const peerAngle = Math.atan2(peer.position.x - centerX, peer.position.z - centerZ);
+        const delta = peerAngle - sourceAngle;
+        const cos = Math.cos(delta);
+        const sin = Math.sin(delta);
+        return {
+          parentKey: peer.key,
+          position: new Vec3(
+            peer.position.x + relX * cos + relZ * sin,
+            peer.position.y + relY,
+            peer.position.z - relX * sin + relZ * cos,
+          ),
+          yaw: baseAngle + delta,
+        };
+      });
+    }
+  }
+
+  return Array.from({ length: count }, (_, index) => {
+    const radialAngle = baseAngle + (index / count) * Math.PI * 2;
+    const yaw = mode === 'mirror' && index % 2 === 1
+      ? -baseAngle + (Math.floor(index / 2) / Math.max(1, Math.ceil(count / 2))) * Math.PI * 2
+      : radialAngle;
+    return {
+      parentKey,
+      position: new Vec3(
+        parent.position.x + Math.sin(yaw) * radius,
+        position.y,
+        parent.position.z + Math.cos(yaw) * radius,
+      ),
+      yaw,
+    };
+  });
+}
+
 export interface EditorCallbacks {
   onLaunch(craft: Craft): Promise<string | null>;
   onExit(): void;
@@ -1400,27 +1475,23 @@ export class Editor {
       // Surface with symmetry around the stack (Y) axis.
       const symGroup = this.symmetry > 1 ? Date.now() % 1_000_000 : 0;
       const { pos, parentKey } = this.candidate;
-      const parent = craftPart(this.craft, parentKey)!;
-      const cx = parent.position.x;
-      const cz = parent.position.z;
-      const relX = pos.x - cx;
-      const relZ = pos.z - cz;
-      const baseAngle = Math.atan2(relX, relZ);
-      const radius = Math.hypot(relX, relZ);
-      for (let i = 0; i < this.symmetry; i++) {
-        const radialAngle = baseAngle + (i / this.symmetry) * Math.PI * 2;
-        const a = this.symmetryMode === 'mirror' && i % 2 === 1
-          ? -baseAngle + (Math.floor(i / 2) / Math.max(1, Math.ceil(this.symmetry / 2))) * Math.PI * 2
-          : radialAngle;
-        const rotQuat = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), a);
+      const placements = surfaceSymmetryPlacements(
+        this.craft,
+        parentKey,
+        pos,
+        this.symmetry,
+        this.symmetryMode,
+      );
+      for (const placement of placements) {
+        const rotQuat = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), placement.yaw);
         rotQuat.multiply(this.holdingRotation).normalize();
         const rot = { x: rotQuat.x, y: rotQuat.y, z: rotQuat.z, w: rotQuat.w };
         addPart(
           this.craft,
           def.id,
-          parentKey,
+          placement.parentKey,
           'surface',
-          { x: cx + Math.sin(a) * radius, y: pos.y, z: cz + Math.cos(a) * radius },
+          placement.position,
           rot,
           symGroup,
         );
