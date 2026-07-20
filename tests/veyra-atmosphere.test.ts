@@ -47,6 +47,7 @@ describe('Veyra atmosphere', () => {
     const physical = veyra.def.atmosphere!;
     expect(layer.shellRadius).toBe(veyra.radius + physical.height);
     expect(layer.mesh.scale.x).toBe(layer.shellRadius);
+    expect(layer.material.side).toBe(THREE.FrontSide);
 
     layer.update({
       cameraRelativeOrigin: { x: 10, y: 20, z: 30 },
@@ -55,6 +56,7 @@ describe('Veyra atmosphere', () => {
     });
     expect(layer.mesh.position.toArray()).toEqual([10, 20, 30]);
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(1);
+    expect(layer.material.side).toBe(THREE.BackSide);
     expect(layer.material.uniforms.uAerialPerspective).toBeUndefined();
     expect((layer.material.uniforms.uSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
 
@@ -64,6 +66,7 @@ describe('Veyra atmosphere', () => {
       bodySunDirection: { x: 1, y: 0, z: 0 },
     });
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(0);
+    expect(layer.material.side).toBe(THREE.FrontSide);
     layer.dispose();
   });
 

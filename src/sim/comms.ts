@@ -25,7 +25,7 @@ export interface GroundStation {
 export const GROUND_STATIONS: GroundStation[] = [
   {
     id: 'gs-cape',
-    name: 'Cape Skyward',
+    name: 'Kennedy Space Center · LC-39B',
     bodyId: 'home',
     dir: launchSiteBodyFixedDirection(new Vec3()),
     range: 5e10,

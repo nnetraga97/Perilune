@@ -137,7 +137,7 @@ export const CONTRACTS: readonly ContractDef[] = [
   {
     id: 'first-launch',
     name: 'Clear the Tower',
-    brief: 'Launch a vessel from Cape Skyward.',
+    brief: 'Launch a vessel from Kennedy Space Center LC-39B.',
     achievement: 'campaign:launched',
     rewardFunds: 4_000,
     rewardReputation: 1,

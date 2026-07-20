@@ -95,7 +95,7 @@ export function expandedBranchKeys(craft: Readonly<Craft>, roots: Iterable<numbe
 }
 
 export interface EditorCallbacks {
-  onLaunch(craft: Craft): string | null;
+  onLaunch(craft: Craft): Promise<string | null>;
   onExit(): void;
   campaign(): CampaignState;
 }
@@ -144,6 +144,7 @@ export class Editor {
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
   private launchBtn!: HTMLButtonElement;
+  private launchPending = false;
   private campaignEl!: HTMLElement;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
@@ -256,9 +257,19 @@ export class Editor {
     };
     this.campaignEl = el('div', 'ed-campaign-balance', topPrimary);
     this.launchBtn = el('button', 'hud-btn ed-launch', topPrimary, '▲ LAUNCH') as HTMLButtonElement;
-    this.launchBtn.onclick = () => {
-      const error = this.cb.onLaunch(structuredClone(this.craft));
-      if (error) this.showNotice(error, true);
+    this.launchBtn.onclick = async () => {
+      if (this.launchPending) return;
+      this.launchPending = true;
+      this.syncLaunchAvailability();
+      try {
+        const error = await this.cb.onLaunch(structuredClone(this.craft));
+        if (error) this.showNotice(error, true);
+      } catch (error) {
+        this.showNotice(error instanceof Error ? error.message : 'Launch preparation failed.', true);
+      } finally {
+        this.launchPending = false;
+        this.syncLaunchAvailability();
+      }
     };
     const topScroll = el('div', 'ed-topbar-scroll', top);
     this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
@@ -1435,13 +1446,26 @@ export class Editor {
     }
     this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
+    this.syncLaunchAvailability();
+    this.selectedKeys = new Set([...this.selectedKeys].filter((key) => Boolean(craftPart(this.craft, key))));
+    if (this.primarySelectedKey !== null && !this.selectedKeys.has(this.primarySelectedKey)) {
+      this.primarySelectedKey = this.selectedKeys.values().next().value ?? null;
+    }
+    this.syncHighlights();
+  }
+
+  private syncLaunchAvailability(): void {
     const campaign = this.cb.campaign();
     const locked = lockedCraftParts(campaign, this.craft);
     const cost = craftCost(this.craft);
     const canAfford = campaign.mode !== 'program' || campaign.funds >= cost;
-    const canLaunch = this.craft.parts.length > 0 && locked.length === 0 && canAfford;
+    const canLaunch = !this.launchPending && this.craft.parts.length > 0 && locked.length === 0 && canAfford;
     this.launchBtn.disabled = !canLaunch;
-    this.launchBtn.title = canLaunch
+    this.launchBtn.textContent = this.launchPending ? 'PREPARING EARTH…' : '▲ LAUNCH';
+    this.launchBtn.setAttribute('aria-busy', this.launchPending ? 'true' : 'false');
+    this.launchBtn.title = this.launchPending
+      ? 'Loading and compiling Earth visuals'
+      : canLaunch
       ? campaign.mode === 'program' ? `Commit ${cost.toLocaleString()} funds and launch` : 'Launch this craft'
       : this.craft.parts.length === 0
         ? 'Add at least one part before launch'
@@ -1449,11 +1473,6 @@ export class Editor {
           ? `Craft contains locked technology: ${locked.map((part) => part.name).join(', ')}`
           : `Insufficient funds: ${cost.toLocaleString()} required`;
     this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
-    this.selectedKeys = new Set([...this.selectedKeys].filter((key) => Boolean(craftPart(this.craft, key))));
-    if (this.primarySelectedKey !== null && !this.selectedKeys.has(this.primarySelectedKey)) {
-      this.primarySelectedKey = this.selectedKeys.values().next().value ?? null;
-    }
-    this.syncHighlights();
   }
 
   orbitCamera(dx: number, dy: number): void {

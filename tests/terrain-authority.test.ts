@@ -13,6 +13,8 @@ import {
 import {
   LAUNCH_PAD_CONTACT_RADIUS,
   LAUNCH_PAD_DECK_HEIGHT,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
   launchSiteBodyFixedDirection,
 } from '../src/sim/launchSite';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
@@ -40,6 +42,11 @@ function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
 }
 
 describe('planet surface authority', () => {
+  it('places the selected-system launch site at Kennedy Space Center LC-39B', () => {
+    expect(LAUNCH_SITE_LAT * 180 / Math.PI).toBeCloseTo(28.6272, 6);
+    expect(LAUNCH_SITE_LON * 180 / Math.PI).toBeCloseTo(-80.6209, 6);
+  });
+
   it('places a flat physical launchpad deck on natural Veyra terrain only inside its footprint', () => {
     const veyra = createLegacyGameState().universe.get('veyra');
     const site = launchSiteBodyFixedDirection(new Vec3());

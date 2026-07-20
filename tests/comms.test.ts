@@ -18,12 +18,12 @@ function probeCraft(antenna: 'ant-whip' | 'ant-wayline' | 'ant-dish' | null): Cr
 }
 
 describe('comms network', () => {
-  it('uses the launch-site authority for the Cape Skyward ground station', () => {
+  it('uses the launch-site authority for the Kennedy LC-39B ground station', () => {
     const game = createLegacyGameState();
     const gv = game.spawnOnPad(probeCraft('ant-whip'), 'Pad Probe');
     const status = evaluateComms(game, gv);
     expect(status.connected).toBe(true);
-    expect(status.path.at(-1)).toBe('Cape Skyward');
+    expect(status.path.at(-1)).toBe('Kennedy Space Center · LC-39B');
   });
 
   it('connects a whip-antenna probe in low orbit to the ground', () => {

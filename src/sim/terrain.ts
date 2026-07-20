@@ -57,7 +57,7 @@ export interface LaunchPadTerrainEnvelope {
 }
 
 /**
- * Natural terrain range under Cape Skyward's complete footprint. This is
+ * Natural terrain range under LC-39B's complete footprint. This is
  * cached per immutable body recipe; contact queries must not resample it every
  * physics tick.
  */
@@ -65,7 +65,7 @@ export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
   const cached = launchPadEnvelopeCache.get(body);
   if (cached) return cached;
   if (!body.def.launchSite || body.def.surfaceKind !== 'solid') {
-    throw new Error(`${body.name} has no Cape Skyward launchpad`);
+    throw new Error(`${body.name} has no LC-39B launchpad`);
   }
   const site = launchSiteBodyFixedDirection(new Vec3());
   const east = new Vec3(-site.y, site.x, 0).normalize();

@@ -259,7 +259,10 @@ class PeriluneGame {
       },
       onSetThrottle: (value) => {
         const gv = this.game.active;
-        if (gv && !this.controlBlocked) gv.runtime.controls.throttle = Math.max(0, Math.min(1, value));
+        if (gv && !this.controlBlocked) {
+          this.clearHeldThrottleInput();
+          gv.runtime.controls.throttle = Math.max(0, Math.min(1, value));
+        }
       },
       onSetFlightControl: (axis, value) => {
         this.touchFlightControl[axis] = Math.max(-1, Math.min(1, value));
@@ -611,7 +614,7 @@ class PeriluneGame {
     this.hud.setMissionStart(this.missionStart);
   }
 
-  private launch(craft: Craft): string | null {
+  private async launch(craft: Craft): Promise<string | null> {
     const locked = lockedCraftParts(this.game.campaign, craft);
     if (locked.length) {
       return `Unlock required technology for ${locked.map((part) => part.name).join(', ')}.`;
@@ -621,8 +624,21 @@ class PeriluneGame {
       if (cost > this.game.campaign.funds) {
         return `Launch requires ${cost.toLocaleString()} funds; ${this.game.campaign.funds.toLocaleString()} available.`;
       }
-      this.game.campaign.funds -= cost;
     }
+    const home = this.game.universe.get(this.game.universe.homeBodyId);
+    try {
+      await Promise.all([
+        this.world.prepareFlightBody(home),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
+      ]);
+    } catch (error) {
+      clientLog.error('sim.boundary.error', error, {
+        boundary: `launch-visual-preload:${home.id}`,
+        errorType: 'RenderPreloadFailure',
+      });
+      return `Could not prepare ${home.name} visuals. Retry launch.`;
+    }
+    if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
     this.launchedCraft = structuredClone(craft);
     this.game.clearFlightVessels();
     this.game.spawnOnPad(craft, craft.name);
@@ -1052,6 +1068,16 @@ class PeriluneGame {
       }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.resetTouchFlightControls();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.keys.clear();
+        this.resetTouchFlightControls();
+      }
+    });
     canvas.addEventListener('pointerdown', (e) => {
       if (this.screen === 'editor') {
         this.editorPointerDown(canvas, e);
@@ -1234,8 +1260,14 @@ class PeriluneGame {
       // ---- flight: control
       { code: 'KeyT', screen: flight, group: 'Control', label: 'Toggle SAS', handler: vessel((v) => (v.sas = v.sas === 'off' ? 'stability' : 'off')) },
       { code: 'KeyR', screen: flight, group: 'Control', label: 'Toggle RCS', handler: vessel((v) => (v.controls.rcs = !v.controls.rcs)) },
-      { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => (v.controls.throttle = 1)) },
-      { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => (v.controls.throttle = 0)) },
+      { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => {
+        this.clearHeldThrottleInput();
+        v.controls.throttle = 1;
+      }) },
+      { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => {
+        this.clearHeldThrottleInput();
+        v.controls.throttle = 0;
+      }) },
       { code: 'CapsLock', screen: flight, group: 'Control', label: 'Precision control', keyLabel: 'CapsLock', handler: (e) => {
         this.precisionControl = e.getModifierState('CapsLock');
       } },
@@ -1371,6 +1403,13 @@ class PeriluneGame {
       clampControl((this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0) + this.touchFlightControl['translate-y']),
       clampControl((this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0) + this.touchFlightControl['translate-z']),
     );
+  }
+
+  private clearHeldThrottleInput(): void {
+    this.keys.delete('ShiftLeft');
+    this.keys.delete('ShiftRight');
+    this.keys.delete('ControlLeft');
+    this.keys.delete('ControlRight');
   }
 
   private resetTouchFlightControls(): void {

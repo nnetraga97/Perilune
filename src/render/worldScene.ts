@@ -208,6 +208,7 @@ export class WorldScene {
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
+  private bodyRendererLoads = new Map<string, Promise<void>>();
   private lastBodyFrames = new Map<string, BodyRenderFrame>();
   private readonly rendererLedger: RendererResourceLedger;
   private readonly checkedPlanetManifest: CheckedPlanetManifest;
@@ -450,6 +451,35 @@ export class WorldScene {
     return this.bodyRendererManagers.get(bodyId)?.currentAssetPack() ?? null;
   }
 
+  /**
+   * Load, stage, compile, and promote the active body's authored visuals before
+   * the VAB hands control to flight. This is real readiness, not a timer-only
+   * loading screen; callers can add a minimum presentation delay separately.
+   */
+  async prepareFlightBody(body: Body): Promise<void> {
+    if (this.disposed) throw new Error('World scene is disposed');
+    this.setFlightTerrainOwner(body.id);
+    this.rendererFor(body);
+    if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
+    const manager = this.bodyRendererManagers.get(body.id);
+    if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
+
+    const pending = this.bodyRendererLoads.get(body.id);
+    if (pending) await pending;
+    if (manager.currentAssetPack() && manager.claimFlightResidency()) {
+      this.flightPromotedBodyId = body.id;
+      return;
+    }
+
+    // A compact pack may have completed just before the body became the flight
+    // owner. Rebuild once with the active-body budget and flight-scale channels.
+    await this.loadAuthoredRenderer(body.id, manager);
+    if (!manager.currentAssetPack() || !manager.claimFlightResidency()) {
+      throw new Error(`Flight-scale visual pack unavailable for ${body.id}`);
+    }
+    this.flightPromotedBodyId = body.id;
+  }
+
   qualityTier(): QualityTier { return this.quality; }
 
   /** Read-only diagnostics probe for the single pooled SRB smoke draw call. */
@@ -574,19 +604,35 @@ export class WorldScene {
       dispose: () => undefined,
     });
     this.bodyRenderers.set(body.id, renderer);
-    if (hasAuthoredPack) {
-      void manager.rebuildCommitted().then(() => {
-        const replacement = manager.current();
-        if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
-          if (replacement) this.bodyRenderers.set(body.id, replacement);
-          if (body.id === this.flightTerrainBodyId) this.flightPromotedBodyId = body.id;
-          if (this.renderFailureState?.bodyId === body.id) this.renderFailureState = null;
-        } else {
-          manager.dispose();
-        }
-      }).catch((error) => this.noteRendererFailure(body.id, error));
-    }
+    if (hasAuthoredPack) void this.loadAuthoredRenderer(body.id, manager).catch(() => undefined);
     return renderer;
+  }
+
+  private loadAuthoredRenderer(bodyId: string, manager: BodyRendererManager): Promise<void> {
+    // A few policy tests intentionally exercise a prototype-only WorldScene
+    // shell without running its constructor.
+    const loads = this.bodyRendererLoads ?? (this.bodyRendererLoads = new Map<string, Promise<void>>());
+    const active = loads.get(bodyId);
+    if (active) return active;
+    const load = manager.rebuildCommitted().then(() => {
+      const replacement = manager.current();
+      if (!this.disposed && this.bodyRendererManagers.get(bodyId) === manager) {
+        if (replacement) this.bodyRenderers.set(bodyId, replacement);
+        if (bodyId === this.flightTerrainBodyId && manager.claimFlightResidency()) {
+          this.flightPromotedBodyId = bodyId;
+        }
+        if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
+      } else {
+        manager.dispose();
+      }
+    }).catch((error) => {
+      this.noteRendererFailure(bodyId, error);
+      throw error;
+    }).finally(() => {
+      if (loads.get(bodyId) === load) loads.delete(bodyId);
+    });
+    loads.set(bodyId, load);
+    return load;
   }
 
   private setFlightTerrainOwner(bodyId: string | null): void {
@@ -617,15 +663,14 @@ export class WorldScene {
       return;
     }
     this.flightPromotionPending.add(bodyId);
-    void manager.rebuildCommitted().then(() => {
+    void this.loadAuthoredRenderer(bodyId, manager).then(() => {
       if (this.disposed || this.flightTerrainBodyId !== bodyId || this.bodyRendererManagers.get(bodyId) !== manager) return;
       const renderer = manager.current();
       if (renderer) this.bodyRenderers.set(bodyId, renderer);
-      this.flightPromotedBodyId = bodyId;
+      if (manager.claimFlightResidency()) this.flightPromotedBodyId = bodyId;
       if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
-    }).catch((error) => {
+    }).catch(() => {
       if (this.flightTerrainBodyId === bodyId) this.flightPromotionFailed.add(bodyId);
-      this.noteRendererFailure(bodyId, error);
     }).finally(() => {
       this.flightPromotionPending.delete(bodyId);
     });
@@ -1101,7 +1146,7 @@ export class WorldScene {
     }
     pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
 
-    // Cape Skyward is a single persistent world object, positioned from the
+    // LC-39B is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.
     if (body.def.launchSite) {
       const siteDir = launchSiteDirection(body, t, _tmp);
@@ -1264,6 +1309,7 @@ export class WorldScene {
     window.removeEventListener('resize', this.resizeHandler);
     for (const manager of this.bodyRendererManagers.values()) manager.dispose();
     this.bodyRendererManagers.clear();
+    this.bodyRendererLoads?.clear();
     for (const renderer of this.bodyRenderers.values()) {
       if (renderer.root.parent === this.scene) this.scene.remove(renderer.root);
     }

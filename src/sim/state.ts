@@ -257,7 +257,7 @@ export class GameState {
       minY = Math.min(minY, bottom);
     }
     const comY = runtime.massProps.com.y;
-    // groundRadiusInertial includes the pad's physical deck at Cape Skyward.
+    // groundRadiusInertial includes the pad's physical deck at LC-39B.
     const standHeight = comY - minY + 0.4;
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);

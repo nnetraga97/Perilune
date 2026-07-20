@@ -175,7 +175,10 @@ export function createAtmosphereMaterial(
         gl_FragColor = vec4(color * alpha, alpha);
       }
     `,
-    side: THREE.BackSide,
+    // Outside cameras must rasterize the near shell so the atmosphere remains
+    // in front of the opaque planet depth. TerrestrialAtmosphere flips this to
+    // BackSide after the camera crosses inside the shell.
+    side: THREE.FrontSide,
     transparent: true,
     depthWrite: false,
     blending: THREE.NormalBlending,

@@ -383,7 +383,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       )));
       if (angularDistance * this.body.radius < 10_000) {
         // The compact emergency sphere must remain below the visible deck
-        // until streamed terrain owns depth around Cape Skyward.
+        // until streamed terrain owns depth around LC-39B.
         this.compactAnchorHeight = Math.min(
           this.compactAnchorHeight,
           launchPadTerrainEnvelope(this.body).deckHeight - 0.25,

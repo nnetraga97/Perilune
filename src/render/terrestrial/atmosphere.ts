@@ -61,6 +61,11 @@ export class TerrestrialAtmosphere {
     sun.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
     const cameraRadius = Math.hypot(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
     const inside = cameraRadius < this.shellRadius;
+    const shellSide = inside ? THREE.BackSide : THREE.FrontSide;
+    if (this.material.side !== shellSide) {
+      this.material.side = shellSide;
+      this.material.needsUpdate = true;
+    }
     this.material.uniforms.uInsideAtmosphere.value = inside ? 1 : 0;
     this.material.uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
   }
