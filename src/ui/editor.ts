@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   ACTION_GROUP_IDS,
   addPart,
@@ -623,6 +624,10 @@ export class Editor {
 
   get cameraYaw(): number {
     return this.camYaw;
+  }
+
+  get cameraPitch(): number {
+    return this.camPitch;
   }
 
   get undoDepth(): number {
@@ -1495,7 +1500,7 @@ export class Editor {
 
   orbitCamera(dx: number, dy: number): void {
     this.camYaw -= dx * 0.006;
-    this.camPitch = Math.max(-0.5, Math.min(1.35, this.camPitch + dy * 0.006));
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.006);
   }
 
   zoomCamera(factor: number): void {
@@ -1524,10 +1529,16 @@ export class Editor {
       midY = (lo + hi) / 2;
     }
     this.camHeight = midY + this.camFocusOffset.y;
-    const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cz = Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cy = this.camHeight + Math.sin(this.camPitch) * this.camDist;
+    const yawCos = Math.cos(this.camYaw);
+    const yawSin = Math.sin(this.camYaw);
+    const pitchCos = Math.cos(this.camPitch);
+    const pitchSin = Math.sin(this.camPitch);
+    const cx = yawCos * pitchCos * this.camDist;
+    const cz = yawSin * pitchCos * this.camDist;
+    const cy = this.camHeight + pitchSin * this.camDist;
     this.camera.position.set(cx + this.camFocusOffset.x, cy, cz + this.camFocusOffset.z);
+    // Follow the pitch tangent through the poles so lookAt never loses its up axis.
+    this.camera.up.set(-yawCos * pitchSin, pitchCos, -yawSin * pitchSin);
     this.camera.lookAt(this.camFocusOffset.x, this.camHeight, this.camFocusOffset.z);
 
     if (this.statsDirty) {

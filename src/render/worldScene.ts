@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   GameState,
   GameVessel,
@@ -68,6 +69,7 @@ const _drawingBufferSize = new THREE.Vector2();
 const _east = new Vec3();
 const _north = new Vec3();
 const _camOffset = new Vec3();
+const _cameraOrbitUp = new Vec3();
 const _craftRight = new Vec3();
 const _craftNose = new Vec3();
 const _craftUp = new Vec3();
@@ -75,7 +77,6 @@ const _chaseForward = new Vec3();
 const _chaseRight = new Vec3();
 const _cameraFromBody = new Vec3();
 const _cameraBodyRelative = new Vec3();
-const _freeUp = new Vec3(0, 0, 1);
 const _cameraVelocity = new Vec3();
 const _cameraViewDirectionBF = new Vec3();
 const _cameraForwardThree = new THREE.Vector3();
@@ -265,6 +266,11 @@ export class WorldScene {
     this.camDist = 18;
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
+  }
+
+  orbitCamera(dx: number, dy: number): void {
+    this.camYaw -= dx * 0.005;
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.005);
   }
 
   zoomFov(delta: number): void {
@@ -931,12 +937,17 @@ export class WorldScene {
     const craftRight = v.att.rotate(_craftRight.set(1, 0, 0), _craftRight);
     const craftNose = v.att.rotate(_craftNose.set(0, 1, 0), _craftNose);
     const craftUp = v.att.rotate(_craftUp.set(0, 0, 1), _craftUp);
-    let cameraUp = up;
+    const cameraUp = _cameraOrbitUp;
     if (this.cameraMode === 'orbit') {
       camOffset
         .addScaled(east, cy * cp * this.camDist)
         .addScaled(north, sy * cp * this.camDist)
         .addScaled(up, sp * this.camDist);
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(east, -cy * sp)
+        .addScaled(north, -sy * sp)
+        .addScaled(up, cp);
     } else if (this.cameraMode === 'chase') {
       const chaseForward = _chaseForward.copy(craftNose).addScaled(up, -craftNose.dot(up));
       if (chaseForward.lengthSq() < 1e-8) chaseForward.copy(north);
@@ -946,15 +957,24 @@ export class WorldScene {
         .addScaled(chaseForward, -cy * cp * this.camDist)
         .addScaled(chaseRight, sy * cp * this.camDist)
         .addScaled(up, sp * this.camDist);
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(chaseForward, cy * sp)
+        .addScaled(chaseRight, -sy * sp)
+        .addScaled(up, cp);
     } else if (this.cameraMode === 'locked') {
       camOffset
         .addScaled(craftNose, -cy * cp * this.camDist)
         .addScaled(craftRight, sy * cp * this.camDist)
         .addScaled(craftUp, sp * this.camDist);
-      cameraUp = craftUp;
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(craftNose, cy * sp)
+        .addScaled(craftRight, -sy * sp)
+        .addScaled(craftUp, cp);
     } else {
       camOffset.set(cy * cp * this.camDist, sy * cp * this.camDist, sp * this.camDist);
-      cameraUp = _freeUp;
+      cameraUp.set(-cy * sp, -sy * sp, cp);
     }
 
     // Keep the camera above authoritative terrain on solid bodies.

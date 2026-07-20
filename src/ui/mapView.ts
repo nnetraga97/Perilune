@@ -12,6 +12,7 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   OrbitalElements,
   elementsAtTime,
@@ -839,7 +840,7 @@ export class MapView {
   /** Pointer controls (called by game shell). */
   orbitCamera(dx: number, dy: number): void {
     this.camYaw -= dx * 0.005;
-    this.camPitch = Math.max(-1.48, Math.min(1.48, this.camPitch + dy * 0.005));
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.005);
   }
 
   panCamera(dx: number, dy: number): void {
@@ -1438,11 +1439,15 @@ export class MapView {
     this.sun.target.position.set(0, 0, 0);
 
     // Camera around focus body origin.
-    const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch);
-    const cy = Math.sin(this.camYaw) * Math.cos(this.camPitch);
-    const cz = Math.sin(this.camPitch);
+    const yawCos = Math.cos(this.camYaw);
+    const yawSin = Math.sin(this.camYaw);
+    const pitchCos = Math.cos(this.camPitch);
+    const pitchSin = Math.sin(this.camPitch);
+    const cx = yawCos * pitchCos;
+    const cy = yawSin * pitchCos;
+    const cz = pitchSin;
     this.camera.position.set(cx * this.camDist, cy * this.camDist, cz * this.camDist).add(this.camFocus);
-    this.camera.up.set(0, 0, 1);
+    this.camera.up.set(-yawCos * pitchSin, -yawSin * pitchSin, pitchCos);
     this.camera.lookAt(this.camFocus);
 
     // Bodies in the active body's frame; camera focus may move among them.

@@ -211,6 +211,25 @@ test('secondary click exposes Make root while secondary drag remains camera orbi
   await expect(page.locator('.ed-part-context')).toHaveCount(0);
 });
 
+test('vertical camera orbit passes through the poles instead of hitting a pitch clamp', async ({ page }) => {
+  await openEditor(page);
+  const initialPitch = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+
+  await page.mouse.move(640, 650);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(640, 100, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  const pitchPastPole = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+  expect(pitchPastPole).toBeLessThan(-Math.PI / 2);
+
+  await page.mouse.move(640, 100);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(640, 650, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  const restoredPitch = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+  expect(restoredPitch).toBeCloseTo(initialPitch, 3);
+});
+
 test('narrow touch layout supports dock sheets, tap placement, long press, pinch, and multi-select', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openEditor(page);

@@ -540,6 +540,7 @@ class PeriluneGame {
         mobilePanel: this.editor.activeMobilePanel,
         editorCameraDistance: this.editor.cameraDistance,
         editorCameraYaw: this.editor.cameraYaw,
+        editorCameraPitch: this.editor.cameraPitch,
         editorUndoDepth: this.editor.undoDepth,
       }),
     };
@@ -1202,8 +1203,7 @@ class PeriluneGame {
         else this.map.orbitCamera(dx, dy);
       }
       else if (this.screen === 'flight') {
-        this.world.camYaw -= dx * 0.005;
-        this.world.camPitch = Math.max(-1.4, Math.min(1.4, this.world.camPitch + dy * 0.005));
+        this.world.orbitCamera(dx, dy);
       }
     });
     window.addEventListener('pointerup', (e) => {
