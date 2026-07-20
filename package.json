@@ -10,7 +10,7 @@
     "prebuild": "npm run validate:content && npm run sync:renderer-assets",
     "build": "tsc --noEmit && vite build",
     "migrate:cloud": "node scripts/apply-cloud-migration.mjs",
-    "vercel-build": "npm run migrate:cloud && npm run build",
+    "deploy-build": "npm run migrate:cloud && npm run build",
     "preview": "vite preview",
     "serve": "vite preview --port 4173",
     "test": "vitest run",
