@@ -20,7 +20,10 @@ const EVENT_FIELD_POLICY = {
   'save.delete.missing': ['status'],
   'dep.redis.unavailable': ['operation', 'reason'],
   'dep.supabase.error': ['operation', 'reason'],
-  'ai.briefing.ok': ['model', 'status', 'durationMs', 'inputTokens', 'outputTokens', 'cache'],
+  'ai.briefing.ok': [
+    'model', 'status', 'durationMs', 'inputTokens', 'outputTokens',
+    'cachedInputTokens', 'cacheWriteTokens', 'reasoningTokens', 'cache',
+  ],
   'ai.briefing.fail': ['status', 'reason'],
   'ai.briefing.audit.fail': ['status', 'reason'],
   'ai.briefing.ratelimited': ['status', 'retryAfterSeconds'],
@@ -43,7 +46,9 @@ export function isLogEvent(value: string): value is LogEvent {
 }
 
 const RESERVED_KEYS = new Set(['level', 'ts', 'event']);
-const SAFE_TOKEN_COUNT_KEYS = new Set(['inputTokens', 'outputTokens']);
+const SAFE_TOKEN_COUNT_KEYS = new Set([
+  'inputTokens', 'outputTokens', 'cachedInputTokens', 'cacheWriteTokens', 'reasoningTokens',
+]);
 const NEVER_LOG_KEY = /(pass(word)?|token|authorization|cookie|secret|dsn|database.?url|postgres|request.?body|response.?body|save.?payload|payload.?content|(?:^|[_-])(?:api|private|publishable|service)?key$)/i;
 const SECRET_VALUE = /(?:bearer\s+[a-z0-9._~+\/-]+|(?:password|token|secret|authorization|api[_-]?key)\s*[=:]\s*[^\s&]+|postgres(?:ql)?:\/\/[^\s]+|(?:redis|rediss|https?):\/\/[^\s/@]+:[^\s/@]+@[^\s]+|eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,})/i;
 const MAX_STRING_LENGTH = 512;

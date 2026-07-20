@@ -3,17 +3,50 @@ import type { GameMode } from '../sim/campaign';
 import type { SurfaceKind } from '../sim/universe';
 
 export const FLIGHT_DIRECTOR_MODEL = 'gpt-5.6-luna';
-export const FLIGHT_DIRECTOR_SCHEMA_VERSION = 1 as const;
+export const FLIGHT_DIRECTOR_SCHEMA_VERSION = 2 as const;
+
+export const FLIGHT_DIRECTOR_PHASES = [
+  'prelaunch',
+  'atmospheric-ascent',
+  'space-ascent',
+  'coast-to-apoapsis',
+  'circularization',
+  'stable-orbit',
+  'maneuver-prep',
+  'maneuver-burn',
+  'atmospheric-entry',
+  'landing',
+  'surface',
+  'escape',
+  'lost',
+] as const;
+
+export type FlightDirectorPhase = typeof FLIGHT_DIRECTOR_PHASES[number];
+
+export const FLIGHT_DIRECTOR_OBJECTIVE_KINDS = [
+  'launch',
+  'stable-orbit',
+  'science-return',
+  'landing',
+  'docking',
+  'surface-industry',
+  'safe-flight',
+] as const;
+
+export type FlightDirectorObjectiveKind = typeof FLIGHT_DIRECTOR_OBJECTIVE_KINDS[number];
 
 export const FLIGHT_DIRECTOR_EVIDENCE_KEYS = [
   'mission.objective',
+  'mission.objectiveAchieved',
   'phase.situation',
+  'phase.flightPhase',
   'currentBody.surfaceGravityMps2',
   'currentBody.atmosphereTopMeters',
   'vessel.fuelFraction',
   'vessel.chargeFraction',
   'vessel.stageDeltaVMps',
   'vessel.totalDeltaVMps',
+  'vessel.stageTwr',
   'flight.altitudeAslMeters',
   'flight.verticalSpeedMps',
   'flight.horizontalSpeedMps',
@@ -22,6 +55,9 @@ export const FLIGHT_DIRECTOR_EVIDENCE_KEYS = [
   'orbit.apoapsisMeters',
   'orbit.periapsisMeters',
   'orbit.timeToApoapsisSeconds',
+  'orbit.apoapsisMarginMeters',
+  'orbit.periapsisMarginMeters',
+  'orbit.stable',
   'maneuver.secondsUntilBurnStart',
   'maneuver.remainingDeltaVMps',
   'entry.predictedImpactSpeedMps',
@@ -46,6 +82,13 @@ export const FLIGHT_DIRECTOR_ACTION_IDS = [
   'restore-comms',
   'conserve-power',
   'review-map',
+  'prepare-launch',
+  'ignite-and-liftoff',
+  'begin-gravity-turn',
+  'hold-ascent',
+  'cut-throttle',
+  'coast-to-apoapsis',
+  'circularize',
 ] as const;
 
 export type FlightDirectorActionId = typeof FLIGHT_DIRECTOR_ACTION_IDS[number];
@@ -65,13 +108,23 @@ export interface FlightDirectorSnapshot {
   schemaVersion: typeof FLIGHT_DIRECTOR_SCHEMA_VERSION;
   requestType: 'flight-briefing';
   mission: {
+    flightId: string;
     elapsedSeconds: number;
     mode: GameMode;
-    objective: string | null;
+    objectiveId: string;
+    objective: string;
+    objectiveSource: 'contract' | 'default';
+    objectiveKind: FlightDirectorObjectiveKind;
+    objectiveAchieved: boolean;
+    targetBodyId: string | null;
+    activeObjectives: string[];
   };
   phase: {
     situation: Situation;
     regime: 'active' | 'rails';
+    flightPhase: FlightDirectorPhase;
+    priority: 'safety' | 'mission' | 'efficiency';
+    allowedActions: FlightDirectorActionId[];
   };
   currentBody: BodySnapshot;
   targetBody: BodySnapshot | null;
@@ -86,6 +139,8 @@ export interface FlightDirectorSnapshot {
     massKg: number;
     stageDeltaVMps: number | null;
     totalDeltaVMps: number;
+    stageTwr: number | null;
+    currentStageHasThrust: boolean;
     fuelFraction: number | null;
     chargeFraction: number | null;
     monopropFraction: number | null;
@@ -105,6 +160,10 @@ export interface FlightDirectorSnapshot {
     timeToApoapsisSeconds: number | null;
     eccentricity: number;
     inclinationDegrees: number;
+    stable: boolean;
+    targetMinimumPeriapsisMeters: number;
+    apoapsisMarginMeters: number | null;
+    periapsisMarginMeters: number;
   };
   maneuver: {
     secondsUntilNode: number;
@@ -124,6 +183,11 @@ export interface FlightDirectorSnapshot {
     strength: number;
     controlBlocked: boolean;
   };
+  continuity: {
+    previousActionId: FlightDirectorActionId;
+    previousFlightPhase: FlightDirectorPhase;
+    ageSeconds: number;
+  } | null;
   recentEvents: Array<{
     ageSeconds: number;
     severity: 'info' | 'warning' | 'danger';
@@ -183,7 +247,7 @@ function bodySnapshot(value: unknown): value is BodySnapshot {
 }
 
 export function isFlightDirectorSnapshot(value: unknown): value is FlightDirectorSnapshot {
-  if (!record(value) || value.schemaVersion !== 1 || value.requestType !== 'flight-briefing') return false;
+  if (!record(value) || value.schemaVersion !== 2 || value.requestType !== 'flight-briefing') return false;
   const mission = value.mission;
   const phase = value.phase;
   const vessel = value.vessel;
@@ -192,19 +256,33 @@ export function isFlightDirectorSnapshot(value: unknown): value is FlightDirecto
   const maneuver = value.maneuver;
   const entry = value.entry;
   const comms = value.comms;
+  const continuity = value.continuity;
   if (!record(mission) || !record(phase) || !record(vessel) || !record(flight)
     || !record(orbit) || !record(comms)) return false;
-  if (!finite(mission.elapsedSeconds, 0, 1e12)
+  if (!shortString(mission.flightId, 96) || !finite(mission.elapsedSeconds, 0, 1e12)
     || !['sandbox', 'exploration', 'program'].includes(String(mission.mode))
-    || !nullableShortString(mission.objective, 180)) return false;
+    || !shortString(mission.objectiveId, 96) || !shortString(mission.objective, 180)
+    || !['contract', 'default'].includes(String(mission.objectiveSource))
+    || !FLIGHT_DIRECTOR_OBJECTIVE_KINDS.includes(mission.objectiveKind as FlightDirectorObjectiveKind)
+    || typeof mission.objectiveAchieved !== 'boolean'
+    || !nullableShortString(mission.targetBodyId, 48)
+    || !Array.isArray(mission.activeObjectives) || mission.activeObjectives.length > 3
+    || !mission.activeObjectives.every((objective) => shortString(objective, 180))) return false;
   if (!['prelaunch', 'landed', 'splashed', 'flying', 'suborbital', 'orbit', 'escaping', 'destroyed'].includes(String(phase.situation))
-    || !['active', 'rails'].includes(String(phase.regime))) return false;
+    || !['active', 'rails'].includes(String(phase.regime))
+    || !FLIGHT_DIRECTOR_PHASES.includes(phase.flightPhase as FlightDirectorPhase)
+    || !['safety', 'mission', 'efficiency'].includes(String(phase.priority))
+    || !Array.isArray(phase.allowedActions) || phase.allowedActions.length < 1
+    || phase.allowedActions.length > 8
+    || !phase.allowedActions.every((action) => FLIGHT_DIRECTOR_ACTION_IDS.includes(action as FlightDirectorActionId))
+    || new Set(phase.allowedActions).size !== phase.allowedActions.length) return false;
   if (!bodySnapshot(value.currentBody) || !(value.targetBody === null || bodySnapshot(value.targetBody))) return false;
   if (!finite(vessel.crewCount, 0, 100) || typeof vessel.controllable !== 'boolean'
     || !finite(vessel.currentStage, 0, 100) || !finite(vessel.stagesRemaining, 0, 100)
     || !finite(vessel.throttle, 0, 1) || !shortString(vessel.sasMode, 32)
     || typeof vessel.rcsEnabled !== 'boolean' || !finite(vessel.massKg, 0, 1e10)
     || !nullableFinite(vessel.stageDeltaVMps, 0, 1e8) || !finite(vessel.totalDeltaVMps, 0, 1e8)
+    || !nullableFinite(vessel.stageTwr, 0, 1e6) || typeof vessel.currentStageHasThrust !== 'boolean'
     || !nullableFinite(vessel.fuelFraction, 0, 1.01) || !nullableFinite(vessel.chargeFraction, 0, 1.01)
     || !nullableFinite(vessel.monopropFraction, 0, 1.01)) return false;
   if (!finite(flight.altitudeAslMeters, -1e9, 1e13) || !finite(flight.verticalSpeedMps, -1e9, 1e9)
@@ -212,7 +290,10 @@ export function isFlightDirectorSnapshot(value: unknown): value is FlightDirecto
     || !finite(flight.dynamicPressurePa, 0, 1e12) || typeof flight.insideAtmosphere !== 'boolean') return false;
   if (typeof orbit.bound !== 'boolean' || !nullableFinite(orbit.apoapsisMeters, -1e9, 1e14)
     || !finite(orbit.periapsisMeters, -1e9, 1e14) || !nullableFinite(orbit.timeToApoapsisSeconds, 0, 1e12)
-    || !finite(orbit.eccentricity, 0, 1e6) || !finite(orbit.inclinationDegrees, 0, 180.0001)) return false;
+    || !finite(orbit.eccentricity, 0, 1e6) || !finite(orbit.inclinationDegrees, 0, 180.0001)
+    || typeof orbit.stable !== 'boolean' || !finite(orbit.targetMinimumPeriapsisMeters, 0, 1e9)
+    || !nullableFinite(orbit.apoapsisMarginMeters, -1e14, 1e14)
+    || !finite(orbit.periapsisMarginMeters, -1e14, 1e14)) return false;
   if (maneuver !== null && (!record(maneuver) || !finite(maneuver.secondsUntilNode, -1e9, 1e12)
     || !finite(maneuver.secondsUntilBurnStart, -1e9, 1e12) || !finite(maneuver.remainingDeltaVMps, 0, 1e8)
     || !finite(maneuver.estimatedBurnSeconds, 0, 1e9))) return false;
@@ -221,6 +302,10 @@ export function isFlightDirectorSnapshot(value: unknown): value is FlightDirecto
     || !nullableFinite(entry.predictedImpactSpeedMps, 0, 1e9) || !nullableFinite(entry.peakG, 0, 1e6))) return false;
   if (typeof comms.connected !== 'boolean' || !finite(comms.strength, 0, 1.01)
     || typeof comms.controlBlocked !== 'boolean') return false;
+  if (continuity !== null && (!record(continuity)
+    || !FLIGHT_DIRECTOR_ACTION_IDS.includes(continuity.previousActionId as FlightDirectorActionId)
+    || !FLIGHT_DIRECTOR_PHASES.includes(continuity.previousFlightPhase as FlightDirectorPhase)
+    || !finite(continuity.ageSeconds, 0, 1e12))) return false;
   if (!Array.isArray(value.recentEvents) || value.recentEvents.length > 3) return false;
   return value.recentEvents.every((event) => record(event)
     && finite(event.ageSeconds, 0, 1e12)
@@ -245,16 +330,19 @@ export function isFlightDirectorAdvisory(value: unknown): value is FlightDirecto
 
 export function availableFlightDirectorEvidence(snapshot: FlightDirectorSnapshot): Set<FlightDirectorEvidenceKey> {
   const keys = new Set<FlightDirectorEvidenceKey>([
-    'phase.situation', 'currentBody.surfaceGravityMps2', 'vessel.totalDeltaVMps',
+    'mission.objective', 'mission.objectiveAchieved', 'phase.situation', 'phase.flightPhase',
+    'currentBody.surfaceGravityMps2', 'vessel.totalDeltaVMps',
     'flight.altitudeAslMeters', 'flight.verticalSpeedMps', 'flight.horizontalSpeedMps',
-    'flight.dynamicPressurePa', 'flight.properG', 'orbit.periapsisMeters', 'comms.connected',
+    'flight.dynamicPressurePa', 'flight.properG', 'orbit.periapsisMeters',
+    'orbit.periapsisMarginMeters', 'orbit.stable', 'comms.connected',
   ]);
-  if (snapshot.mission.objective !== null) keys.add('mission.objective');
   if (snapshot.currentBody.hasAtmosphere) keys.add('currentBody.atmosphereTopMeters');
   if (snapshot.vessel.fuelFraction !== null) keys.add('vessel.fuelFraction');
   if (snapshot.vessel.chargeFraction !== null) keys.add('vessel.chargeFraction');
   if (snapshot.vessel.stageDeltaVMps !== null) keys.add('vessel.stageDeltaVMps');
+  if (snapshot.vessel.stageTwr !== null) keys.add('vessel.stageTwr');
   if (snapshot.orbit.apoapsisMeters !== null) keys.add('orbit.apoapsisMeters');
+  if (snapshot.orbit.apoapsisMarginMeters !== null) keys.add('orbit.apoapsisMarginMeters');
   if (snapshot.orbit.timeToApoapsisSeconds !== null) keys.add('orbit.timeToApoapsisSeconds');
   if (snapshot.maneuver) {
     keys.add('maneuver.secondsUntilBurnStart');

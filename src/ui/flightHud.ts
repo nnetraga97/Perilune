@@ -21,7 +21,10 @@ import type { EntryPrediction } from '../sim/entry';
 import { availableHere, isRecoverable } from '../sim/science';
 import { FlightCompanion, type FlightCompanionAdvisory } from './flightCompanion';
 import { FlightDirectorRequestError, requestFlightDirector } from '../ai/flightDirector';
-import { buildFlightDirectorSnapshot } from './flightDirectorSnapshot';
+import {
+  buildFlightDirectorSnapshot,
+  type PreviousFlightDirectorDecision,
+} from './flightDirectorSnapshot';
 
 export interface HudCallbacks {
   onStage(): void;
@@ -186,6 +189,7 @@ export class FlightHud {
   private lastScienceRender = '';
   private companion: FlightCompanion;
   private lastDirectorContext: { game: GameState; node: ManeuverNode | null; telemetry: HudTelemetry } | null = null;
+  private lastDirectorDecision: PreviousFlightDirectorDecision | null = null;
 
   constructor(uiRoot: HTMLElement, cb: HudCallbacks) {
     this.cb = cb;
@@ -433,6 +437,7 @@ export class FlightHud {
       context.telemetry,
       this.lastComms,
       this.commsBlocked,
+      this.lastDirectorDecision,
     );
     if (!snapshot) {
       return {
@@ -442,6 +447,12 @@ export class FlightHud {
     }
     try {
       const advisory = await requestFlightDirector(snapshot);
+      this.lastDirectorDecision = {
+        vesselId: snapshot.mission.flightId,
+        issuedAt: context.game.time,
+        actionId: advisory.nextAction.actionId,
+        flightPhase: snapshot.phase.flightPhase,
+      };
       const action = advisory.nextAction.actionId === 'none'
         ? undefined
         : `${advisory.nextAction.timing.toUpperCase()} — ${advisory.nextAction.instruction}`;

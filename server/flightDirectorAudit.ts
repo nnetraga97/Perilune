@@ -10,6 +10,9 @@ export interface FlightDirectorAuditRecord {
   durationMs: number;
   inputTokens: number | null;
   outputTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
   snapshot: FlightDirectorSnapshot;
   advisory: FlightDirectorAdvisory;
 }
@@ -32,6 +35,9 @@ function auditRow(record: FlightDirectorAuditRecord): Record<string, unknown> {
     duration_ms: record.durationMs,
     input_tokens: record.inputTokens,
     output_tokens: record.outputTokens,
+    cached_input_tokens: record.cachedInputTokens,
+    cache_write_tokens: record.cacheWriteTokens,
+    reasoning_tokens: record.reasoningTokens,
     snapshot: record.snapshot,
     advisory: record.advisory,
   };

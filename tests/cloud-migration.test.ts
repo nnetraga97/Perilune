@@ -9,6 +9,10 @@ const auditSql = readFileSync(
   new URL('../supabase/migrations/20260718193500_flight_director_audits.sql', import.meta.url),
   'utf8',
 );
+const auditUsageSql = readFileSync(
+  new URL('../supabase/migrations/20260719090000_flight_director_usage_details.sql', import.meta.url),
+  'utf8',
+);
 
 describe('cloud save migration', () => {
   it('creates an owner-scoped revisioned save table with RLS', () => {
@@ -19,6 +23,7 @@ describe('cloud save migration', () => {
     expect(sql).toContain('to authenticated');
     expect(sql).toContain('revoke all on table public.cloud_saves from anon');
   });
+
 });
 
 describe('flight director audit migration', () => {
@@ -31,5 +36,11 @@ describe('flight director audit migration', () => {
     expect(auditSql).toContain('revoke all on table public.flight_director_audits from authenticated');
     expect(auditSql).toContain('to service_role');
     expect(auditSql).not.toContain('create policy');
+  });
+
+  it('adds prompt-cache and reasoning usage details for cost review', () => {
+    expect(auditUsageSql).toContain('cached_input_tokens integer');
+    expect(auditUsageSql).toContain('cache_write_tokens integer');
+    expect(auditUsageSql).toContain('reasoning_tokens integer');
   });
 });
