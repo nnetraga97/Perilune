@@ -144,6 +144,7 @@ export function compactBodyMesh(
   pack: Readonly<RuntimeBodyAssetPack> | null = null,
   maxAnisotropy = 1,
   quality: QualityTier = pack?.tier ?? 'medium',
+  bodyRadius = 1,
 ): THREE.Mesh<THREE.SphereGeometry, THREE.Material> {
   const geometry = descriptor.identity === 'solid'
     ? createGlobalSphereGeometry(quality)
@@ -165,8 +166,8 @@ export function compactBodyMesh(
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
       : pack && descriptor.renderer !== 'terrestrial'
-        ? createAirlessGlobalMaterial(pack, maxAnisotropy)
-        : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy);
+        ? createAirlessGlobalMaterial(pack, maxAnisotropy, bodyRadius)
+        : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy, bodyRadius);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `compact-body:${descriptor.bodyId}`;
   mesh.userData.bodyMaterial = {
@@ -1463,7 +1464,7 @@ export class MapView {
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
           for (const material of materials) material.dispose();
         }
-        mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality);
+        mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality, b.radius);
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }

@@ -28,7 +28,10 @@ function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAsse
   const texture = () => new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
   return {
     bodyId: 'veyra', tier, width: 4096, height: 2048, manifestDigest: 'map-test', gpuBytes: 12,
-    textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()], ['clouds', texture()]]),
+    textures: new Map([
+      ['albedo', texture()], ['normal', texture()], ['material', texture()],
+      ['clouds', texture()], ['heightMacro', texture()],
+    ]),
   };
 }
 
@@ -85,7 +88,8 @@ describe('compact map body presentation', () => {
 
   test('uses the borrowed authored pack and quality-tier sphere resolution for terrestrial bodies', () => {
     const pack = authoredPack('high');
-    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('veyra')), pack, 16, 'high');
+    const body = universe.get('veyra');
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(body), pack, 16, 'high', body.radius);
     const material = mesh.material as THREE.MeshStandardMaterial;
 
     expect(material.userData).toMatchObject({ terrestrialGlobal: true, authored: true, bodyId: 'veyra' });
@@ -93,6 +97,8 @@ describe('compact map body presentation', () => {
     expect(material.userData.maps.albedo.anisotropy).toBe(8);
     expect(mesh.geometry.parameters).toMatchObject({ widthSegments: 160, heightSegments: 96 });
     expect(mesh.userData.assetPack).toBe(pack);
+    expect((material.userData.terrestrialCloudLighting as { bodyRadius: { value: number } }).bodyRadius.value)
+      .toBe(body.radius);
   });
 
   test('uses the authored airless material for a moon pack without requiring clouds', () => {
@@ -100,11 +106,14 @@ describe('compact map body presentation', () => {
     const pack: RuntimeBodyAssetPack = {
       bodyId: 'palla', tier: 'medium', width: 2048, height: 1024,
       manifestDigest: 'map-test', gpuBytes: 12,
-      textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()]]),
+      textures: new Map([
+        ['albedo', texture()], ['normal', texture()], ['material', texture()], ['heightMacro', texture()],
+      ]),
     };
-    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('palla')), pack, 16, 'medium');
+    const body = universe.get('palla');
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(body), pack, 16, 'medium', body.radius);
 
-    expect(mesh.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla' });
+    expect(mesh.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla', bodyRadius: body.radius });
     expect(pack.textures.get('albedo')!.anisotropy).toBe(8);
   });
 

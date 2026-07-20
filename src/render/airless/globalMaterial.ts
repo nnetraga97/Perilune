@@ -47,7 +47,7 @@ export function createAirlessGlobalMaterial(
   if (pack.textures.has('heightMacro')) configureTexture(heightMacro, THREE.NoColorSpace, anisotropy);
 
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 }) as AirlessGlobalMaterial;
-  Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId });
+  Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId, bodyRadius });
   material.customProgramCacheKey = () => 'airless-global-v1:authored';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.airlessAlbedoMap = { value: albedo };

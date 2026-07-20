@@ -320,9 +320,11 @@ export function createTerrestrialGlobalMaterial(
   pack: Readonly<RuntimeBodyAssetPack> | null,
   fallback: Readonly<BodyMaterialDescriptor>,
   maxAnisotropy = 1,
+  bodyRadius = 1,
 ): TerrestrialGlobalMaterial {
   const textures = resolveTerrestrialAuthoredTextures(pack, fallback.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
+  cloudLighting.bodyRadius.value = bodyRadius;
 
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
