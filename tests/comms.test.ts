@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 /**
  * Communications network: range limits, planetary occlusion, and relay
  * routing (acceptance scenario 11: control a probe through a relay).
@@ -18,7 +19,7 @@ function probeCraft(antenna: 'ant-whip' | 'ant-wayline' | 'ant-dish' | null): Cr
 
 describe('comms network', () => {
   it('uses the launch-site authority for the Cape Skyward ground station', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(probeCraft('ant-whip'), 'Pad Probe');
     const status = evaluateComms(game, gv);
     expect(status.connected).toBe(true);
@@ -26,7 +27,7 @@ describe('comms network', () => {
   });
 
   it('connects a whip-antenna probe in low orbit to the ground', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(probeCraft('ant-whip'), 'LEO Probe', 'veyra', 200_000);
     const status = evaluateComms(game, gv);
     expect(status.connected).toBe(true);
@@ -36,14 +37,14 @@ describe('comms network', () => {
   });
 
   it('loses signal without an antenna', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(probeCraft(null), 'Mute Probe', 'veyra', 200_000);
     const status = evaluateComms(game, gv);
     expect(status.connected).toBe(false);
   });
 
   it('uses the Wayline tier for neighboring interplanetary missions', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const target = game.spawnInOrbit(probeCraft('ant-wayline'), 'Vess Probe', 'vess', 200_000);
     const body = game.universe.get('vess');
     const towardHome = new Vec3();
@@ -54,7 +55,7 @@ describe('comms network', () => {
   });
 
   it('lets the Longtalk tier reach the far system without a mandatory range relay', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const target = game.spawnInOrbit(probeCraft('ant-dish'), 'Farfall Probe', 'farfall', 200_000);
     const body = game.universe.get('farfall');
     const towardHome = new Vec3();
@@ -65,7 +66,7 @@ describe('comms network', () => {
   });
 
   it('is blocked behind Palla and restored via a relay', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     // Probe on the far side of Palla (from Veyra).
     const probe = game.spawnInOrbit(probeCraft('ant-whip'), 'Farside Probe', 'palla', 30_000);
     const palla = game.universe.get('palla');
@@ -98,7 +99,7 @@ describe('comms network', () => {
   });
 
   it('segment occlusion math blocks through-planet paths', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const vp = new Vec3();
     game.universe.absolutePosition(veyra, 0, vp);

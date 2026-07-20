@@ -2,6 +2,7 @@
 import { Quat } from '../core/quat';
 import { Vec3 } from '../core/vec3';
 import type { Body } from './universe';
+import { referenceFrameAngles, referenceFrameOrientation } from './bodyReferenceFrame';
 
 const _orientation = new Quat();
 const _attitude = new Quat();
@@ -11,6 +12,7 @@ const _attitude = new Quat();
  * axial tilt about inertial +X.
  */
 export function bodyOrientation(body: Body, time: number, out: Quat): Quat {
+  if (body.def.referenceFrame) return referenceFrameOrientation(body.def.referenceFrame, time, out);
   const halfTilt = body.def.axialTilt / 2;
   const halfSpin = body.rotationAngle(time) / 2;
   const sx = Math.sin(halfTilt);
@@ -65,6 +67,16 @@ export function inertialAttitudeToBodyFixed(
 
 /** Angular velocity vector in the body's inertial frame. */
 export function bodyAngularVelocity(body: Body, out: Vec3): Vec3 {
+  if (body.def.referenceFrame) {
+    const frame = body.def.referenceFrame;
+    const magnitude = frame.primeMeridianRateDegreesPerDay * Math.PI / 180 / 86_400;
+    const { rightAscension, declination } = referenceFrameAngles(frame, 0);
+    return out.set(
+      Math.cos(rightAscension) * Math.cos(declination) * magnitude,
+      Math.sin(rightAscension) * Math.cos(declination) * magnitude,
+      Math.sin(declination) * magnitude,
+    );
+  }
   if (body.def.rotationPeriod === 0) return out.set(0, 0, 0);
   const magnitude = (Math.PI * 2) / body.def.rotationPeriod;
   return out.set(

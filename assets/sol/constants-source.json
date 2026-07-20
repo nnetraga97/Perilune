@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "epoch": "J2000",
+  "authorities": [
+    {
+      "id": "naif-pck00011",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc",
+      "sha256": "3dff7b1dbeceaa01f25467767d3fa25816051c85d162d1edf04acb310ee28bb1",
+      "units": "kernel values in km and degrees"
+    },
+    {
+      "id": "naif-gm-de440",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc",
+      "sha256": "924ddf4fb9ead9fe8a1aa55780bcabde40b09d00065d58226e24b68d8092f140",
+      "units": "kernel GM values in km^3/s^2"
+    },
+    {
+      "id": "iau-2015-b3",
+      "url": "https://arxiv.org/abs/1605.09788",
+      "version": "IAU 2015 Resolution B3",
+      "units": "nominal SI conversion constants"
+    },
+    {
+      "id": "jpl-planetary-mean-elements",
+      "url": "https://ssd.jpl.nasa.gov/planets/approx_pos.html",
+      "version": "J2000 approximate elements",
+      "units": "AU and degrees"
+    },
+    {
+      "id": "jpl-satellite-mean-elements",
+      "url": "https://ssd.jpl.nasa.gov/sats/elem/",
+      "version": "Moon mean elements",
+      "units": "km and degrees"
+    }
+  ],
+  "astronomicalUnitMeters": 149597870700,
+  "bodies": {
+    "sun": {
+      "naifId": 10,
+      "meanRadiusMeters": 695700000,
+      "gmMeters3PerSecond2": 1.3271244004127942e20,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 286.13,
+        "poleRightAscensionRateDegreesPerCentury": 0,
+        "poleDeclinationDegrees": 63.87,
+        "poleDeclinationRateDegreesPerCentury": 0,
+        "primeMeridianDegrees": 84.176,
+        "primeMeridianRateDegreesPerDay": 14.1844,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      }
+    },
+    "earth": {
+      "naifId": 399,
+      "equatorialRadiusMeters": 6378136.6,
+      "polarRadiusMeters": 6356751.9,
+      "meanRadiusMeters": 6371008.366666667,
+      "gmMeters3PerSecond2": 3.9860043550702266e14,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 0,
+        "poleRightAscensionRateDegreesPerCentury": -0.641,
+        "poleDeclinationDegrees": 90,
+        "poleDeclinationRateDegreesPerCentury": -0.557,
+        "primeMeridianDegrees": 190.147,
+        "primeMeridianRateDegreesPerDay": 360.9856235,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 149598261150.4425,
+        "eccentricity": 0.01671123,
+        "inclinationRadians": -2.6720990848033185e-7,
+        "longitudeAscendingNodeRadians": 0,
+        "argumentPeriapsisRadians": 1.796601474049171,
+        "meanAnomalyRadiansAtEpoch": -0.04316391697638581
+      }
+    },
+    "moon": {
+      "naifId": 301,
+      "meanRadiusMeters": 1737400,
+      "gmMeters3PerSecond2": 4.9028001184575496e12,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 269.9949,
+        "poleRightAscensionRateDegreesPerCentury": 0.0031,
+        "poleDeclinationDegrees": 66.5392,
+        "poleDeclinationRateDegreesPerCentury": 0.013,
+        "primeMeridianDegrees": 38.3213,
+        "primeMeridianRateDegreesPerDay": 13.17635815,
+        "primeMeridianQuadraticDegreesPerCentury2": -1.4e-12
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 384400000,
+        "eccentricity": 0.0549,
+        "inclinationRadians": 0.08979719001510825,
+        "longitudeAscendingNodeRadians": 0,
+        "argumentPeriapsisRadians": 0,
+        "meanAnomalyRadiansAtEpoch": 0
+      }
+    }
+  }
+}

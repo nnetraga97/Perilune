@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 /**
  * Docking: two independently orbiting vessels capture at their ports, merge
  * into one vessel (momentum-conserving, crew combined), and undock cleanly.
@@ -25,7 +26,7 @@ function buildTarget(): Craft {
 
 describe('docking and undocking', () => {
   it('captures, merges, and undocks two vessels', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const a = game.spawnInOrbit(buildChaser(), 'Chaser', 'veyra', 120_000);
     const b = game.spawnInOrbit(buildTarget(), 'Target Station', 'veyra', 120_000);
 
@@ -86,7 +87,7 @@ describe('docking and undocking', () => {
   });
 
   it('does not capture misaligned or fast approaches', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const a = game.spawnInOrbit(buildChaser(), 'A', 'veyra', 120_000);
     const b = game.spawnInOrbit(buildTarget(), 'B', 'veyra', 120_000);
     // Fast flyby: 12 m/s closing — must NOT dock.

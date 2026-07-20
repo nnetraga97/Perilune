@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
@@ -148,7 +149,7 @@ describe('Veyra authored asset contracts', () => {
   it('encodes a graded one-texel shoreline while preserving the authoritative sign', () => {
     const width = 144;
     const height = 72;
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const source = new Uint8Array(width * height * 3).fill(128);
     const maps = veyraMaps.generateVeyraCanonicalMaps({
       width,

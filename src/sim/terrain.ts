@@ -64,7 +64,7 @@ export interface LaunchPadTerrainEnvelope {
 export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
   const cached = launchPadEnvelopeCache.get(body);
   if (cached) return cached;
-  if (body.id !== 'veyra' || body.def.surfaceKind !== 'solid') {
+  if (!body.def.launchSite || body.def.surfaceKind !== 'solid') {
     throw new Error(`${body.name} has no Cape Skyward launchpad`);
   }
   const site = launchSiteBodyFixedDirection(new Vec3());
@@ -110,7 +110,7 @@ export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
  * remains based on natural terrain while physics contacts its top face.
  */
 export function launchPadContactSurface(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
-  if (body.id !== 'veyra' || body.def.surfaceKind !== 'solid') return { kind: 'none' };
+  if (!body.def.launchSite || body.def.surfaceKind !== 'solid') return { kind: 'none' };
   const length = Math.hypot(dir.x, dir.y, dir.z);
   if (!(length > 0)) return { kind: 'none' };
   const site = launchSiteBodyFixedDirection(_launchSiteDirection);

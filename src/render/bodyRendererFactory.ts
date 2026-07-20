@@ -5,8 +5,9 @@ import { bodyMaterialDescriptor } from './bodyMaterial';
 import type { RenderCaps } from './context';
 import type { BodyRenderer, QualityTier } from './bodyRenderer';
 import { LegacyBodyRenderer, type LegacyBodyRendererDependencies } from './legacyBodyRenderer';
-import { StarBodyRenderer } from './starBodyRenderer';
+import { SolarBodyRenderer } from './solarBodyRenderer';
 import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
+import { AirlessBodyRenderer } from './airlessBodyRenderer';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 
 export interface BodyRendererCandidateOptions {
@@ -24,7 +25,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
   const descriptor = bodyMaterialDescriptor(options.body, visual);
   switch (visual.renderer) {
     case 'star':
-      return new StarBodyRenderer(options.body, descriptor, options.caps, options.quality);
+      return new SolarBodyRenderer(options.body, descriptor, options.caps, options.quality);
     case 'legacy':
       return new LegacyBodyRenderer(options.body, descriptor, options.caps, options.quality, options.legacyDependencies);
     case 'terrestrial':
@@ -35,6 +36,14 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.quality,
         options.diagnostics,
         options.activeBodyBudgetBytes,
+      );
+    case 'airless':
+      return new AirlessBodyRenderer(
+        options.body,
+        descriptor,
+        options.caps,
+        options.quality,
+        options.diagnostics,
       );
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);

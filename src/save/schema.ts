@@ -16,7 +16,8 @@ import type { SasMode, Situation } from '../sim/flight';
 import type { AlarmKind } from '../sim/state';
 import type { CampaignState } from '../sim/campaign';
 import { EXPERIMENT_INDEX, experimentCap, type ScienceSituation } from '../content/science';
-import { AUREN_SYSTEM } from '../content/system';
+import { SOL_SYSTEM } from '../content/system';
+import type { BodyDef } from '../sim/universe';
 import { encodeScienceKey, type BufferedResult, type LedgerEntry } from '../sim/science';
 
 export { SAVE_VERSION, validateSave } from './validation';
@@ -140,16 +141,16 @@ function parseLegacyScienceKey(key: string): { experimentId: string; bodyId: str
   return null;
 }
 
-function legacyCap(experimentId: string, bodyId: string): number {
+function legacyCap(experimentId: string, bodyId: string, bodies: readonly BodyDef[]): number {
   const experiment = EXPERIMENT_INDEX.get(experimentId);
-  const body = AUREN_SYSTEM.find((candidate) => candidate.id === bodyId);
+  const body = bodies.find((candidate) => candidate.id === bodyId);
   if (!experiment || !body) return 1;
   const globalMultiplier = body.biomes?.find((biome) => biome.id === 'global')?.scienceMultiplier ?? 1;
   return experimentCap(experiment, body.scienceValue, globalMultiplier);
 }
 
 /** Upgrade an older save to the current version. Throws on unknown versions. */
-export function migrateSave(raw: SaveGame): SaveGame {
+export function migrateSave(raw: SaveGame, bodies: readonly BodyDef[] = SOL_SYSTEM): SaveGame {
   let save = raw;
   if (save.saveVersion > SAVE_VERSION) {
     throw new Error(
@@ -215,7 +216,7 @@ export function migrateSave(raw: SaveGame): SaveGame {
     for (const legacyId of completed) {
       const parsed = parseLegacyScienceKey(legacyId);
       if (!parsed) continue;
-      const cap = legacyCap(parsed.experimentId, parsed.bodyId);
+        const cap = legacyCap(parsed.experimentId, parsed.bodyId, bodies);
       const keyId = encodeScienceKey({ ...parsed, biomeId: 'global' });
       ledger[keyId] = { cap, deliveredByTransmit: 0, deliveredByRecovery: cap };
     }
@@ -236,7 +237,7 @@ export function migrateSave(raw: SaveGame): SaveGame {
           const experiment = EXPERIMENT_INDEX.get(parsed.experimentId);
           const keyId = encodeScienceKey({ ...parsed, biomeId: 'global' });
           scienceBuffer[keyId] = {
-            siteCapAtCollection: legacyCap(parsed.experimentId, parsed.bodyId),
+            siteCapAtCollection: legacyCap(parsed.experimentId, parsed.bodyId, bodies),
             heldValue,
             transmittedFromThis: 0,
             transmitTarget: Math.round(heldValue * (experiment?.transmitFraction ?? 0)),

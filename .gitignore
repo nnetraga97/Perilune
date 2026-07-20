@@ -11,6 +11,7 @@ artifacts/performance/
 *.local
 assets/planets/sources/**/*.zip
 assets/planets/sources/**/*.tif
+assets/planets/sources/**/*.jpg
 assets/planets/sources/**/*.partial
 assets/parts/sources/**
 .DS_Store

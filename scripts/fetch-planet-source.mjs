@@ -20,6 +20,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDir = resolve(root, 'assets/planets/sources/natural-earth-ii-3.2.0');
 const archivePath = resolve(sourceDir, 'NE2_LR_LC.zip');
 const imagePath = resolve(sourceDir, 'NE2_LR_LC.tif');
+const solSourceLockPath = resolve(root, 'assets/planets/sol-source-lock.json');
 
 function checksum(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -63,3 +64,36 @@ if (extraction.error || extraction.status !== 0) {
 }
 renameSync(temporaryImagePath, imagePath);
 console.log(`verified Natural Earth II 3.2.0 source: ${archivePath}`);
+
+const solSourceLock = JSON.parse(readFileSync(solSourceLockPath, 'utf8'));
+if (solSourceLock.schemaVersion !== 1 || !Array.isArray(solSourceLock.sources)) {
+  throw new Error('Invalid Sol visual source lock');
+}
+for (const source of solSourceLock.sources) {
+  if (typeof source.url !== 'string' || typeof source.path !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(source.sha256 ?? '')) {
+    throw new Error(`Invalid Sol source lock entry ${source.id ?? '<unknown>'}`);
+  }
+  const targetPath = resolve(root, 'assets/planets', source.path);
+  if (!targetPath.startsWith(resolve(root, 'assets/planets/sources/') + '/')) {
+    throw new Error(`Sol source ${source.id} escapes the authoring source directory`);
+  }
+  mkdirSync(dirname(targetPath), { recursive: true });
+  if (!existsSync(targetPath)) {
+    const partialPath = `${targetPath}.partial`;
+    rmSync(partialPath, { force: true });
+    const response = await fetch(source.url);
+    if (!response.ok || !response.body) throw new Error(`${source.id} download failed: HTTP ${response.status}`);
+    await pipeline(response.body, createWriteStream(partialPath));
+    if (checksum(partialPath) !== source.sha256) {
+      rmSync(partialPath, { force: true });
+      throw new Error(`${source.id} checksum mismatch; refusing cached source`);
+    }
+    renameSync(partialPath, targetPath);
+  }
+  const sourceChecksum = checksum(targetPath);
+  if (sourceChecksum !== source.sha256) {
+    throw new Error(`${source.id} checksum mismatch: expected ${source.sha256}, got ${sourceChecksum}`);
+  }
+  console.log(`verified ${source.id}: ${targetPath}`);
+}

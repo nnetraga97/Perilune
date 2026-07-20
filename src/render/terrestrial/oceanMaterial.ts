@@ -71,32 +71,35 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uCameraBodyFixed;
   uniform vec3 uSunDirection;
   uniform float uGlitterStrength;
+  uniform float uSolarVisibility;
   uniform float uTime;
   varying vec3 vBodyDirection;
   varying vec3 vViewNormal;
   varying vec3 vViewDirection;
 
   vec2 bodyUv(vec3 direction) {
-    float longitude = atan(direction.y, direction.x) / 6.283185307179586;
-    return vec2(longitude < 0.0 ? longitude + 1.0 : longitude,
+    float longitude = atan(direction.y, direction.x) / 6.283185307179586 + 0.5;
+    return vec2(fract(longitude),
       0.5 - asin(clamp(direction.z, -1.0, 1.0)) / 3.141592653589793);
   }
 
   void main() {
-    float oceanMask = uHasShoreMask > 0.5 ? texture2D(uShoreMask, bodyUv(vBodyDirection)).a : 1.0;
+    float oceanMask = uHasShoreMask > 0.5 ? texture2D(uShoreMask, bodyUv(vBodyDirection)).b : 1.0;
     if (uHasShoreMask > 0.5 && oceanMask <= 0.01) discard;
     #include <logdepthbuf_fragment>
-    float shore = 1.0 - abs(oceanMask * 2.0 - 1.0);
+    float shore = 4.0 * oceanMask * (1.0 - oceanMask);
     float fresnel = pow(1.0 - max(0.0, dot(normalize(vViewNormal), normalize(vViewDirection))), 4.0);
     vec3 reflectedSun = reflect(-normalize(uSunDirection), normalize(vBodyDirection));
     vec3 bodyView = normalize(uCameraBodyFixed - vBodyDirection * uBodyRadius);
     float wave = sin(vBodyDirection.x * 170.0 + uTime * 0.7) *
       sin(vBodyDirection.y * 143.0 - uTime * 0.53);
     float glitter = pow(max(0.0, dot(reflectedSun, bodyView)), 96.0) *
-      (0.55 + 0.45 * wave) * uGlitterStrength;
-    vec3 depthTint = mix(uOceanColor * 0.48, uOceanColor * 1.18, fresnel);
+      (0.55 + 0.45 * wave) * uGlitterStrength * uSolarVisibility;
+    vec3 skyReflection = mix(vec3(0.025, 0.09, 0.18), vec3(0.32, 0.55, 0.82),
+      pow(1.0 - max(0.0, dot(normalize(vViewNormal), normalize(vViewDirection))), 0.65));
+    vec3 depthTint = mix(uOceanColor * 1.18, skyReflection, 0.26 + fresnel * 0.64);
     vec3 foam = vec3(0.72, 0.82, 0.84) * shore;
-    gl_FragColor = vec4(depthTint + foam * 0.72 + glitter, 1.0);
+    gl_FragColor = vec4(depthTint + foam * 0.64 + glitter * 0.62, 1.0);
   }
 `;
 
@@ -116,6 +119,7 @@ export function createOceanCapMaterial(
       uCameraBodyFixed: { value: new THREE.Vector3() },
       uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
       uGlitterStrength: { value: GLITTER_BY_QUALITY[quality] },
+      uSolarVisibility: { value: 1 },
       uTime: { value: 0 },
       uAnchorDirection: { value: new THREE.Vector3(0, 0, 1) },
       uEast: { value: new THREE.Vector3(1, 0, 0) },

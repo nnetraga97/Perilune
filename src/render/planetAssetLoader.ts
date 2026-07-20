@@ -213,7 +213,15 @@ export class PlanetAssetLoader {
           const texture = compressed
             ? await this.options.ktx2.loadAsync(this.options.resolveAssetUrl(channel.packagePath))
             : await this.options.loadConventional(this.options.resolveAssetUrl(channel.fallbackPath));
-          texture.colorSpace = channel.name === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+          // Every generated pack declares a top-left texture origin and the
+          // body-fixed sampler maps north to v=0. TextureLoader defaults to a
+          // bottom-left WebGL convention, so conventional fallbacks must opt
+          // out of its vertical upload flip. KTX2 carries this orientation in
+          // container metadata and is normalized by KTX2Loader.
+          if (!compressed) texture.flipY = false;
+          texture.colorSpace = channel.name === 'albedo' || channel.name === 'emissive'
+            ? THREE.SRGBColorSpace
+            : THREE.NoColorSpace;
           textures.set(channel.name, texture);
           selectedGpuBytes += compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
           this.options.diagnostics?.record({

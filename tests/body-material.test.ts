@@ -1,23 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
+import { SOL_SYSTEM } from '../src/content/system';
 import { BODY_VISUALS, DEFAULT_ENTRY_VISUAL, validateEntryVisual } from '../src/content/bodyVisuals';
 import { bodyFixedUv, bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 
 describe('body visual assignments', () => {
   it('covers every system body exactly once', () => {
     expect(Object.keys(BODY_VISUALS).sort()).toEqual(
-      AUREN_SYSTEM.map((body) => body.id).sort(),
+      [...SOL_SYSTEM, ...AUREN_SYSTEM].map((body) => body.id).sort(),
     );
   });
 
-  it('activates only the star renderer while retaining explicit target archetypes', () => {
+  it('activates production renderer families while retaining explicit legacy archetypes', () => {
     expect(BODY_VISUALS.auren).toMatchObject({ renderer: 'star', targetArchetype: 'star' });
+    expect(BODY_VISUALS.sun).toMatchObject({ renderer: 'star', targetArchetype: 'star' });
 
     for (const [bodyId, visual] of Object.entries(BODY_VISUALS)) {
-      if (bodyId !== 'auren' && bodyId !== 'veyra') expect(visual.renderer).toBe('legacy');
+      if (!['auren', 'sun', 'veyra', 'earth', 'moon'].includes(bodyId)) expect(visual.renderer).toBe('legacy');
     }
 
     expect(BODY_VISUALS.veyra.renderer).toBe('terrestrial');
+    expect(BODY_VISUALS.earth.renderer).toBe('terrestrial');
     expect(BODY_VISUALS.veyra.targetArchetype).toBe('terrestrial');
     expect(BODY_VISUALS.palla.targetArchetype).toBe('airless');
     expect(BODY_VISUALS.tyran.targetArchetype).toBe('gas-giant');
@@ -27,6 +30,9 @@ describe('body visual assignments', () => {
     expect(Object.fromEntries(
       Object.entries(BODY_VISUALS).map(([id, visual]) => [id, visual.targetArchetype]),
     )).toEqual({
+      sun: 'star',
+      earth: 'terrestrial',
+      moon: 'airless',
       auren: 'star',
       ashen: 'airless',
       vess: 'terrestrial',
@@ -117,19 +123,19 @@ describe('bodyMaterialDescriptor', () => {
 
 describe('bodyFixedUv', () => {
   it.each([
-    ['+X', { x: 1, y: 0, z: 0 }, { u: 0, v: 0.5 }],
-    ['+Y', { x: 0, y: 1, z: 0 }, { u: 0.25, v: 0.5 }],
-    ['-X', { x: -1, y: 0, z: 0 }, { u: 0.5, v: 0.5 }],
-    ['-Y', { x: 0, y: -1, z: 0 }, { u: 0.75, v: 0.5 }],
-    ['north', { x: 0, y: 0, z: 1 }, { u: 0, v: 0 }],
-    ['south', { x: 0, y: 0, z: -1 }, { u: 0, v: 1 }],
+    ['+X', { x: 1, y: 0, z: 0 }, { u: 0.5, v: 0.5 }],
+    ['+Y', { x: 0, y: 1, z: 0 }, { u: 0.75, v: 0.5 }],
+    ['-X', { x: -1, y: 0, z: 0 }, { u: 0, v: 0.5 }],
+    ['-Y', { x: 0, y: -1, z: 0 }, { u: 0.25, v: 0.5 }],
+    ['north', { x: 0, y: 0, z: 1 }, { u: 0.5, v: 0 }],
+    ['south', { x: 0, y: 0, z: -1 }, { u: 0.5, v: 1 }],
   ])('maps the %s cardinal direction', (_name, direction, expected) => {
     expect(bodyFixedUv(direction)).toEqual(expected);
   });
 
-  it('wraps once across the +X longitude seam', () => {
-    const above = bodyFixedUv({ x: 1, y: 1e-9, z: 0 });
-    const below = bodyFixedUv({ x: 1, y: -1e-9, z: 0 });
+  it('wraps once across the -X antimeridian seam', () => {
+    const above = bodyFixedUv({ x: -1, y: -1e-9, z: 0 });
+    const below = bodyFixedUv({ x: -1, y: 1e-9, z: 0 });
 
     expect(above.u).toBeGreaterThanOrEqual(0);
     expect(above.u).toBeLessThan(1e-8);

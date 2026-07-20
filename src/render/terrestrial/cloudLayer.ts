@@ -60,7 +60,10 @@ export class TerrestrialCloudDeck {
         volume: volumetric ? {
           baseRadius: body.radius + volumeBaseAltitude,
           topRadius: body.radius + volumeTopAltitude,
-          samples: quality === 'high' ? 12 : 6,
+          // Tangent rays traverse a long distance through a thin layer. A
+          // 12-step march exposes its radial slices as horizontal horizon
+          // lines; High spends the extra samples to keep the volume smooth.
+          samples: quality === 'high' ? 24 : 6,
           noiseOctaves: quality === 'high' ? 3 : 2,
         } : undefined,
       });
@@ -102,16 +105,22 @@ export class TerrestrialCloudDeck {
       }, { bodyId: body.id });
       return Object.freeze({ name, mesh, altitude, driftRate, baseOpacity: opacity });
     };
-    const segments: readonly [number, number] = quality === 'low' ? [48, 30] : quality === 'medium' ? [72, 44] : [96, 60];
+    // Tangent views amplify interpolation error on a sphere. Keep cloud shells
+    // at the atmosphere-shell tessellation so triangle latitude bands cannot
+    // become radial streaks along a ground/ocean horizon.
+    const segments: readonly [number, number] = quality === 'low'
+      ? [96, 64]
+      : quality === 'medium' ? [144, 96] : [192, 128];
     this.shells = Object.freeze([
-      makeShell('weather', 0.11, WEATHER_CLOUD_DRIFT_RATE, 1, quality === 'high' ? 0.82 : quality === 'medium' ? 0.62 : 0.58, 0.009, segments),
+      makeShell('weather', 0.11, WEATHER_CLOUD_DRIFT_RATE, 1, quality === 'high' ? 0.9 : quality === 'medium' ? 0.68 : 0.6, 0.009, segments),
       makeShell('wisps', 0.22, -3.5e-6, 2.4, 0.14, 0.004, segments),
     ]) as unknown as readonly [TerrestrialCloudShell, TerrestrialCloudShell];
     this.group.name = `terrestrial-cloud-deck:${body.id}`;
     this.group.add(this.shells[0].mesh, this.shells[1].mesh);
   }
 
-  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'>): void {
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'orientation' | 'bodySunDirection' | 'time' | 'altitude'> &
+    { readonly solarVisibleFraction?: number }): void {
     if (this.disposed) return;
     const origin = frame.cameraRelativeOrigin;
     this.group.position.set(origin.x, origin.y, origin.z);
@@ -132,6 +141,7 @@ export class TerrestrialCloudDeck {
         frame.bodySunDirection.y,
         frame.bodySunDirection.z,
       ).normalize();
+      shell.mesh.material.uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
       INVERSE_DRIFT_QUATERNION.copy(DRIFT_QUATERNION).invert();
       CAMERA_CLOUD_FIXED.set(
         frame.cameraBodyFixed.x,
@@ -142,7 +152,15 @@ export class TerrestrialCloudDeck {
       shell.mesh.material.uniforms.uTime.value = frame.time;
       const distanceFromShell = Math.abs(frame.altitude - shell.altitude);
       const crossingFade = Math.max(0, Math.min(1, (distanceFromShell - 1_200) / 4_000));
-      shell.mesh.material.uniforms.uOpacity.value = shell.baseOpacity * crossingFade;
+      // The bounded High march is stable from within/above the weather deck,
+      // but very long tangent rays from ground level expose discrete radial
+      // slices. Fade that volume below its base and leave the outer parallax
+      // wisps to carry distant cloud presence until a ground-space volume pass
+      // exists.
+      const groundVolumeFade = this.quality === 'high' && shell.name === 'weather'
+        ? Math.max(0, Math.min(1, (frame.altitude - 1_000) / 4_000))
+        : 1;
+      shell.mesh.material.uniforms.uOpacity.value = shell.baseOpacity * crossingFade * groundVolumeFade;
       const desiredSide = frame.altitude >= shell.altitude ? THREE.FrontSide : THREE.BackSide;
       if (shell.mesh.material.side !== desiredSide) {
         shell.mesh.material.side = desiredSide;

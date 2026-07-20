@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
@@ -7,7 +8,7 @@ const MAP_SCALE = 1e-5;
 
 describe('map body placement', () => {
   it('keeps every planet and moon on its analytic parent-relative orbit', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const anchor = game.universe.get('veyra');
     const local = new Vec3();
 

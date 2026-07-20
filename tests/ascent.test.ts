@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 /**
  * Integration test: a reference rocket flies a scripted gravity turn from
  * the Veyra launch pad to a stable orbit, then executes a deorbit burn and
@@ -52,7 +53,7 @@ function elementsOf(game: GameState) {
 
 describe('full ascent to orbit', () => {
   it('flies a gravity turn to a stable orbit, deorbits, and lands', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildOrbiter(), 'Ascent Reference');
     const v = gv.runtime;
     const veyra = game.bodyOf(gv);
@@ -225,7 +226,7 @@ function flyReferenceEntry(withShield: boolean): { alive: boolean; situation: st
   if (withShield) addPart(craft, 'shield-s', pod.key, 'stack-bottom', { x: 0, y: -0.55, z: 0 });
   craft.stages = [{ partKeys: [chute.key] }];
 
-  const game = new GameState();
+  const game = createLegacyGameState();
   const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
   const vessel = gv.runtime;
   vessel.sas = 'retrograde';

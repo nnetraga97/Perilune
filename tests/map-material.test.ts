@@ -1,7 +1,8 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { describe, expect, test, vi } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Vec3 } from '../src/core/vec3';
 import { Quat } from '../src/core/quat';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
@@ -33,7 +34,7 @@ function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAsse
 
 describe('compact map body presentation', () => {
   test('returns default map focus to the active vessel SOI body', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const active = game.spawnInOrbit(createCraft('Map focus probe'), 'Map focus probe', 'palla', 10_000);
     game.activeVesselId = active.runtime.id;
 

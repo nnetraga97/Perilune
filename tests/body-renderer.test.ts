@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, test, vi } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Body } from '../src/sim/universe';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
@@ -35,9 +35,18 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
     cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
     verticalFovRadians: Math.PI / 3,
     drawingBufferHeight: 1080,
+    projection: {
+      trueObserverDistance: 37.416573867739416,
+      angularRadius: 0.1,
+      projectedPixelRadius: 93.84,
+      proxyDepth: 3e8,
+      proxyRadius: 30_100_401,
+      visibility: 'physical',
+    },
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: { x: -1, y: 0, z: 0 },
     bodySunDirection: { x: -1, y: 0, z: 0 },
+    solarVisibleFraction: 1,
     time: 0,
     deltaSeconds: 1 / 60,
     framePressure: false,
@@ -174,17 +183,33 @@ describe('body renderer adapters', () => {
     expect(visibleSources).toHaveLength(1);
     expect(lights).toHaveLength(1);
     expect(renderer.root.children).toContain((lights[0] as THREE.DirectionalLight).target);
+    expect((lights[0] as THREE.DirectionalLight).castShadow).toBe(true);
 
-    const corona = visibleSources[0].children.find((child): child is THREE.Sprite => child instanceof THREE.Sprite)!;
-    const alpha = (corona.material.map!.image as { data: Uint8Array }).data;
-    expect(alpha[3]).toBe(0);
-    expect(alpha[(8 * 16 + 8) * 4 + 3]).toBeGreaterThan(0);
+    const corona = visibleSources[0].children.find((child): child is THREE.Mesh => (
+      child instanceof THREE.Mesh && child.material.userData.solarCorona === true
+    ))!;
+    const disk = visibleSources[0].children.find((child): child is THREE.Mesh => (
+      child instanceof THREE.Mesh && child.material.userData.solarPhotosphere === true
+    ))!;
+    expect(corona).toBeDefined();
+    expect(disk).toBeDefined();
 
-    renderer.update(frame({ cameraRelativeOrigin: { x: 1e9, y: 0, z: 0 }, cameraSunDirection: { x: 1, y: 0, z: 0 } }));
+    renderer.update(frame({
+      cameraRelativeOrigin: { x: 1e10, y: 0, z: 0 },
+      cameraSunDirection: { x: 1, y: 0, z: 0 },
+      projection: {
+        trueObserverDistance: 1e10,
+        angularRadius: Math.asin(star.radius / 1e10),
+        projectedPixelRadius: 50,
+        proxyDepth: 3e8,
+        proxyRadius: 3e8 * Math.tan(Math.asin(star.radius / 1e10)),
+        visibility: 'far-field',
+      },
+    }));
     const presentation = visibleSources[0];
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(presentation.quaternion);
     expect(Math.abs(normal.dot(new THREE.Vector3(-1, 0, 0)))).toBeCloseTo(1, 5);
-    expect(renderer.stats().visible).toBe(0);
+    expect(renderer.stats()).toMatchObject({ visible: 1, presentationMode: 'proxy' });
     renderer.root.visible = false;
     expect(renderer.stats().visible).toBe(0);
   });
@@ -193,17 +218,19 @@ describe('body renderer adapters', () => {
     const star = body('auren');
     const renderer = new StarBodyRenderer(star, bodyMaterialDescriptor(star), caps, 'low');
     const source = renderer.root.children.find((child) => child.userData.starPresentation === true)!;
-    const disk = source.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh)!;
-    const corona = source.children.find((child): child is THREE.Sprite => child instanceof THREE.Sprite)!;
+    const disk = source.children.find((child): child is THREE.Mesh => (
+      child instanceof THREE.Mesh && child.material.userData.solarPhotosphere === true
+    ))!;
+    const corona = source.children.find((child): child is THREE.Mesh => (
+      child instanceof THREE.Mesh && child.material.userData.solarCorona === true
+    ))!;
     const geometryDispose = vi.spyOn(disk.geometry, 'dispose');
-    const materialDispose = vi.spyOn(corona.material, 'dispose');
-    const textureDispose = vi.spyOn(corona.material.map!, 'dispose');
+    const materialDispose = vi.spyOn(corona.material as THREE.Material, 'dispose');
 
     renderer.dispose();
     renderer.dispose();
 
     expect(materialDispose).toHaveBeenCalledOnce();
-    expect(textureDispose).toHaveBeenCalledOnce();
     expect(geometryDispose).toHaveBeenCalledOnce();
     expect(renderer.root.children).toHaveLength(0);
     expect(renderer.ready).toBe(false);

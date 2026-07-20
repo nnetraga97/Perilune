@@ -5,6 +5,8 @@ import type { AtmosphereVisualCoefficients } from './atmosphereMaterial';
 export interface AtmosphereLutSet {
   readonly transmittance: THREE.DataTexture;
   readonly multipleScattering: THREE.DataTexture;
+  readonly skyView: THREE.DataTexture;
+  readonly aerialPerspective: THREE.DataTexture;
   readonly textures: readonly THREE.DataTexture[];
 }
 
@@ -12,12 +14,18 @@ const TRANSMITTANCE_WIDTH = 128;
 const TRANSMITTANCE_HEIGHT = 32;
 const MULTI_SCATTER_WIDTH = 32;
 const MULTI_SCATTER_HEIGHT = 32;
+const SKY_VIEW_WIDTH = 64;
+const SKY_VIEW_HEIGHT = 32;
+const AERIAL_WIDTH = 32;
+const AERIAL_HEIGHT = 32;
 const INTEGRATION_SAMPLES = 32;
 const EARTH_RAYLEIGH = [5.802e-6, 13.558e-6, 33.1e-6] as const;
 const EARTH_MIE = 3.996e-6;
 interface CachedAtmosphereLutData {
   readonly transmittance: Uint8Array<ArrayBuffer>;
   readonly multipleScattering: Uint8Array<ArrayBuffer>;
+  readonly skyView: Uint8Array<ArrayBuffer>;
+  readonly aerialPerspective: Uint8Array<ArrayBuffer>;
 }
 const LUT_DATA_CACHE = new Map<string, CachedAtmosphereLutData>();
 
@@ -135,7 +143,46 @@ export function createAtmosphereLuts(
         multipleData[offset + 3] = 255;
       }
     }
-    cached = Object.freeze({ transmittance: transmittanceData, multipleScattering: multipleData });
+    const skyViewData = new Uint8Array(SKY_VIEW_WIDTH * SKY_VIEW_HEIGHT * 4);
+    for (let y = 0; y < SKY_VIEW_HEIGHT; y++) {
+      const sunMu = ((y + 0.5) / SKY_VIEW_HEIGHT) * 2 - 1;
+      const sunTransmittance = transmittanceAt(radius, physical, rayleigh, mie, mieScaleHeight, 0, sunMu);
+      for (let x = 0; x < SKY_VIEW_WIDTH; x++) {
+        const viewMu = ((x + 0.5) / SKY_VIEW_WIDTH) * 2 - 1;
+        const horizon = Math.exp(-Math.abs(viewMu) * 3.2);
+        const forward = Math.pow(Math.max(0, viewMu * sunMu + Math.sqrt(Math.max(0, 1 - viewMu * viewMu)) *
+          Math.sqrt(Math.max(0, 1 - sunMu * sunMu))), 6);
+        const offset = (y * SKY_VIEW_WIDTH + x) * 4;
+        for (let channel = 0; channel < 3; channel++) {
+          const rayleighSky = (1 - sunTransmittance[channel]) * (0.22 + horizon * 0.78);
+          const mieGlow = forward * (1 - sunTransmittance[channel]) * 0.34;
+          skyViewData[offset + channel] = Math.round(Math.min(1, rayleighSky + mieGlow) * 255);
+        }
+        skyViewData[offset + 3] = 255;
+      }
+    }
+
+    const aerialData = new Uint8Array(AERIAL_WIDTH * AERIAL_HEIGHT * 4);
+    for (let y = 0; y < AERIAL_HEIGHT; y++) {
+      const altitude = ((y + 0.5) / AERIAL_HEIGHT) * physical.height;
+      const density = Math.exp(-altitude / physical.scaleHeight);
+      for (let x = 0; x < AERIAL_WIDTH; x++) {
+        const distance = ((x + 0.5) / AERIAL_WIDTH) * 200_000;
+        const transmittance = [0, 1, 2].map((channel) =>
+          Math.exp(-(rayleigh[channel] + mie) * density * distance));
+        const offset = (y * AERIAL_WIDTH + x) * 4;
+        for (let channel = 0; channel < 3; channel++) {
+          aerialData[offset + channel] = Math.round(Math.min(1, (1 - transmittance[channel]) * 1.8) * 255);
+        }
+        aerialData[offset + 3] = Math.round((1 - (transmittance[0] + transmittance[1] + transmittance[2]) / 3) * 255);
+      }
+    }
+    cached = Object.freeze({
+      transmittance: transmittanceData,
+      multipleScattering: multipleData,
+      skyView: skyViewData,
+      aerialPerspective: aerialData,
+    });
     LUT_DATA_CACHE.set(cacheKey, cached);
   }
 
@@ -151,9 +198,18 @@ export function createAtmosphereLuts(
     MULTI_SCATTER_HEIGHT,
     'multiple-scattering',
   );
+  const skyView = encodeTexture(cached.skyView, SKY_VIEW_WIDTH, SKY_VIEW_HEIGHT, 'sky-view');
+  const aerialPerspective = encodeTexture(
+    cached.aerialPerspective,
+    AERIAL_WIDTH,
+    AERIAL_HEIGHT,
+    'aerial-perspective',
+  );
   return Object.freeze({
     transmittance,
     multipleScattering,
-    textures: Object.freeze([transmittance, multipleScattering]),
+    skyView,
+    aerialPerspective,
+    textures: Object.freeze([transmittance, multipleScattering, skyView, aerialPerspective]),
   });
 }

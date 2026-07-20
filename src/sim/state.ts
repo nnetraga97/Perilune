@@ -13,7 +13,8 @@ import {
   timeToTrueAnomaly,
 } from '../core/orbit';
 import { Body, Universe } from './universe';
-import { AUREN_SYSTEM, HOME_BODY_ID } from '../content/system';
+import { HOME_BODY_ID, SOL_SYSTEM } from '../content/system';
+import type { BodyDef } from './universe';
 import {
   ACTION_GROUP_IDS,
   ActionGroupId,
@@ -94,6 +95,11 @@ export interface GameAlarm {
   vesselId: string | null;
 }
 
+export interface GameStateOptions {
+  readonly bodies?: readonly BodyDef[];
+  readonly homeBodyId?: string;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _br = new Vec3();
@@ -101,7 +107,7 @@ const _bv = new Vec3();
 const _sun = new Vec3();
 
 export class GameState {
-  readonly universe = new Universe(AUREN_SYSTEM, HOME_BODY_ID);
+  readonly universe: Universe;
   time = 0;
   vessels: GameVessel[] = [];
   activeVesselId: string | null = null;
@@ -127,7 +133,11 @@ export class GameState {
   private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
 
-  constructor(mode: GameMode = 'sandbox') {
+  constructor(
+    mode: GameMode = 'sandbox',
+    options: Readonly<GameStateOptions> = {},
+  ) {
+    this.universe = new Universe([...(options.bodies ?? SOL_SYSTEM)], options.homeBodyId ?? HOME_BODY_ID);
     this.campaign = createCampaign(mode);
   }
 
@@ -225,14 +235,17 @@ export class GameState {
     return fired;
   }
 
-  /** Place a craft on Veyra's Cape Skyward launch pad. */
+  /** Place a craft on the selected system's home-body launch pad. */
   spawnOnPad(craft: Craft, name: string): GameVessel {
-    const veyra = this.universe.get('veyra');
-    const runtime = createVesselRuntime(this.newVesselId(), name, craft, 'veyra');
+    const home = this.universe.get(this.universe.homeBodyId);
+    if (!home.def.launchSite || home.def.surfaceKind !== 'solid') {
+      throw new Error(`${home.name} has no configured launch site`);
+    }
+    const runtime = createVesselRuntime(this.newVesselId(), name, craft, home.id);
 
     // Pad site: fixed longitude/latitude on the surface at current spin.
-    const dirI = launchSiteDirection(veyra, this.time, new Vec3());
-    const groundR = groundRadiusInertial(veyra, dirI, this.time);
+    const dirI = launchSiteDirection(home, this.time, new Vec3());
+    const groundR = groundRadiusInertial(home, dirI, this.time);
 
     // Height so the craft's lowest part rests on ground.
     let minY = Infinity;
@@ -248,9 +261,9 @@ export class GameState {
     const standHeight = comY - minY + 0.4;
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
-    runtime.landedBodyFixed = inertialToBodyFixed(veyra, this.time, runtime.pos, new Vec3());
+    runtime.landedBodyFixed = inertialToBodyFixed(home, this.time, runtime.pos, new Vec3());
     // Surface rotation velocity.
-    surfaceVelocity(veyra, runtime.pos, runtime.vel);
+    surfaceVelocity(home, runtime.pos, runtime.vel);
     // Point up.
     runtime.att.setLookRotation(
       new Vec3(-dirI.y, dirI.x, 0).normalize(), // forward: east-ish tangent

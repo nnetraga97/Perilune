@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { BodyRendererKind } from '../content/bodyVisuals';
 import type { BodyFixedFrustumPlane } from './terrain/terrainFrustum';
+import type { CelestialProjection } from './celestialProjection';
 
 export type QualityTier = 'low' | 'medium' | 'high';
 
@@ -37,9 +38,13 @@ export interface BodyRenderFrame {
   readonly verticalFovRadians: number;
   /** Physical drawing-buffer height in pixels, including device pixel ratio. */
   readonly drawingBufferHeight: number;
+  /** Analytic f64 projection authority, independent of any proxy mesh placement. */
+  readonly projection: Readonly<CelestialProjection>;
   readonly orientation: QuaternionCoordinates;
   readonly cameraSunDirection: VectorCoordinates;
   readonly bodySunDirection: VectorCoordinates;
+  /** Fraction of the finite solar disk visible after analytic body occultation. */
+  readonly solarVisibleFraction: number;
   readonly time: number;
   /** Wall-clock frame delta; never simulation-warp time. */
   readonly deltaSeconds: number;
@@ -69,9 +74,20 @@ export interface BodyRendererStats {
   readonly terrainSelectionMs?: number;
   readonly terrainBalanceMs?: number;
   readonly terrainSelectionReused?: boolean;
+  readonly terrainPending?: number;
+  readonly terrainTransitions?: number;
   /** Renderer-owned surface resource bytes by category. */
   readonly scatterBytes?: number;
   readonly effectBytes?: number;
+  readonly presentationMode?: 'physical' | 'transition' | 'proxy';
+  readonly angularRadius?: number;
+  /** Committed authored pack and renderer-owned auxiliary allocations. */
+  readonly assetTier?: QualityTier | 'procedural';
+  readonly assetBytes?: number;
+  readonly lutBytes?: number;
+  readonly cloudHistoryBytes?: number;
+  readonly heightCacheBytes?: number;
+  readonly shadowBytes?: number;
 }
 
 export interface BodyRenderer {

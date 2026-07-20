@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { restoreGame, serializeGame } from '../src/save/persistence';
@@ -14,13 +15,13 @@ function buildProbe() {
 
 describe('gas-body physics', () => {
   it('continues Tyran pressure and density below the reference radius', () => {
-    const tyran = new GameState().universe.get('tyran');
+    const tyran = createLegacyGameState().universe.get('tyran');
     expect(tyran.pressureAt(-10_000)).toBeGreaterThan(tyran.pressureAt(0));
     expect(tyran.densityAt(-10_000)).toBeGreaterThan(tyran.densityAt(0));
   });
 
   it('does not create solid contact below Tyran reference radius', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const tyran = game.universe.get('tyran');
     const gv = game.spawnInOrbit(buildProbe(), 'Dive', 'tyran', 10_000);
     gv.runtime.pos.set(tyran.radius - 100, 0, 0);
@@ -33,7 +34,7 @@ describe('gas-body physics', () => {
   });
 
   it('destroys a vessel at Tyran terminal pressure before any landed state', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const tyran = game.universe.get('tyran');
     const gv = game.spawnInOrbit(buildProbe(), 'Deep dive', 'tyran', 10_000);
     gv.runtime.pos.set(tyran.radius - 40_000, 0, 0);
@@ -47,7 +48,7 @@ describe('gas-body physics', () => {
   });
 
   it('predicts a terminal gas descent without reporting terrain landing', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const tyran = game.universe.get('tyran');
     const craft = buildProbe();
     const prediction = predictEntry(
@@ -66,13 +67,13 @@ describe('gas-body physics', () => {
   });
 
   it('rejects a save that claims a vessel landed on Tyran', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const tyran = game.universe.get('tyran');
     const gv = game.spawnInOrbit(buildProbe(), 'Impossible lander', 'tyran', 1_000);
     gv.runtime.pos.set(tyran.radius, 0, 0);
     gv.runtime.situation = 'landed';
     const save = serializeGame(game, 'invalid gas landing');
 
-    expect(() => restoreGame(save)).toThrow(/gas|solid surface/i);
+    expect(() => restoreLegacyGame(save)).toThrow(/gas|solid surface/i);
   });
 });

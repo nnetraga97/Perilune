@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Body } from '../src/sim/universe';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import type { RenderCaps } from '../src/render/context';
@@ -52,9 +52,18 @@ function frame(radius: number, overrides: Partial<BodyRenderFrame> = {}): BodyRe
     cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
     verticalFovRadians: Math.PI / 3,
     drawingBufferHeight: 1080,
+    projection: {
+      trueObserverDistance: radius * 2,
+      angularRadius: Math.asin(0.5),
+      projectedPixelRadius: 540,
+      proxyDepth: 3e8,
+      proxyRadius: 173205080.75688773,
+      visibility: 'physical',
+    },
     orientation: { x: 0, y: 0, z: 0, w: 1 },
     cameraSunDirection: { x: 1, y: 0, z: 0 },
     bodySunDirection: { x: 1, y: 0, z: 0 },
+    solarVisibleFraction: 1,
     time: 10,
     deltaSeconds: 1 / 60,
     framePressure: false,

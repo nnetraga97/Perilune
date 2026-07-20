@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import planetManifest from '../../assets/planets/manifest.json';
 import { Quat } from '../core/quat';
 import { Vec3 } from '../core/vec3';
-import { AUREN_SYSTEM } from '../content/system';
+import { HOME_BODY_ID, SOL_SYSTEM } from '../content/system';
 import { createRenderContext } from '../render/context';
 import { GpuTimerRing, type GpuTimerSnapshot } from '../render/gpuTimer';
 import { makeStarfield } from '../render/starfield';
@@ -217,8 +217,8 @@ export async function runFeasibilityProto(): Promise<void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  const universe = new Universe(AUREN_SYSTEM);
-  const veyra = universe.get('veyra');
+  const universe = new Universe([...SOL_SYSTEM], HOME_BODY_ID);
+  const veyra = universe.get(HOME_BODY_ID);
   let features = reductionStage(stage, tier);
   const fixture = new FeasibilityScene(veyra, features);
   const disabledGroups = (params.get('disabled') ?? '')

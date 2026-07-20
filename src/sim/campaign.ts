@@ -40,6 +40,8 @@ export interface ContractDef {
   rewardFunds: number;
   rewardReputation: number;
   requiresTech?: TechId;
+  /** Contract is hidden when any named world is absent from the selected system. */
+  requiredBodyIds?: readonly string[];
 }
 
 export const PROGRAM_RESERVE_THRESHOLD = 6_000;
@@ -139,6 +141,7 @@ export const CONTRACTS: readonly ContractDef[] = [
     achievement: 'campaign:launched',
     rewardFunds: 4_000,
     rewardReputation: 1,
+    requiredBodyIds: ['veyra'],
   },
   {
     id: 'veyra-orbit',
@@ -147,6 +150,7 @@ export const CONTRACTS: readonly ContractDef[] = [
     achievement: 'campaign:veyra-orbit',
     rewardFunds: 9_000,
     rewardReputation: 3,
+    requiredBodyIds: ['veyra'],
   },
   {
     id: 'science-return',
@@ -163,6 +167,7 @@ export const CONTRACTS: readonly ContractDef[] = [
     achievement: 'campaign:palla-landed',
     rewardFunds: 18_000,
     rewardReputation: 6,
+    requiredBodyIds: ['palla'],
   },
   {
     id: 'first-docking',
@@ -181,6 +186,7 @@ export const CONTRACTS: readonly ContractDef[] = [
     rewardFunds: 30_000,
     rewardReputation: 8,
     requiresTech: 'deep-space-systems',
+    requiredBodyIds: ['tyran', 'brimm', 'glacia', 'mote'],
   },
   {
     id: 'surface-industry',
@@ -192,6 +198,13 @@ export const CONTRACTS: readonly ContractDef[] = [
     requiresTech: 'planetary-industry',
   },
 ];
+
+export function contractsForBodies(bodyIds: Iterable<string>): readonly ContractDef[] {
+  const available = new Set(bodyIds);
+  return CONTRACTS.filter((contract) => (
+    contract.requiredBodyIds?.every((bodyId) => available.has(bodyId)) ?? true
+  ));
+}
 
 export function createCampaign(mode: GameMode = 'sandbox'): CampaignState {
   return {

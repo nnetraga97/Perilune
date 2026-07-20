@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { addPart, createCraft } from '../src/sim/vessel';
@@ -11,7 +12,7 @@ function buildProbe() {
 
 describe('mission alarms', () => {
   it('orders alarms and clips rails warp at the first boundary', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);
     game.addAlarm(8_000, 'later', 'custom');
     const first = game.addAlarm(5_000, 'first', 'custom');
@@ -28,7 +29,7 @@ describe('mission alarms', () => {
   });
 
   it('fires a due alarm during fixed-step physics warp', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);
     game.addAlarm(3, 'soon', 'custom');
     game.setWarp(2, false);
@@ -42,7 +43,7 @@ describe('mission alarms', () => {
   });
 
   it('removes alarms by stable id and rejects invalid alarm data', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const alarm = game.addAlarm(10, 'maneuver', 'maneuver');
 
     expect(game.removeAlarm(alarm.id)).toBe(true);

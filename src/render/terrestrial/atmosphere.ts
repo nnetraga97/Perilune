@@ -12,6 +12,7 @@ export class TerrestrialAtmosphere {
   readonly path: RenderCaps['atmospherePath'];
   readonly shellRadius: number;
   private readonly lookupTextures: readonly THREE.DataTexture[];
+  readonly aerialPerspectiveTexture: THREE.DataTexture;
   private disposed = false;
 
   constructor(
@@ -26,7 +27,13 @@ export class TerrestrialAtmosphere {
     this.shellRadius = body.radius + physical.height;
     const bundle = createAtmosphereMaterial(this.path, body.radius, physical, visual, quality);
     this.lookupTextures = bundle.lookupTextures;
-    const geometry = new THREE.SphereGeometry(1, 96, 64);
+    this.aerialPerspectiveTexture = bundle.material.uniforms.uAerialPerspectiveLut.value as THREE.DataTexture;
+    const shellSegments = quality === 'high'
+      ? [192, 128] as const
+      : quality === 'medium'
+        ? [144, 96] as const
+        : [96, 64] as const;
+    const geometry = new THREE.SphereGeometry(1, shellSegments[0], shellSegments[1]);
     this.mesh = new THREE.Mesh(geometry, bundle.material);
     this.mesh.name = `terrestrial-atmosphere:${body.id}`;
     this.mesh.scale.setScalar(this.shellRadius);
@@ -36,9 +43,16 @@ export class TerrestrialAtmosphere {
 
   get material(): THREE.ShaderMaterial { return this.mesh.material; }
 
-  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection'>): void {
+  get lookupBytes(): number {
+    return this.lookupTextures.reduce((total, texture) => {
+      const data = texture.image?.data as ArrayBufferView | undefined;
+      return total + (data?.byteLength ?? 0);
+    }, 0);
+  }
+
+  update(frame: Pick<BodyRenderFrame, 'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection'> &
+    { readonly solarVisibleFraction?: number }): void {
     if (this.disposed) return;
-    const atmosphere = this.body.def.atmosphere!;
     const { cameraRelativeOrigin: origin, cameraBodyFixed, bodySunDirection: sunDirection } = frame;
     this.mesh.position.set(origin.x, origin.y, origin.z);
     const camera = this.material.uniforms.uCameraBodyFixed.value as THREE.Vector3;
@@ -46,12 +60,9 @@ export class TerrestrialAtmosphere {
     const sun = this.material.uniforms.uSunDirection.value as THREE.Vector3;
     sun.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
     const cameraRadius = Math.hypot(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
-    const altitude = cameraRadius - this.body.radius;
     const inside = cameraRadius < this.shellRadius;
     this.material.uniforms.uInsideAtmosphere.value = inside ? 1 : 0;
-    this.material.uniforms.uAerialPerspective.value = inside
-      ? Math.exp(-Math.max(0, altitude) / atmosphere.scaleHeight)
-      : 0;
+    this.material.uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
   }
 
   dispose(): void {

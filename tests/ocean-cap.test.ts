@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
@@ -8,7 +9,7 @@ import {
   oceanCapSegments,
 } from '../src/render/terrestrial/oceanMaterial';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 const RADIUS = veyra.radius;
 const ANCHOR = Object.freeze({ x: 0, y: 0, z: 1 });
 const EAST = Object.freeze({ x: 1, y: 0, z: 0 });

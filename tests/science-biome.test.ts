@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
@@ -6,7 +7,7 @@ import { addPart, createCraft } from '../src/sim/vessel';
 
 describe('science biome authority', () => {
   it('classifies deterministically from body-fixed geometry and honors polar precedence', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const palla = game.universe.get('palla');
     const pole = new Vec3(0, 0, 1);
     expect(biomeAt(palla, pole).id).toBe('ice-cap');
@@ -17,7 +18,7 @@ describe('science biome authority', () => {
   });
 
   it('uses global for orbital situations and upper-atmosphere for a gas body classifier', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('Orbital lab');
     addPart(craft, 'core-pilot', null, 'root', { x: 0, y: 0, z: 0 });
     const vessel = game.spawnInOrbit(craft, 'Orbital lab', 'palla', 30_000);

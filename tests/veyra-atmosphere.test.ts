@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { BODY_VISUALS } from '../src/content/bodyVisuals';
@@ -6,7 +7,7 @@ import type { RenderCaps } from '../src/render/context';
 import { TerrestrialAtmosphere } from '../src/render/terrestrial/atmosphere';
 import { usesLegacyAtmosphereTint } from '../src/render/worldScene';
 
-const universe = new GameState().universe;
+const universe = createLegacyGameState().universe;
 const veyra = universe.get('veyra');
 const visual = BODY_VISUALS.veyra.atmosphereVisual!;
 
@@ -41,7 +42,7 @@ describe('Veyra atmosphere', () => {
     },
   );
 
-  it('uses the exact physical top and updates inside/outside aerial perspective', () => {
+  it('uses the exact physical top while opaque consumers own aerial perspective', () => {
     const layer = atmosphere('analytic');
     const physical = veyra.def.atmosphere!;
     expect(layer.shellRadius).toBe(veyra.radius + physical.height);
@@ -54,7 +55,7 @@ describe('Veyra atmosphere', () => {
     });
     expect(layer.mesh.position.toArray()).toEqual([10, 20, 30]);
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(1);
-    expect(layer.material.uniforms.uAerialPerspective.value).toBeCloseTo(Math.exp(-1_000 / physical.scaleHeight), 12);
+    expect(layer.material.uniforms.uAerialPerspective).toBeUndefined();
     expect((layer.material.uniforms.uSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
 
     layer.update({
@@ -63,18 +64,23 @@ describe('Veyra atmosphere', () => {
       bodySunDirection: { x: 1, y: 0, z: 0 },
     });
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(0);
-    expect(layer.material.uniforms.uAerialPerspective.value).toBe(0);
     layer.dispose();
   });
 
-  it('binds RGB transmittance and multiple-scattering LUTs to the view-ray integrator', () => {
+  it('binds transmittance, scattering, sky-view, and aerial-perspective LUTs', () => {
     const layer = atmosphere('analytic');
     const transmittance = layer.material.uniforms.uTransmittanceLut.value as THREE.DataTexture;
     const multipleScattering = layer.material.uniforms.uMultipleScatteringLut.value as THREE.DataTexture;
+    const skyView = layer.material.uniforms.uSkyViewLut.value as THREE.DataTexture;
+    const aerial = layer.material.uniforms.uAerialPerspectiveLut.value as THREE.DataTexture;
     expect(transmittance.image).toMatchObject({ width: 128, height: 32 });
     expect(multipleScattering.image).toMatchObject({ width: 32, height: 32 });
+    expect(skyView.image).toMatchObject({ width: 64, height: 32 });
+    expect(aerial.image).toMatchObject({ width: 32, height: 32 });
     expect(transmittance.userData.atmosphereLut).toBe('transmittance');
     expect(multipleScattering.userData.atmosphereLut).toBe('multiple-scattering');
+    expect(skyView.userData.atmosphereLut).toBe('sky-view');
+    expect(aerial.userData.atmosphereLut).toBe('aerial-perspective');
     const transmittanceBytes = transmittance.image.data as Uint8Array;
     const upwardGroundOffset = ((32 - 1) * 128) * 4;
     const upwardTopOffset = ((32 - 1) * 128 + 127) * 4;

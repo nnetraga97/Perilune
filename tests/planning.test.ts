@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 /**
  * Mission planning: transfer windows (moon + interplanetary), the alarm
  * system's warp interlock, and atmospheric entry prediction.
@@ -22,7 +23,7 @@ function buildProbe(): Craft {
 
 describe('transfer planner', () => {
   it('plans a transfer to the moon Palla with a verifiable phase window', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);
     const veyra = game.universe.get('veyra');
     const palla = game.universe.get('palla');
@@ -61,7 +62,7 @@ describe('transfer planner', () => {
   });
 
   it('refines a live-orbit Palla sketch into a usable non-impact approach', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 105_000);
     const veyra = game.universe.get('veyra');
     const palla = game.universe.get('palla');
@@ -89,7 +90,7 @@ describe('transfer planner', () => {
   });
 
   it('plans an interplanetary transfer to Rusk', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);
     const veyra = game.universe.get('veyra');
     const rusk = game.universe.get('rusk');
@@ -130,7 +131,7 @@ describe('transfer planner', () => {
   });
 
   it('uses an energy-raising local escape burn for inward planet transfers', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 105_000);
     const veyra = game.universe.get('veyra');
     const ashen = game.universe.get('ashen');
@@ -148,7 +149,7 @@ describe('transfer planner', () => {
   });
 
   it('returns null for unsupported pairs', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const auren = game.universe.get('auren');
     expect(
@@ -157,7 +158,7 @@ describe('transfer planner', () => {
   });
 
   it('rejects moon-window estimates for retrograde parking orbits', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const palla = game.universe.get('palla');
     expect(planTransfer(game.universe, 0, veyra, palla, {
@@ -176,7 +177,7 @@ function bodyAngle(game: GameState, id: string, t: number): number {
 
 describe('alarms', () => {
   it('preserves physics warp when rails warp is unavailable', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 50_000);
     game.setWarp(2, false); // 4x physics warp
     game.setWarp(1, true); // 5x rails is unavailable inside Veyra's atmosphere
@@ -186,7 +187,7 @@ describe('alarms', () => {
   });
 
   it('stops rails warp at the alarm time, not after it', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);
     const alarmTime = game.time + 5000;
     game.addAlarm(alarmTime, 'Test alarm', 'custom');
@@ -205,7 +206,7 @@ describe('alarms', () => {
   });
 
   it('drops physics warp when an alarm fires', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);
     game.addAlarm(game.time + 3, 'Soon', 'custom');
     game.setWarp(2, false); // 4× physics warp
@@ -219,10 +220,10 @@ describe('alarms', () => {
 
   it('persists alarms through save/load', async () => {
     const { serializeGame, restoreGame } = await import('../src/save/persistence');
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 120_000);
     game.addAlarm(game.time + 1234, 'Window: Rusk', 'transfer');
-    const restored = restoreGame(JSON.parse(JSON.stringify(serializeGame(game, 'x'))));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(serializeGame(game, 'x'))));
     expect(restored.alarms.length).toBe(1);
     expect(restored.alarms[0].label).toBe('Window: Rusk');
     expect(restored.alarms[0].time).toBeCloseTo(game.time + 1234, 5);
@@ -231,7 +232,7 @@ describe('alarms', () => {
 
 describe('entry prediction', () => {
   it('predicts a landing for a decaying trajectory', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);
     const v = gv.runtime;
     const veyra = game.bodyOf(gv);
@@ -258,7 +259,7 @@ describe('entry prediction', () => {
   });
 
   it('reports no entry for a stable high orbit', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 300_000);
     const v = gv.runtime;
     const veyra = game.bodyOf(gv);
@@ -270,7 +271,7 @@ describe('entry prediction', () => {
   });
 
   it('predicts direct terrain impact on an airless body without heating', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const palla = game.universe.get('palla');
     const craft = buildProbe();
     const model = buildAeroModel(craft);
@@ -291,7 +292,7 @@ describe('entry prediction', () => {
   });
 
   it('reports no entry for a stable airless orbit', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildProbe(), 'Probe', 'palla', 100_000);
     const palla = game.bodyOf(gv);
     const model = buildAeroModel(gv.runtime.craft);
@@ -311,7 +312,7 @@ describe('entry prediction', () => {
   });
 
   it('reports atmospheric heating independently of the drag-area approximation', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const craft = buildProbe();
     const model = { ...buildAeroModel(craft), areaAxial: 0 };

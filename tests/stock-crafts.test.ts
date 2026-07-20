@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_CRAFTS, createWayfarerDemonstrator } from '../src/content/crafts';
 import { partById } from '../src/content/parts';
@@ -82,7 +83,7 @@ describe('built-in craft library', () => {
     expect(launchLoad.failures).toEqual([]);
     expect(launchLoad.maxUtilization).toBeLessThan(0.8);
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnOnPad(craft, craft.name);
     vessel.runtime.controls.throttle = 1;
     expect(game.fireStage(vessel)).toBe(true);
@@ -100,7 +101,7 @@ describe('built-in craft library', () => {
 
   it('keeps fins and radial couplings attached through the normal max-Q envelope', () => {
     const craft = createWayfarerDemonstrator();
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnOnPad(craft, craft.name);
     const runtime = vessel.runtime;
     const body = game.bodyOf(vessel);

@@ -12,6 +12,8 @@ import {
   elementsAtTime,
   periodOf,
 } from '../core/orbit';
+import type { BodyReferenceFrameDef } from './bodyReferenceFrame';
+import { referenceFrameAngles } from './bodyReferenceFrame';
 
 export interface AtmosphereDef {
   /** Sea-level static pressure (Pa). */
@@ -73,10 +75,14 @@ export interface BodyDef {
   rotationPeriod: number;
   /** Axial tilt (rad). */
   axialTilt: number;
+  /** Optional checked IAU/NAIF body-fixed frame. Epoch zero is J2000. */
+  referenceFrame?: BodyReferenceFrameDef;
   /** Physical surface model; never inferred from terrain amplitude. */
   surfaceKind: SurfaceKind;
   /** Immutable terrain-recipe schema version assigned by content. */
   terrainRecipeVersion: number;
+  /** This body owns the single active launch-site presentation/contact surface. */
+  launchSite?: boolean;
   /** Gas-body terminal pressure; absent on solid/star bodies. */
   terminalPressurePa?: number;
   /** Gas-body terminal depth below reference radius. */
@@ -138,6 +144,7 @@ export class Body {
 
   /** Rotation angle at time t (rad). */
   rotationAngle(t: number): number {
+    if (this.def.referenceFrame) return referenceFrameAngles(this.def.referenceFrame, t).primeMeridian;
     const period = this.def.rotationPeriod;
     if (period === 0) return 0;
     return ((t / period) % 1) * Math.PI * 2;

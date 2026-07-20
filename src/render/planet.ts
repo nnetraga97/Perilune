@@ -90,6 +90,8 @@ export interface PlanetRendererStats {
   selectionPasses: number;
   selectionReused: boolean;
   geometryBytes: number;
+  pending: number;
+  activeTransitions: number;
 }
 
 export interface TerrainChunkKeyInfo {
@@ -208,6 +210,7 @@ export class PlanetRenderer {
     chunks: 0, visible: 0, built: 0, triangles: 0, coverageGaps: 0,
     overlapChunks: 0, scheduleMs: 0, installMs: 0, geometryBytes: 0,
     selectionMs: 0, balanceMs: 0, selectionPasses: 0, selectionReused: false,
+    pending: 0, activeTransitions: 0,
   };
 
   constructor(
@@ -337,6 +340,8 @@ export class PlanetRenderer {
       selectionPasses: current.selectionPasses,
       selectionReused: current.selectionReused,
       geometryBytes: current.geometryBytes,
+      pending: current.queued + current.building + current.ready,
+      activeTransitions: current.activeTransitions,
     });
     void this.diagnostics;
     void this.diagnosticContext;

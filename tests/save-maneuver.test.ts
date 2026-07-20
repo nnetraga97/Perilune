@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame, migrateLegacySave } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { serializeGame, restoreGame } from '../src/save/persistence';
@@ -18,7 +19,7 @@ import { encodeScienceKey } from '../src/sim/science';
 
 describe('save system', () => {
   it('round-trips a full game state losslessly', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildTwoStageRocket(), 'Roundtrip One');
     // Fly a little so state is non-trivial.
     gv.runtime.controls.throttle = 0.8;
@@ -46,7 +47,7 @@ describe('save system', () => {
 
     const save = serializeGame(game, 'test');
     const json = JSON.stringify(save);
-    const restored = restoreGame(JSON.parse(json));
+    const restored = restoreLegacyGame(JSON.parse(json));
 
     expect(restored.time).toBeCloseTo(game.time, 9);
     expect(restored.sciencePoints).toBe(42);
@@ -80,22 +81,22 @@ describe('save system', () => {
     expect(validateSave(null)).toBe(false);
     expect(validateSave({})).toBe(false);
     expect(validateSave({ saveVersion: 1, time: NaN, vessels: [] })).toBe(false);
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnOnPad(buildTwoStageRocket(), 'V');
     const good = serializeGame(game, 't');
     expect(validateSave(JSON.parse(JSON.stringify(good)))).toBe(true);
-    expect(() => migrateSave({ ...good, saveVersion: SAVE_VERSION + 1 })).toThrow(/newer/);
+    expect(() => migrateLegacySave({ ...good, saveVersion: SAVE_VERSION + 1 })).toThrow(/newer/);
     good.vessels[0].target = 'not-a-body';
-    expect(() => restoreGame(good)).toThrow(/not-a-body/);
+    expect(() => restoreLegacyGame(good)).toThrow(/not-a-body/);
   });
 
   it('round-trips alarms and migrates version 2 saves with an empty queue', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.addAlarm(1234, 'Window: Rusk', 'transfer');
 
     const saved = serializeGame(game, 'alarm');
     expect(saved.saveVersion).toBe(SAVE_VERSION);
-    expect(restoreGame(saved).alarms[0]).toMatchObject({
+    expect(restoreLegacyGame(saved).alarms[0]).toMatchObject({
       time: 1234,
       label: 'Window: Rusk',
       kind: 'transfer',
@@ -104,9 +105,9 @@ describe('save system', () => {
     const v2 = JSON.parse(JSON.stringify(saved));
     v2.saveVersion = 2;
     delete v2.alarms;
-    expect(migrateSave(v2).alarms).toEqual([]);
+    expect(migrateLegacySave(v2).alarms).toEqual([]);
 
-    const legacyGame = new GameState();
+    const legacyGame = createLegacyGameState();
     legacyGame.spawnOnPad(buildTwoStageRocket(), 'Legacy craft');
     const v5 = JSON.parse(JSON.stringify(serializeGame(legacyGame, 'v5')));
     v5.saveVersion = 5;
@@ -114,7 +115,7 @@ describe('save system', () => {
       delete vessel.target;
       delete vessel.craft.actionGroups;
     }
-    const migrated = migrateSave(v5);
+    const migrated = migrateLegacySave(v5);
     expect(migrated.saveVersion).toBe(SAVE_VERSION);
     expect(migrated.vessels[0].target).toBeNull();
     expect(migrated.vessels[0].craft.actionGroups).toEqual({});
@@ -122,11 +123,11 @@ describe('save system', () => {
     const v6 = JSON.parse(JSON.stringify(saved));
     v6.saveVersion = 6;
     for (const alarm of v6.alarms) delete alarm.vesselId;
-    expect(migrateSave(v6).alarms[0].vesselId).toBeNull();
+    expect(migrateLegacySave(v6).alarms[0].vesselId).toBeNull();
   });
 
   it('migrates banked history and aboard science through distinct v8 rules', () => {
-    const game = new GameState('exploration');
+    const game = createLegacyGameState('exploration');
     game.spawnOnPad(buildTwoStageRocket(), 'Legacy science craft');
     const legacy = JSON.parse(JSON.stringify(serializeGame(game, 'legacy-v8')));
     legacy.saveVersion = 8;
@@ -135,7 +136,7 @@ describe('save system', () => {
     legacy.vessels[0].science = { 'spore-exposure@veyra-surface': 7 };
     delete legacy.vessels[0].scienceBuffer;
 
-    const migrated = migrateSave(legacy);
+    const migrated = migrateLegacySave(legacy);
     const historyKey = encodeScienceKey({
       experimentId: 'thermal-scan', bodyId: 'veyra', biomeId: 'global', situation: 'surface',
     });
@@ -155,7 +156,7 @@ describe('save system', () => {
     });
     expect(migrated.science.ledger[aboardKey]).toBeUndefined();
 
-    const restored = restoreGame(migrated);
+    const restored = restoreLegacyGame(migrated);
     const resaved = serializeGame(restored, 'round-trip');
     expect(resaved.science.points).toBe(17);
     expect(resaved.science.ledger).toEqual(migrated.science.ledger);
@@ -164,7 +165,7 @@ describe('save system', () => {
 });
 
 describe('maneuver planning', () => {
-  const game = new GameState();
+  const game = createLegacyGameState();
   const veyra = game.universe.get('veyra');
   const palla = game.universe.get('palla');
 

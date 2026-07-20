@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "branch": "feature/sol-earth-moon-visuals",
+  "matrix": {
+    "tiers": ["low", "medium", "high"],
+    "stationsPerTier": 20,
+    "viewport": [1280, 720],
+    "devicePixelRatio": 1,
+    "command": "npx playwright test e2e/sol-visual-reference.spec.ts"
+  },
+  "verification": {
+    "vitestFiles": 116,
+    "vitestTests": 784,
+    "referenceCases": 60,
+    "productionSmokeCases": 5,
+    "contentValidation": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed"
+  },
+  "assetBudgets": {
+    "earth": {
+      "low": { "compressedTransferBytes": 1494603, "runtimeGpuBytes": 3844984, "fallbackGpuBytes": 16777224, "transientBytes": 8912896 },
+      "medium": { "compressedTransferBytes": 5525262, "runtimeGpuBytes": 16777440, "fallbackGpuBytes": 78293684, "transientBytes": 41943040 },
+      "high": { "compressedTransferBytes": 20827921, "runtimeGpuBytes": 67109088, "fallbackGpuBytes": 313174708, "transientBytes": 167772160 }
+    },
+    "moon": {
+      "low": { "compressedTransferBytes": 1611274, "runtimeGpuBytes": 3145896, "fallbackGpuBytes": 13981020, "transientBytes": 7864320 },
+      "medium": { "compressedTransferBytes": 6218324, "runtimeGpuBytes": 12583080, "fallbackGpuBytes": 55924060, "transientBytes": 31457280 },
+      "high": { "compressedTransferBytes": 23426732, "runtimeGpuBytes": 50331816, "fallbackGpuBytes": 223696220, "transientBytes": 125829120 }
+    }
+  },
+  "runtimeSummary": {
+    "low": {
+      "cases": 20,
+      "maxDrawCalls": 188,
+      "maxTriangles": 113088,
+      "maxTextures": 14,
+      "maxGeometries": 280,
+      "averageFrameP50Ms": 8.329,
+      "maxFrameP95Ms": 9.38,
+      "maxFrameP99Ms": 81.805,
+      "maxAssetBytes": 16777224,
+      "maxLutBytes": 32768,
+      "maxHeightCacheBytes": 262144,
+      "maxShadowBytes": 0,
+      "maxTerrainPending": 11,
+      "maxTerrainTransitions": 20,
+      "maxClippedBlackFraction": 0.313746,
+      "maxClippedWhiteFraction": 0.000076
+    },
+    "medium": {
+      "cases": 20,
+      "maxDrawCalls": 275,
+      "maxTriangles": 306720,
+      "maxTextures": 15,
+      "maxGeometries": 530,
+      "averageFrameP50Ms": 8.351,
+      "maxFrameP95Ms": 10.625,
+      "maxFrameP99Ms": 218.04,
+      "maxAssetBytes": 78293684,
+      "maxLutBytes": 32768,
+      "maxHeightCacheBytes": 262144,
+      "maxShadowBytes": 4194304,
+      "maxTerrainPending": 22,
+      "maxTerrainTransitions": 25,
+      "maxClippedBlackFraction": 0.313852,
+      "maxClippedWhiteFraction": 0.000076
+    },
+    "high": {
+      "cases": 20,
+      "maxDrawCalls": 170,
+      "maxTriangles": 391680,
+      "maxTextures": 15,
+      "maxGeometries": 729,
+      "averageFrameP50Ms": 8.33,
+      "maxFrameP95Ms": 14.465,
+      "maxFrameP99Ms": 784.265,
+      "maxAssetBytes": 313174708,
+      "maxLutBytes": 32768,
+      "maxHeightCacheBytes": 262144,
+      "maxShadowBytes": 16777216,
+      "maxTerrainPending": 300,
+      "maxTerrainTransitions": 27,
+      "maxClippedBlackFraction": 0.312807,
+      "maxClippedWhiteFraction": 0.000076
+    }
+  },
+  "rawEvidence": "test-results/sol-visual-reference (ignored)"
+}

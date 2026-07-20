@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 /**
  * M1 acceptance mission: Veyra orbit → maneuver-node transfer to Palla →
  * SOI transition → powered landing on the moon → ascent and escape →
@@ -45,7 +46,7 @@ function buildMoonship(): Craft {
 
 describe('Palla round trip', () => {
   it('transfers, lands on the moon, returns, and aerobrakes home', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildMoonship(), 'Palla Pathfinder', 'veyra', 110_000);
     const v = gv.runtime;
     const veyra = game.universe.get('veyra');

@@ -33,6 +33,7 @@ export function createCloudMaterial(
       uOpacity: { value: options.opacity },
       uTint: { value: new THREE.Color(options.tint) },
       uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
+      uSolarVisibility: { value: 1 },
       uCameraCloudFixed: { value: new THREE.Vector3() },
       uShellRadius: { value: options.shellRadius },
       uParallaxStrength: { value: options.parallaxStrength },
@@ -41,6 +42,8 @@ export function createCloudMaterial(
       uVolumeTopRadius: { value: options.volume?.topRadius ?? options.shellRadius },
     },
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying vec3 vBodyDirection;
       varying vec3 vWorldDirection;
       varying vec3 vViewNormal;
@@ -52,14 +55,18 @@ export function createCloudMaterial(
         vViewNormal = normalize(normalMatrix * normal);
         vViewDirection = normalize(-viewPosition.xyz);
         gl_Position = projectionMatrix * viewPosition;
+        #include <logdepthbuf_vertex>
       }
     `,
     fragmentShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
       uniform sampler2D uCloudMap;
       uniform float uTextureScale;
       uniform float uOpacity;
       uniform vec3 uTint;
       uniform vec3 uSunDirection;
+      uniform float uSolarVisibility;
       uniform vec3 uCameraCloudFixed;
       uniform float uShellRadius;
       uniform float uParallaxStrength;
@@ -72,8 +79,8 @@ export function createCloudMaterial(
       varying vec3 vViewDirection;
 
       vec2 cloudUv(vec3 direction) {
-        float longitude = atan(direction.y, direction.x) / 6.283185307179586;
-        float u = longitude < 0.0 ? longitude + 1.0 : longitude;
+        float longitude = atan(direction.y, direction.x) / 6.283185307179586 + 0.5;
+        float u = fract(longitude);
         float v = 0.5 - asin(clamp(direction.z, -1.0, 1.0)) / 3.141592653589793;
         return vec2(fract(u * uTextureScale), v);
       }
@@ -108,6 +115,7 @@ export function createCloudMaterial(
       }
 
       void main() {
+        #include <logdepthbuf_fragment>
         // Varyings are interpolated across each triangle. Renormalizing here is
         // essential: using the interpolated chord directly reveals the sphere's
         // latitude/triangle structure in the equirectangular lookup.
@@ -139,21 +147,24 @@ export function createCloudMaterial(
             float macroCoverage = smoothstep(0.08, 0.82, authored.r - (1.0 - authored.g) * 0.06);
             vec3 noisePosition = sampleDirection * 22.0 + vec3(0.0, uTime * 0.00007, heightFraction * 3.1);
             float erosion = cloudFbm(noisePosition);
-            float threshold = mix(0.72, 0.30, macroCoverage);
+            float threshold = mix(0.64, 0.22, macroCoverage);
             float heightShape = smoothstep(0.0, 0.16, heightFraction) *
               (1.0 - smoothstep(0.68, 1.0, heightFraction));
             float density = smoothstep(threshold, threshold + 0.16, erosion) *
               macroCoverage * heightShape * mix(0.55, 1.0, authored.g);
-            float opticalStep = density * stepLength / layerDepth * 5.2;
+            float opticalStep = density * stepLength / layerDepth * 6.8;
             float segmentAlpha = 1.0 - exp(-opticalStep);
-            float sunFacing = max(0.0, dot(sampleDirection, sunDirection));
-            vec3 cloudColor = uTint * mix(0.34, 1.08, sunFacing);
+            float sunFacing = max(0.0, dot(sampleDirection, sunDirection)) * uSolarVisibility;
+            vec3 cloudColor = uTint * mix(0.42, 1.18, sunFacing);
             cloudColor += vec3(0.52, 0.58, 0.64) * forwardScatter * (1.0 - viewTransmittance);
             accumulated += viewTransmittance * cloudColor * segmentAlpha;
             viewTransmittance *= 1.0 - segmentAlpha;
           }
         }
-        float alpha = (1.0 - viewTransmittance) * uOpacity;
+        vec3 shellToCamera = normalize(uCameraCloudFixed - shellPoint);
+        float tangentFade = smoothstep(0.015, 0.08, abs(dot(direction, shellToCamera)));
+        accumulated *= tangentFade;
+        float alpha = (1.0 - viewTransmittance) * uOpacity * tangentFade;
         if (alpha < 0.008) discard;
         gl_FragColor = vec4(accumulated * uOpacity, alpha);
 #else
@@ -179,7 +190,7 @@ export function createCloudMaterial(
         float opticalDepth = clamp(field.g, 0.0, 1.0);
 
         vec3 sunDirection = normalize(uSunDirection);
-        float sunFacing = max(0.0, dot(normalize(vWorldDirection), sunDirection));
+        float sunFacing = max(0.0, dot(normalize(vWorldDirection), sunDirection)) * uSolarVisibility;
         float daylight = 0.34 + 0.66 * sunFacing;
         float cameraOutside = step(uShellRadius, length(uCameraCloudFixed));
         float underside = mix(0.76, 1.0, cameraOutside);

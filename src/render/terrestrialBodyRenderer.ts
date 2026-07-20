@@ -15,7 +15,11 @@ import type { RenderCaps } from './context';
 import { CoverageTransition } from './coverageTransition';
 import { PLANET_QUALITY, PlanetRenderer } from './planet';
 import { createGlobalSphereGeometry } from './terrestrial/globalGeometry';
-import { createTerrestrialGlobalMaterial, updateTerrestrialCloudLighting } from './terrestrial/globalMaterial';
+import {
+  createTerrestrialGlobalMaterial,
+  updateTerrestrialCloudLighting,
+  updateTerrestrialEnvironment,
+} from './terrestrial/globalMaterial';
 import { createTerrestrialSurfaceMaterial } from './terrestrial/surfaceMaterial';
 import { TerrestrialAtmosphere } from './terrestrial/atmosphere';
 import { TerrestrialOcean } from './terrestrial/ocean';
@@ -26,11 +30,13 @@ import { geometryByteLength, terrainGeometryAllocation } from './resourceAccount
 import { launchPadTerrainEnvelope, naturalContactSurface } from '../sim/terrain';
 import { launchSiteBodyFixedDirection } from '../sim/launchSite';
 import { terrainPresentationBand } from './terrainPresentation';
+import { sampleSourceMacroHeight, sourceHeightCacheBytes } from '../sim/sourceHeightAuthority';
+import { localShadowPolicy } from './lightingPolicy';
 
 const DEFAULT_ACTIVE_BODY_BUDGET: Readonly<Record<QualityTier, number>> = Object.freeze({
   low: 64 * 1024 * 1024,
   medium: 128 * 1024 * 1024,
-  high: 256 * 1024 * 1024,
+  high: 320 * 1024 * 1024,
 });
 
 function uniqueGeometryBytes(objects: readonly THREE.Object3D[]): number {
@@ -67,6 +73,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   private compactAnchorSource: 'surface' | 'camera' | 'datum' = 'datum';
   private readonly compactAnchorDirection = new Vec3();
   private readonly launchSiteDirection = new Vec3();
+  private stagedAssetBytes = 0;
+  private lastAngularRadius = 0;
   private readonly workerPool = typeof Worker === 'undefined'
     ? undefined
     : new TerrainChunkWorkerPool();
@@ -97,7 +105,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       throw new Error(`Cannot stage ${pack.bodyId}/${pack.tier} for ${this.bodyId}/${this.quality}`);
     }
     if (pack) {
-      for (const channel of ['albedo', 'normal', 'material', 'clouds']) {
+      const requiredChannels = this.bodyId === 'earth'
+        ? ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail']
+        : ['albedo', 'normal', 'material', 'clouds'];
+      for (const channel of requiredChannels) {
         if (!pack.textures.has(channel)) throw new Error(`${pack.bodyId}/${pack.tier} is missing required ${channel} texture`);
       }
     }
@@ -106,6 +117,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   }
 
   private buildStack(pack: Readonly<RuntimeBodyAssetPack> | null): void {
+    this.stagedAssetBytes = pack?.gpuBytes ?? 0;
     const compactMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor, this.caps.maxAnisotropy);
     const compactGeometry = createGlobalSphereGeometry(this.quality);
     this.compact = new THREE.Mesh(compactGeometry, compactMaterial);
@@ -181,6 +193,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
 
   update(frame: Readonly<BodyRenderFrame>): void {
     if (!this.ready) return;
+    this.lastAngularRadius = frame.projection.angularRadius;
     const band = terrainPresentationBand(this.body);
     const prewarm = frame.allowFlightTerrain && frame.altitude < band.prewarmAltitude;
     const visibleBand = frame.allowFlightTerrain && frame.altitude < band.visibleAltitude;
@@ -191,6 +204,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     const cloudDriftAngle = frame.time * WEATHER_CLOUD_DRIFT_RATE;
     updateTerrestrialCloudLighting(this.compact.material, frame.bodySunDirection, cloudDriftAngle);
     updateTerrestrialCloudLighting(this.surfaceMaterial, frame.bodySunDirection, cloudDriftAngle);
+    updateTerrestrialEnvironment(this.compact.material, this.body, frame, this.atmosphere.aerialPerspectiveTexture);
+    updateTerrestrialEnvironment(this.surfaceMaterial, this.body, frame, this.atmosphere.aerialPerspectiveTexture);
     this.atmosphere.update(frame);
     this.ocean.update(frame);
     this.clouds.update(frame);
@@ -282,7 +297,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.compactAnchorDirection.set(anchor.x / length, anchor.y / length, anchor.z / length);
     const surface = naturalContactSurface(this.body, this.compactAnchorDirection);
     this.compactAnchorHeight = surface.kind === 'none' ? 0 : surface.height;
-    if (this.body.id === 'veyra') {
+    if (this.body.def.launchSite) {
       const launchDirection = launchSiteBodyFixedDirection(this.launchSiteDirection);
       const angularDistance = Math.acos(Math.max(-1, Math.min(1,
         this.compactAnchorDirection.x * launchDirection.x
@@ -298,7 +313,10 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
         );
       }
     }
-    this.compactRadius = this.body.radius + this.compactAnchorHeight;
+    const sourceMacro = sampleSourceMacroHeight(this.bodyId, this.compactAnchorDirection);
+    // Authored compact geometry already carries the source macro displacement;
+    // the uniform scale contributes only the residual canonical local relief.
+    this.compactRadius = this.body.radius + this.compactAnchorHeight - (sourceMacro ?? 0);
     this.compactAnchorSource = frame.surfaceAnchorBodyFixed ? 'surface' : 'camera';
     this.compact.scale.setScalar(this.compactRadius);
   }
@@ -337,8 +355,18 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       terrainSelectionMs: this.terrain.stats.selectionMs,
       terrainBalanceMs: this.terrain.stats.balanceMs,
       terrainSelectionReused: this.terrain.stats.selectionReused,
+      terrainPending: this.terrain.stats.pending,
+      terrainTransitions: this.terrain.stats.activeTransitions,
       scatterBytes: 0,
       effectBytes: 0,
+      presentationMode: this.coverageProgress <= 0 ? 'proxy' : this.coverageProgress >= 1 ? 'physical' : 'transition',
+      angularRadius: this.lastAngularRadius,
+      assetTier: this.stagedAssetBytes > 0 ? this.quality : 'procedural',
+      assetBytes: this.stagedAssetBytes,
+      lutBytes: this.atmosphere.lookupBytes,
+      cloudHistoryBytes: 0,
+      heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
+      shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
     });
   }
 
@@ -356,6 +384,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     this.initialized = false;
     this.terrainActive = false;
     this.coverageProgress = 0;
+    this.stagedAssetBytes = 0;
   }
 
   dispose(): void {

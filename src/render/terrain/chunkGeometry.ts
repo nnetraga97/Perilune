@@ -325,7 +325,12 @@ export function buildTerrainChunkGeometry(
   // world-scale UV floor (formerly 1e-5) spans a large portion of a depth-16
   // tile and smooths away the relief the vertex itself represents.
   const cellUvSize = size / Math.max(1, res - 1);
-  const eps = Math.max(1e-9, cellUvSize / 8);
+  // Normal sampling is a property of the canonical surface, not of the tile
+  // currently representing it. Capping the stencil to a fixed metric span
+  // prevents adjacent parent/child LODs from producing rectangular shading
+  // bands while retaining the finer stencil of the deepest tiles.
+  const metricNormalUv = 4 / Math.max(1, request.radius);
+  const eps = Math.max(1e-9, Math.min(cellUvSize / 8, metricNormalUv));
   const point = new Vec3();
   const sampleU = new Vec3();
   const sampleV = new Vec3();

@@ -1,6 +1,6 @@
 import { EXPERIMENTS, experimentCap, scienceBiomesForSituation } from './science';
 import { PARTS } from './parts';
-import { AUREN_SYSTEM, HOME_BODY_ID } from './system';
+import { HOME_BODY_ID, SOL_SYSTEM } from './system';
 import { TECHNOLOGIES } from '../sim/campaign';
 import type { BodyDef } from '../sim/universe';
 
@@ -26,7 +26,15 @@ export function scienceBudgetForBody(body: BodyDef): number {
   return total;
 }
 
-export function validateGameContent(): string[] {
+export interface GameContentValidationOptions {
+  readonly enforceLegacyEconomy?: boolean;
+  readonly homeBodyId?: string;
+}
+
+export function validateGameContent(
+  bodies: readonly BodyDef[] = SOL_SYSTEM,
+  options: Readonly<GameContentValidationOptions> = {},
+): string[] {
   const errors: string[] = [];
   const knownTech = new Set(TECHNOLOGIES.map((technology) => technology.id));
   for (const part of PARTS) {
@@ -38,7 +46,7 @@ export function validateGameContent(): string[] {
     }
   }
 
-  for (const body of AUREN_SYSTEM) {
+  for (const body of bodies) {
     if (!body.biomes) continue;
     const ids = new Set<string>();
     for (const biome of body.biomes) {
@@ -67,7 +75,9 @@ export function validateGameContent(): string[] {
     if (thresholds?.highlandAltitudeMin !== undefined && !ids.has('highland')) errors.push(`Body ${body.id} enables highland without defining it`);
   }
 
-  const worlds = AUREN_SYSTEM.filter((body) => !body.isStar);
+  if (!options.enforceLegacyEconomy) return errors;
+
+  const worlds = bodies.filter((body) => !body.isStar);
   const budgets = worlds.map((body) => ({ body, value: scienceBudgetForBody(body) }));
   for (const { body, value } of budgets) {
     if (value < SCIENCE_BUDGET_TARGETS.worldMin || value > SCIENCE_BUDGET_TARGETS.worldMax) {
@@ -78,7 +88,7 @@ export function validateGameContent(): string[] {
   if (systemBudget < SCIENCE_BUDGET_TARGETS.systemMin || systemBudget > SCIENCE_BUDGET_TARGETS.systemMax) {
     errors.push(`System science budget ${systemBudget} is outside ${SCIENCE_BUDGET_TARGETS.systemMin}-${SCIENCE_BUDGET_TARGETS.systemMax}`);
   }
-  const homeBudget = budgets.find(({ body }) => body.id === HOME_BODY_ID)?.value ?? 0;
+  const homeBudget = budgets.find(({ body }) => body.id === (options.homeBodyId ?? HOME_BODY_ID))?.value ?? 0;
   const homeShare = systemBudget > 0 ? homeBudget / systemBudget : 0;
   if (homeShare < SCIENCE_BUDGET_TARGETS.homeShareMin || homeShare > SCIENCE_BUDGET_TARGETS.homeShareMax) {
     errors.push(`Home-world science share ${(homeShare * 100).toFixed(1)}% is outside ${(SCIENCE_BUDGET_TARGETS.homeShareMin * 100).toFixed(0)}-${(SCIENCE_BUDGET_TARGETS.homeShareMax * 100).toFixed(0)}%`);

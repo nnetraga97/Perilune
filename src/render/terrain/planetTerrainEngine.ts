@@ -573,7 +573,10 @@ export class PlanetTerrainEngine {
 
   setShadowReceiver(enabled: boolean): void {
     this.shadowReceiver = enabled;
-    for (const chunk of this.chunks.values()) chunk.mesh.receiveShadow = enabled;
+    for (const chunk of this.chunks.values()) {
+      chunk.mesh.receiveShadow = enabled;
+      chunk.mesh.castShadow = enabled;
+    }
   }
 
   private queue(
@@ -678,6 +681,7 @@ export class PlanetTerrainEngine {
     mesh.userData.terrainTileId = tile.id;
     mesh.visible = false;
     mesh.receiveShadow = this.shadowReceiver;
+    mesh.castShadow = this.shadowReceiver;
     this.dither.bindMesh(mesh);
     this.group.add(mesh);
     this.chunks.set(tile.key, { tile, mesh, origin: result.origin });

@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { addPart, createCraft, type Craft } from '../src/sim/vessel';
 import { GameState } from '../src/sim/state';
@@ -24,7 +25,7 @@ function scienceCraft(withAntenna = true): Craft {
 
 describe('science collection and delivery', () => {
   it('collects once, transmits through comms, and recovers only the undelivered remainder', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnOnPad(scienceCraft(), 'Field mission');
     const preview = availableHere(game, vessel);
     expect(preview.results.length).toBeGreaterThanOrEqual(2);
@@ -57,7 +58,7 @@ describe('science collection and delivery', () => {
   });
 
   it('rejects recovery away from home without mutating any science state', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnInOrbit(scienceCraft(), 'Away mission', 'palla', 30_000);
     const key = encodeScienceKey({
       experimentId: 'surface-sample', bodyId: 'palla', biomeId: 'lowland', situation: 'surface',
@@ -83,7 +84,7 @@ describe('science collection and delivery', () => {
   });
 
   it('clamps competing vessel deliveries to one site cap', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const first = game.spawnInOrbit(scienceCraft(), 'First', 'veyra', 200_000);
     const second = game.spawnInOrbit(scienceCraft(), 'Second', 'veyra', 200_000);
     const key = encodeScienceKey({
@@ -100,7 +101,7 @@ describe('science collection and delivery', () => {
   });
 
   it('requires the existing comms authority and leaves buffers untouched without a link', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnInOrbit(scienceCraft(false), 'Mute lab', 'veyra', 200_000);
     const key = encodeScienceKey({
       experimentId: 'thermal-scan', bodyId: 'veyra', biomeId: 'global', situation: 'space-low',
@@ -116,7 +117,7 @@ describe('science collection and delivery', () => {
   });
 
   it('applies upgrade levels only to future collection snapshots', () => {
-    const game = new GameState('exploration');
+    const game = createLegacyGameState('exploration');
     const first = game.spawnOnPad(scienceCraft(), 'Before upgrades');
     collectScience(game, first);
     const firstSpore = [...first.runtime.scienceBuffer].find(([keyId]) => keyId.includes('spore-exposure'));
@@ -135,7 +136,7 @@ describe('science collection and delivery', () => {
   });
 
   it('loses only the destroyed vessel buffer and leaves the global ledger untouched', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnOnPad(scienceCraft(), 'Disposable lab');
     collectScience(game, vessel);
     expect(aboardScienceValue(game)).toBeGreaterThan(0);
@@ -149,7 +150,7 @@ describe('science collection and delivery', () => {
 
 describe('recovery authority', () => {
   it('covers home, situation, and debris combinations from one predicate', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const vessel = game.spawnOnPad(scienceCraft(), 'Recovery truth table');
     for (const situation of ['landed', 'splashed', 'prelaunch'] as const) {
       vessel.runtime.situation = situation;

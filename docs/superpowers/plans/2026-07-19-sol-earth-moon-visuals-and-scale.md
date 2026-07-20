@@ -2,9 +2,9 @@
 
 **Date:** 2026-07-19
 
-**Status:** Revised after current-HEAD review; implementation has not started
+**Status:** Implemented on `feature/sol-earth-moon-visuals`; final reference and lifecycle audit completed 2026-07-19
 
-**Branch:** `main`
+**Branch:** `feature/sol-earth-moon-visuals`
 
 **Supersedes for visual direction:**
 `docs/superpowers/plans/2026-07-19-planet-rendering-fidelity-full-system-pass.md`

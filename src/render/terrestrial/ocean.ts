@@ -39,7 +39,8 @@ export class TerrestrialOcean {
   get material(): THREE.ShaderMaterial { return this.mesh.material; }
 
   update(frame: Pick<BodyRenderFrame,
-    'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection' | 'time' | 'orientation'>): void {
+    'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection' | 'time' | 'orientation'> &
+    { readonly solarVisibleFraction?: number }): void {
     if (this.disposed) return;
     const { cameraRelativeOrigin: origin, cameraBodyFixed: camera, orientation } = frame;
     this.mesh.position.set(origin.x, origin.y, origin.z);
@@ -63,6 +64,7 @@ export class TerrestrialOcean {
       frame.bodySunDirection.y,
       frame.bodySunDirection.z,
     ).normalize();
+    uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
     uniforms.uTime.value = frame.time;
   }
 

@@ -33,15 +33,18 @@ function configureTexture(
 export function createAirlessGlobalMaterial(
   pack: Readonly<RuntimeBodyAssetPack>,
   maxAnisotropy = 1,
+  bodyRadius = 1,
 ): AirlessGlobalMaterial {
   const albedo = requiredTexture(pack, 'albedo');
   const normal = requiredTexture(pack, 'normal');
   const packedMaterial = requiredTexture(pack, 'material');
+  const heightMacro = pack.textures.get('heightMacro') ?? packedMaterial;
   const requestedAnisotropy = pack.tier === 'high' ? 16 : pack.tier === 'medium' ? 8 : 4;
   const anisotropy = Math.max(1, Math.min(maxAnisotropy, requestedAnisotropy));
   configureTexture(albedo, THREE.SRGBColorSpace, anisotropy);
   configureTexture(normal, THREE.NoColorSpace, anisotropy);
   configureTexture(packedMaterial, THREE.NoColorSpace, anisotropy);
+  if (pack.textures.has('heightMacro')) configureTexture(heightMacro, THREE.NoColorSpace, anisotropy);
 
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 }) as AirlessGlobalMaterial;
   Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId });
@@ -50,14 +53,27 @@ export function createAirlessGlobalMaterial(
     shader.uniforms.airlessAlbedoMap = { value: albedo };
     shader.uniforms.airlessNormalMap = { value: normal };
     shader.uniforms.airlessMaterialMap = { value: packedMaterial };
+    shader.uniforms.airlessHeightMap = { value: heightMacro };
+    shader.uniforms.airlessUseHeightMap = { value: pack.textures.has('heightMacro') ? 1 : 0 };
+    shader.uniforms.airlessBodyRadius = { value: bodyRadius };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nattribute vec3 bodyDirection;\nvarying vec3 vAirlessBodyDirection;',
+        '#include <common>\nattribute vec3 bodyDirection;\nuniform sampler2D airlessHeightMap;\nuniform float airlessUseHeightMap;\nuniform float airlessBodyRadius;\nvarying vec3 vAirlessBodyDirection;',
       )
       .replace(
         '#include <begin_vertex>',
-        '#include <begin_vertex>\nvAirlessBodyDirection = bodyDirection;',
+        `#include <begin_vertex>
+vAirlessBodyDirection = bodyDirection;
+if (airlessUseHeightMap > 0.5) {
+  vec3 airlessHeightDirection = normalize(bodyDirection);
+  float airlessHeightU = fract(atan(airlessHeightDirection.y, airlessHeightDirection.x) / 6.283185307179586 + 0.5);
+  float airlessHeightV = clamp(0.5 - asin(clamp(airlessHeightDirection.z, -1.0, 1.0)) / 3.141592653589793, 0.0, 1.0);
+  vec2 airlessHeightRg = texture2D(airlessHeightMap, vec2(airlessHeightU, airlessHeightV)).rg;
+  float airlessHeightQuantized = airlessHeightRg.r * 65280.0 + airlessHeightRg.g * 255.0;
+  float airlessHeightMeters = -12000.0 + airlessHeightQuantized / 65535.0 * 24000.0;
+  transformed += airlessHeightDirection * (airlessHeightMeters / max(airlessBodyRadius, 1.0));
+}`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -79,9 +95,8 @@ vec3 decodeAirlessOctNormal(vec2 encoded) {
       .replace(
         '#include <map_fragment>',
         `vec2 airlessUv = bodyFixedUv(vAirlessBodyDirection);
-airlessUv.x = fract(airlessUv.x + 0.5);
 vec4 airlessPackedMaterial = texture2D(airlessMaterialMap, airlessUv);
-diffuseColor.rgb *= texture2D(airlessAlbedoMap, airlessUv).rgb;
+diffuseColor.rgb *= texture2D(airlessAlbedoMap, airlessUv).rgb * 0.30;
 diffuseColor.rgb *= mix(0.72, 1.0, airlessPackedMaterial.g);`,
       )
       .replace(

@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
@@ -40,7 +41,7 @@ function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
 
 describe('planet surface authority', () => {
   it('places a flat physical launchpad deck on natural Veyra terrain only inside its footprint', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const site = launchSiteBodyFixedDirection(new Vec3());
     const east = new Vec3(-site.y, site.x, 0).normalize();
     const directionAtDistance = (distance: number): Vec3 => {
@@ -67,7 +68,7 @@ describe('planet surface authority', () => {
   });
 
   it('derives deterministic Veyra masks and normals from the shared height evaluator', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const source = new Uint8Array(32 * 16 * 3);
     for (let index = 0; index < source.length; index++) source[index] = (index * 17) & 0xff;
     const generate = () => generateVeyraCanonicalMaps({
@@ -114,7 +115,7 @@ describe('planet surface authority', () => {
   it('matches authoritative shoreline signs and finite-difference normals across 10,000 seeded samples', () => {
     const width = 144;
     const height = 72;
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const source = new Uint8Array(width * height * 3);
     for (let index = 0; index < source.length; index++) source[index] = (index * 29 + 17) & 0xff;
     const heightAt = (direction: Readonly<Vec3>): number => {
@@ -170,7 +171,7 @@ describe('planet surface authority', () => {
   });
 
   it('returns raw seafloor separately from water contact', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const ocean = findDirection((direction) => {
       const surface = solidHeight(veyra, direction);
       return surface.kind === 'solid' && surface.height < 0;
@@ -186,7 +187,7 @@ describe('planet surface authority', () => {
   });
 
   it('uses the same versioned recipe evaluator as the public solid query', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     for (const body of game.universe.bodies.values()) {
       const recipe = recipeForBody(body);
       expect(recipe.version).toBeGreaterThanOrEqual(1);
@@ -202,7 +203,7 @@ describe('planet surface authority', () => {
   });
 
   it('returns a typed no-surface result for Tyran and Auren', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     for (const id of ['tyran', 'auren']) {
       const body = game.universe.get(id);
       expect(solidHeight(body, new Vec3(1, 0, 0))).toEqual({ kind: 'none' });

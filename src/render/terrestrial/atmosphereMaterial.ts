@@ -54,19 +54,26 @@ export function createAtmosphereMaterial(
       uCameraBodyFixed: { value: new THREE.Vector3(radius + physical.height * 2, 0, 0) },
       uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
       uInsideAtmosphere: { value: 0 },
-      uAerialPerspective: { value: 0 },
+      uSolarVisibility: { value: 1 },
       uTransmittanceLut: { value: luts.transmittance },
       uMultipleScatteringLut: { value: luts.multipleScattering },
+      uSkyViewLut: { value: luts.skyView },
+      uAerialPerspectiveLut: { value: luts.aerialPerspective },
     },
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying vec3 vBodyNormal;
       void main() {
         vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
         vBodyNormal = normalize(position);
         gl_Position = projectionMatrix * viewPosition;
+        #include <logdepthbuf_vertex>
       }
     `,
     fragmentShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
       uniform float uBodyRadius;
       uniform float uAtmosphereRadius;
       uniform float uAtmosphereHeight;
@@ -82,9 +89,11 @@ export function createAtmosphereMaterial(
       uniform vec3 uCameraBodyFixed;
       uniform vec3 uSunDirection;
       uniform float uInsideAtmosphere;
-      uniform float uAerialPerspective;
+      uniform float uSolarVisibility;
       uniform sampler2D uTransmittanceLut;
       uniform sampler2D uMultipleScatteringLut;
+      uniform sampler2D uSkyViewLut;
+      uniform sampler2D uAerialPerspectiveLut;
       varying vec3 vBodyNormal;
 
       vec2 atmosphereRaySphere(vec3 origin, vec3 direction, float radius) {
@@ -113,11 +122,14 @@ export function createAtmosphereMaterial(
       }
 
       void main() {
+        #include <logdepthbuf_fragment>
         vec3 shellPoint = normalize(vBodyNormal) * uAtmosphereRadius;
         vec3 rayDirection = normalize(shellPoint - uCameraBodyFixed);
         vec2 atmosphereHit = atmosphereRaySphere(uCameraBodyFixed, rayDirection, uAtmosphereRadius);
         float rayStart = max(0.0, atmosphereHit.x);
         float rayEnd = atmosphereHit.y;
+        vec2 groundHit = atmosphereRaySphere(uCameraBodyFixed, rayDirection, uBodyRadius);
+        if (groundHit.x > rayStart && groundHit.x < rayEnd) rayEnd = groundHit.x;
         if (rayEnd <= rayStart) discard;
 
         float stepLength = (rayEnd - rayStart) / float(ATMOSPHERE_VIEW_SAMPLES);
@@ -143,6 +155,7 @@ export function createAtmosphereMaterial(
             uRayleighScattering * rayleighDensity * phaseRayleigh +
             vec3(uMieScattering * mieDensity * phaseMie)
           );
+          singleScattering *= uSolarVisibility;
           vec3 isotropicScattering = multipleScattering * (
             uRayleighScattering * rayleighDensity + vec3(uMieScattering * mieDensity)
           );
@@ -150,8 +163,13 @@ export function createAtmosphereMaterial(
           viewTransmittance *= exp(-extinction * stepLength);
         }
         float alpha = clamp(1.0 - dot(viewTransmittance, vec3(0.333333)), 0.0, 1.0);
-        vec3 color = radiance * 8.0 * uVisualStrength;
-        color *= mix(vec3(1.0), uWavelengthTint, 0.16);
+        vec3 color = radiance * 3.2 * uVisualStrength;
+        vec3 skyView = texture2D(uSkyViewLut, vec2(scatteringCosine * 0.5 + 0.5,
+          dot(normalize(shellPoint), normalize(uSunDirection)) * 0.5 + 0.5)).rgb;
+        color += skyView * 0.10 * uVisualStrength;
+        color *= mix(vec3(1.0), uWavelengthTint, 0.10);
+        float skyLuminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = mix(color, mix(vec3(skyLuminance), color, 0.82), uInsideAtmosphere);
         // The material uses premultiplied alpha. Leaving RGB unscaled makes
         // low-density samples outside the limb composite as a broad glow.
         gl_FragColor = vec4(color * alpha, alpha);

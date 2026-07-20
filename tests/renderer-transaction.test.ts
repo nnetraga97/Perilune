@@ -225,6 +225,31 @@ describe('transactional body renderer replacement', () => {
     ]);
   });
 
+  test('cycles Earth and Moon plus tier rebuilds without accumulating renderer roots or assets', async () => {
+    const loadedAssets: LoadedRendererAssets[] = [];
+    const { manager, made, scene } = managerHarness({
+      loadAssets: async () => {
+        const loaded = assets({ dispose: vi.fn() });
+        loadedAssets.push(loaded);
+        return loaded;
+      },
+    });
+
+    await manager.ensure(body('earth'));
+    await manager.ensure(body('moon'));
+    await manager.ensure(body('earth'));
+    await manager.replaceQuality('high');
+    await manager.rebuildCommitted();
+
+    expect(scene.children).toEqual([made.at(-1)!.root]);
+    for (const renderer of made.slice(0, -1)) expect(renderer.dispose).toHaveBeenCalledOnce();
+    for (const loaded of loadedAssets.slice(0, -1)) expect(loaded.dispose).toHaveBeenCalledOnce();
+    manager.dispose();
+    expect(made.at(-1)!.dispose).toHaveBeenCalledOnce();
+    expect(loadedAssets.at(-1)!.dispose).toHaveBeenCalledOnce();
+    expect(scene.children).toHaveLength(0);
+  });
+
   test('reports truthful committed, transaction, failure, and resident resource state', async () => {
     const load = deferred<LoadedRendererAssets>();
     let now = 100;
@@ -583,6 +608,8 @@ describe('planet asset loading boundary', () => {
     expect(loaded.gpuBytes).toBe(120);
     expect(loaded.textures.get('albedo')?.colorSpace).toBe(THREE.SRGBColorSpace);
     expect(loaded.textures.get('normal')?.colorSpace).toBe(THREE.NoColorSpace);
+    expect(loaded.textures.get('albedo')?.flipY).toBe(false);
+    expect(loaded.textures.get('normal')?.flipY).toBe(false);
     expect(diagnostics.snapshot().entries
       .filter((entry) => entry.event === 'asset-channel-selected')
       .map((entry) => entry.data)).toEqual([
@@ -613,7 +640,13 @@ describe('planet asset loading boundary', () => {
     expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
     const production = checkPlanetManifest(checkedPlanetArtifact);
-    expect(production.packs).toHaveLength(5);
+    expect(production.packs).toHaveLength(11);
+    expect(production.hasPack('earth', 'low')).toBe(true);
+    expect(production.hasPack('earth', 'medium')).toBe(true);
+    expect(production.hasPack('earth', 'high')).toBe(true);
+    expect(production.hasPack('moon', 'low')).toBe(true);
+    expect(production.hasPack('moon', 'medium')).toBe(true);
+    expect(production.hasPack('moon', 'high')).toBe(true);
     expect(production.hasPack('palla', 'medium')).toBe(true);
     expect(production.hasPack('wisp', 'medium')).toBe(true);
   });

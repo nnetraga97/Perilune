@@ -33,6 +33,11 @@ async function boot(): Promise<void> {
     await runFeasibilityProto();
     return;
   }
+  if (proto === 'sol-visual-reference') {
+    const { runSolVisualReferenceProto } = await import('./proto/solVisualReferenceProto');
+    await runSolVisualReferenceProto();
+    return;
+  }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
   await startGame(renderStartupOptions);

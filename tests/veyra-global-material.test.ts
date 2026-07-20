@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
@@ -15,7 +16,7 @@ import {
   updateTerrestrialCloudLighting,
 } from '../src/render/terrestrial/globalMaterial';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 const descriptor = bodyMaterialDescriptor(veyra);
 
 function texture(): THREE.DataTexture {
@@ -43,11 +44,11 @@ describe('Veyra global coordinates and material', () => {
   };
 
   it('uses north-at-row-zero coordinates and remains adjacent at the longitude seam', () => {
-    expect(bodyFixedUv({ x: 0, y: 0, z: 1 })).toEqual({ u: 0, v: 0 });
-    expect(bodyFixedUv({ x: 0, y: 0, z: -1 })).toEqual({ u: 0, v: 1 });
-    expect(bodyFixedUv({ x: 0, y: 1, z: 0 })).toEqual({ u: 0.25, v: 0.5 });
-    const above = bodyFixedUv({ x: 1, y: 1e-12, z: 0 });
-    const below = bodyFixedUv({ x: 1, y: -1e-12, z: 0 });
+    expect(bodyFixedUv({ x: 0, y: 0, z: 1 })).toEqual({ u: 0.5, v: 0 });
+    expect(bodyFixedUv({ x: 0, y: 0, z: -1 })).toEqual({ u: 0.5, v: 1 });
+    expect(bodyFixedUv({ x: 0, y: 1, z: 0 })).toEqual({ u: 0.75, v: 0.5 });
+    const above = bodyFixedUv({ x: -1, y: -1e-12, z: 0 });
+    const below = bodyFixedUv({ x: -1, y: 1e-12, z: 0 });
     expect(above.u + (1 - below.u)).toBeLessThan(1e-9);
   });
 
@@ -95,7 +96,7 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('decodeGlobalOctNormal');
     expect(shader.fragmentShader).toContain('vec3 globalBodyNormal');
-    expect(shader.fragmentShader).toContain('diffuseColor.rgb *= authoredAlbedo.rgb;');
+    expect(shader.fragmentShader).toContain('mix(authoredAlbedo.rgb, globalOceanColor, authoredMaterial.b)');
     expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);

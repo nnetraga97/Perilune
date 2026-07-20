@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { CoverageTransition } from '../src/render/coverageTransition';
@@ -41,7 +42,7 @@ describe('coverage-safe compact-to-terrain transition', () => {
   });
 
   it('does not declare terrain ready while any visible coverage gap remains', () => {
-    const renderer = new PlanetRenderer(new GameState().universe.get('veyra'));
+    const renderer = new PlanetRenderer(createLegacyGameState().universe.get('veyra'));
     expect(renderer.coverageReady()).toBe(false);
     for (let frame = 0; frame < 4; frame++) {
       renderer.update(

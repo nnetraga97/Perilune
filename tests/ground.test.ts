@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 /**
  * Ground vehicles: motorized wheels (drive, brake, steer), free-rolling
  * landing gear, and the air-breathing jet engine. Exercises the multi-point
@@ -117,7 +118,7 @@ describe('part catalog: ground & ISRU families', () => {
 
 describe('rover wheel physics', () => {
   it('rests stably on wheels without drifting or exploding', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawnRoverLanded(game, buildRover());
     for (let i = 0; i < 500; i++) game.update(PHYSICS_DT); // 10 s
     expect(game.vessels.includes(gv)).toBe(true);
@@ -127,7 +128,7 @@ describe('rover wheel physics', () => {
   });
 
   it('drives forward under wheel power and brakes to a stop', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawnRoverLanded(game, buildRover());
     const v = gv.runtime;
     for (let i = 0; i < 100; i++) game.update(PHYSICS_DT); // settle
@@ -152,7 +153,7 @@ describe('rover wheel physics', () => {
 
   it('steers: opposite steer inputs turn the heading opposite ways', () => {
     const run = (steer: number): number => {
-      const game = new GameState();
+      const game = createLegacyGameState();
       const gv = spawnRoverLanded(game, buildRover());
       const v = gv.runtime;
       for (let i = 0; i < 100; i++) game.update(PHYSICS_DT);
@@ -193,7 +194,7 @@ describe('air-breathing engine', () => {
     };
 
     // On the pad: jet at full throttle must push (properAccel from thrust).
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildJetSled(), 'Jet Sled');
     const v = gv.runtime;
     v.controls.throttle = 1;
@@ -206,7 +207,7 @@ describe('air-breathing engine', () => {
     expect(peakAccel).toBeGreaterThan(1);
 
     // In orbit (vacuum): same craft, throttle up — no thrust.
-    const game2 = new GameState();
+    const game2 = createLegacyGameState();
     const gv2 = game2.spawnInOrbit(buildJetSled(), 'Vacuum Sled', 'veyra', 120_000);
     const v2 = gv2.runtime;
     v2.controls.throttle = 1;

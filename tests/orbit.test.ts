@@ -12,7 +12,7 @@ import {
   trueToMean,
 } from '../src/core/orbit';
 import { Universe } from '../src/sim/universe';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 
 const MU_VEYRA = 9.42e12;
 

@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { stateToElements } from '../src/core/orbit';
@@ -12,7 +13,7 @@ function buildProbe(name: string) {
 
 describe('Fleet orbit action', () => {
   it('places only the active craft into a safe circular orbit around its target', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const parked = game.spawnInOrbit(buildProbe('Parked'), 'Parked', 'veyra', 120_000);
     const parkedPosition = parked.runtime.pos.clone();
     const active = game.spawnOnPad(buildProbe('Active'), 'Active');
@@ -59,7 +60,7 @@ describe('Fleet orbit action', () => {
   });
 
   it('does nothing without an active craft or when the target is the star', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     expect(game.placeActiveInOrbit('palla')).toBe(false);
 
     const active = game.spawnOnPad(buildProbe('Active'), 'Active');

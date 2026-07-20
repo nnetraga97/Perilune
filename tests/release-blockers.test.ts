@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import * as state from '../src/sim/state';
@@ -24,7 +25,7 @@ describe('M2 release blockers', () => {
     const pod = addPart(craft, 'pod-voyager', dec.key, 'stack-top', { x: 0, y: 2, z: 0 });
     craft.stages = [{ partKeys: [dec.key] }];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const original = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(original)).toBe(true);
 
@@ -56,7 +57,7 @@ describe('M2 release blockers', () => {
   });
 
   it('keeps a coarse terrain fallback visible while detailed chunks build', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const body = game.universe.get('veyra');
     const renderer = new PlanetRenderer(body, { ...PLANET_QUALITY.medium, buildBudget: 1 });
     renderer.update(
@@ -87,7 +88,7 @@ describe('M2 release blockers', () => {
   });
 
   it('clears every prior mission vessel before a fresh launch', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('old flight');
     addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     game.spawnOnPad(craft, craft.name);
@@ -126,7 +127,7 @@ describe('M2 release blockers', () => {
     }).launchSiteDirection;
     expect(siteDirection).toBeTypeOf('function');
     if (!siteDirection) return;
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('pad alignment');
     addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     const spawned = game.spawnOnPad(craft, craft.name);
@@ -145,7 +146,7 @@ describe('M2 release blockers', () => {
     const craft = validateCraftFile(diagnosticCraft);
     expect(craft).not.toBeNull();
     if (!craft) return;
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(craft, craft.name);
     const body = game.bodyOf(gv);
     for (let step = 0; step < 1_000; step++) game.update(PHYSICS_DT);
@@ -175,7 +176,7 @@ describe('M2 release blockers', () => {
   });
 
   it('uses an opaque ocean depth surface so underwater chunks cannot show through', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const renderer = new PlanetRenderer(game.universe.get('veyra'));
     const ocean = renderer.group.children[0] as { material?: { transparent?: boolean; opacity?: number } };
     expect(ocean.material?.transparent).toBe(false);

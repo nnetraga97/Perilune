@@ -1,10 +1,11 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { TerrestrialCloudDeck } from '../src/render/terrestrial/cloudLayer';
 import { RenderDiagnostics } from '../src/render/renderDiagnostics';
 
-const universe = new GameState().universe;
+const universe = createLegacyGameState().universe;
 const veyra = universe.get('veyra');
 
 function cloudTexture(): THREE.DataTexture {
@@ -39,7 +40,7 @@ describe('Veyra two-scale clouds', () => {
     const snapshot = diagnostics.snapshot();
     expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-created')).toHaveLength(2);
     expect(snapshot.entries.find((entry) => entry.event === 'cloud-shell-created' && entry.data.shell === 'weather')?.data)
-      .toMatchObject({ widthSegments: 96, heightSegments: 60, textureIdentity: texture.uuid, shadowMaterial: false });
+      .toMatchObject({ widthSegments: 192, heightSegments: 128, textureIdentity: texture.uuid, shadowMaterial: false });
     expect(snapshot.entries.filter((entry) => entry.event === 'cloud-shell-sample').map((entry) => entry.data.classification))
       .toEqual(expect.arrayContaining(['inside', 'crossing', 'outside']));
     deck.dispose();
@@ -103,7 +104,7 @@ describe('Veyra two-scale clouds', () => {
     const weather = deck.shells[0];
     const wisps = deck.shells[1];
     expect(wisps.mesh.renderOrder).toBeLessThan(weather.mesh.renderOrder);
-    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.65);
+    expect(weather.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.7);
     expect(wisps.mesh.material.uniforms.uOpacity.value).toBeLessThanOrEqual(0.15);
 
     deck.update({ ...frame, altitude: weather.altitude - 5_000 });
@@ -133,7 +134,7 @@ describe('Veyra two-scale clouds', () => {
     expect(low.shells[0].mesh.material.defines.CLOUD_VOLUMETRIC).toBe(0);
     expect(high.shells[0].mesh.material.userData.cloudModel).toBe('bounded-volume');
     expect(high.shells[0].mesh.material.defines).toMatchObject({
-      CLOUD_VIEW_SAMPLES: 12,
+      CLOUD_VIEW_SAMPLES: 24,
       CLOUD_NOISE_OCTAVES: 3,
     });
     low.dispose();

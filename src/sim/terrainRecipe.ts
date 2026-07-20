@@ -13,6 +13,11 @@ import {
   LAUNCH_SITE_LAT,
   LAUNCH_SITE_LON,
 } from './launchSite';
+import {
+  sampleCanonicalLocalRelief,
+  sampleSourceMacroHeight,
+  sourceHeightGrid,
+} from './sourceHeightAuthority';
 
 export interface CraterFeature {
   readonly center: { readonly x: number; readonly y: number; readonly z: number };
@@ -131,6 +136,19 @@ export function terrainRecipeBounds(recipe: Readonly<BodyFeatureRecipe>): Terrai
   if (!Number.isFinite(terrain.oceanLevel)) {
     throw new Error(`Invalid terrain ocean level ${terrain.oceanLevel}`);
   }
+  const sourceGrid = sourceHeightGrid(recipe.bodyId);
+  if (sourceGrid) {
+    const localReliefBound = recipe.bodyId === 'earth' ? 80 : 150;
+    return Object.freeze({
+      minimumHeightMeters: sourceGrid.minimumHeightMeters - localReliefBound,
+      maximumHeightMeters: sourceGrid.maximumHeightMeters + localReliefBound,
+      // Bilinear source slopes are conservatively bounded by the complete
+      // source range per grid cell plus the local relief bands.
+      maximumAngularSlopeMeters:
+        (sourceGrid.maximumHeightMeters - sourceGrid.minimumHeightMeters) * sourceGrid.width
+        + localReliefBound * recipe.radiusMeters / 125,
+    });
+  }
   // The evaluator returns before ocean/crater work for a flat recipe.
   if (terrain.amplitude === 0) {
     return Object.freeze({
@@ -198,7 +216,7 @@ export function evaluateRecipeHeight(
   direction: Readonly<{ x: number; y: number; z: number }>,
 ): number {
   const naturalHeight = evaluateNaturalRecipeHeight(recipe, direction);
-  if (recipe.bodyId !== 'veyra') return naturalHeight;
+  if (recipe.bodyId !== 'veyra' && recipe.bodyId !== 'earth') return naturalHeight;
 
   // Cape Skyward is authored into the same immutable terrain recipe consumed
   // by physics, workers, and baked assets. A flat center plus a wide smooth
@@ -225,6 +243,14 @@ function evaluateNaturalRecipeHeight(
   recipe: BodyFeatureRecipe,
   direction: Readonly<{ x: number; y: number; z: number }>,
 ): number {
+  const sourceHeight = sampleSourceMacroHeight(recipe.bodyId, direction);
+  if (sourceHeight !== null) {
+    return sourceHeight + sampleCanonicalLocalRelief(
+      recipe.bodyId,
+      recipe.radiusMeters,
+      direction,
+    );
+  }
   const terrain = recipe.terrain;
   if (terrain.amplitude === 0) return 0;
   const frequency = terrain.frequency;

@@ -106,10 +106,17 @@ function buildPartMesh(
   if (imported) {
     // Imported geometry/materials are shared library resources; never own them here.
     holder.add(imported.object);
+    imported.object.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+      }
+    });
     holder.userData.visualSource = 'model' satisfies VesselVisualSource;
   } else {
     const body = new THREE.Mesh(geometryFor(def), materialFor(def.color ?? '#c8cdd2'));
-    body.castShadow = false;
+    body.castShadow = true;
+    body.receiveShadow = true;
     holder.add(body);
     // Accent band for visual identity (cheap, no textures). Procedural bodies only.
     const isStraightStack =
@@ -123,6 +130,8 @@ function buildPartMesh(
         bandGeometry,
         materialFor(def.accent, 0.2, 0.6),
       );
+      band.castShadow = true;
+      band.receiveShadow = true;
       band.position.y = def.shape.height * 0.28;
       holder.add(band);
     }

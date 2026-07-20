@@ -15,6 +15,7 @@ import { launchSiteBodyFixedDirection } from './launchSite';
 export interface GroundStation {
   id: string;
   name: string;
+  /** `home` binds the station to the selected system's home body. */
   bodyId: string;
   /** Body-fixed unit direction of the site. */
   dir: Vec3;
@@ -25,21 +26,21 @@ export const GROUND_STATIONS: GroundStation[] = [
   {
     id: 'gs-cape',
     name: 'Cape Skyward',
-    bodyId: 'veyra',
+    bodyId: 'home',
     dir: launchSiteBodyFixedDirection(new Vec3()),
     range: 5e10,
   },
   {
     id: 'gs-farside',
     name: 'Farside Array',
-    bodyId: 'veyra',
+    bodyId: 'home',
     dir: new Vec3(Math.cos(0.12) * Math.cos(-0.5), Math.cos(0.12) * Math.sin(-0.5), Math.sin(0.12)).normalize(),
     range: 5e10,
   },
   {
     id: 'gs-polar',
     name: 'Highwatch Station',
-    bodyId: 'veyra',
+    bodyId: 'home',
     dir: new Vec3(Math.cos(1.1) * Math.cos(1.2), Math.cos(1.1) * Math.sin(1.2), Math.sin(1.1)).normalize(),
     range: 5e10,
   },
@@ -103,7 +104,7 @@ export function evaluateComms(game: GameState, target: GameVessel): CommsStatus 
   const nodes: NetNode[] = [];
   // Ground stations (rotate with their body).
   for (const gs of GROUND_STATIONS) {
-    const body = game.universe.get(gs.bodyId);
+    const body = game.universe.get(gs.bodyId === 'home' ? game.universe.homeBodyId : gs.bodyId);
     const pos = bodyFixedToInertial(body, game.time, gs.dir, new Vec3()).scale(body.radius + 500);
     game.universe.absolutePosition(body, game.time, _sp);
     pos.add(_sp);

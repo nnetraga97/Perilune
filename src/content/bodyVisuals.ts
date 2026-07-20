@@ -68,6 +68,9 @@ export interface BodyVisualDef {
 }
 
 export type BodyId =
+  | 'sun'
+  | 'earth'
+  | 'moon'
   | 'auren'
   | 'ashen'
   | 'vess'
@@ -83,6 +86,15 @@ export type BodyId =
 
 /** Renderer-owned visual assignments, deliberately separate from simulation body definitions. */
 export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.freeze({
+  sun: { renderer: 'star', targetArchetype: 'star', materialId: 'sol-photosphere' },
+  earth: {
+    renderer: 'terrestrial',
+    targetArchetype: 'terrestrial',
+    materialId: 'earth-terrestrial',
+    atmosphereVisual: { wavelengthTint: [0.36, 0.62, 1], strength: 1 },
+    entryVisual: { ...DEFAULT_ENTRY_VISUAL },
+  },
+  moon: { renderer: 'airless', targetArchetype: 'airless', materialId: 'moon-airless' },
   auren: { renderer: 'star', targetArchetype: 'star', materialId: 'auren-star' },
   ashen: { renderer: 'legacy', targetArchetype: 'airless', materialId: 'ashen-airless' },
   vess: {

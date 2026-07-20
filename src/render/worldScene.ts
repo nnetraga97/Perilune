@@ -39,6 +39,14 @@ import { bodyFixedFrustumPlanes, type BodyFixedFrustumPlane } from './terrain/te
 import { ActiveReentryEffect, type ReentryEffectStats } from './reentryEffects';
 import { craftReentryFingerprint } from './reentryGeometry';
 import { signalFromAero, type ReentrySignal } from './reentrySignal';
+import { computeCelestialProjection, type CelestialProjection } from './celestialProjection';
+import { celestialOcclusion } from './celestialOcclusion';
+import {
+  adaptExposure,
+  environmentLighting,
+  localShadowPolicy,
+  snapShadowCenter,
+} from './lightingPolicy';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -79,6 +87,10 @@ const _smokeQuaternion = new THREE.Quaternion();
 const _reentryAtmosphereVelocity = new Vec3();
 const _reentryVelocityOS = new THREE.Vector3(0, 1, 0);
 const _reentryInverseAttitude = new THREE.Quaternion();
+const _occluderAbs = new Vec3();
+const _occluderDirection = new Vec3();
+const _shadowCenter = new THREE.Vector3();
+const _shadowDirection = new THREE.Vector3();
 interface MutableVectorCoordinates { x: number; y: number; z: number }
 interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: number }
 interface MutableBodyRenderFrame {
@@ -90,9 +102,11 @@ interface MutableBodyRenderFrame {
   cameraBodyFixedVelocity: MutableVectorCoordinates;
   verticalFovRadians: number;
   drawingBufferHeight: number;
+  projection: CelestialProjection;
   orientation: MutableQuaternionCoordinates;
   cameraSunDirection: MutableVectorCoordinates;
   bodySunDirection: MutableVectorCoordinates;
+  solarVisibleFraction: number;
   time: number;
   deltaSeconds: number;
   framePressure: boolean;
@@ -178,7 +192,7 @@ function rendererGeometryBytes(renderer: BodyRenderer): number {
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
-  private readonly ambient: THREE.AmbientLight;
+  private readonly environment: THREE.HemisphereLight;
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
@@ -303,6 +317,7 @@ export class WorldScene {
       0.3,
       6e8,
     );
+    this.camera.userData.physicalDepthEnvelope = 'earth-moon-certified';
     this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -317,8 +332,9 @@ export class WorldScene {
     this.launchSite = this.buildLaunchSite();
     this.scene.add(this.launchSite);
     this.scene.add(this.srbSmoke.points);
-    this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
-    this.scene.add(this.ambient);
+    this.environment = new THREE.HemisphereLight('#0b1016', '#020304', 0.045);
+    this.scene.add(this.environment);
+    this.configureShadowRenderer();
   }
 
   private buildLaunchSite(): THREE.Group {
@@ -329,11 +345,15 @@ export class WorldScene {
       new THREE.CylinderGeometry(LAUNCH_PAD_CONTACT_RADIUS, LAUNCH_PAD_FOOTPRINT_RADIUS, 1, 32),
       concrete,
     );
+    pad.castShadow = true;
+    pad.receiveShadow = true;
     pad.name = 'launch-pad-foundation';
     // The final depth is set from the complete terrain footprint each frame.
     pad.position.y = -0.5;
     group.add(pad);
     const deck = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.12, 32), structure);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
     deck.position.y = 0.06;
     group.add(deck);
     group.visible = false;
@@ -346,6 +366,7 @@ export class WorldScene {
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
     const qualityChanged = this.quality !== tier;
     this.quality = tier;
+    this.configureShadowRenderer();
     this.srbSmoke?.setQuality(tier);
     if (qualityChanged) this.clearReentryEffect();
     for (const [bodyId, manager] of this.bodyRendererManagers) {
@@ -359,6 +380,42 @@ export class WorldScene {
         if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
       }).catch((error) => this.noteRendererFailure(bodyId, error));
     }
+  }
+
+  private configureShadowRenderer(): void {
+    // Some policy-only unit probes construct a prototype shell without a WebGL
+    // context; the live scene always has one.
+    if (!this.context?.renderer?.shadowMap) return;
+    this.context.renderer.shadowMap.enabled = this.quality !== 'low';
+    this.context.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.context.renderer.shadowMap.needsUpdate = true;
+  }
+
+  private updateLocalSolarShadow(altitude: number): void {
+    const light = this.scene.getObjectByProperty('name', 'solar-direct:sun');
+    if (!(light instanceof THREE.DirectionalLight)) return;
+    const policy = localShadowPolicy(this.quality, this.camDist, altitude);
+    light.castShadow = policy.enabled;
+    if (!policy.enabled) return;
+    light.shadow.mapSize.set(policy.mapSize, policy.mapSize);
+    const camera = light.shadow.camera;
+    camera.left = -policy.extent;
+    camera.right = policy.extent;
+    camera.top = policy.extent;
+    camera.bottom = -policy.extent;
+    camera.near = policy.near;
+    camera.far = policy.far;
+    light.shadow.bias = policy.bias;
+    light.shadow.normalBias = policy.normalBias;
+    const activeCenter = this.activeVesselId
+      ? this.vesselVisuals.get(this.activeVesselId)?.group.position ?? _shadowCenter.set(0, 0, 0)
+      : _shadowCenter.set(0, 0, 0);
+    _shadowDirection.copy(light.position).sub(light.target.position).normalize();
+    snapShadowCenter(activeCenter, _shadowDirection, policy.extent, policy.mapSize, _shadowCenter);
+    light.target.position.copy(_shadowCenter);
+    light.position.copy(_shadowCenter).addScaledVector(_shadowDirection, policy.lightDistance);
+    light.target.updateMatrixWorld(true);
+    light.shadow.camera.updateProjectionMatrix();
   }
 
   planetStats(): { chunks: number; visible: number } {
@@ -927,9 +984,18 @@ export class WorldScene {
           cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
           verticalFovRadians: 0,
           drawingBufferHeight: 0,
+          projection: computeCelestialProjection({
+            centerRelative: { x: 1, y: 0, z: 0 },
+            bodyRadius: 1,
+            verticalFovRadians: Math.PI / 3,
+            drawingBufferHeight: 1,
+            physicalFarMeters: this.camera.far,
+            farField: false,
+          }),
           orientation: { x: 0, y: 0, z: 0, w: 1 },
           cameraSunDirection: { x: 0, y: 0, z: 0 },
           bodySunDirection: { x: 0, y: 0, z: 0 },
+          solarVisibleFraction: 1,
           time: 0,
           deltaSeconds: 0,
           framePressure: false,
@@ -952,8 +1018,39 @@ export class WorldScene {
       stableFrame.orientation.w = _bodyQ.w;
       copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
       copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
+      let solarVisibleFraction = 1;
+      const solarAngularRadius = game.universe.root.radius > 0
+        ? Math.asin(Math.min(1, game.universe.root.radius / Math.max(game.universe.root.radius, _starAbs.distanceTo(_camAbs))))
+        : 0;
+      if (solarAngularRadius > 0) {
+        for (const occluder of game.universe.bodies.values()) {
+          if (occluder.def.isStar) continue;
+          game.universe.absolutePosition(occluder, t, _occluderAbs);
+          _occluderDirection.copy(_occluderAbs).sub(_camAbs);
+          const occluderDistance = _occluderDirection.length();
+          if (!(occluderDistance > 0)) continue;
+          const occlusion = celestialOcclusion(
+            { direction: _sunDir, angularRadius: solarAngularRadius },
+            {
+              direction: _occluderDirection,
+              angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
+            },
+          );
+          solarVisibleFraction = Math.min(solarVisibleFraction, occlusion.sourceVisibleFraction);
+        }
+      }
+      stableFrame.solarVisibleFraction = solarVisibleFraction;
       stableFrame.verticalFovRadians = verticalFovRadians;
       stableFrame.drawingBufferHeight = drawingBufferHeight;
+      stableFrame.projection = computeCelestialProjection({
+        centerRelative: stableFrame.cameraRelativeOrigin,
+        bodyRadius: b.radius,
+        verticalFovRadians,
+        drawingBufferHeight,
+        physicalFarMeters: this.camera.far,
+        preferredProxyDepth: 3e8,
+        farField: b.def.surfaceKind === 'star',
+      });
       stableFrame.time = t;
       stableFrame.deltaSeconds = dt;
       stableFrame.framePressure = dt > 1 / 30;
@@ -971,7 +1068,7 @@ export class WorldScene {
 
     // Cape Skyward is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.
-    if (body.id === 'veyra') {
+    if (body.def.launchSite) {
       const siteDir = launchSiteDirection(body, t, _tmp);
       const padEnvelope = launchPadTerrainEnvelope(body);
       // Model origin and physics both own the deck top. The foundation extends
@@ -1047,24 +1144,34 @@ export class WorldScene {
     }
     this.srbSmoke.endFrame();
 
-    // ---- atmosphere tint: fade background + fog by altitude.
+    // ---- shared local illumination: the atmosphere supplies hemispherical
+    // fill while airless/deep-space scenes remain almost black. Direct solar
+    // light is still owned by SolarBodyRenderer.
     const alt = v.pos.length() - body.radius;
     const atmo = body.def.atmosphere;
-    const legacyAtmosphereTint = usesLegacyAtmosphereTint(this.bodyRenderers.get(body.id)?.kind);
-    if (atmo && legacyAtmosphereTint && alt < atmo.height) {
-      const f = Math.max(0, 1 - alt / atmo.height);
-      const dayness = Math.max(0, Vec3.dot(up, _sunDir));
-      const sky = _skyColor.setRGB(
-        0.05 + 0.35 * f * dayness,
-        0.07 + 0.5 * f * dayness,
-        0.1 + 0.72 * f * dayness,
-      );
-      (this.scene.background as THREE.Color).copy(sky);
-      this.ambient.intensity = 0.55 + 0.5 * f * dayness;
-    } else {
-      (this.scene.background as THREE.Color).set('#04070a');
-      this.ambient.intensity = 0.55;
-    }
+    const rendererKind = this.bodyRenderers.get(body.id)?.kind;
+    const solarVisibleFraction = this.lastBodyFrames.get(body.id)?.solarVisibleFraction ?? 1;
+    const dayness = Math.max(0, Vec3.dot(up, _sunDir));
+    const sunInFrame = Vec3.dot(_cameraForwardWorld, _sunDir)
+      > Math.cos(verticalFovRadians * 0.65);
+    const environment = environmentLighting(
+      rendererKind,
+      atmo?.height ?? 0,
+      alt,
+      dayness,
+      solarVisibleFraction,
+      sunInFrame,
+    );
+    this.environment.color.set(environment.sky);
+    this.environment.groundColor.set(environment.ground);
+    this.environment.intensity = environment.intensity;
+    (this.scene.background as THREE.Color).set(environment.background);
+    this.context.renderer.toneMappingExposure = adaptExposure(
+      this.context.renderer.toneMappingExposure,
+      environment.exposure,
+      smokeDt,
+    );
+    this.updateLocalSolarShadow(alt);
   }
 
   private bodyOf(game: GameState, gv: GameVessel): Body {

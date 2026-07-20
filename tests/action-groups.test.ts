@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
@@ -20,7 +21,7 @@ describe('craft action groups', () => {
       2: [{ partKey: solar.key, action: 'activate' }],
     };
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.executeActionGroup(gv, 1)).toBe(2);
     expect(engine.activated).toBe(true);
@@ -43,7 +44,7 @@ describe('craft action groups', () => {
       ],
     };
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(retained)).toBe(true);
     const detached = game.vessels.find((candidate) => (
@@ -61,7 +62,7 @@ describe('craft action groups', () => {
   });
 
   it('remaps incoming assignments when vessels dock', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const aCraft = createCraft('A');
     const aPod = addPart(aCraft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     addPart(aCraft, 'dock-port-s', aPod.key, 'stack-top', { x: 0, y: 0.55, z: 0 });

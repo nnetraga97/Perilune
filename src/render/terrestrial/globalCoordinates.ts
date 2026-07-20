@@ -3,15 +3,16 @@ import * as THREE from 'three';
 export type BodyFixedDirection = Readonly<{ x: number; y: number; z: number }>;
 
 /**
- * Canonical authored-map coordinates: +Z is north, +X is the longitude seam,
- * and image row zero is the north pole.
+ * Canonical authored-map coordinates: +Z is north, -X is the antimeridian
+ * seam, +X is Greenwich at the texture center, east longitude increases with
+ * U, and image row zero is the north pole.
  */
 export function bodyFixedUv(direction: BodyFixedDirection): { u: number; v: number } {
   const length = Math.hypot(direction.x, direction.y, direction.z);
   const normalizedZ = length === 0 ? 0 : Math.max(-1, Math.min(1, direction.z / length));
-  const longitude = Math.atan2(direction.y, direction.x) / (Math.PI * 2);
+  const longitude = Math.atan2(direction.y, direction.x) / (Math.PI * 2) + 0.5;
   return {
-    u: longitude < 0 ? longitude + 1 : longitude,
+    u: longitude >= 1 ? longitude - 1 : longitude < 0 ? longitude + 1 : longitude,
     v: 0.5 - Math.asin(normalizedZ) / Math.PI,
   };
 }
@@ -42,8 +43,8 @@ export function installBodyFixedDirectionAttribute(
 export const BODY_FIXED_UV_GLSL = /* glsl */ `
 vec2 bodyFixedUv(vec3 rawDirection) {
   vec3 direction = normalize(rawDirection);
-  float longitude = atan(direction.y, direction.x) / 6.283185307179586;
-  return vec2(longitude < 0.0 ? longitude + 1.0 : longitude,
+  float longitude = atan(direction.y, direction.x) / 6.283185307179586 + 0.5;
+  return vec2(fract(longitude),
     0.5 - asin(clamp(direction.z, -1.0, 1.0)) / 3.141592653589793);
 }
 `;
