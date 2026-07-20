@@ -6,6 +6,7 @@ import {
   createAtmosphereMaterial,
   type AtmosphereVisualCoefficients,
 } from './atmosphereMaterial';
+import { atmospherePresentationVisibility } from './aerialPerspective';
 
 export class TerrestrialAtmosphere {
   readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
@@ -69,6 +70,12 @@ export class TerrestrialAtmosphere {
     const sun = this.material.uniforms.uSunDirection.value as THREE.Vector3;
     sun.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
     const cameraRadius = Math.hypot(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
+    const presentationVisibility = atmospherePresentationVisibility(
+      Math.max(0, cameraRadius - this.body.radius),
+      this.body.def.atmosphere!.height,
+    );
+    this.material.uniforms.uPresentationVisibility.value = presentationVisibility;
+    this.mesh.visible = presentationVisibility > 0;
     const inside = cameraRadius < this.shellRadius;
     const shellSide = inside ? THREE.BackSide : THREE.FrontSide;
     if (this.material.side !== shellSide) {

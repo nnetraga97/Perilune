@@ -129,6 +129,12 @@ describe('per-scene flight aerial perspective', () => {
     controller.update(earth, frame);
     expect(controller.snapshot()).toMatchObject({ active: true, bodyId: 'earth' });
     expect(controller.aerial.atmosphereHeight.value).toBe(100_000);
+    expect(controller.aerial.presentationVisibility.value).toBe(1);
+    controller.update(earth, {
+      ...frame,
+      cameraBodyFixed: { x: earth.radius + 400_000, y: 0, z: 0 },
+    });
+    expect(controller.aerial.presentationVisibility.value).toBe(0);
     controller.disable(moon, {
       ...frame,
       cameraBodyFixed: { x: moon.radius + 10, y: 0, z: 0 },
@@ -136,6 +142,7 @@ describe('per-scene flight aerial perspective', () => {
     expect(controller.snapshot()).toMatchObject({ active: false, bodyId: 'moon' });
     expect(controller.aerial.atmosphereHeight.value).toBe(0);
     expect(controller.aerial.useLookup.value).toBe(0);
+    expect(controller.aerial.presentationVisibility.value).toBe(0);
     controller.dispose();
   });
 });

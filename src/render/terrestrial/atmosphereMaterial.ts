@@ -55,6 +55,7 @@ export function createAtmosphereMaterial(
       uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
       uInsideAtmosphere: { value: 0 },
       uSolarVisibility: { value: 1 },
+      uPresentationVisibility: { value: 1 },
       uTransmittanceLut: { value: luts.transmittance },
       uMultipleScatteringLut: { value: luts.multipleScattering },
       uSkyViewLut: { value: luts.skyView },
@@ -90,6 +91,7 @@ export function createAtmosphereMaterial(
       uniform vec3 uSunDirection;
       uniform float uInsideAtmosphere;
       uniform float uSolarVisibility;
+      uniform float uPresentationVisibility;
       uniform sampler2D uTransmittanceLut;
       uniform sampler2D uMultipleScatteringLut;
       uniform sampler2D uSkyViewLut;
@@ -162,7 +164,8 @@ export function createAtmosphereMaterial(
           radiance += viewTransmittance * (singleScattering + isotropicScattering) * stepLength;
           viewTransmittance *= exp(-extinction * stepLength);
         }
-        float alpha = clamp(1.0 - dot(viewTransmittance, vec3(0.333333)), 0.0, 1.0);
+        float alpha = clamp(1.0 - dot(viewTransmittance, vec3(0.333333)), 0.0, 1.0)
+          * uPresentationVisibility;
         vec3 color = radiance * 3.2 * uVisualStrength;
         vec3 skyView = texture2D(uSkyViewLut, vec2(scatteringCosine * 0.5 + 0.5,
           dot(normalize(shellPoint), normalize(uSunDirection)) * 0.5 + 0.5)).rgb;

@@ -281,7 +281,11 @@ export function createTerrestrialGlobalMaterial(
     terrestrialCloudLighting: cloudLighting,
   });
   attachTerrestrialAerialPerspective(material, aerialPerspective);
-  material.customProgramCacheKey = () => `terrestrial-global-v3:${pack ? 'authored' : 'palette'}`;
+  // Body-space oct normals have unavoidable fold discontinuities. Orbital mip
+  // levels average across those folds into sun-dependent wedges, so the
+  // compact globe keeps its smooth geometric normal. Streamed near-field
+  // terrain still applies the authored relief normal.
+  material.customProgramCacheKey = () => `terrestrial-global-v4:${pack ? 'authored' : 'palette'}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
     bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
@@ -296,8 +300,7 @@ uniform float terrestrialAerialBodyRadius;`)
       .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}`)
       .replace('#include <map_fragment>', GLOBAL_ALBEDO_APPLY)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
-      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}`)
-      .replace('#include <normal_fragment_maps>', GLOBAL_NORMAL_APPLY);
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <opaque_fragment>', `outgoingLight = applyTerrestrialAerialPerspective(\n  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude),\n  outgoingLight\n);\n#include <opaque_fragment>`);
   };

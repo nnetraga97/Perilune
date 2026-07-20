@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Body } from '../sim/universe';
 import type { BodyRenderFrame, QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 import {
+  atmospherePresentationVisibility,
   bindTerrestrialAerialPerspectiveUniforms,
   createTerrestrialAerialPerspectiveState,
   TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
@@ -57,6 +58,11 @@ export class FlightAerialPerspectiveController {
       0,
       1,
     );
+    const cameraAltitude = Math.max(0, this.aerial.cameraBodyFixed.value.length() - body.radius);
+    this.aerial.presentationVisibility.value = atmospherePresentationVisibility(
+      cameraAltitude,
+      atmosphere?.height ?? 0,
+    );
     this.aerial.lookup.value = atmosphere ? lookup ?? null : null;
     this.aerial.useLookup.value = atmosphere && lookup ? 1 : 0;
     this.setInverseOrientation(frame.orientation);
@@ -69,6 +75,7 @@ export class FlightAerialPerspectiveController {
     this.update(body, frame);
     this.active.value = 0;
     this.aerial.atmosphereHeight.value = 0;
+    this.aerial.presentationVisibility.value = 0;
     this.aerial.lookup.value = null;
     this.aerial.useLookup.value = 0;
   }
@@ -99,6 +106,7 @@ export class FlightAerialPerspectiveController {
     this.bodyId = null;
     this.active.value = 0;
     this.aerial.atmosphereHeight.value = 0;
+    this.aerial.presentationVisibility.value = 0;
     this.aerial.lookup.value = null;
     this.aerial.useLookup.value = 0;
   }

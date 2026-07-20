@@ -13,6 +13,7 @@ export interface TerrestrialAerialPerspectiveState {
   readonly scaleHeight: { value: number };
   readonly sunDirection: { value: THREE.Vector3 };
   readonly solarVisibleFraction: { value: number };
+  readonly presentationVisibility: { value: number };
   readonly lookup: { value: THREE.Texture | null };
   readonly useLookup: { value: number };
 }
@@ -33,6 +34,7 @@ export function createTerrestrialAerialPerspectiveState(
     scaleHeight: { value: 1 },
     sunDirection: { value: new THREE.Vector3(1, 0, 0) },
     solarVisibleFraction: { value: 1 },
+    presentationVisibility: { value: 1 },
     lookup: { value: null },
     useLookup: { value: 0 },
   };
@@ -63,6 +65,7 @@ export function bindTerrestrialAerialPerspectiveUniforms(
   shader.uniforms.terrestrialAerialScaleHeight = state.scaleHeight;
   shader.uniforms.terrestrialAerialSunDirection = state.sunDirection;
   shader.uniforms.terrestrialAerialSolarVisibleFraction = state.solarVisibleFraction;
+  shader.uniforms.terrestrialAerialPresentationVisibility = state.presentationVisibility;
   shader.uniforms.terrestrialAerialLut = state.lookup;
   shader.uniforms.useTerrestrialAerialLut = state.useLookup;
 }
@@ -90,6 +93,11 @@ export function updateTerrestrialAerialPerspective(
     frame.bodySunDirection.z,
   ).normalize();
   state.solarVisibleFraction.value = Math.max(0, Math.min(1, frame.solarVisibleFraction));
+  const cameraAltitude = Math.max(0, state.cameraBodyFixed.value.length() - body.radius);
+  state.presentationVisibility.value = atmospherePresentationVisibility(
+    cameraAltitude,
+    body.def.atmosphere?.height ?? 0,
+  );
   state.lookup.value = lookup ?? null;
   state.useLookup.value = lookup ? 1 : 0;
 }
@@ -105,6 +113,7 @@ uniform float terrestrialAerialAtmosphereHeight;
 uniform float terrestrialAerialScaleHeight;
 uniform vec3 terrestrialAerialSunDirection;
 uniform float terrestrialAerialSolarVisibleFraction;
+uniform float terrestrialAerialPresentationVisibility;
 uniform sampler2D terrestrialAerialLut;
 uniform float useTerrestrialAerialLut;
 
@@ -127,6 +136,7 @@ vec3 applyTerrestrialAerialPerspective(vec3 shadedPointBodyFixed, vec3 baseColor
   vec4 aerialLut = texture2D(terrestrialAerialLut, aerialUv);
   aerialAmount = mix(aerialAmount, min(0.94, aerialLut.a * 1.18),
     useTerrestrialAerialLut);
+  aerialAmount *= terrestrialAerialPresentationVisibility;
   float sunElevation = dot(radialDirection, normalize(terrestrialAerialSunDirection));
   vec3 hazeColor = mix(vec3(0.30, 0.43, 0.62), vec3(0.48, 0.68, 0.96),
     smoothstep(-0.18, 0.34, sunElevation));
@@ -158,6 +168,22 @@ export interface CpuAerialPerspectiveResult {
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Keep atmospheric wash in low flight, then remove it before the body becomes
+ * an orbital presentation. The smooth band avoids a visible boundary pop.
+ */
+export function atmospherePresentationVisibility(
+  altitudeMeters: number,
+  atmosphereHeightMeters: number,
+): number {
+  if (!(atmosphereHeightMeters > 0)) return 0;
+  const start = atmosphereHeightMeters;
+  const end = atmosphereHeightMeters * 2;
+  const t = clamp01((altitudeMeters - start) / Math.max(end - start, 1));
+  const smooth = t * t * (3 - 2 * t);
+  return 1 - smooth;
 }
 
 function normalized(
@@ -209,6 +235,7 @@ export function evaluateTerrestrialAerialPerspective(
   amount = Math.min(amount, 0.94);
   const lookup = input.lookupSample;
   if (lookup) amount = Math.min(0.94, lookup[3] * 1.18);
+  amount *= atmospherePresentationVisibility(cameraAltitude, input.atmosphereHeight);
   const sun = normalized(input.sunDirection);
   const sunElevation = radial[0] * sun[0] + radial[1] * sun[1] + radial[2] * sun[2];
   const day = smoothstep(-0.18, 0.34, sunElevation);

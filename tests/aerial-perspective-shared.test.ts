@@ -5,6 +5,7 @@ import { Body } from '../src/sim/universe';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import {
   createTerrestrialAerialPerspectiveState,
+  atmospherePresentationVisibility,
   evaluateTerrestrialAerialPerspective,
   terrestrialAerialPerspectiveState,
   updateTerrestrialAerialPerspective,
@@ -30,6 +31,14 @@ function shaderSource(): {
 }
 
 describe('shared terrestrial aerial perspective', () => {
+  it('limits atmospheric presentation to low altitude with a smooth exit band', () => {
+    expect(atmospherePresentationVisibility(0, 100_000)).toBe(1);
+    expect(atmospherePresentationVisibility(100_000, 100_000)).toBe(1);
+    expect(atmospherePresentationVisibility(150_000, 100_000)).toBeCloseTo(0.5);
+    expect(atmospherePresentationVisibility(200_000, 100_000)).toBe(0);
+    expect(atmospherePresentationVisibility(1, 0)).toBe(0);
+  });
+
   it('owns independent state per consumer material', () => {
     const first = createTerrestrialAerialPerspectiveState('first', 10);
     const second = createTerrestrialAerialPerspectiveState('second', 20);
@@ -89,6 +98,24 @@ describe('shared terrestrial aerial perspective', () => {
       .toBeLessThan(contrast(nearWhite.color, nearBlack.color));
   });
 
+  it('is a strict color no-op from orbital altitude', () => {
+    const bodyRadius = 6_378_137;
+    const baseColor = [0.08, 0.21, 0.47] as const;
+    const result = evaluateTerrestrialAerialPerspective({
+      shadedPointBodyFixed: { x: bodyRadius, y: 0, z: 0 },
+      baseColor,
+      cameraBodyFixed: { x: bodyRadius + 400_000, y: 0, z: 0 },
+      bodyRadius,
+      atmosphereHeight: 100_000,
+      scaleHeight: 8_500,
+      sunDirection: { x: 1, y: 0, z: 0 },
+      solarVisibleFraction: 1,
+      lookupSample: [0.2, 0.4, 0.8, 0.9],
+    });
+    expect(result.amount).toBe(0);
+    expect(result.color).toEqual(baseColor);
+  });
+
   it('updates ocean camera and LUT state instead of only declaring uniforms', () => {
     const body = earth();
     const ocean = new TerrestrialOcean(body, 'medium', null);
@@ -134,7 +161,7 @@ describe('shared terrestrial aerial perspective', () => {
     expect(surfaceShader.fragmentShader).toContain('terrestrialAerialBodyRadius + vGlobalSurfaceAltitude');
     const ocean = new TerrestrialOcean(body, 'medium', null);
     expect(ocean.material.fragmentShader).toContain('normalize(vBodyDirection) * uBodyRadius');
-    expect(compact.customProgramCacheKey()).toContain('terrestrial-global-v3');
+    expect(compact.customProgramCacheKey()).toContain('terrestrial-global-v4');
     expect(surface.customProgramCacheKey()).toContain('terrestrial-surface-v3');
     expect(ocean.material.customProgramCacheKey()).toContain('terrestrial-ocean-v3');
     compact.dispose();
@@ -155,6 +182,7 @@ describe('shared terrestrial aerial perspective', () => {
     expect(state.cameraBodyFixed.value.toArray()).toEqual([body.radius + 10, 2, 3]);
     expect(state.sunDirection.value.toArray()).toEqual([0, 1, 0]);
     expect(state.atmosphereHeight.value).toBe(100_000);
+    expect(state.presentationVisibility.value).toBe(1);
     expect(state.lookup.value).toBe(lookup);
     material.dispose();
   });

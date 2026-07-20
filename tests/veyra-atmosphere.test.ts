@@ -58,6 +58,8 @@ describe('Veyra atmosphere', () => {
     expect(layer.mesh.position.toArray()).toEqual([10, 20, 30]);
     expect(layer.mesh.quaternion.toArray()).toEqual([0, 0, Math.SQRT1_2, Math.SQRT1_2]);
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(1);
+    expect(layer.material.uniforms.uPresentationVisibility.value).toBe(1);
+    expect(layer.mesh.visible).toBe(true);
     expect(layer.material.side).toBe(THREE.BackSide);
     expect(layer.material.uniforms.uAerialPerspective).toBeUndefined();
     expect((layer.material.uniforms.uSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
@@ -70,6 +72,16 @@ describe('Veyra atmosphere', () => {
     });
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(0);
     expect(layer.material.side).toBe(THREE.FrontSide);
+    expect(layer.material.uniforms.uPresentationVisibility.value).toBeLessThan(1);
+
+    layer.update({
+      cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
+      cameraBodyFixed: { x: veyra.radius + physical.height * 2, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+      bodySunDirection: { x: 1, y: 0, z: 0 },
+    });
+    expect(layer.material.uniforms.uPresentationVisibility.value).toBe(0);
+    expect(layer.mesh.visible).toBe(false);
     layer.dispose();
   });
 
