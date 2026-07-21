@@ -28,6 +28,10 @@ import {
 
 /** Body-fixed period over which local surface detail repeats exactly (meters). */
 export const SURFACE_DETAIL_PERIOD_METERS = 8192;
+/** Local material is fully visible below this camera altitude. */
+export const SURFACE_DETAIL_FULL_ALTITUDE_METERS = 12_000;
+/** Local material is fully removed above this camera altitude. */
+export const SURFACE_DETAIL_FADE_OUT_ALTITUDE_METERS = 48_000;
 
 /**
  * Regional-classification thresholds shared verbatim by the CPU classifier and
@@ -379,6 +383,12 @@ float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a * useGlobalIceM
 float surfMoisture = deterministicMoisture(vBodyDirection);
 SurfaceWeights surfWeights = classifyTerrestrialSurface(
   surfBiome, surfShore, surfOcean, vSurfaceAltitude, surfSlope, surfLatitude, surfMoisture);
+float surfCameraAltitude = max(0.0,
+  length(terrestrialAerialCameraBodyFixed) - terrestrialAerialBodyRadius);
+float surfNearGroundFade = 1.0 - smoothstep(
+  ${SURFACE_DETAIL_FULL_ALTITUDE_METERS.toFixed(1)},
+  ${SURFACE_DETAIL_FADE_OUT_ALTITUDE_METERS.toFixed(1)},
+  surfCameraAltitude);
 vec3 surfDetailGradient;
 float surfDetail = triplanarSurfaceDetail(vDetailAnchor, surfBodyNormal, surfaceDetailMaxOctave, surfDetailGradient);
 // Material identity must not depend on streamed mesh LOD. Macro altitude and
@@ -395,7 +405,7 @@ float surfLocalFootprint = max(max(length(fwidth(surfStableAnchor.yz / 24.0)), l
 // footprints, exposing the quadtree as bright rectangles.
 vec3 surfViewDirectionBody = normalize(terrestrialAerialCameraBodyFixed - surfStableAnchor);
 float surfLocalGrazingFade = smoothstep(0.08, 0.32, abs(dot(surfRadialProjection, surfViewDirectionBody)));
-float surfLocalFade = useLocalDetailMap * surfLocalGrazingFade;
+float surfLocalFade = useLocalDetailMap * surfLocalGrazingFade * surfNearGroundFade;
 vec4 surfLocalDetail = sampleLocalDetailTriplanar(surfStableAnchor, surfRadialProjection, surfLocalCell);
 vec3 surfTint = surfWeights.soil * vec3(1.0, 0.98, 0.95)
   + surfWeights.rock * vec3(0.86, 0.84, 0.82)
@@ -405,15 +415,20 @@ diffuseColor.rgb *= surfTint;
 vec4 surfTerrainDetail = sampleTerrainDetail(vBodyDirection);
 diffuseColor.rgb = mix(diffuseColor.rgb, surfTerrainDetail.rgb * surfTint, surfTerrainDetail.a * (1.0 - surfOcean));
 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.94, 0.98, 1.03), surfIce * 0.32);
-diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock);
+diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock) * surfNearGroundFade;
 diffuseColor.rgb *= mix(1.0, mix(0.9, 1.1, surfLocalDetail.r), surfLocalFade * 0.5);
 `;
 
 const SURFACE_ROUGHNESS_APPLY = /* glsl */ `
 float surfClassRough = surfWeights.soil * 0.9 + surfWeights.rock * 1.0
   + surfWeights.sand * 0.8 + surfWeights.vegetation * 0.85;
-roughnessFactor = clamp(roughnessFactor * surfClassRough + surfDetail * 0.05 * surfWeights.rock, 0.05, 1.0);
+roughnessFactor = clamp(roughnessFactor * surfClassRough
+  + surfDetail * 0.05 * surfWeights.rock * surfNearGroundFade, 0.05, 1.0);
 roughnessFactor = mix(roughnessFactor, surfLocalDetail.a, surfLocalFade * 0.45);
+// The streamed land deck must not inherit the compact packed map's very low
+// orbital roughness. At grazing reentry angles that produced a broad white
+// sheen across terrain and amplified every procedural normal band.
+roughnessFactor = max(roughnessFactor, mix(0.72, 0.48, surfOcean));
 `;
 
 const SURFACE_NORMAL_APPLY = /* glsl */ `
@@ -422,7 +437,8 @@ vec3 surfMacroDelta = globalBodyNormal - surfRadialNormal * dot(globalBodyNormal
 vec3 surfMacroNormal = normalize(surfBodyNormal + surfMacroDelta * 0.36 * useAuthoredGlobalMaps);
 vec3 surfTangentGradient = surfDetailGradient - surfMacroNormal * dot(surfDetailGradient, surfMacroNormal);
 float surfBump = mix(80.0, 240.0, surfWeights.rock);
-vec3 surfPerturbed = normalize(surfMacroNormal - surfTangentGradient * surfBump);
+vec3 surfPerturbed = normalize(surfMacroNormal
+  - surfTangentGradient * surfBump * surfNearGroundFade);
 vec3 surfLocalNormal = sampleLocalDetailNormal(surfStableAnchor, surfRadialProjection, surfLocalCell);
 surfPerturbed = normalize(mix(surfPerturbed, surfLocalNormal, surfLocalFade * 0.12));
 vec4 surfSourceNormal = sampleTerrainDetailNormal(vBodyDirection);

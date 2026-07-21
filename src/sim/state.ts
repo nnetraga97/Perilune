@@ -23,6 +23,7 @@ import {
   defOf,
   partitionActionGroups,
   projectStages,
+  removeSubtree,
 } from './vessel';
 import {
   createVesselRuntime,
@@ -963,17 +964,32 @@ export class GameState {
         continue;
       }
       if (result.destroyedParts.length) {
+        const stagesBeforeDamage = v.craft.stages.map((stage) => ({
+          partKeys: [...stage.partKeys],
+        }));
+        const currentStageBeforeDamage = v.currentStage;
         for (const key of result.destroyedParts) {
           const p = v.craft.parts.find((q) => q.key === key);
           if (p) {
             logEvent(v, this.time, `${defOf(p).name} destroyed by overheating`, 'danger');
+            // A destroyed attachment cannot leave its descendants pointing at
+            // a parent that no longer exists. Remove the complete attached
+            // branch and clean its stage/action-group references together.
+            removeSubtree(v.craft, key);
           }
         }
-        v.craft.parts = v.craft.parts.filter((p) => !result.destroyedParts.includes(p.key));
         if (!v.craft.parts.length || !hasControlSource(v.craft)) {
           this.destroyVessel(gv, 'Vessel lost to overheating');
           continue;
         }
+        const retainedKeys = new Set(v.craft.parts.map((part) => part.key));
+        const stagePlan = projectStages(
+          stagesBeforeDamage,
+          currentStageBeforeDamage,
+          retainedKeys,
+        );
+        v.craft.stages = stagePlan.stages;
+        v.currentStage = stagePlan.currentStage;
         refreshDerived(v);
       }
 

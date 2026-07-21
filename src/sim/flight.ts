@@ -30,6 +30,11 @@ import {
 } from './bodyOrientation';
 import type { BufferedResult, ScienceKeyId } from './science';
 
+// Temporary visual-validation rule: keep thermal state, ablation, telemetry,
+// and reentry effects active, but do not remove parts while reentry rendering
+// is being tuned. Re-enable part failures once that pass is complete.
+const THERMAL_PART_FAILURES_ENABLED = false;
+
 export type SasMode =
   | 'off'
   | 'stability'
@@ -983,7 +988,7 @@ function stepThermal(
     const cooling = (temp - 270) * (0.02 + density * 0.06) + Math.pow(temp / 1000, 4) * 6;
     temp -= cooling * dt;
     p.temperature = Math.max(200, temp);
-    if (temp > def.maxTemp) {
+    if (THERMAL_PART_FAILURES_ENABLED && temp > def.maxTemp) {
       result.destroyedParts.push(p.key);
     }
   }
