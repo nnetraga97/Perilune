@@ -27,7 +27,7 @@ describe('compilePartAssets', () => {
     const first = await compilePartAssets({ root, write: false, optimize: copyGenerated });
     const second = await compilePartAssets({ root, write: false, optimize: copyGenerated });
     expect(canonicalJson(first)).toBe(canonicalJson(second));
-    expect(first.manifest.models).toHaveLength(32);
+    expect(first.manifest.models).toHaveLength(34);
   });
 
   it('reproduces the committed checked-part-manifest exactly', async () => {

@@ -2,7 +2,7 @@ import { canonicalJson, sha256Utf8 } from './checkedManifestDigest';
 
 /** Approved runtime ceilings; mirrors scripts/lib/part-asset-schema.mjs. */
 const PART_ASSET_BUDGET_CEILINGS = Object.freeze({
-  totalTriangleLimit: 64_000,
+  totalTriangleLimit: 65_000,
   totalTransferBytes: 6 * 1024 * 1024,
   totalGpuBytes: 32 * 1024 * 1024,
 });

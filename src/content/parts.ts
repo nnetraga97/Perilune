@@ -213,6 +213,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'tank-s1',
     tech: 'foundations',
+    modelAssetId: 'perilune-pl100-tank',
     name: 'PL-100 Tank',
     blurb: 'The smallest serious fuel tank the Cooperative sells.',
     category: 'tanks',
@@ -296,6 +297,7 @@ export const PARTS: PartDef[] = [
   {
     id: 'tank-m8',
     tech: 'deep-space-systems',
+    modelAssetId: 'perilune-hv1600-tank',
     name: 'HV-1600 Tank',
     blurb: 'When the mission plan says "more".',
     category: 'tanks',

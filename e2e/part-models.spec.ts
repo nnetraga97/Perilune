@@ -72,7 +72,9 @@ async function selectSinglePart(page: Page): Promise<number> {
 
 const ENHANCED_PARTS = [
   { category: 'Pods', name: 'Voyager Pod' },
+  { category: 'Tanks', name: 'PL-100 Tank' },
   { category: 'Tanks', name: 'PL-400 Tank' },
+  { category: 'Tanks', name: 'HV-1600 Tank' },
   { category: 'Engines', name: 'Mule' },
   { category: 'Engines', name: 'Colt' },
   { category: 'Utility', name: 'Homecoming Chute' },
@@ -81,7 +83,7 @@ const ENHANCED_PARTS = [
   { category: 'Ground', name: 'Mesa Wheel' },
 ];
 
-test('all eight enhanced parts render their imported model', async ({ page }) => {
+test('all enhanced parts render their imported model', async ({ page }) => {
   test.setTimeout(120_000);
   await enterSandbox(page);
   for (const { category, name } of ENHANCED_PARTS) {
@@ -97,7 +99,7 @@ test('all eight enhanced parts render their imported model', async ({ page }) =>
 
 test('a failed part asset falls back to procedural geometry and still launches', async ({ page }) => {
   // Force one model to 500 before the shared library preloads it.
-  await page.route('**/parts/generated/orion-voyager-pod.glb', (route) =>
+  await page.route('**/parts/generated/orion-voyager-pod.glb*', (route) =>
     route.fulfill({ status: 500, contentType: 'model/gltf-binary', body: '' }),
   );
   await enterSandbox(page);
