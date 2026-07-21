@@ -3,8 +3,8 @@
 ## Perilune itself
 
 Copyright © 2026 the Perilune authors. All rights reserved.
-(License to be selected before public release; all code and content in
-this repository is original work created for this project.)
+(License to be selected before public release. Third-party content remains
+under its own terms and is identified in this file and `ATTRIBUTIONS.md`.)
 
 ## Runtime dependencies
 
@@ -42,3 +42,11 @@ The authoritative planet-asset write command is
 `npm run compile:planet-assets:container`. Its linux/amd64 Docker image pins
 both the Node base-image digest and KTX-Software archive checksum; bind mounts
 return only the generated planet assets and checked metadata to the host.
+
+## Bundled mission assets
+
+`assets/missions/artemis-iv/models/martiandays-spacex-starship-2019.glb` is
+"SpaceX Starship" by MartianDays, licensed under CC BY 4.0. The GLB is
+redistributed unmodified and retains embedded attribution metadata. Its exact
+source, checksum, and required credit are recorded in
+`assets/missions/artemis-iv/source-lock.json` and `ATTRIBUTIONS.md`.

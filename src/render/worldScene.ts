@@ -27,6 +27,7 @@ import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import type { PartModelLibrary } from './partModelLibrary';
 import { makeStarfield } from './starfield';
+import { SPACE_BACKGROUND } from './spaceBackground';
 import { bodyOrientation, inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
 import type { RenderContext } from './context';
 import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack, VectorCoordinates } from './bodyRenderer';
@@ -200,6 +201,26 @@ export interface WorldSceneOptions {
 export const FLIGHT_CAMERA_MODES = ['orbit', 'chase', 'locked', 'free'] as const;
 export type FlightCameraMode = (typeof FLIGHT_CAMERA_MODES)[number];
 
+/** Distance needed to contain a sphere in the narrower camera axis. */
+export function flightCameraDistanceForVisualRadius(
+  radiusMeters: number,
+  verticalFovDegrees: number,
+  aspect: number,
+  padding = 1.12,
+): number {
+  if (!(Number.isFinite(radiusMeters) && radiusMeters > 0)) {
+    throw new Error('Flight camera visual radius must be positive');
+  }
+  if (!(Number.isFinite(verticalFovDegrees) && verticalFovDegrees > 0 && verticalFovDegrees < 180)) {
+    throw new Error('Flight camera vertical field of view must be between 0 and 180 degrees');
+  }
+  if (!(Number.isFinite(aspect) && aspect > 0)) throw new Error('Flight camera aspect must be positive');
+  if (!(Number.isFinite(padding) && padding >= 1)) throw new Error('Flight camera padding must be at least 1');
+  const verticalHalfFov = THREE.MathUtils.degToRad(verticalFovDegrees) / 2;
+  const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * aspect);
+  return radiusMeters / Math.sin(Math.min(verticalHalfFov, horizontalHalfFov)) * padding;
+}
+
 export function bodyFixedCameraVelocity(
   current: VectorCoordinates,
   previous: Readonly<BodyRenderFrame> | undefined,
@@ -262,6 +283,8 @@ export class WorldScene {
   private readonly unsubscribeRestoration: () => void;
   private disposed = false;
   private flightTerrainBodyId: string | null = null;
+  /** Keeps an intentional no-vessel preparation frame from releasing the body being loaded. */
+  private flightTerrainPreparationLease: Readonly<{ bodyId: string }> | null = null;
   private flightPromotedBodyId: string | null = null;
   private readonly flightPromotionPending = new Set<string>();
   private readonly flightPromotionFailed = new Set<string>();
@@ -304,6 +327,20 @@ export class WorldScene {
     this.camDist = 18;
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Opt-in framing for external mission visuals whose render bounds are larger
+   * than their hidden physics craft. Ordinary vessels never call this path.
+   */
+  frameCameraForVisualRadius(radiusMeters: number): number {
+    const distance = flightCameraDistanceForVisualRadius(
+      radiusMeters,
+      this.camera.fov,
+      this.camera.aspect,
+    );
+    this.camDist = Math.max(this.camDist, distance);
+    return this.camDist;
   }
 
   orbitCamera(dx: number, dy: number): void {
@@ -386,7 +423,7 @@ export class WorldScene {
     this.unsubscribeRestoration = context.lifecycle.subscribeRestoration(
       () => this.rebuildCommittedRenderers(),
     );
-    this.scene.background = new THREE.Color('#04070a');
+    this.scene.background = new THREE.Color(SPACE_BACKGROUND);
     this.starfield = makeStarfield(4200);
     this.scene.add(this.starfield);
     this.launchSite = this.buildLaunchSite();
@@ -525,40 +562,48 @@ export class WorldScene {
     if (authority.bodyId !== body.id || installed.generation !== authority.generation) {
       throw new Error(`Flight authority is not installed for ${body.id}`);
     }
-    this.bodyAuthorities.set(body.id, authority);
-    if (claimTerrain) this.setFlightTerrainOwner(body.id);
-    this.rendererFor(body);
-    const manager = this.bodyRendererManagers.get(body.id);
-    if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
+    const preparationLease = Object.freeze({ bodyId: body.id });
+    if (claimTerrain) this.flightTerrainPreparationLease = preparationLease;
+    try {
+      this.bodyAuthorities.set(body.id, authority);
+      if (claimTerrain) this.setFlightTerrainOwner(body.id);
+      this.rendererFor(body);
+      const manager = this.bodyRendererManagers.get(body.id);
+      if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
 
-    const pending = this.bodyRendererLoads.get(body.id);
-    if (pending) await pending;
-    const currentAuthorityMismatch = () => (
-      manager.current()?.terrainAuthorityGeneration !== authority.generation
-      || manager.current()?.stats().terrainAuthorityFallbackReason !== authority.fallbackReason
-    );
-    if (currentAuthorityMismatch()) {
-      await manager.rebuildCommitted();
-      const replacement = manager.current();
-      if (replacement) this.bodyRenderers.set(body.id, replacement);
-    }
-    if (currentAuthorityMismatch()) {
-      throw new Error(`Renderer authority generation mismatch for ${body.id}`);
-    }
-    if (!claimTerrain) return;
-    if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
-    if (manager.currentAssetPack() && manager.claimFlightResidency()) {
+      const pending = this.bodyRendererLoads.get(body.id);
+      if (pending) await pending;
+      const currentAuthorityMismatch = () => (
+        manager.current()?.terrainAuthorityGeneration !== authority.generation
+        || manager.current()?.stats().terrainAuthorityFallbackReason !== authority.fallbackReason
+      );
+      if (currentAuthorityMismatch()) {
+        await manager.rebuildCommitted();
+        const replacement = manager.current();
+        if (replacement) this.bodyRenderers.set(body.id, replacement);
+      }
+      if (currentAuthorityMismatch()) {
+        throw new Error(`Renderer authority generation mismatch for ${body.id}`);
+      }
+      if (!claimTerrain) return;
+      if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
+      if (manager.currentAssetPack() && manager.claimFlightResidency()) {
+        this.flightPromotedBodyId = body.id;
+        return;
+      }
+
+      // A compact pack may have completed just before the body became the flight
+      // owner. Rebuild once with the active-body budget and flight-scale channels.
+      await this.loadAuthoredRenderer(body.id, manager);
+      if (!manager.currentAssetPack() || !manager.claimFlightResidency()) {
+        throw new Error(`Flight-scale visual pack unavailable for ${body.id}`);
+      }
       this.flightPromotedBodyId = body.id;
-      return;
+    } finally {
+      if (this.flightTerrainPreparationLease === preparationLease) {
+        this.flightTerrainPreparationLease = null;
+      }
     }
-
-    // A compact pack may have completed just before the body became the flight
-    // owner. Rebuild once with the active-body budget and flight-scale channels.
-    await this.loadAuthoredRenderer(body.id, manager);
-    if (!manager.currentAssetPack() || !manager.claimFlightResidency()) {
-      throw new Error(`Flight-scale visual pack unavailable for ${body.id}`);
-    }
-    this.flightPromotedBodyId = body.id;
   }
 
   qualityTier(): QualityTier { return this.quality; }
@@ -991,7 +1036,7 @@ export class WorldScene {
         this.landingLight.distance = 0;
       }
       this.clearReentryEffect();
-      this.setFlightTerrainOwner(null);
+      if (!this.flightTerrainPreparationLease) this.setFlightTerrainOwner(null);
       this.lastBodyFrames?.clear();
       this.srbSmoke?.clear();
       return;
@@ -1360,7 +1405,7 @@ export class WorldScene {
     this.environment.color.set(environment.sky);
     this.environment.groundColor.set(environment.ground);
     this.environment.intensity = environment.intensity;
-    (this.scene.background as THREE.Color).set(environment.background);
+    (this.scene.background as THREE.Color).copy(environment.background);
     const landingAid = landingVisibilityAid(
       body.def.surfaceKind,
       alt,
@@ -1451,6 +1496,7 @@ export class WorldScene {
     this.lastBodyFrames.clear();
     this.planetAssetLoader.dispose();
     this.flightTerrainBodyId = null;
+    this.flightTerrainPreparationLease = null;
     this.flightPromotedBodyId = null;
     this.flightPromotionPending.clear();
     this.flightPromotionFailed.clear();

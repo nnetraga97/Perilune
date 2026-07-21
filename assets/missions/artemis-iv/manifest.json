@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "missionId": "artemis-iv",
+  "releaseBudgets": {
+    "requiredQualityTier": "high",
+    "missionCraftTransferBytes": 25165824,
+    "combinedSceneGpuBytes": 805306368
+  },
+  "models": [
+    {
+      "assetId": "martiandays-starship-2019-concept",
+      "sourceId": "martiandays-starship-2019-concept",
+      "missionRole": "hls-visual-stand-in",
+      "sourcePath": "models/martiandays-spacex-starship-2019.glb",
+      "publicPath": "models/martiandays-spacex-starship-2019.glb",
+      "publicUrl": "/missions/artemis-iv/models/martiandays-spacex-starship-2019.glb?v=287317f26516237ed154b9364914396d562552d330a3041000f6157f97c9304c",
+      "sha256": "287317f26516237ed154b9364914396d562552d330a3041000f6157f97c9304c",
+      "byteLength": 19007332,
+      "contentPolicy": "unaltered",
+      "runtimeTransform": {
+        "scale": [0.01, 0.01, 0.01],
+        "position": [-2.9751872432370874e-7, 26.465836469188208, 0.19693045634239867],
+        "rotationQuaternion": [0, 0, 0, 1]
+      },
+      "transformedBoundsMeters": {
+        "minimum": [-9.99748424, -26.58930634, -5.52268755],
+        "maximum": [9.99748424, 26.58930634, 5.52268755]
+      },
+      "orientation": "+Y nose",
+      "triangleCount": 20630,
+      "meshCount": 8,
+      "drawCallCount": 8,
+      "materialCount": 1,
+      "textureCount": 4,
+      "textureDimensions": [4096, 4096],
+      "estimatedTextureGpuBytesWithMipmaps": 357913936,
+      "animationCount": 0,
+      "requiresLazyLoading": true,
+      "displayLabel": "UNCHANGED 2019 STARSHIP CONCEPT STAND-IN",
+      "providerStatusLabel": "NASA PROVIDER TBD",
+      "isAccurateHlsModel": false
+    }
+  ]
+}

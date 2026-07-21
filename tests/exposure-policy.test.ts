@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import { adaptExposure, environmentLighting, landingVisibilityAid } from '../src/render/exposurePolicy';
+import { SPACE_BACKGROUND } from '../src/render/spaceBackground';
 
 describe('Sol exposure policy', () => {
   it('keeps atmospheric daylight brighter than night without blue ambient on the Moon', () => {
@@ -9,6 +11,20 @@ describe('Sol exposure policy', () => {
     expect(day.intensity).toBeGreaterThan(night.intensity);
     expect(moon.intensity).toBeLessThan(0.03);
     expect(day.exposure).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('keeps one sRGB-defined neutral space background across bodies and altitude', () => {
+    const expected = new THREE.Color(SPACE_BACKGROUND);
+    const earthSurfaceDay = environmentLighting('terrestrial', 100_000, 0, 1, 1, false);
+    const earthOrbitNight = environmentLighting('terrestrial', 100_000, 500_000, 0, 1, false);
+    const moon = environmentLighting('airless', 0, 10_000, 1, 1, false);
+    const fallback = environmentLighting(undefined, 0, 0, 0, 1, false);
+
+    for (const environment of [earthSurfaceDay, earthOrbitNight, moon, fallback]) {
+      expect(environment.background.equals(expected)).toBe(true);
+      expect(environment.background.getHexString(THREE.SRGBColorSpace)).toBe('020304');
+    }
+    expect(earthSurfaceDay.sky.equals(earthOrbitNight.sky)).toBe(false);
   });
 
   it('adapts by wall time and clamps pathological targets', () => {

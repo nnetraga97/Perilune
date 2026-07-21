@@ -24,7 +24,12 @@ test('landing page and utility launchers use the approved hierarchy', async ({ p
   await expect(menu).toBeVisible();
   await expect(menu).toHaveCSS('background-image', /perilune-command-deck-bg\.jpg/);
   await expect(page.getByRole('button', { name: 'Continue Mission' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'First Light tutorial' })).toHaveClass(/perilune-mission-primary/);
+  const artemisIv = page.getByRole('button', { name: 'Artemis IV guided lunar landing mission' });
+  await expect(artemisIv).toHaveClass(/perilune-mission-primary/);
+  await expect(artemisIv.locator('.perilune-mission-qualifier')).toHaveText(
+    'UNCHANGED 2019 STARSHIP CONCEPT STAND-IN · NASA PROVIDER TBD',
+  );
+  await expect(page.getByRole('button', { name: 'First Light tutorial' })).not.toHaveClass(/perilune-mission-primary/);
   await expect(page.getByRole('button', { name: 'Save & Load' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();

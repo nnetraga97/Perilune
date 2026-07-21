@@ -76,6 +76,27 @@ export interface FlightEvent {
   severity: 'info' | 'warning' | 'danger';
 }
 
+/**
+ * Four editor-hidden contact pads for a tall mission visual. This deliberately
+ * stays narrower than the stock part contact system: one rectangular footprint
+ * in craft space, installed explicitly on the transient mission runtime.
+ */
+export interface ExternalLandingFootprint {
+  halfWidth: number;
+  halfDepth: number;
+  footY: number;
+  contactCount: number;
+  stableForMs: number;
+  tipped: boolean;
+}
+
+export interface ExternalLandingFootprintConfig {
+  halfWidth: number;
+  halfDepth: number;
+  /** Craft-space Y coordinate shared by all four contact pads. */
+  footY: number;
+}
+
 export interface VesselRuntime {
   id: string;
   name: string;
@@ -110,6 +131,8 @@ export interface VesselRuntime {
   crew: string[];
   charge: { amount: number; capacity: number };
   landedBodyFixed: Vec3 | null;
+  /** Optional mission-only four-pad contact; stock vessels leave this absent. */
+  externalLandingFootprint?: ExternalLandingFootprint;
   /** Proper acceleration magnitude (for g-force display + structure). */
   properAccel: number;
   /** Target direction (world frame) for SAS mode 'custom' and 'node'. */
@@ -180,6 +203,32 @@ export function createVesselRuntime(
   refreshDerived(v);
   v.charge.amount = v.charge.capacity;
   return v;
+}
+
+/** Install the transient four-pad footprint used by the Artemis lander proxy. */
+export function setExternalLandingFootprint(
+  v: VesselRuntime,
+  config: Readonly<ExternalLandingFootprintConfig>,
+): ExternalLandingFootprint {
+  if (!(Number.isFinite(config.halfWidth) && config.halfWidth > 0)) {
+    throw new Error('External landing footprint halfWidth must be positive');
+  }
+  if (!(Number.isFinite(config.halfDepth) && config.halfDepth > 0)) {
+    throw new Error('External landing footprint halfDepth must be positive');
+  }
+  if (!(Number.isFinite(config.footY) && config.footY < v.massProps.com.y)) {
+    throw new Error('External landing footprint footY must be finite and below the center of mass');
+  }
+  const footprint: ExternalLandingFootprint = {
+    halfWidth: config.halfWidth,
+    halfDepth: config.halfDepth,
+    footY: config.footY,
+    contactCount: 0,
+    stableForMs: 0,
+    tipped: false,
+  };
+  v.externalLandingFootprint = footprint;
+  return footprint;
 }
 
 export function logEvent(v: VesselRuntime, time: number, text: string, severity: FlightEvent['severity'] = 'info'): void {
@@ -575,7 +624,19 @@ export function stepVessel(
       }
     }
 
-    if (hasWheels) {
+    if (v.externalLandingFootprint) {
+      contactNear = stepExternalLandingContact(
+        v,
+        body,
+        time,
+        mass,
+        com,
+        dt,
+        isOverOcean,
+        stepResult,
+      );
+      if (stepResult.crashed) return stepResult;
+    } else if (hasWheels) {
       // Multi-point wheel contact (rovers, aircraft gear).
       contactNear = stepWheeledContact(v, body, time, mass, com, dt, isOverOcean, stepResult);
       if (stepResult.crashed) return stepResult;
@@ -638,6 +699,10 @@ export function stepVessel(
         v.angVel.scale(Math.max(0, 1 - dt * 3));
       }
     }
+  } else if (v.externalLandingFootprint) {
+    v.externalLandingFootprint.contactCount = 0;
+    v.externalLandingFootprint.stableForMs = 0;
+    v.externalLandingFootprint.tipped = false;
   }
 
   // -------------------------------------------------------------- integrate
@@ -702,6 +767,136 @@ const _cF = new Vec3();
 const _wWorld = new Vec3();
 const _axisK = new Vec3();
 const _rotTmp = new Vec3();
+
+// --- external four-pad landing scratch ------------------------------------
+const _lOff = new Vec3();
+const _lPt = new Vec3();
+const _lUp = new Vec3();
+const _lVp = new Vec3();
+const _lTan = new Vec3();
+const _lForce = new Vec3();
+const _lUpCraft = new Vec3();
+const _lWorldOmega = new Vec3();
+
+/**
+ * Contact response for the one mission-only rectangular footprint. Stability
+ * requires at least three supported pads, low surface-relative motion, and the
+ * center-of-mass gravity projection to remain inside the support rectangle.
+ */
+function stepExternalLandingContact(
+  v: VesselRuntime,
+  body: Body,
+  time: number,
+  mass: number,
+  com: Readonly<Vec3>,
+  dt: number,
+  isOverOcean: boolean,
+  result: StepResult,
+): boolean {
+  const footprint = v.externalLandingFootprint!;
+  const n = 4;
+  const k = (mass * (isOverOcean ? 10 : 50)) / n;
+  const cDamp = (mass * (isOverOcean ? 5 : 11)) / n;
+  v.att.rotate(v.angVel, _lWorldOmega);
+
+  let anyNear = false;
+  let contacts = 0;
+  let loadedContacts = 0;
+  const articulatedReach = Math.hypot(footprint.halfWidth * 2, footprint.halfDepth * 2)
+    * Math.tan(10 * Math.PI / 180);
+  for (let index = 0; index < n; index++) {
+    const x = (index & 1) === 0 ? -footprint.halfWidth : footprint.halfWidth;
+    const z = (index & 2) === 0 ? -footprint.halfDepth : footprint.halfDepth;
+    _lOff.set(x - com.x, footprint.footY - com.y, z - com.z);
+    v.att.rotate(_lOff, _lOff);
+    _lPt.copy(v.pos).add(_lOff);
+    const radius = _lPt.length();
+    _lUp.copy(_lPt).scale(1 / radius);
+    const penetration = groundRadiusInertial(body, _lUp, time) - radius;
+    // The authored footprint stands in for independently extending legs.
+    // Count a pad as supported while the local surface remains within the
+    // travel needed for the mission's accepted ten-degree landing envelope.
+    if (penetration > -articulatedReach) {
+      anyNear = true;
+      contacts++;
+    }
+    if (penetration <= 0) continue;
+    loadedContacts++;
+
+    surfaceVelocity(body, _lPt, _wind);
+    _lVp.set(
+      v.vel.x + _lWorldOmega.y * _lOff.z - _lWorldOmega.z * _lOff.y - _wind.x,
+      v.vel.y + _lWorldOmega.z * _lOff.x - _lWorldOmega.x * _lOff.z - _wind.y,
+      v.vel.z + _lWorldOmega.x * _lOff.y - _lWorldOmega.y * _lOff.x - _wind.z,
+    );
+    const radialSpeed = Vec3.dot(_lVp, _lUp);
+    _lTan.copy(_lVp).addScaled(_lUp, -radialSpeed);
+    const horizontalSpeed = _lTan.length();
+
+    if (v.situation !== 'landed' && v.situation !== 'splashed' && v.situation !== 'prelaunch') {
+      const impactSpeed = Math.max(-radialSpeed, horizontalSpeed * 0.4);
+      if (impactSpeed > crashToleranceOfLowestPart(v.craft)) {
+        footprint.contactCount = contacts;
+        footprint.stableForMs = 0;
+        result.crashed = true;
+        result.crashSpeed = impactSpeed;
+        return true;
+      }
+    }
+
+    const normalForce = Math.max(0, k * penetration - cDamp * radialSpeed);
+    _lForce.copy(_lUp).scale(normalForce);
+    if (horizontalSpeed > 0.02) {
+      const friction = Math.min(
+        normalForce * (isOverOcean ? 0.3 : 0.75),
+        (horizontalSpeed * (mass / n)) / dt,
+      );
+      _lForce.addScaled(_lTan, -friction / horizontalSpeed);
+    }
+    _force.add(_lForce);
+    Vec3.cross(_lOff, _lForce, _rotTmp);
+    // The mission footprint represents independently articulated landing
+    // struts, so terrain-height differences should not transmit the full
+    // rigid-body lever-arm impulse through the tall visual stand-in.
+    _torqueW.addScaled(_rotTmp, 0.08);
+  }
+
+  footprint.contactCount = contacts;
+
+  // Project the CoM along gravity onto the pad plane in craft space. Once the
+  // projection leaves the rectangle, the four pads can no longer support it.
+  _lUp.copy(v.pos).normalize();
+  _attInv.copy(v.att).conjugate().rotate(_lUp, _lUpCraft);
+  if (_lUpCraft.y <= 1e-6) {
+    footprint.tipped = true;
+  } else {
+    const height = com.y - footprint.footY;
+    const projectedX = com.x - (_lUpCraft.x * height) / _lUpCraft.y;
+    const projectedZ = com.z - (_lUpCraft.z * height) / _lUpCraft.y;
+    footprint.tipped = Math.abs(projectedX) > footprint.halfWidth
+      || Math.abs(projectedZ) > footprint.halfDepth;
+  }
+
+  surfaceVelocity(body, v.pos, _wind);
+  _lVp.copy(v.vel).sub(_wind);
+  const centerRadialSpeed = Vec3.dot(_lVp, _lUp);
+  const centerHorizontalSpeed = _lTan.copy(_lVp).addScaled(_lUp, -centerRadialSpeed).length();
+  const stable = contacts >= 3
+    && !footprint.tipped
+    && Math.abs(centerRadialSpeed) <= 0.25
+    && centerHorizontalSpeed <= 0.25
+    // Rotation about the upright/nose axis does not unload the footprint;
+    // pitch/yaw rocking does, so only those rates gate support stability.
+    && Math.hypot(v.angVel.x, v.angVel.z) <= 0.06;
+  footprint.stableForMs = stable ? footprint.stableForMs + dt * 1000 : 0;
+
+  if (loadedContacts > 0) {
+    // Tall landers have a large rotational lever arm; their landing struts
+    // dissipate that rocking much more strongly than rover suspension.
+    v.angVel.scale(Math.max(0, 1 - dt * 12));
+  }
+  return anyNear;
+}
 
 /** Rotate `vec` in place about unit `axis` by `ang` radians (Rodrigues). */
 function rotateAboutAxis(vec: Vec3, axis: Readonly<Vec3>, ang: number): void {

@@ -3,6 +3,7 @@ dist/
 public/basis/
 public/planets/
 public/parts/
+public/missions/
 .vite/
 playwright-report/
 test-results/

@@ -67,3 +67,16 @@ and https://www.nasa.gov/news-release/video-gives-astronauts-eye-view-inside-nas
 - **Apollo Lunar Module** — NASA/Michael D. Carbajal source geometry; central descent-engine bell isolated and modified by Perilune. https://science.nasa.gov/3d-resources/apollo-lunar-module/
 - **Space Shuttle (D) engine** — NASA/Johnson Space Center source geometry; modified and arranged as an unmarked three-engine assembly by Perilune. https://science.nasa.gov/3d-resources/space-shuttle-d/
 - **Space Shuttle External Tank** — NASA/Johnson Space Center source geometry; straight barrel, feedline, seam, and bracket geometry cropped and modified by Perilune. https://science.nasa.gov/3d-resources/space-shuttle-parts/
+
+## Artemis IV mission model
+
+- **SpaceX Starship** — model by MartianDays, downloaded from Sketchfab and
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  Source: https://sketchfab.com/3d-models/spacex-starship-a8a0b69f776841a1a465cd9fb3762fd2
+
+  The downloaded GLB is redistributed unmodified. Perilune applies only a
+  runtime scene transform for scale, centering, and craft-axis alignment. It is
+  a 2019 generic Starship concept used as a visual stand-in, not an accurate
+  Starship HLS model. No endorsement by SpaceX, NASA, Sketchfab, or the artist
+  is implied. Exact provenance and checksum are recorded in
+  `assets/missions/artemis-iv/source-lock.json`.
