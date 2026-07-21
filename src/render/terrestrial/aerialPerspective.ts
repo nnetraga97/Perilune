@@ -134,14 +134,20 @@ vec3 applyTerrestrialAerialPerspective(vec3 shadedPointBodyFixed, vec3 baseColor
   vec2 aerialUv = vec2(clamp(airPath / 200000.0, 0.0, 1.0),
     clamp(cameraAltitude / max(terrestrialAerialAtmosphereHeight, 1.0), 0.0, 1.0));
   vec4 aerialLut = texture2D(terrestrialAerialLut, aerialUv);
-  aerialAmount = mix(aerialAmount, min(0.94, aerialLut.a * 1.18),
+  // The LUT alpha is average extinction, not a presentation opacity. Keeping
+  // it below full replacement preserves terrain/ocean contrast on long,
+  // low-altitude sight lines.
+  aerialAmount = mix(aerialAmount, min(0.86, aerialLut.a * 0.88),
     useTerrestrialAerialLut);
   aerialAmount *= terrestrialAerialPresentationVisibility;
   float sunElevation = dot(radialDirection, normalize(terrestrialAerialSunDirection));
   vec3 hazeColor = mix(vec3(0.30, 0.43, 0.62), vec3(0.48, 0.68, 0.96),
     smoothstep(-0.18, 0.34, sunElevation));
-  hazeColor = mix(hazeColor, max(hazeColor, aerialLut.rgb * 1.7),
-    useTerrestrialAerialLut);
+  // LUT RGB stores per-channel extinction. Treating it as emissive radiance
+  // makes saturated long paths converge on white. Use it only to shape the
+  // wavelength tint while the bounded analytic haze owns the sky color.
+  vec3 lookupHazeColor = hazeColor * mix(vec3(0.72), vec3(1.0), aerialLut.rgb);
+  hazeColor = mix(hazeColor, lookupHazeColor, useTerrestrialAerialLut);
   float occlusionLight = mix(0.08, 1.0, terrestrialAerialSolarVisibleFraction);
   return baseColor * (1.0 - aerialAmount * 0.86)
     + hazeColor * aerialAmount * occlusionLight;
@@ -234,7 +240,7 @@ export function evaluateTerrestrialAerialPerspective(
   ));
   amount = Math.min(amount, 0.94);
   const lookup = input.lookupSample;
-  if (lookup) amount = Math.min(0.94, lookup[3] * 1.18);
+  if (lookup) amount = Math.min(0.86, lookup[3] * 0.88);
   amount *= atmospherePresentationVisibility(cameraAltitude, input.atmosphereHeight);
   const sun = normalized(input.sunDirection);
   const sunElevation = radial[0] * sun[0] + radial[1] * sun[1] + radial[2] * sun[2];
@@ -245,9 +251,9 @@ export function evaluateTerrestrialAerialPerspective(
     0.62 + (0.96 - 0.62) * day,
   ];
   if (lookup) {
-    haze[0] = Math.max(haze[0], lookup[0] * 1.7);
-    haze[1] = Math.max(haze[1], lookup[1] * 1.7);
-    haze[2] = Math.max(haze[2], lookup[2] * 1.7);
+    haze[0] *= 0.72 + 0.28 * lookup[0];
+    haze[1] *= 0.72 + 0.28 * lookup[1];
+    haze[2] *= 0.72 + 0.28 * lookup[2];
   }
   const visibility = clamp01(input.solarVisibleFraction);
   const occlusionLight = 0.08 + (1 - 0.08) * visibility;

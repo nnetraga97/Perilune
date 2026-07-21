@@ -98,6 +98,24 @@ describe('shared terrestrial aerial perspective', () => {
       .toBeLessThan(contrast(nearWhite.color, nearBlack.color));
   });
 
+  it('keeps saturated low-altitude LUT haze blue and below white', () => {
+    const bodyRadius = 6_378_137;
+    const result = evaluateTerrestrialAerialPerspective({
+      shadedPointBodyFixed: { x: bodyRadius, y: 0, z: 0 },
+      baseColor: [0.08, 0.21, 0.47],
+      cameraBodyFixed: { x: bodyRadius + 5_000, y: 120_000, z: 0 },
+      bodyRadius,
+      atmosphereHeight: 100_000,
+      scaleHeight: 8_500,
+      sunDirection: { x: 1, y: 0, z: 0 },
+      solarVisibleFraction: 1,
+      lookupSample: [1, 1, 1, 1],
+    });
+    expect(result.amount).toBe(0.86);
+    expect(Math.max(...result.color)).toBeLessThan(1);
+    expect(result.color[2] - result.color[0]).toBeGreaterThan(0.4);
+  });
+
   it('is a strict color no-op from orbital altitude', () => {
     const bodyRadius = 6_378_137;
     const baseColor = [0.08, 0.21, 0.47] as const;
