@@ -143,7 +143,7 @@ describe('AirlessBodyRenderer', () => {
     expect(stats.scatterBytes).toBeGreaterThan(0);
     const expectedAllocation = DEFAULT_TERRAIN_GEOMETRY_BUDGET
       - stats.scatterBytes!
-      - planetDetailBudget('medium').gpuBytes;
+      - planetDetailBudget('medium').activeGpuBytes;
     expect(stats.terrainAllocationBytes).toBe(expectedAllocation);
     renderer.dispose();
 

@@ -89,9 +89,9 @@ function recipeContent(
     terrain.colorMid,
     terrain.colorHigh,
     terrain.colorOcean ?? null,
-    ...(body.id === 'earth' || body.id === 'moon' ? [CHECKED_HEIGHT_AUTHORITY_VERSION] : []),
-    authority.generation,
-    authority.region?.digest ?? null,
+    ...(body.id === 'earth' || body.id === 'moon'
+      ? [CHECKED_HEIGHT_AUTHORITY_VERSION, authority.generation, authority.region?.digest ?? null]
+      : []),
     craters,
   ]);
 }
