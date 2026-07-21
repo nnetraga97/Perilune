@@ -155,3 +155,106 @@ try {
   await rm(partStagedDir, { recursive: true, force: true });
 }
 console.log(`renderer assets: verified ${checkedPartFiles.length} checked part model files`);
+
+const missionRoot = resolve(root, 'assets/missions/artemis-iv');
+const missionManifest = JSON.parse(await readFile(resolve(missionRoot, 'manifest.json'), 'utf8'));
+const missionSourceLock = JSON.parse(await readFile(resolve(missionRoot, 'source-lock.json'), 'utf8'));
+if (missionManifest.schemaVersion !== 1 || missionManifest.missionId !== 'artemis-iv') {
+  throw new Error('Artemis IV mission model manifest has an unsupported identity or schema');
+}
+if (!Array.isArray(missionManifest.models) || missionManifest.models.length === 0) {
+  throw new Error('Artemis IV mission model manifest must contain at least one model');
+}
+if (
+  missionSourceLock.schemaVersion !== 1 || missionSourceLock.missionId !== missionManifest.missionId ||
+  !Array.isArray(missionSourceLock.sources)
+) {
+  throw new Error('Artemis IV mission source lock has an unsupported identity or schema');
+}
+
+const missionDestinationDir = resolve(root, 'public/missions/artemis-iv');
+const missionStagedDir = resolve(root, `public/missions/artemis-iv.stage-${process.pid}`);
+const missionBackupDir = resolve(root, `public/missions/artemis-iv.backup-${process.pid}`);
+const checkedMissionFiles = [];
+const missionAssetIds = new Set();
+const missionSourceIds = new Set();
+const missionPublicPaths = new Set();
+for (const model of missionManifest.models) {
+  if (
+    missionAssetIds.has(model.assetId) || missionSourceIds.has(model.sourceId) ||
+    missionPublicPaths.has(model.publicPath)
+  ) {
+    throw new Error(`Mission model ${model.assetId} duplicates an asset, source, or public path`);
+  }
+  missionAssetIds.add(model.assetId);
+  missionSourceIds.add(model.sourceId);
+  missionPublicPaths.add(model.publicPath);
+  const lockedSource = missionSourceLock.sources.find((source) => source.sourceId === model.sourceId);
+  if (
+    !lockedSource || lockedSource.localPath !== model.sourcePath ||
+    lockedSource.byteLength !== model.byteLength || lockedSource.sha256 !== model.sha256 ||
+    lockedSource.license !== 'CC-BY-4.0' || !lockedSource.attribution ||
+    !lockedSource.accuracyBoundary
+  ) {
+    throw new Error(`Mission model ${model.assetId} does not match its provenance lock`);
+  }
+  const transform = model.runtimeTransform;
+  const bounds = model.transformedBoundsMeters;
+  const finiteVector = (value, length) => Array.isArray(value) && value.length === length
+    && value.every(Number.isFinite);
+  if (
+    model.isAccurateHlsModel !== false ||
+    model.displayLabel !== 'UNCHANGED 2019 STARSHIP CONCEPT STAND-IN' ||
+    model.providerStatusLabel !== 'NASA PROVIDER TBD' ||
+    !finiteVector(transform?.scale, 3) || !finiteVector(transform?.position, 3) ||
+    !finiteVector(transform?.rotationQuaternion, 4) ||
+    !finiteVector(bounds?.minimum, 3) || !finiteVector(bounds?.maximum, 3) ||
+    !transform.scale.every((component) => component > 0) ||
+    !bounds.minimum.every((component, index) => component < bounds.maximum[index])
+  ) {
+    throw new Error(`Mission model ${model.assetId} has an invalid transform, bounds, or truth label`);
+  }
+  const expectedPublicUrl = `/${['missions', missionManifest.missionId, model.publicPath].join('/')}?v=${model.sha256}`;
+  if (model.publicUrl !== expectedPublicUrl) {
+    throw new Error(`Mission model ${model.assetId} must use its checksum-addressed public URL`);
+  }
+  if (model.contentPolicy !== 'unaltered') {
+    throw new Error(`Mission model ${model.assetId} must use the unaltered pass-through policy`);
+  }
+  if (!Number.isSafeInteger(model.byteLength) || model.byteLength <= 0) {
+    throw new Error(`Mission model ${model.assetId} has an invalid byte length`);
+  }
+  if (typeof model.sha256 !== 'string' || !/^[a-f\d]{64}$/.test(model.sha256)) {
+    throw new Error(`Mission model ${model.assetId} has an invalid SHA-256`);
+  }
+  const source = checkedAssetPath(missionRoot, model.sourcePath);
+  const bytes = await readFile(source);
+  const checksum = createHash('sha256').update(bytes).digest('hex');
+  if (bytes.byteLength !== model.byteLength || checksum !== model.sha256) {
+    throw new Error(`Mission model ${model.assetId} no longer matches its unaltered source lock`);
+  }
+  checkedMissionFiles.push({ model, source, bytes });
+}
+
+await rm(missionStagedDir, { recursive: true, force: true });
+await mkdir(missionStagedDir, { recursive: true });
+try {
+  for (const { model, source, bytes } of checkedMissionFiles) {
+    const stagedDestination = checkedAssetPath(missionStagedDir, model.publicPath);
+    await mkdir(dirname(stagedDestination), { recursive: true });
+    await copyFile(source, stagedDestination);
+    const published = await readFile(stagedDestination);
+    const publishedChecksum = createHash('sha256').update(published).digest('hex');
+    if (!published.equals(bytes) || publishedChecksum !== model.sha256) {
+      throw new Error(`Mission model ${model.assetId} changed during pass-through publication`);
+    }
+  }
+  await swapDirectoryAtomically({
+    stagedPath: missionStagedDir,
+    targetPath: missionDestinationDir,
+    backupPath: missionBackupDir,
+  });
+} finally {
+  await rm(missionStagedDir, { recursive: true, force: true });
+}
+console.log(`renderer assets: verified ${checkedMissionFiles.length} unaltered Artemis IV model file`);

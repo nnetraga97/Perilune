@@ -312,6 +312,19 @@ describe('body renderer adapters', () => {
     expect(scene.children).toContain(root);
   });
 
+  test('a no-vessel frame keeps flight terrain ownership while that body is preparing', () => {
+    const world = Object.create(WorldScene.prototype) as WorldScene;
+    Object.assign(world as unknown as Record<string, unknown>, {
+      flightTerrainBodyId: 'moon',
+      flightTerrainPreparationLease: { bodyId: 'moon' },
+      lastBodyFrames: new Map(),
+    });
+
+    world.update({ active: null } as never, 0);
+
+    expect((world as unknown as Record<string, unknown>).flightTerrainBodyId).toBe('moon');
+  });
+
   test('setQuality retries only managers whose committed tier is still stale', async () => {
     const stale = { current: vi.fn(() => ({ quality: 'medium' })), replaceQuality: vi.fn()
       .mockRejectedValueOnce(new Error('compile failed')).mockResolvedValueOnce(undefined) };

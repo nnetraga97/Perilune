@@ -35,6 +35,21 @@ trademarks from Kerbal Space Program or its mods.
   acknowledged as prior art only—no code, shaders, textures, or configuration
   were copied.
 
+## Bundled mission assets
+
+- **SpaceX Starship** — model by MartianDays, downloaded from Sketchfab and
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  Source: https://sketchfab.com/3d-models/spacex-starship-a8a0b69f776841a1a465cd9fb3762fd2
+
+  The GLB at
+  `assets/missions/artemis-iv/models/martiandays-spacex-starship-2019.glb` is
+  redistributed unmodified and retains its embedded attribution metadata.
+  Perilune applies only a runtime transform for scale, centering, and craft-axis
+  alignment. It is a 2019 generic Starship concept used as a visual stand-in,
+  not an accurate Starship HLS model. No endorsement by SpaceX, NASA,
+  Sketchfab, or the artist is implied. Exact provenance, checksum, and required
+  credit are recorded in `assets/missions/artemis-iv/source-lock.json`.
+
 Every new third-party asset must have a recorded source URL, license, checksum,
 and transformation record before it is shipped. Run `npm run validate:content`
 after changing content or asset metadata.

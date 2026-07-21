@@ -28,7 +28,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run build >/dev/null 2>&1 && npm run preview',
+    command: 'VITE_ARTEMIS_IV_MENU_ENABLED=true npm run build >/dev/null 2>&1 && npm run preview',
     port: 4173,
     reuseExistingServer: true,
     timeout: 120_000,

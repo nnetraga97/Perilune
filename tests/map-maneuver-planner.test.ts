@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { OrbitalElements } from '../src/core/orbit';
 import { ManeuverPlanController } from '../src/sim/maneuverPlan';
 import { pickOrbitSegment } from '../src/ui/orbitPicking';
+import {
+  estimatedManeuverDuration,
+  maneuverPlannerPresentation,
+} from '../src/ui/mapView';
 
 const circularOrbit = (): OrbitalElements => ({
   a: 720_000,
@@ -123,5 +127,54 @@ describe('screen-space orbit picking', () => {
     ], 50, 10, 24);
 
     expect(pick).toBeNull();
+  });
+});
+
+describe('maneuver planner presentation', () => {
+  it('uses explicit idle, armed, and executing action labels', () => {
+    const planned = { phase: 'planned', initialDeltaV: 120, remainingDeltaV: 120 } as const;
+
+    expect(maneuverPlannerPresentation(null, false)).toMatchObject({
+      autoLabel: 'ARM AUTO',
+      autoState: 'idle',
+      executionFraction: null,
+    });
+    expect(maneuverPlannerPresentation(planned, true)).toMatchObject({
+      autoLabel: 'AUTO ARMED',
+      autoState: 'armed',
+      executionFraction: null,
+    });
+    expect(maneuverPlannerPresentation({ ...planned, phase: 'executing', remainingDeltaV: 30 }, false))
+      .toMatchObject({
+        autoLabel: 'EXECUTING',
+        autoState: 'executing',
+        executionFraction: 0.75,
+      });
+  });
+
+  it('describes the next planner interaction from the authoritative phase', () => {
+    const planned = maneuverPlannerPresentation({
+      phase: 'planned', initialDeltaV: 20, remainingDeltaV: 20,
+    }, false);
+    const overdue = maneuverPlannerPresentation({
+      phase: 'overdue', initialDeltaV: 20, remainingDeltaV: 20,
+    }, false);
+
+    expect(planned.instruction).toContain('yellow prograde');
+    expect(planned.instruction).toContain('purple normal');
+    expect(planned.instruction).toContain('blue radial');
+    expect(overdue.instruction).toContain('burn window has passed');
+  });
+
+  it('estimates duration from the already-analyzed active stages', () => {
+    const stages = [
+      { deltaV: 100, burnTime: 20, thrust: 100_000, massStart: 10_000, isp: 320 },
+      { deltaV: 200, burnTime: 45, thrust: 40_000, massStart: 4_000, isp: 340 },
+    ];
+
+    expect(estimatedManeuverDuration(100, stages)).toBe(20);
+    expect(estimatedManeuverDuration(150, stages)).toBeGreaterThan(20);
+    expect(estimatedManeuverDuration(150, stages)).toBeLessThan(65);
+    expect(estimatedManeuverDuration(350, stages)).toBe(Infinity);
   });
 });

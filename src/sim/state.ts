@@ -804,6 +804,12 @@ export class GameState {
     )
       ?? componentVessels.find((component) => !component.gv.runtime.isDebris)
       ?? componentVessels[0];
+    // Mission-authored manifests may intentionally exceed a stock proxy pod's
+    // catalog capacity. Never silently discard those occupants during a split;
+    // keep any overflow with the controlled crew-bearing component.
+    if (scienceHeir && crewIndex < crewBefore.length) {
+      scienceHeir.gv.runtime.crew.push(...crewBefore.slice(crewIndex));
+    }
     if (scienceHeir && scienceHeir.gv.runtime !== v && v.scienceBuffer.size > 0) {
       for (const [keyId, result] of v.scienceBuffer) {
         scienceHeir.gv.runtime.scienceBuffer.set(keyId, { ...result });
@@ -1312,6 +1318,11 @@ export class GameState {
       const capA = capOf(v.craft);
       v.crew = crewBefore.slice(0, capA);
       newVessel.runtime.crew = crewBefore.slice(capA, capA + capOf(newVessel.runtime.craft));
+      const assigned = v.crew.length + newVessel.runtime.crew.length;
+      if (assigned < crewBefore.length) {
+        const crewHeir = capA > 0 ? v : newVessel.runtime;
+        crewHeir.crew.push(...crewBefore.slice(assigned));
+      }
       logEvent(v, this.time, 'Undocked.');
     }
     return true;

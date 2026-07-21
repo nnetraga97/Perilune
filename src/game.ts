@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { Vec3 } from './core/vec3';
+import { Quat } from './core/quat';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
 import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
 import { createRenderContext, RenderContext } from './render/context';
@@ -17,13 +18,23 @@ import { Editor } from './ui/editor';
 import { FlightHud, type FlightControlAxis } from './ui/flightHud';
 import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
+import {
+  ArtemisIvGuide,
+  type ArtemisIvGuideContextualAction,
+  type ArtemisIvGuidePresentation,
+} from './ui/artemisIvGuide';
 import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
 import { GpuTimerRing } from './render/gpuTimer';
-import { restoreGame } from './save/persistence';
-import { igniteManeuverEngines, logEvent, maxThrust } from './sim/flight';
+import { restoreGame, serializeGame } from './save/persistence';
+import {
+  igniteManeuverEngines,
+  logEvent,
+  maxThrust,
+  setExternalLandingFootprint,
+} from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from './sim/maneuver';
-import { ManeuverPlanController } from './sim/maneuverPlan';
+import { ManeuverPlanController, type ManeuverPlan } from './sim/maneuverPlan';
 import { apoapsisOf, periapsisOf, stateToElements } from './core/orbit';
 import { RenderDiagnostics } from './render/renderDiagnostics';
 import type { RenderStartupOptions } from './render/renderStartupOptions';
@@ -42,7 +53,12 @@ import { SyncStore } from './cloud/syncStore';
 import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
 import { clientLog } from './telemetry/log';
-import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
+import {
+  bindMenuContinueSave,
+  MainMenu,
+  type ArtemisIvMenuAction,
+  type ArtemisIvMenuState,
+} from './ui/mainMenu';
 import { el, injectUiStyles } from './ui/kit';
 import {
   craftCost,
@@ -61,8 +77,72 @@ import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
 import { createFirstLightRocket, createSecondLightCraft } from './content/crafts';
 import { maneuverAutomationCommand } from './sim/maneuverAutomation';
 import { planMoonCourseCorrection, planTransfer } from './sim/transfer';
+import {
+  artemisIvHighTierRendererBaseBytes,
+  createBrowserArtemisIvAssetLoader,
+  preflightArtemisIvAssets,
+  recheckArtemisIvPreparedSceneBudget,
+  type ArtemisIvAssetLoader,
+} from './missions/artemisIv/assets';
+import {
+  ARTEMIS_IV_POST_TLI_START_NODE,
+  ARTEMIS_IV_PREPARED,
+  ARTEMIS_IV_PREPARED_MANEUVER_IDS,
+  ARTEMIS_IV_SOUTH_POLE_TRAINING_ANALOGUE,
+  assessArtemisIvDescentSetup,
+  assessArtemisIvLunarOrbitInsertion,
+  assessArtemisIvPostTliCorrection,
+  assessArtemisIvTransEarthInjection,
+  artemisIvCheckpointForChapter,
+  initializeArtemisIvCheckpoint,
+  prepareArtemisIvEarthApproach,
+  prepareArtemisIvLunarInsertion,
+} from './missions/artemisIv/checkpoints';
+import {
+  bindArtemisIvRole,
+  recordArtemisIvDocking,
+  recordArtemisIvUndocking,
+  setActiveArtemisIvRole,
+  vesselForArtemisIvRole,
+  type ArtemisIvMissionState,
+} from './missions/artemisIv/mission';
+import {
+  artemisIvGuideViewModel,
+  continueArtemisIvGuide,
+  createArtemisIvGuideProgress,
+  currentArtemisIvGuideStep,
+  updateArtemisIvGuide,
+  type ArtemisIvGuideProgress,
+} from './missions/artemisIv/guide';
+import {
+  ARTEMIS_IV_ACKNOWLEDGEMENTS,
+  ARTEMIS_IV_MISSION_VERSION,
+  ARTEMIS_IV_SESSION_DOCUMENT_VERSION,
+  ArtemisIvSessionStore,
+  browserArtemisIvSessionStore,
+  type ArtemisIvChapter,
+} from './missions/artemisIv/session';
+import {
+  ARTEMIS_IV_CAMERA_FRAMING_RADII,
+  createArtemisIvVisualComposite,
+  type ArtemisIvVisualComposite,
+} from './missions/artemisIv/visuals';
+import {
+  applyArtemisIvRenderScale,
+  type ArtemisIvRenderScaleLease,
+} from './missions/artemisIv/renderScale';
+import { drawingBufferResourceBytes } from './render/resourceAccounting';
+import {
+  artemisIvGuideReadouts,
+  createArtemisIvRendererResourceLedger,
+  syncArtemisIvLiveTelemetry,
+} from './missions/artemisIv/runtime';
 
 type Screen = 'menu' | 'editor' | 'flight';
+type SessionKind = 'standard' | 'first-light' | 'artemis-iv';
+
+const ARTEMIS_IV_MENU_ENABLED = import.meta.env.DEV
+  || import.meta.env.VITE_ARTEMIS_IV_MENU_ENABLED === 'true';
 
 type EditorGestureKind = 'part-press' | 'canvas-press' | 'part-drag' | 'orbit' | 'pan' | 'secondary-press' | 'secondary-orbit' | 'pinch';
 
@@ -90,6 +170,7 @@ class PeriluneGame {
   private hud!: FlightHud;
   private map!: MapView;
   private tutorial!: Tutorial;
+  private artemisIvGuide!: ArtemisIvGuide;
   private perf!: PerfOverlay;
   private gpuProfiler!: GpuSubmissionProfiler;
   private unsubscribeGpuRestoration: (() => void) | null = null;
@@ -120,7 +201,20 @@ class PeriluneGame {
   private editorLongPressTimer: number | null = null;
   private lastFrame = performance.now();
   private launchedCraft: Craft | null = null;
-  private firstLightSession = false;
+  private sessionKind: SessionKind = 'standard';
+  private artemisIvSessionStore: ArtemisIvSessionStore | null = null;
+  private artemisIvMission: ArtemisIvMissionState | null = null;
+  private artemisIvGuideProgress: ArtemisIvGuideProgress | null = null;
+  private artemisIvAssetLoader: ArtemisIvAssetLoader | null = null;
+  private artemisIvVisuals: ArtemisIvVisualComposite | null = null;
+  private artemisIvRestoreQuality: 'low' | 'medium' | 'high' | null = null;
+  private artemisIvRenderScaleLease: ArtemisIvRenderScaleLease | null = null;
+  private artemisIvTransitionGeneration = 0;
+  private artemisIvActiveTransition: number | null = null;
+  private readonly artemisIvManeuverIds = new Map<string, string>();
+  private readonly artemisIvRendererLedger = createArtemisIvRendererResourceLedger(
+    () => this.artemisIvRendererBaseBytes(),
+  );
   private firstLightMoonCorrectionApplied = false;
   private missionStart = 0;
   private maneuver = new ManeuverPlanController();
@@ -171,6 +265,7 @@ class PeriluneGame {
 
   private readonly onPageHide = (event: PageTransitionEvent): void => {
     if (event.persisted) return;
+    this.cancelArtemisIvTransition();
     window.removeEventListener('pagehide', this.onPageHide);
     this.unsubscribeGpuRestoration?.();
     this.unsubscribeGpuRestoration = null;
@@ -180,6 +275,7 @@ class PeriluneGame {
     this.saveSync.dispose();
     this.auth.dispose();
     this.map.dispose();
+    this.disposeArtemisIvVisualResources(false);
     // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
     this.partModels.dispose();
@@ -328,6 +424,7 @@ class PeriluneGame {
       onDeleteManeuverNode: () => {
         const selected = this.maneuver.current?.id ?? null;
         if (selected === this.autoManeuverPlanId) this.autoManeuverPlanId = null;
+        if (selected) this.artemisIvManeuverIds.delete(selected);
         this.maneuver.clear();
       },
       onWarpToNode: (node) => this.warpToNode(node),
@@ -353,6 +450,13 @@ class PeriluneGame {
       onContinueToMoon: () => this.planFirstLightMoonTransfer(),
       onStartSecondLight: () => this.startSecondLight(),
     });
+    this.artemisIvGuide = new ArtemisIvGuide(this.uiRoot, {
+      onContinue: () => this.continueArtemisIvTextStep(),
+      onContextualAction: (action) => this.handleArtemisIvContextualAction(action),
+      onRetryChapter: () => void this.retryArtemisIvChapter(),
+      onExit: () => this.confirmExitArtemisIv(),
+    });
+    this.artemisIvSessionStore = browserArtemisIvSessionStore();
     window.addEventListener('pagehide', this.onPageHide);
     this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
     const profile = browserProfileStore();
@@ -404,15 +508,20 @@ class PeriluneGame {
       },
     }, this.uiRoot);
     this.utilityTools = new UtilityTools(this.windows, profile, this.input, () => this.game, {
-      persistenceStatus: () => this.game.persistence === 'enabled'
-        ? { enabled: true }
-        : { enabled: false, reason: 'Legacy Auren is session-only. Save, load, sync, and Continue are unavailable.' },
+      persistenceStatus: () => this.sessionKind === 'artemis-iv'
+        ? { enabled: false, reason: 'Artemis IV uses a local chapter checkpoint. Normal saves and sync are unavailable during the mission.' }
+        : this.game.persistence === 'enabled'
+          ? { enabled: true }
+          : { enabled: false, reason: 'Legacy Auren is session-only. Save, load, sync, and Continue are unavailable.' },
       onSave: (slot, label) => this.writeSave(slot, label),
       onLoad: (slot) => this.loadSlot(slot),
-      onListSaves: () => this.game.persistence === 'enabled' ? this.saveSync.list() : Promise.resolve([]),
-      onRefreshSaves: () => this.game.persistence === 'enabled' ? this.saveSync.refresh() : Promise.resolve(),
-      onDeleteSave: (slot) => this.game.persistence === 'enabled' ? this.saveSync.delete(slot) : Promise.resolve(false),
-      onResolveConflict: (slot, choice) => this.game.persistence === 'enabled'
+      onListSaves: () => this.sessionKind !== 'artemis-iv' && this.game.persistence === 'enabled'
+        ? this.saveSync.list() : Promise.resolve([]),
+      onRefreshSaves: () => this.sessionKind !== 'artemis-iv' && this.game.persistence === 'enabled'
+        ? this.saveSync.refresh() : Promise.resolve(),
+      onDeleteSave: (slot) => this.sessionKind !== 'artemis-iv' && this.game.persistence === 'enabled'
+        ? this.saveSync.delete(slot) : Promise.resolve(false),
+      onResolveConflict: (slot, choice) => this.sessionKind !== 'artemis-iv' && this.game.persistence === 'enabled'
         ? this.saveSync.resolveConflict(slot, choice)
         : Promise.resolve(false),
       onSavesChanged: (listener) => this.saveSync.subscribe(listener),
@@ -424,13 +533,8 @@ class PeriluneGame {
       },
     });
     this.menu = new MainMenu(this.uiRoot, {
-      onFirstLight: () => {
-        this.newGame('sandbox', 'sol');
-        this.firstLightSession = true;
-        this.editor.loadCraft(createFirstLightRocket(), false);
-        this.tutorial.start();
-        this.toEditor();
-      },
+      onArtemisIv: (action) => this.openArtemisIv(action),
+      onFirstLight: () => this.startFirstLight(),
       onSandbox: () => {
         this.newGame('sandbox');
         this.toEditor();
@@ -447,6 +551,9 @@ class PeriluneGame {
       onSaves: () => this.utilityTools.openSaves(),
       onAccount: () => this.account.open(),
       onSettings: () => this.utilityTools.openSettings(),
+    }, {
+      artemisIvEnabled: ARTEMIS_IV_MENU_ENABLED,
+      artemisIvState: this.artemisIvMenuState(),
     });
     this.unsubscribeMenuSave = bindMenuContinueSave(this.saveSync, this.menu);
     void this.auth.start();
@@ -585,6 +692,795 @@ class PeriluneGame {
   }
 
   // ------------------------------------------------------------------ menu
+  private beginArtemisIvTransition(): number | null {
+    if (this.artemisIvActiveTransition !== null) return null;
+    const generation = ++this.artemisIvTransitionGeneration;
+    this.artemisIvActiveTransition = generation;
+    return generation;
+  }
+
+  private isCurrentArtemisIvTransition(
+    generation: number,
+    mission?: ArtemisIvMissionState,
+  ): boolean {
+    return this.artemisIvActiveTransition === generation
+      && this.artemisIvTransitionGeneration === generation
+      && (mission === undefined || this.artemisIvMission === mission);
+  }
+
+  private finishArtemisIvTransition(generation: number): void {
+    if (this.artemisIvActiveTransition === generation) {
+      this.artemisIvActiveTransition = null;
+    }
+  }
+
+  private cancelArtemisIvTransition(): void {
+    this.artemisIvTransitionGeneration++;
+    this.artemisIvActiveTransition = null;
+    if (this.dialogEl?.dataset.artemisIvTransition !== undefined) {
+      this.dialogEl.remove();
+      this.dialogEl = null;
+    }
+  }
+
+  private showArtemisIvPreparing(
+    generation: number,
+    title: string,
+    message: string,
+  ): void {
+    this.showDialog(title, message, []);
+    if (this.dialogEl) this.dialogEl.dataset.artemisIvTransition = String(generation);
+  }
+
+  private dismissArtemisIvPreparing(generation: number): void {
+    if (this.dialogEl?.dataset.artemisIvTransition !== String(generation)) return;
+    this.dialogEl.remove();
+    this.dialogEl = null;
+  }
+
+  private artemisIvMenuState(): ArtemisIvMenuState {
+    const result = this.artemisIvSessionStore?.read();
+    if (result?.status !== 'ready') return { status: 'new' };
+    return result.document.completed
+      ? { status: 'complete' }
+      : { status: 'resume', chapter: result.document.currentChapter };
+  }
+
+  private refreshArtemisIvMenuState(): void {
+    if (this.menu) this.menu.setArtemisIvState(this.artemisIvMenuState());
+  }
+
+  private async openArtemisIv(action: ArtemisIvMenuAction): Promise<void> {
+    if (this.artemisIvActiveTransition !== null) return;
+    const stored = this.artemisIvSessionStore?.read();
+    if (action === 'resume' && stored?.status === 'ready' && !stored.document.completed) {
+      await this.beginArtemisIv(stored.document.currentChapter);
+      return;
+    }
+    if (action === 'fly-again') this.artemisIvSessionStore?.clear();
+    if (stored?.status === 'corrupt' || stored?.status === 'incompatible') {
+      this.artemisIvSessionStore?.clear();
+      this.refreshArtemisIvMenuState();
+    }
+    this.showArtemisIvBriefing();
+  }
+
+  private showArtemisIvBriefing(): void {
+    this.showDialog(
+      'Artemis IV · Guided Lunar Landing',
+      'NASA currently describes Artemis IV as the first crewed lunar landing in the revised Artemis sequence: four astronauts launch in Orion, two land near the lunar South Pole, and all four return for splashdown. Launch and the long TLI coast are summarized so this mission can focus on the craft operations.\n\nNASA has not yet assigned the Artemis IV lander. This scenario uses an unchanged artist-made 2019 generic Starship model as its visual stand-in. It is not a Starship HLS model or an official NASA or SpaceX flight configuration.',
+      [
+        { label: 'BEGIN MISSION', fn: () => void this.beginArtemisIv(1) },
+        { label: 'OPEN FIRST LIGHT', fn: () => this.startFirstLight() },
+        { label: 'EXIT', fn: () => {} },
+      ],
+    );
+  }
+
+  private async beginArtemisIv(chapter: ArtemisIvChapter): Promise<void> {
+    const generation = this.beginArtemisIvTransition();
+    if (generation === null) return;
+    if (this.sessionKind === 'artemis-iv') {
+      this.paused = true;
+      this.game.setWarp(0, false);
+    }
+    this.showArtemisIvPreparing(
+      generation,
+      'Preparing Artemis IV',
+      `Preparing the checked craft and terrain for Chapter ${chapter}…`,
+    );
+    try {
+      if (!await this.ensureArtemisIvVisualResources(chapter, generation)) return;
+      if (!this.isCurrentArtemisIvTransition(generation)) return;
+      await this.loadArtemisIvChapter(chapter, generation);
+    } finally {
+      this.finishArtemisIvTransition(generation);
+    }
+  }
+
+  private artemisIvRendererBaseBytes(): number {
+    const size = new THREE.Vector2();
+    this.ctx.renderer.getDrawingBufferSize(size);
+    const framebuffer = drawingBufferResourceBytes(
+      Math.max(1, Math.floor(size.x)),
+      Math.max(1, Math.floor(size.y)),
+      this.ctx.caps.drawingBufferSamples,
+    ).totalBytes;
+    return artemisIvHighTierRendererBaseBytes({
+      residentPackGpuBytes: this.world.renderStats().residentPackGpuBytes,
+      drawingBufferBytes: framebuffer,
+    });
+  }
+
+  private confirmArtemisIvPreparedSceneBudget(retryChapter: ArtemisIvChapter): boolean {
+    const decision = recheckArtemisIvPreparedSceneBudget(this.artemisIvRendererLedger);
+    if (decision.ok) return true;
+    this.disposeArtemisIvVisualResources(true);
+    this.showArtemisIvAssetFailure(
+      `${decision.reason} Measured ${(decision.currentRendererBytes / 1_048_576).toFixed(0)} MiB against the ${(decision.combinedSceneGpuCapBytes / 1_048_576).toFixed(0)} MiB ceiling.`,
+      retryChapter,
+    );
+    return false;
+  }
+
+  private async ensureArtemisIvVisualResources(
+    retryChapter: ArtemisIvChapter,
+    generation: number,
+  ): Promise<boolean> {
+    if (this.artemisIvVisuals) return true;
+    this.artemisIvRenderScaleLease ??= applyArtemisIvRenderScale(this.ctx.renderer);
+    const decision = preflightArtemisIvAssets({
+      currentTier: this.world.qualityTier(),
+      supportsHighTier: this.ctx.caps.backend === 'webgl2',
+      caps: this.ctx.caps,
+      ledger: this.artemisIvRendererLedger,
+    });
+    if (!decision.ok) {
+      this.artemisIvRenderScaleLease.restore();
+      this.artemisIvRenderScaleLease = null;
+      if (this.isCurrentArtemisIvTransition(generation)) {
+        this.showArtemisIvAssetFailure(decision.reason, retryChapter);
+      }
+      return false;
+    }
+
+    this.artemisIvRestoreQuality = decision.restoreTierOnExit;
+    this.world.setQuality('high');
+    const baseUrl = import.meta.env.BASE_URL.endsWith('/')
+      ? import.meta.env.BASE_URL
+      : `${import.meta.env.BASE_URL}/`;
+    const loader = createBrowserArtemisIvAssetLoader(this.ctx.renderer, {
+      ledger: this.artemisIvRendererLedger,
+      transcoderPath: `${baseUrl}basis/`,
+      ktx2: this.ktx2Loader ?? undefined,
+    });
+    this.artemisIvAssetLoader = loader;
+    try {
+      const starship = await loader.loadStarship();
+      if (!this.isCurrentArtemisIvTransition(generation)) {
+        loader.dispose();
+        if (this.artemisIvAssetLoader === loader) this.artemisIvAssetLoader = null;
+        return false;
+      }
+      this.artemisIvVisuals = createArtemisIvVisualComposite(this.partModels, starship.object);
+      this.world.scene.add(this.artemisIvVisuals.root);
+      return true;
+    } catch (error) {
+      if (!this.isCurrentArtemisIvTransition(generation)) {
+        loader.dispose();
+        if (this.artemisIvAssetLoader === loader) this.artemisIvAssetLoader = null;
+        return false;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      this.disposeArtemisIvVisualResources(true);
+      this.showArtemisIvAssetFailure(reason, retryChapter);
+      return false;
+    }
+  }
+
+  private showArtemisIvAssetFailure(reason: string, retryChapter: ArtemisIvChapter): void {
+    this.showDialog(
+      'Artemis IV visual unavailable',
+      `${reason}\n\nThe selected unchanged model requires the certified High-quality path. No substitute model was loaded.`,
+      [
+        {
+          label: 'OPEN FIRST LIGHT',
+          fn: () => {
+            this.disposeArtemisIvVisualResources(true);
+            this.startFirstLight();
+          },
+        },
+        { label: 'RETRY', fn: () => void this.beginArtemisIv(retryChapter) },
+        {
+          label: 'EXIT',
+          fn: () => {
+            this.disposeArtemisIvVisualResources(true);
+            this.showMenu();
+          },
+        },
+      ],
+    );
+  }
+
+  private async loadArtemisIvChapter(
+    chapter: ArtemisIvChapter,
+    generation: number,
+  ): Promise<void> {
+    if (!this.isCurrentArtemisIvTransition(generation)) return;
+    const descriptor = artemisIvCheckpointForChapter(chapter);
+    const checkpointGame = new GameState('sandbox', { persistence: 'session-only' });
+    this.world.resetDynamicState();
+    try {
+      if (descriptor.bodyId) {
+        const body = checkpointGame.universe.get(descriptor.bodyId);
+        const authority = await checkpointGame.prepareFlightAuthority(
+          body,
+          descriptor.terrainAuthorityRequest,
+        );
+        if (!this.isCurrentArtemisIvTransition(generation)) return;
+        if (descriptor.terrainAuthorityRequest === 'moon-site01' && authority.fallbackReason) {
+          throw new Error(`South Pole training terrain unavailable: ${authority.fallbackReason}`);
+        }
+        await this.world.prepareFlightBody(body, authority);
+        if (!this.isCurrentArtemisIvTransition(generation)) return;
+        if (!this.confirmArtemisIvPreparedSceneBudget(chapter)) return;
+      }
+      const mission = initializeArtemisIvCheckpoint(chapter, checkpointGame);
+      if (!this.isCurrentArtemisIvTransition(generation)) return;
+      this.game = mission.game;
+      this.artemisIvMission = mission;
+      this.artemisIvGuideProgress = createArtemisIvGuideProgress(chapter);
+      this.sessionKind = 'artemis-iv';
+      this.launchedCraft = null;
+      this.maneuver = new ManeuverPlanController();
+      this.artemisIvManeuverIds.clear();
+      this.autoManeuverPlanId = null;
+      this.autoManeuverPauseLoggedFor = null;
+      this.pendingWarpStop = null;
+      this.firstLightMoonCorrectionApplied = false;
+      this.tutorial.dismiss();
+      this.editor.refreshCampaign();
+      this.toFlight(false);
+      this.artemisIvGuide.setVisible(true);
+      this.configureArtemisIvChapterStart();
+      this.frameArtemisIvChapterCamera(chapter);
+      this.persistArtemisIvChapter(false);
+      this.dismissArtemisIvPreparing(generation);
+      telemetry.track('game_started', { mode: 'artemis-iv', chapter, system: 'sol' });
+      clientLog.info('game.start', { mode: 'artemis-iv', chapter, system: 'sol' });
+    } catch (error) {
+      if (!this.isCurrentArtemisIvTransition(generation)) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      this.showDialog('Artemis IV checkpoint unavailable', reason, [
+        { label: 'RETRY', fn: () => void this.beginArtemisIv(chapter) },
+        { label: 'EXIT MISSION', fn: () => this.showMenu() },
+      ]);
+    }
+  }
+
+  private configureArtemisIvChapterStart(): void {
+    const state = this.artemisIvMission;
+    if (!state) return;
+    this.map.setLandingTarget(
+      state.chapter === 5 ? ARTEMIS_IV_SOUTH_POLE_TRAINING_ANALOGUE : null,
+    );
+    if (state.chapter === 1) {
+      const orion = vesselForArtemisIvRole(state, 'orion-cm');
+      if (orion) orion.target = 'moon';
+      const prepared = ARTEMIS_IV_PREPARED.maneuvers.postTliCorrection;
+      this.installArtemisIvManeuver({
+        ...prepared,
+        node: { ...ARTEMIS_IV_POST_TLI_START_NODE },
+      });
+      if (!this.map.visible) this.toggleMap();
+    }
+    if (state.chapter === 5) {
+      const lander = vesselForArtemisIvRole(state, 'hls');
+      if (lander) lander.runtime.sas = 'retrograde';
+    }
+    if (state.chapter === 10) {
+      const orion = vesselForArtemisIvRole(state, 'orion-cm');
+      if (orion) orion.runtime.sas = 'retrograde';
+    }
+  }
+
+  private frameArtemisIvChapterCamera(chapter: ArtemisIvChapter): void {
+    const descriptor = artemisIvCheckpointForChapter(chapter);
+    const radius = chapter === 10
+      ? ARTEMIS_IV_CAMERA_FRAMING_RADII.recovery
+      : descriptor.topology === 'docked'
+        ? ARTEMIS_IV_CAMERA_FRAMING_RADII.docked
+        : descriptor.activeRole === 'hls'
+          ? ARTEMIS_IV_CAMERA_FRAMING_RADII.hls
+          : ARTEMIS_IV_CAMERA_FRAMING_RADII.orionCmEsm;
+    this.world.resetCamera(false);
+    this.world.frameCameraForVisualRadius(radius);
+  }
+
+  private installArtemisIvManeuver(
+    prepared: Readonly<{ id: string; bodyId: 'earth' | 'moon'; node: ManeuverNode }>,
+  ): void {
+    const active = this.game.active;
+    if (!active || active.runtime.bodyId !== prepared.bodyId) return;
+    const body = this.game.bodyOf(active);
+    const reference = stateToElements(
+      body.mu,
+      active.runtime.pos,
+      active.runtime.vel,
+      this.game.time,
+    );
+    const plan = this.maneuver.create(active.runtime.id, body.id, reference, { ...prepared.node });
+    this.artemisIvManeuverIds.set(plan.id, prepared.id);
+  }
+
+  private persistArtemisIvChapter(completed: boolean): void {
+    const state = this.artemisIvMission;
+    if (!state || !this.artemisIvSessionStore) return;
+    this.artemisIvSessionStore.write({
+      documentVersion: ARTEMIS_IV_SESSION_DOCUMENT_VERSION,
+      missionVersion: ARTEMIS_IV_MISSION_VERSION,
+      currentChapter: state.chapter,
+      completedAcknowledgements: ARTEMIS_IV_ACKNOWLEDGEMENTS.filter(
+        (acknowledgement) => state.acknowledgements[acknowledgement],
+      ),
+      completed,
+      chapterStartSave: serializeGame(state.game, `Artemis IV · Chapter ${state.chapter}`),
+    });
+    this.refreshArtemisIvMenuState();
+  }
+
+  private continueArtemisIvTextStep(): void {
+    if (!this.artemisIvMission || !this.artemisIvGuideProgress) return;
+    try {
+      const update = continueArtemisIvGuide(
+        this.artemisIvGuideProgress,
+        this.artemisIvMission,
+        performance.now(),
+      );
+      this.artemisIvGuideProgress = update.progress;
+    } catch (error) {
+      const vessel = this.game.active?.runtime;
+      if (vessel) logEvent(vessel, this.game.time, error instanceof Error ? error.message : String(error), 'warning');
+    }
+  }
+
+  private handleArtemisIvContextualAction(
+    action: Readonly<ArtemisIvGuideContextualAction>,
+  ): void {
+    const state = this.artemisIvMission;
+    if (!state) return;
+    switch (action.id) {
+      case 'next-chapter':
+        void this.advanceArtemisIvChapter();
+        break;
+      case 'finish-mission':
+        this.completeArtemisIvMission();
+        break;
+      case 'target-hls':
+        state.telemetry.selectedTargetRole = 'hls';
+        break;
+      case 'target-orion':
+        state.telemetry.selectedTargetRole = 'orion-cm';
+        break;
+      case 'guided-intercept':
+        this.compressArtemisIvRendezvous();
+        break;
+      case 'switch-hls':
+        setActiveArtemisIvRole(state, 'hls');
+        this.game.setWarp(0, false);
+        break;
+      case 'switch-orion':
+        setActiveArtemisIvRole(state, 'orion-cm');
+        this.game.setWarp(0, false);
+        break;
+      case 'undock-hls':
+        this.undockArtemisIvLander();
+        break;
+      case 'restore-node':
+        this.restoreCurrentArtemisIvManeuver();
+        break;
+      case 'open-map':
+        if (!this.map.visible) this.toggleMap();
+        break;
+      case 'ignite-lander':
+      case 'jettison-esm':
+      case 'arm-recovery':
+        this.stage();
+        break;
+    }
+  }
+
+  private compressArtemisIvRendezvous(): void {
+    const state = this.artemisIvMission;
+    const targetRole = state?.telemetry.selectedTargetRole;
+    if (!state || !targetRole || !state.activeRole || targetRole === state.activeRole) return;
+    const chaser = vesselForArtemisIvRole(state, state.activeRole);
+    const target = vesselForArtemisIvRole(state, targetRole);
+    if (!chaser || !target || chaser.runtime.bodyId !== target.runtime.bodyId) return;
+    this.game.setWarp(0, false);
+    this.game.toActive(chaser);
+    this.game.toActive(target);
+    const corridor = target.runtime.att.rotate(new Vec3(0, 1, 0), new Vec3()).normalize();
+    chaser.runtime.pos.copy(target.runtime.pos).addScaled(corridor, 220);
+    chaser.runtime.vel.copy(target.runtime.vel).addScaled(corridor, -0.6);
+    chaser.runtime.att.copy(target.runtime.att).multiply(new Quat(1, 0, 0, 0));
+    chaser.runtime.angVel.set(0, 0, 0);
+    state.telemetry.holdStableForMs = 0;
+    logEvent(
+      chaser.runtime,
+      this.game.time,
+      'Prepared phasing coast complete. Final approach remains under manual RCS control.',
+    );
+  }
+
+  private undockArtemisIvLander(): void {
+    const state = this.artemisIvMission;
+    if (!state) return;
+    const merged = vesselForArtemisIvRole(state, 'orion-cm');
+    const joint = merged ? this.game.dockedJoints(merged)[0] : null;
+    if (!merged || !joint || !this.game.undock(merged, joint.childKey)) return;
+    const orion = this.game.vessels.find((vessel) =>
+      vessel.runtime.craft.parts.some((part) => part.defId === 'pod-voyager'));
+    const lander = this.game.vessels.find((vessel) =>
+      vessel.runtime.craft.parts.some((part) => part.defId === 'pod-tandem'));
+    if (!orion || !lander) throw new Error('Artemis IV undocking did not preserve both craft');
+    recordArtemisIvUndocking(state, orion.runtime.id, lander.runtime.id);
+    if (!lander.runtime.externalLandingFootprint) {
+      setExternalLandingFootprint(lander.runtime, {
+        halfWidth: 6.5,
+        halfDepth: 4.5,
+        footY: -26.5,
+      });
+    }
+    const continueInLander = state.chapter === 4;
+    setActiveArtemisIvRole(state, continueInLander ? 'hls' : 'orion-cm');
+    for (const vessel of this.game.vessels) this.world.invalidateVessel(vessel.runtime.id);
+    this.world.resetCamera(false);
+    this.world.frameCameraForVisualRadius(
+      continueInLander
+        ? ARTEMIS_IV_CAMERA_FRAMING_RADII.hls
+        : ARTEMIS_IV_CAMERA_FRAMING_RADII.orionCmEsm,
+    );
+    const prepared = continueInLander
+      ? ARTEMIS_IV_PREPARED.maneuvers.descentSetup
+      : ARTEMIS_IV_PREPARED.maneuvers.transEarthInjection;
+    this.maneuver = new ManeuverPlanController();
+    this.artemisIvManeuverIds.clear();
+    this.installArtemisIvManeuver(prepared);
+  }
+
+  private restoreCurrentArtemisIvManeuver(): void {
+    const stepId = currentArtemisIvGuideStep(this.artemisIvGuideProgress ?? {
+      chapter: 0, stepId: null, satisfiedAtMs: null, complete: true,
+    })?.id;
+    const prepared = stepId === 'post-tli-correction'
+      ? ARTEMIS_IV_PREPARED.maneuvers.postTliCorrection
+      : stepId === 'lunar-orbit-insertion'
+        ? ARTEMIS_IV_PREPARED.maneuvers.lunarOrbitInsertion
+        : stepId === 'commit-descent'
+          ? ARTEMIS_IV_PREPARED.maneuvers.descentSetup
+          : stepId === 'trans-earth-injection'
+            ? ARTEMIS_IV_PREPARED.maneuvers.transEarthInjection
+            : null;
+    if (!prepared) return;
+    this.maneuver = new ManeuverPlanController();
+    this.artemisIvManeuverIds.clear();
+    this.autoManeuverPlanId = null;
+    this.installArtemisIvManeuver(
+      stepId === 'post-tli-correction'
+        ? { ...prepared, node: { ...ARTEMIS_IV_POST_TLI_START_NODE } }
+        : prepared,
+    );
+    if (!this.map.visible) this.toggleMap();
+  }
+
+  private async advanceArtemisIvChapter(): Promise<void> {
+    const state = this.artemisIvMission;
+    if (!state || !this.artemisIvGuideProgress?.complete) return;
+    if (state.chapter === 10) {
+      this.completeArtemisIvMission();
+      return;
+    }
+    await this.beginArtemisIv((state.chapter + 1) as ArtemisIvChapter);
+  }
+
+  private completeArtemisIvMission(): void {
+    if (!this.artemisIvMission || this.artemisIvMission.chapter !== 10) return;
+    this.persistArtemisIvChapter(true);
+    this.paused = true;
+    this.game.setWarp(0, false);
+    this.showDialog(
+      'Artemis IV training mission complete',
+      'Orion and all four representative crew are safely home. The mission session is complete; your normal save was never changed.',
+      [
+        { label: 'BACK TO MAIN SCREEN', fn: () => { this.paused = false; this.showMenu(); } },
+        {
+          label: 'FLY AGAIN',
+          fn: () => {
+            this.paused = false;
+            this.artemisIvSessionStore?.clear();
+            this.showArtemisIvBriefing();
+          },
+        },
+      ],
+    );
+  }
+
+  private updateArtemisIvMission(dtMs: number): void {
+    const state = this.artemisIvMission;
+    const progress = this.artemisIvGuideProgress;
+    if (this.sessionKind !== 'artemis-iv' || !state || !progress) return;
+    this.syncArtemisIvDockingTopology();
+    syncArtemisIvLiveTelemetry(
+      state,
+      state.telemetry.selectedTargetRole,
+      this.paused ? 0 : Math.max(0, dtMs),
+    );
+    const update = updateArtemisIvGuide(progress, state, performance.now());
+    this.artemisIvGuideProgress = update.progress;
+    const step = currentArtemisIvGuideStep(update.progress);
+    if (
+      update.signal === 'advanced'
+      && step?.id === 'lunar-orbit-insertion'
+      && vesselForArtemisIvRole(state, 'orion-cm')?.runtime.bodyId === 'earth'
+    ) {
+      void this.prepareArtemisIvLunarInsertionPhase();
+    }
+    this.artemisIvGuide.update(
+      artemisIvGuideViewModel(update.progress, performance.now()),
+      this.artemisIvGuidePresentation(),
+    );
+  }
+
+  private syncArtemisIvVisuals(): void {
+    const state = this.artemisIvMission;
+    const visuals = this.artemisIvVisuals;
+    if (this.sessionKind !== 'artemis-iv' || !state || !visuals) return;
+    const orion = vesselForArtemisIvRole(state, 'orion-cm');
+    const lander = vesselForArtemisIvRole(state, 'hls');
+    if (orion) {
+      const proxy = this.world.visualFor(orion).group;
+      const visible = proxy.visible;
+      visuals.copyVesselTransform('orion', proxy);
+      visuals.setRoleVisible('orion', visible);
+      proxy.visible = false;
+    } else {
+      visuals.setRoleVisible('orion', false);
+    }
+    if (lander && lander.runtime.id !== orion?.runtime.id) {
+      const proxy = this.world.visualFor(lander).group;
+      const visible = proxy.visible;
+      visuals.copyVesselTransform('hls', proxy);
+      visuals.setRoleVisible('hls', visible);
+      proxy.visible = false;
+    } else if (lander && orion) {
+      visuals.copyDockedHlsTransformFromOrion();
+      visuals.setRoleVisible('hls', visuals.orionRoot.visible);
+    } else {
+      visuals.setRoleVisible('hls', false);
+    }
+    const esmAttached = state.roles['orion-esm'] !== null
+      && state.roles['orion-esm'] === state.roles['orion-cm'];
+    visuals.setTopology(
+      esmAttached ? 'cm-esm' : state.telemetry.parachutesDeployed ? 'recovery' : 'cm-only',
+    );
+  }
+
+  private syncArtemisIvDockingTopology(): void {
+    const state = this.artemisIvMission;
+    if (!state || state.roles['orion-cm'] === state.roles.hls || !state.roles.hls) return;
+    const orionLive = this.game.vessels.some((vessel) => vessel.runtime.id === state.roles['orion-cm']);
+    const landerLive = this.game.vessels.some((vessel) => vessel.runtime.id === state.roles.hls);
+    if (orionLive && landerLive) return;
+    const merged = this.game.vessels.find((vessel) =>
+      this.game.dockedJoints(vessel).length > 0
+      && vessel.runtime.craft.parts.some((part) => part.defId === 'pod-voyager')
+      && vessel.runtime.craft.parts.some((part) => part.defId === 'pod-tandem'));
+    if (!merged) return;
+    recordArtemisIvDocking(state, merged.runtime.id);
+    this.world.invalidateVessel(merged.runtime.id);
+    this.world.resetCamera(false);
+    this.world.frameCameraForVisualRadius(ARTEMIS_IV_CAMERA_FRAMING_RADII.docked);
+  }
+
+  private artemisIvGuidePresentation(): ArtemisIvGuidePresentation {
+    const state = this.artemisIvMission;
+    const progress = this.artemisIvGuideProgress;
+    if (!state || !progress) return {};
+    const step = currentArtemisIvGuideStep(progress);
+    let contextualAction: ArtemisIvGuideContextualAction | null = null;
+    const active = this.game.active;
+    const hasPlan = Boolean(active && this.maneuver.nextFor(active.runtime.id, active.runtime.bodyId));
+    const range = state.telemetry.relativeRangeMeters;
+
+    if (progress.complete) {
+      contextualAction = state.chapter === 10
+        ? { id: 'finish-mission', label: 'COMPLETE MISSION' }
+        : { id: 'next-chapter', label: `CONTINUE TO CHAPTER ${state.chapter + 1}` };
+    } else if (step?.id === 'post-tli-correction' || step?.id === 'lunar-orbit-insertion'
+      || step?.id === 'trans-earth-injection') {
+      contextualAction = !hasPlan
+        ? { id: 'restore-node', label: 'RESTORE PREPARED NODE' }
+        : !this.map.visible ? { id: 'open-map', label: 'OPEN MANEUVER PLANNER' } : null;
+    } else if (step?.id === 'outbound-rendezvous-hold' || step?.id === 'rejoin-orion') {
+      const target = step.id === 'outbound-rendezvous-hold' ? 'hls' : 'orion-cm';
+      contextualAction = state.telemetry.selectedTargetRole !== target
+        ? { id: target === 'hls' ? 'target-hls' : 'target-orion', label: `TARGET ${target === 'hls' ? 'LANDER' : 'ORION'}` }
+        : range !== null && range > 500
+          ? { id: 'guided-intercept', label: 'RUN PREPARED PHASING' }
+          : null;
+    } else if (step?.id === 'dock') {
+      contextualAction = state.telemetry.selectedTargetRole !== 'hls'
+        ? { id: 'target-hls', label: 'TARGET LANDER' }
+        : null;
+    } else if (step?.id === 'commit-descent') {
+      contextualAction = state.activeRole !== 'hls'
+        ? { id: 'switch-hls', label: 'TAKE CONTROL OF LANDER' }
+        : state.roles['orion-cm'] === state.roles.hls
+          ? { id: 'undock-hls', label: 'UNDOCK LANDER' }
+          : !hasPlan
+            ? { id: 'restore-node', label: 'PREPARE DESCENT NODE' }
+            : !this.map.visible ? { id: 'open-map', label: 'OPEN MANEUVER PLANNER' } : null;
+    } else if (step?.id === 'lunar-landing' || step?.id === 'lunar-ascent') {
+      const lander = vesselForArtemisIvRole(state, 'hls');
+      const engineActive = lander?.runtime.craft.parts.some(
+        (part) => part.defId === 'eng-aspen' && part.activated,
+      );
+      contextualAction = engineActive ? null : { id: 'ignite-lander', label: 'IGNITE LANDER ENGINE' };
+    } else if (step?.id === 'separate-lander') {
+      contextualAction = state.roles['orion-cm'] === state.roles.hls
+        ? { id: 'undock-hls', label: 'UNDOCK LANDER' }
+        : state.activeRole !== 'orion-cm'
+          ? { id: 'switch-orion', label: 'TAKE CONTROL OF ORION' }
+          : null;
+    } else if (step?.id === 'separate-service-module') {
+      contextualAction = state.roles['orion-cm'] === state.roles['orion-esm']
+        ? { id: 'jettison-esm', label: 'JETTISON SERVICE MODULE' }
+        : null;
+    } else if (step?.id === 'splashdown') {
+      contextualAction = state.telemetry.parachutesDeployed
+        ? null
+        : { id: 'arm-recovery', label: 'ARM RECOVERY SYSTEM' };
+    }
+    return { contextualAction, readouts: artemisIvGuideReadouts(state) };
+  }
+
+  private async prepareArtemisIvLunarInsertionPhase(): Promise<void> {
+    const state = this.artemisIvMission;
+    if (!state || state.chapter !== 1) return;
+    const generation = this.beginArtemisIvTransition();
+    if (generation === null) return;
+    this.paused = true;
+    state.game.setWarp(0, false);
+    this.showArtemisIvPreparing(
+      generation,
+      'Preparing lunar approach',
+      'Loading the checked South Pole terrain and placing Orion at lunar arrival…',
+    );
+    try {
+      state.game.clearFlightVessels();
+      this.world.resetDynamicState();
+      const moon = state.game.universe.get('moon');
+      const authority = await state.game.prepareFlightAuthority(moon, 'moon-site01');
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      if (authority.fallbackReason) throw new Error(authority.fallbackReason);
+      await this.world.prepareFlightBody(moon, authority);
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      if (!this.confirmArtemisIvPreparedSceneBudget(state.chapter)) return;
+      prepareArtemisIvLunarInsertion(state);
+      this.game = state.game;
+      this.maneuver = new ManeuverPlanController();
+      this.artemisIvManeuverIds.clear();
+      this.autoManeuverPlanId = null;
+      this.installArtemisIvManeuver(ARTEMIS_IV_PREPARED.maneuvers.lunarOrbitInsertion);
+      this.toFlight(false);
+      if (!this.map.visible) this.toggleMap();
+      this.dismissArtemisIvPreparing(generation);
+    } catch (error) {
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      this.showDialog(
+        'Lunar approach unavailable',
+        error instanceof Error ? error.message : String(error),
+        [
+          { label: 'RETRY CHAPTER', fn: () => void this.retryArtemisIvChapter() },
+          { label: 'EXIT MISSION', fn: () => this.showMenu() },
+        ],
+      );
+    } finally {
+      this.finishArtemisIvTransition(generation);
+    }
+  }
+
+  private async prepareArtemisIvEarthApproachPhase(): Promise<void> {
+    const state = this.artemisIvMission;
+    if (!state || state.chapter !== 9) return;
+    const generation = this.beginArtemisIvTransition();
+    if (generation === null) return;
+    this.paused = true;
+    state.game.setWarp(0, false);
+    this.showArtemisIvPreparing(
+      generation,
+      'Preparing Earth approach',
+      'Loading Earth entry terrain and placing Orion on the checked recovery corridor…',
+    );
+    try {
+      state.game.clearFlightVessels();
+      this.world.resetDynamicState();
+      const earth = state.game.universe.get('earth');
+      const authority = await state.game.prepareFlightAuthority(earth, 'parent');
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      await this.world.prepareFlightBody(earth, authority);
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      if (!this.confirmArtemisIvPreparedSceneBudget(state.chapter)) return;
+      prepareArtemisIvEarthApproach(state);
+      this.game = state.game;
+      this.maneuver = new ManeuverPlanController();
+      this.artemisIvManeuverIds.clear();
+      this.autoManeuverPlanId = null;
+      this.toFlight(false);
+      this.dismissArtemisIvPreparing(generation);
+    } catch (error) {
+      if (!this.isCurrentArtemisIvTransition(generation, state)) return;
+      this.showDialog(
+        'Earth approach unavailable',
+        error instanceof Error ? error.message : String(error),
+        [
+          { label: 'RETRY CHAPTER', fn: () => void this.retryArtemisIvChapter() },
+          { label: 'EXIT MISSION', fn: () => this.showMenu() },
+        ],
+      );
+    } finally {
+      this.finishArtemisIvTransition(generation);
+    }
+  }
+
+  private async retryArtemisIvChapter(): Promise<void> {
+    const chapter = this.artemisIvMission?.chapter;
+    if (chapter === undefined) return;
+    await this.beginArtemisIv(chapter);
+  }
+
+  private confirmExitArtemisIv(): void {
+    this.paused = true;
+    this.game.setWarp(0, false);
+    this.showDialog(
+      'Exit Artemis IV?',
+      'Your progress resumes from the beginning of this chapter checkpoint.',
+      [
+        { label: 'KEEP FLYING', fn: () => { this.paused = false; } },
+        { label: 'EXIT MISSION', fn: () => { this.paused = false; this.showMenu(); } },
+      ],
+    );
+  }
+
+  private disposeArtemisIvVisualResources(restoreQuality: boolean): void {
+    if (this.artemisIvVisuals) {
+      this.world?.scene.remove(this.artemisIvVisuals.root);
+      this.artemisIvVisuals.dispose();
+      this.artemisIvVisuals = null;
+    }
+    this.artemisIvAssetLoader?.dispose();
+    this.artemisIvAssetLoader = null;
+    this.artemisIvRenderScaleLease?.restore();
+    this.artemisIvRenderScaleLease = null;
+    if (restoreQuality && this.artemisIvRestoreQuality && this.world) {
+      this.world.setQuality(this.artemisIvRestoreQuality);
+    }
+    this.artemisIvRestoreQuality = null;
+  }
+
+  private startFirstLight(): void {
+    this.cancelArtemisIvTransition();
+    this.artemisIvGuide?.setVisible(false);
+    this.map?.setLandingTarget(null);
+    this.disposeArtemisIvVisualResources(true);
+    this.newGame('sandbox', 'sol');
+    this.sessionKind = 'first-light';
+    this.editor.loadCraft(createFirstLightRocket(), false);
+    this.tutorial.start();
+    this.toEditor();
+  }
+
   private async continueAutosave(): Promise<void> {
     const save = await this.saveSync.read('auto');
     if (!save) {
@@ -592,16 +1488,17 @@ class PeriluneGame {
       return;
     }
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
-    this.firstLightSession = false;
+    this.sessionKind = 'standard';
     this.editor.refreshCampaign();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
 
   private newGame(mode: GameMode, systemOverride?: keyof typeof GAMEPLAY_PROFILES): void {
+    this.cancelArtemisIvTransition();
     const profile = GAMEPLAY_PROFILES[systemOverride ?? this.uiSettings?.gameSystem ?? 'sol'];
     this.game = new GameState(mode, profile);
-    this.firstLightSession = false;
+    this.sessionKind = 'standard';
     this.firstLightMoonCorrectionApplied = false;
     this.maneuver = new ManeuverPlanController();
     this.autoManeuverPlanId = null;
@@ -616,7 +1513,25 @@ class PeriluneGame {
   }
 
   private showMenu(): void {
+    this.cancelArtemisIvTransition();
+    const exitingArtemis = this.sessionKind === 'artemis-iv'
+      || this.artemisIvVisuals !== null
+      || this.artemisIvAssetLoader !== null;
+    if (exitingArtemis) {
+      this.artemisIvGuide?.setVisible(false);
+      this.map.setLandingTarget(null);
+      this.disposeArtemisIvVisualResources(true);
+      this.artemisIvMission = null;
+      this.artemisIvGuideProgress = null;
+      this.artemisIvManeuverIds.clear();
+      this.sessionKind = 'standard';
+      this.game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+      this.world.resetCamera(false);
+      this.world.resetDynamicState();
+      this.refreshArtemisIvMenuState();
+    }
     this.resetTouchFlightControls();
+    this.paused = false;
     this.screen = 'menu';
     document.getElementById('game-canvas')?.classList.remove('vab-active');
     this.menu.setVisible(true);
@@ -630,6 +1545,10 @@ class PeriluneGame {
   }
 
   private toEditor(): void {
+    if (this.sessionKind === 'artemis-iv') {
+      this.confirmExitArtemisIv();
+      return;
+    }
     this.resetTouchFlightControls();
     this.paused = false;
     this.screen = 'editor';
@@ -724,8 +1643,26 @@ class PeriluneGame {
       logEvent(gv.runtime, this.game.time, 'No signal: cannot command staging.', 'warning');
       return;
     }
-    this.game.fireStage(gv);
+    if (!this.game.fireStage(gv)) return;
     this.world.invalidateVessel(gv.runtime.id);
+    if (this.sessionKind === 'artemis-iv') this.syncArtemisIvStageTopology();
+  }
+
+  private syncArtemisIvStageTopology(): void {
+    const state = this.artemisIvMission;
+    if (!state || state.chapter !== 10) return;
+    const crewModule = this.game.vessels.find((vessel) => vessel.runtime.craft.parts.some(
+      (part) => part.defId === 'pod-voyager',
+    ));
+    const serviceModule = this.game.vessels.find((vessel) => vessel.runtime.craft.parts.some(
+      (part) => part.defId === 'eng-ember',
+    ));
+    if (crewModule) {
+      bindArtemisIvRole(state, 'orion-cm', crewModule.runtime.id);
+      setActiveArtemisIvRole(state, 'orion-cm');
+    }
+    bindArtemisIvRole(state, 'orion-esm', serviceModule?.runtime.id ?? null);
+    for (const vessel of this.game.vessels) this.world.invalidateVessel(vessel.runtime.id);
   }
 
   private toggleMap(): void {
@@ -736,6 +1673,11 @@ class PeriluneGame {
   }
 
   private quickSave(): void {
+    if (this.sessionKind === 'artemis-iv') {
+      const gv = this.game.active;
+      if (gv) logEvent(gv.runtime, this.game.time, 'Artemis IV resumes from its checked chapter checkpoint.', 'warning');
+      return;
+    }
     if (this.game.persistence !== 'enabled') {
       const gv = this.game.active;
       if (gv) logEvent(gv.runtime, this.game.time, 'Legacy Auren is session-only; quicksave is unavailable.', 'warning');
@@ -748,12 +1690,16 @@ class PeriluneGame {
   }
 
   private writeSave(slot: string, label: string): Promise<boolean> {
-    if (this.game.persistence !== 'enabled') return Promise.resolve(false);
+    // Artemis owns one local chapter checkpoint document. Its temporary craft
+    // must never enter normal autosaves, named saves, or cloud sync.
+    if (this.sessionKind === 'artemis-iv' || this.game.persistence !== 'enabled') {
+      return Promise.resolve(false);
+    }
     return this.saveSync.write(this.game, slot, label);
   }
 
   private scheduleAutosave(): void {
-    if (this.game.persistence !== 'enabled') return;
+    if (this.sessionKind === 'artemis-iv' || this.game.persistence !== 'enabled') return;
     if (this.autosaveScheduled) return;
     this.autosaveScheduled = true;
     const run = () => {
@@ -768,6 +1714,11 @@ class PeriluneGame {
   }
 
   private async quickLoad(): Promise<void> {
+    if (this.sessionKind === 'artemis-iv') {
+      const gv = this.game.active;
+      if (gv) logEvent(gv.runtime, this.game.time, 'Use Retry Chapter to restore the Artemis IV checkpoint.', 'warning');
+      return;
+    }
     if (this.game.persistence !== 'enabled') {
       const gv = this.game.active;
       if (gv) logEvent(gv.runtime, this.game.time, 'Legacy Auren is session-only; quickload is unavailable.', 'warning');
@@ -777,7 +1728,7 @@ class PeriluneGame {
   }
 
   private async loadSlot(slot: string): Promise<void> {
-    if (this.game.persistence !== 'enabled') return;
+    if (this.sessionKind === 'artemis-iv' || this.game.persistence !== 'enabled') return;
     const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
@@ -808,6 +1759,10 @@ class PeriluneGame {
   }
 
   private revert(): void {
+    if (this.sessionKind === 'artemis-iv') {
+      void this.retryArtemisIvChapter();
+      return;
+    }
     if (!this.launchedCraft) return;
     this.game.clearFlightVessels();
     this.maneuver = new ManeuverPlanController();
@@ -820,7 +1775,7 @@ class PeriluneGame {
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.game.setWarp(0, false);
     this.toFlight();
-    if (this.firstLightSession) this.tutorial.restartAfterRevert();
+    if (this.sessionKind === 'first-light') this.tutorial.restartAfterRevert();
   }
 
   private runScience(): void {
@@ -885,6 +1840,14 @@ class PeriluneGame {
   private recover(): void {
     const gv = this.game.active;
     if (!gv) return;
+    if (this.sessionKind === 'artemis-iv') {
+      logEvent(
+        gv.runtime,
+        this.game.time,
+        'Artemis IV recovery is confirmed automatically after safe splashdown.',
+      );
+      return;
+    }
     const v = gv.runtime;
     const science = recoverScience(this.game, gv);
     if (!science.accepted) {
@@ -976,6 +1939,15 @@ class PeriluneGame {
     if (this.dialogEl) return;
     this.paused = true;
     this.game.setWarp(0, false);
+    if (this.sessionKind === 'artemis-iv') {
+      this.showDialog('Artemis IV paused', 'Simulation time is stopped. Progress resumes from this chapter checkpoint.', [
+        { label: 'Resume', fn: () => { this.paused = false; } },
+        { label: 'Retry chapter', fn: () => { this.paused = false; void this.retryArtemisIvChapter(); } },
+        { label: 'Settings', fn: () => { this.utilityTools.openSettings(); } },
+        { label: 'Exit mission', fn: () => { this.paused = false; this.showMenu(); } },
+      ]);
+      return;
+    }
     this.showDialog('Flight paused', 'Simulation time is stopped.', [
       { label: 'Resume', fn: () => { this.paused = false; } },
       { label: 'Settings', fn: () => { this.utilityTools.openSettings(); } },
@@ -1482,6 +2454,11 @@ class PeriluneGame {
   private activateVessel(id: string): void {
     if (!this.game.vessels.some((vessel) => vessel.runtime.id === id)) return;
     this.game.setActive(id);
+    const mission = this.artemisIvMission;
+    if (mission) {
+      if (mission.roles.hls === id && mission.roles['orion-cm'] !== id) mission.activeRole = 'hls';
+      else if (mission.roles['orion-cm'] === id && mission.roles.hls !== id) mission.activeRole = 'orion-cm';
+    }
     this.map.focusActiveVessel(this.game);
     this.hud.setMissionStart(this.game.time);
   }
@@ -1669,10 +2646,19 @@ class PeriluneGame {
       // Destruction dialog.
       if (this.game.lastDestruction) {
         const reason = this.game.lastDestruction.reason;
-        this.showDialog('Flight over', `${reason}. The review board recommends... adjustments.`, [
-          { label: 'Revert to launch', fn: () => this.revert() },
-          { label: 'Back to Workshop', fn: () => this.toEditor() },
-        ]);
+        this.showDialog(
+          'Flight over',
+          `${reason}. The review board recommends... adjustments.`,
+          this.sessionKind === 'artemis-iv'
+            ? [
+              { label: 'Retry chapter', fn: () => void this.retryArtemisIvChapter() },
+              { label: 'Exit mission', fn: () => this.showMenu() },
+            ]
+            : [
+              { label: 'Revert to launch', fn: () => this.revert() },
+              { label: 'Back to Workshop', fn: () => this.toEditor() },
+            ],
+        );
       }
     }
     this.perf.endSim(simStart);
@@ -1686,6 +2672,7 @@ class PeriluneGame {
         }
       } else {
         this.world.update(this.game, dt, this.paused ? 0 : realDt);
+        this.syncArtemisIvVisuals();
         if (!this.ctx.renderPaused) {
           this.gpuProfiler.submit('flight', () => this.world.render());
         }
@@ -1735,6 +2722,7 @@ class PeriluneGame {
         && this.autoManeuverPlanId === tutorialManeuver.id,
       warpRate: this.game.warpRate,
     });
+    this.updateArtemisIvMission(dtMs);
 
     if (this.keys.has('F3')) {
       this.keys.delete('F3');
@@ -1833,13 +2821,35 @@ class PeriluneGame {
       if (remaining <= 0) {
         v.controls.throttle = 0;
         logEvent(v, this.game.time, 'Maneuver complete.');
+        const artemisManeuverId = this.artemisIvManeuverIds.get(activePlan.id) ?? null;
+        if (artemisManeuverId && this.artemisIvMission) {
+          if (this.isArtemisIvManeuverAccepted(artemisManeuverId, activePlan)) {
+            if (!this.artemisIvMission.telemetry.completedManeuverIds.includes(artemisManeuverId)) {
+              this.artemisIvMission.telemetry.completedManeuverIds.push(artemisManeuverId);
+            }
+          } else {
+            logEvent(
+              v,
+              this.game.time,
+              'The burn completed outside the guided corridor. Retry the chapter to restore its checked approach.',
+              'warning',
+            );
+          }
+          this.artemisIvManeuverIds.delete(activePlan.id);
+        }
         if (this.autoManeuverPlanId === activePlan.id) this.autoManeuverPlanId = null;
         this.autoManeuverPauseLoggedFor = null;
         this.maneuver.clear(activePlan.id);
         const achieved = stateToElements(body.mu, v.pos, v.vel, this.game.time);
         this.maneuver.rebaseFirst(v.id, body.id, achieved);
         if (
-          this.firstLightSession
+          artemisManeuverId === ARTEMIS_IV_PREPARED_MANEUVER_IDS.transEarthInjection
+          && this.artemisIvMission?.telemetry.completedManeuverIds.includes(artemisManeuverId)
+        ) {
+          void this.prepareArtemisIvEarthApproachPhase();
+        }
+        if (
+          this.sessionKind === 'first-light'
           && !this.firstLightMoonCorrectionApplied
           && body.id === 'earth'
           && gv.target === 'moon'
@@ -1883,11 +2893,60 @@ class PeriluneGame {
       logEvent(gv.runtime, this.game.time, 'Automatic maneuver disarmed.');
       return;
     }
+    const artemisManeuverId = this.artemisIvManeuverIds.get(id);
+    if (
+      artemisManeuverId
+      && !this.isArtemisIvManeuverAccepted(artemisManeuverId, plan)
+    ) {
+      logEvent(
+        gv.runtime,
+        this.game.time,
+        'Adjust the prepared node into the highlighted training corridor before arming automatic execution.',
+        'warning',
+      );
+      return;
+    }
     this.autoManeuverPlanId = id;
     this.autoManeuverPauseLoggedFor = null;
     gv.runtime.sas = 'node';
     gv.runtime.controls.throttle = 0;
     logEvent(gv.runtime, this.game.time, 'Automatic maneuver armed. Engine ignition is automatic; separation remains manual.');
+  }
+
+  private isArtemisIvManeuverAccepted(
+    missionId: string,
+    plan: Readonly<ManeuverPlan>,
+  ): boolean {
+    const { node } = plan;
+    if (missionId === ARTEMIS_IV_PREPARED_MANEUVER_IDS.postTliCorrection) {
+      return assessArtemisIvPostTliCorrection(
+        this.game.universe,
+        plan.referenceOrbit,
+        node,
+      ).accepted;
+    }
+    if (missionId === ARTEMIS_IV_PREPARED_MANEUVER_IDS.lunarOrbitInsertion) {
+      return assessArtemisIvLunarOrbitInsertion(
+        this.game.universe,
+        plan.referenceOrbit,
+        node,
+      ).accepted;
+    }
+    if (missionId === ARTEMIS_IV_PREPARED_MANEUVER_IDS.descentSetup) {
+      return assessArtemisIvDescentSetup(
+        this.game.universe,
+        plan.referenceOrbit,
+        node,
+      ).accepted;
+    }
+    if (missionId === ARTEMIS_IV_PREPARED_MANEUVER_IDS.transEarthInjection) {
+      return assessArtemisIvTransEarthInjection(
+        this.game.universe,
+        plan.referenceOrbit,
+        node,
+      ).accepted;
+    }
+    return false;
   }
 
   private createManeuverNode(node: ManeuverNode): void {
@@ -1943,7 +3002,7 @@ class PeriluneGame {
     this.autoManeuverPauseLoggedFor = null;
     this.pendingWarpStop = null;
     this.firstLightMoonCorrectionApplied = false;
-    this.firstLightSession = true;
+    this.sessionKind = 'first-light';
     this.launchedCraft = createFirstLightRocket();
     const craft = createSecondLightCraft();
     const vessel = this.game.spawnInOrbit(craft, craft.name, 'earth', 200_000);

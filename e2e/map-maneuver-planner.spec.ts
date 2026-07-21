@@ -103,7 +103,9 @@ test('map orbit has a forgiving click target and a compact six-direction planner
   }
   await panel.getByTitle('Prograde', { exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode()?.prograde)).toBeCloseTo(1, 4);
-  await panel.getByRole('spinbutton', { name: 'Tangential value' }).fill('25');
+  await panel.getByRole('spinbutton', {
+    name: 'Prograde / retrograde delta-v in meters per second',
+  }).fill('25');
   await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode()?.prograde)).toBeCloseTo(25, 4);
 
   await panel.getByRole('button', { name: 'Add node in 2 minutes' }).click();
@@ -165,7 +167,10 @@ test('map orbit has a forgiving click target and a compact six-direction planner
   const resizedBounds = await panel.boundingBox();
   expect(resizedBounds).not.toBeNull();
   expect(resizedBounds!.width).toBeGreaterThan(movedBounds!.width + 50);
-  expect(resizedBounds!.height).toBeGreaterThan(movedBounds!.height + 30);
+  // The richer outcome section begins closer to the viewport height cap, but
+  // the vertical resize handle must still move the panel before that cap.
+  expect(resizedBounds!.height).toBeGreaterThan(movedBounds!.height + 15);
+  expect(resizedBounds!.y + resizedBounds!.height).toBeLessThanOrEqual(720);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(panel).toHaveClass(/has-node/);

@@ -1,25 +1,87 @@
 import type { SaveGame } from '../save/schema';
+import type { ArtemisIvChapter } from '../missions/artemisIv/session';
 import { iconButton } from './icons';
 import { el, injectUiStyles } from './kit';
 
-export type MissionEntry = 'continue' | 'first-light' | 'exploration' | 'program' | 'sandbox';
+export const ARTEMIS_IV_VISIBLE_QUALIFIER =
+  'UNCHANGED 2019 STARSHIP CONCEPT STAND-IN · NASA PROVIDER TBD';
+export const DEFAULT_ARTEMIS_IV_MENU_ENABLED = false;
+
+export type MissionEntry =
+  | 'continue'
+  | 'artemis-iv'
+  | 'first-light'
+  | 'exploration'
+  | 'program'
+  | 'sandbox';
+
+export type ArtemisIvMenuState =
+  | { status: 'new' }
+  | { status: 'resume'; chapter: ArtemisIvChapter }
+  | { status: 'complete' };
+
+export type ArtemisIvMenuAction = 'start' | 'resume' | 'fly-again';
+
+export interface MenuMissionOptions {
+  artemisIvEnabled?: boolean;
+  artemisIvState?: ArtemisIvMenuState;
+}
 
 export interface MenuMission {
   id: MissionEntry;
   eyebrow: string;
   title: string;
   detail: string;
+  qualifier?: string;
   primary: boolean;
 }
 
-export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
+function artemisIvMission(
+  save: SaveGame | null,
+  state: ArtemisIvMenuState,
+): MenuMission {
+  if (state.status === 'resume') {
+    return {
+      id: 'artemis-iv',
+      eyebrow: 'CHAPTER CHECKPOINT',
+      title: `RESUME ARTEMIS IV · CHAPTER ${state.chapter}`,
+      detail: 'Resume begins at the chapter checkpoint',
+      qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+      primary: !save,
+    };
+  }
+  if (state.status === 'complete') {
+    return {
+      id: 'artemis-iv',
+      eyebrow: 'MISSION COMPLETE',
+      title: 'ARTEMIS IV',
+      detail: 'FLY AGAIN',
+      qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+      primary: !save,
+    };
+  }
+  return {
+    id: 'artemis-iv',
+    eyebrow: 'GUIDED LUNAR LANDING',
+    title: 'ARTEMIS IV',
+    detail: 'BEGIN MISSION',
+    qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+    primary: !save,
+  };
+}
+
+export function menuMissions(
+  save: SaveGame | null,
+  options: Readonly<MenuMissionOptions> = {},
+): readonly MenuMission[] {
+  const artemisIvEnabled = options.artemisIvEnabled ?? DEFAULT_ARTEMIS_IV_MENU_ENABLED;
   const base: MenuMission[] = [
     {
       id: 'first-light',
       eyebrow: 'GUIDED',
       title: 'FIRST LIGHT',
       detail: 'Earth orbit to the Moon',
-      primary: !save,
+      primary: !save && !artemisIvEnabled,
     },
     {
       id: 'exploration',
@@ -43,6 +105,9 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
       primary: false,
     },
   ];
+  if (artemisIvEnabled) {
+    base.unshift(artemisIvMission(save, options.artemisIvState ?? { status: 'new' }));
+  }
   if (!save) return base;
 
   const activeName = save.vessels.find((vessel) => vessel.id === save.activeVesselId)?.name
@@ -62,6 +127,7 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
 
 export interface MainMenuCallbacks {
   onContinue(): Promise<void> | void;
+  onArtemisIv?(action: ArtemisIvMenuAction): Promise<void> | void;
   onFirstLight(): void;
   onSandbox(): void;
   onExploration(): void;
@@ -106,6 +172,7 @@ export function bindMenuContinueSave(
 
 const actionLabels: Record<MissionEntry, string> = {
   continue: 'Continue Mission',
+  'artemis-iv': 'Artemis IV guided lunar landing mission',
   'first-light': 'First Light tutorial',
   sandbox: 'Sandbox — just build and fly',
   exploration: 'Exploration — unlock technology with science',
@@ -116,8 +183,19 @@ export class MainMenu {
   readonly root: HTMLElement;
   private readonly commandDeck: HTMLElement;
   private continueSave: SaveGame | null = null;
+  private readonly artemisIvEnabled: boolean;
+  private artemisIvState: ArtemisIvMenuState;
 
-  constructor(parent: HTMLElement, private readonly callbacks: MainMenuCallbacks) {
+  constructor(
+    parent: HTMLElement,
+    private readonly callbacks: MainMenuCallbacks,
+    options: Readonly<MenuMissionOptions> = {},
+  ) {
+    this.artemisIvEnabled = options.artemisIvEnabled ?? DEFAULT_ARTEMIS_IV_MENU_ENABLED;
+    this.artemisIvState = options.artemisIvState ?? { status: 'new' };
+    if (this.artemisIvEnabled && !callbacks.onArtemisIv) {
+      throw new Error('Artemis IV menu is enabled without an onArtemisIv callback.');
+    }
     injectUiStyles();
     this.root = el('section', 'perilune-menu', parent);
     this.root.setAttribute('aria-labelledby', 'perilune-menu-title');
@@ -150,14 +228,26 @@ export class MainMenu {
     this.rebuildCommandDeck();
   }
 
+  setArtemisIvState(state: ArtemisIvMenuState): void {
+    this.artemisIvState = state;
+    this.rebuildCommandDeck();
+  }
+
   setVisible(visible: boolean): void {
     this.root.style.display = visible ? '' : 'none';
   }
 
   private rebuildCommandDeck(): void {
     this.commandDeck.replaceChildren();
-    const missions = menuMissions(this.continueSave);
+    const missions = menuMissions(this.continueSave, {
+      artemisIvEnabled: this.artemisIvEnabled,
+      artemisIvState: this.artemisIvState,
+    });
     this.commandDeck.style.setProperty('--mission-count', String(missions.length));
+    this.commandDeck.classList.toggle(
+      'perilune-command-deck-artemis',
+      missions.some((mission) => mission.id === 'artemis-iv'),
+    );
     for (const mission of missions) {
       const button = el(
         'button',
@@ -169,8 +259,17 @@ export class MainMenu {
       el('span', 'perilune-mission-eyebrow', button, mission.eyebrow);
       el('span', 'perilune-mission-title', button, mission.title);
       el('span', 'perilune-mission-detail', button, mission.detail);
+      if (mission.qualifier) {
+        el('span', 'perilune-mission-qualifier', button, mission.qualifier);
+      }
       button.onclick = () => {
         if (mission.id === 'continue') void this.callbacks.onContinue();
+        else if (mission.id === 'artemis-iv') {
+          const action: ArtemisIvMenuAction = this.artemisIvState.status === 'complete'
+            ? 'fly-again'
+            : this.artemisIvState.status === 'resume' ? 'resume' : 'start';
+          void this.callbacks.onArtemisIv?.(action);
+        }
         else if (mission.id === 'first-light') this.callbacks.onFirstLight();
         else if (mission.id === 'exploration') this.callbacks.onExploration();
         else if (mission.id === 'program') this.callbacks.onProgram();

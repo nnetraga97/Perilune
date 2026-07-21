@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SaveGame } from '../src/save/schema';
-import { bindMenuContinueSave, menuMissions } from '../src/ui/mainMenu';
+import {
+  ARTEMIS_IV_VISIBLE_QUALIFIER,
+  bindMenuContinueSave,
+  menuMissions,
+} from '../src/ui/mainMenu';
 
 const save = {
   label: 'autosave',
@@ -40,6 +44,54 @@ describe('main-menu mission hierarchy', () => {
       'first-light', 'exploration', 'program', 'sandbox',
     ]);
     expect(missions.find((mission) => mission.primary)?.id).toBe('first-light');
+  });
+
+  it('keeps Artemis IV development-gated by default', () => {
+    expect(menuMissions(null).some((mission) => mission.id === 'artemis-iv')).toBe(false);
+  });
+
+  it('makes a new Artemis IV session primary while retaining First Light', () => {
+    const missions = menuMissions(null, { artemisIvEnabled: true });
+    expect(missions.map((mission) => mission.id)).toEqual([
+      'artemis-iv', 'first-light', 'exploration', 'program', 'sandbox',
+    ]);
+    expect(missions.find((mission) => mission.primary)?.id).toBe('artemis-iv');
+    expect(missions.some((mission) => mission.id === 'first-light')).toBe(true);
+    expect(missions[0]).toMatchObject({
+      title: 'ARTEMIS IV',
+      detail: 'BEGIN MISSION',
+      qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+    });
+  });
+
+  it('shows chapter-checkpoint resume without displacing a normal Continue', () => {
+    const missions = menuMissions(save, {
+      artemisIvEnabled: true,
+      artemisIvState: { status: 'resume', chapter: 4 },
+    });
+    expect(missions.map((mission) => mission.id).slice(0, 3)).toEqual([
+      'continue', 'artemis-iv', 'first-light',
+    ]);
+    expect(missions.find((mission) => mission.primary)?.id).toBe('continue');
+    expect(missions[1]).toMatchObject({
+      title: 'RESUME ARTEMIS IV · CHAPTER 4',
+      detail: 'Resume begins at the chapter checkpoint',
+      qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+    });
+  });
+
+  it('turns a completed Artemis IV session into Fly Again', () => {
+    const missions = menuMissions(null, {
+      artemisIvEnabled: true,
+      artemisIvState: { status: 'complete' },
+    });
+    expect(missions[0]).toMatchObject({
+      id: 'artemis-iv',
+      title: 'ARTEMIS IV',
+      detail: 'FLY AGAIN',
+      primary: true,
+      qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+    });
   });
 });
 

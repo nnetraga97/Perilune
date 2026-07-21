@@ -29,6 +29,7 @@ import { GameState } from '../sim/state';
 import type { Body, Universe } from '../sim/universe';
 import {
   ManeuverNode,
+  estimateBurnTime,
   nodeDeltaV,
   predictTrajectory,
   TrajectoryPrediction,
@@ -38,6 +39,7 @@ import {
   type ManeuverPlan,
 } from '../sim/maneuverPlan';
 import { makeStarfield } from '../render/starfield';
+import { SPACE_BACKGROUND } from '../render/spaceBackground';
 import { depositSites, DepositSite } from '../sim/resources';
 import { bodyFixedToInertial, bodyOrientation } from '../sim/bodyOrientation';
 import {
@@ -59,6 +61,98 @@ import { pickOrbitSegment, type OrbitPick, type ScreenOrbitPoint } from './orbit
 
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
+
+const MANEUVER_AXIS_PRESENTATION = {
+  prograde: { label: 'Prograde / retrograde', color: '#d8c36d' },
+  normal: { label: 'Normal / anti-normal', color: '#b98ce8' },
+  radial: { label: 'Radial out / in', color: '#6baee8' },
+} as const;
+
+type PlannerPhaseInput = Readonly<Pick<ManeuverPlan, 'phase' | 'initialDeltaV' | 'remainingDeltaV'>>;
+
+export interface ManeuverPlannerPresentation {
+  readonly instruction: string;
+  readonly autoLabel: 'ARM AUTO' | 'AUTO ARMED' | 'EXECUTING' | 'COMPLETE';
+  readonly autoState: 'idle' | 'armed' | 'executing' | 'complete';
+  readonly executionFraction: number | null;
+}
+
+/** Presentation state derived only from the maneuver authority's existing plan data. */
+export function maneuverPlannerPresentation(
+  plan: PlannerPhaseInput | null,
+  autoEnabled: boolean,
+): ManeuverPlannerPresentation {
+  if (!plan) {
+    return {
+      instruction: 'Select the bright orbit arc to place a maneuver node.',
+      autoLabel: 'ARM AUTO',
+      autoState: 'idle',
+      executionFraction: null,
+    };
+  }
+  if (plan.phase === 'executing') {
+    const total = Math.max(0, plan.initialDeltaV);
+    const remaining = Math.min(total, Math.max(0, plan.remainingDeltaV));
+    return {
+      instruction: 'Execution in progress. Monitor delivered delta-v and engine cutoff.',
+      autoLabel: 'EXECUTING',
+      autoState: 'executing',
+      executionFraction: total > 0 ? 1 - remaining / total : 0,
+    };
+  }
+  if (plan.phase === 'complete') {
+    return {
+      instruction: 'Maneuver complete. Review the achieved orbit before continuing.',
+      autoLabel: 'COMPLETE',
+      autoState: 'complete',
+      executionFraction: 1,
+    };
+  }
+  if (plan.phase === 'overdue') {
+    return {
+      instruction: 'This burn window has passed. Move the node to a future time or delete it.',
+      autoLabel: autoEnabled ? 'AUTO ARMED' : 'ARM AUTO',
+      autoState: autoEnabled ? 'armed' : 'idle',
+      executionFraction: null,
+    };
+  }
+  return {
+    instruction: 'Drag the yellow prograde, purple normal, or blue radial handles, then review the predicted orbit.',
+    autoLabel: autoEnabled ? 'AUTO ARMED' : 'ARM AUTO',
+    autoState: autoEnabled ? 'armed' : 'idle',
+    executionFraction: null,
+  };
+}
+
+type BurnStageEstimate = Readonly<{
+  deltaV: number;
+  burnTime: number;
+  thrust: number;
+  massStart: number;
+  isp: number;
+}>;
+
+/** Estimate how long the analyzed remaining stages need to deliver a maneuver. */
+export function estimatedManeuverDuration(
+  deltaV: number,
+  stages: readonly BurnStageEstimate[],
+): number {
+  let needed = Math.max(0, deltaV);
+  let duration = 0;
+  for (const stage of stages) {
+    if (needed <= 0) break;
+    const available = Math.max(0, stage.deltaV);
+    if (available <= 0) continue;
+    if (needed >= available) {
+      duration += Math.max(0, stage.burnTime);
+      needed -= available;
+      continue;
+    }
+    duration += estimateBurnTime(needed, stage.thrust, stage.massStart, stage.isp);
+    needed = 0;
+  }
+  return needed > 0 || !Number.isFinite(duration) ? Infinity : duration;
+}
 
 export interface MapBodyBounds {
   readonly position: Readonly<{ x: number; y: number; z: number }>;
@@ -103,6 +197,67 @@ export function mapFitBounds(bodies: readonly MapBodyBounds[]): MapFitBounds {
 /** Preserve physical size when visible and use only a small picking floor when distant. */
 export function mapBodyPresentationRadius(radiusMeters: number, cameraDistance: number): number {
   return Math.max(radiusMeters * SCALE, cameraDistance * 0.0045);
+}
+
+export interface MapLandingTarget {
+  readonly bodyId: string;
+  readonly label: string;
+  readonly latitudeDegrees: number;
+  readonly longitudeDegrees: number;
+  readonly ellipse: Readonly<{
+    readonly semiMajorMeters: number;
+    readonly semiMinorMeters: number;
+    /** Clockwise from body-fixed north. */
+    readonly headingDegrees: number;
+  }>;
+}
+
+/** Body-fixed center direction for a latitude/longitude surface target. */
+export function mapLandingTargetDirection(
+  target: Pick<MapLandingTarget, 'latitudeDegrees' | 'longitudeDegrees'>,
+): Vec3 {
+  const latitude = target.latitudeDegrees * Math.PI / 180;
+  const longitude = target.longitudeDegrees * Math.PI / 180;
+  return new Vec3(
+    Math.cos(latitude) * Math.cos(longitude),
+    Math.cos(latitude) * Math.sin(longitude),
+    Math.sin(latitude),
+  );
+}
+
+/** Closed body-fixed ring whose geodesic axes preserve the authored ellipse dimensions. */
+export function mapLandingTargetEllipseDirections(
+  target: Readonly<MapLandingTarget>,
+  bodyRadiusMeters: number,
+  segments = 64,
+): readonly Vec3[] {
+  if (!(bodyRadiusMeters > 0) || !Number.isFinite(bodyRadiusMeters)) {
+    throw new Error('Landing target body radius must be positive and finite');
+  }
+  if (!Number.isInteger(segments) || segments < 8) {
+    throw new Error('Landing target ellipse requires at least 8 segments');
+  }
+  const center = mapLandingTargetDirection(target);
+  const longitude = target.longitudeDegrees * Math.PI / 180;
+  const east = new Vec3(-Math.sin(longitude), Math.cos(longitude), 0);
+  const north = Vec3.cross(center, east, new Vec3()).normalize();
+  const heading = target.ellipse.headingDegrees * Math.PI / 180;
+  const majorAxis = north.clone().scale(Math.cos(heading)).addScaled(east, Math.sin(heading));
+  const minorAxis = north.clone().scale(-Math.sin(heading)).addScaled(east, Math.cos(heading));
+  const directions: Vec3[] = [];
+  for (let index = 0; index <= segments; index++) {
+    const angle = TWO_PI * index / segments;
+    const tangent = majorAxis.clone().scale(target.ellipse.semiMajorMeters * Math.cos(angle))
+      .addScaled(minorAxis, target.ellipse.semiMinorMeters * Math.sin(angle));
+    const surfaceDistance = tangent.length();
+    const angularDistance = surfaceDistance / bodyRadiusMeters;
+    directions.push(
+      center.clone().scale(Math.cos(angularDistance))
+        .addScaled(tangent.normalize(), Math.sin(angularDistance))
+        .normalize(),
+    );
+  }
+  return directions;
 }
 
 function predictionOrbitSignature(bodyId: string, elements: OrbitalElements): string {
@@ -250,6 +405,15 @@ function entryPathLine(): MapLine {
   return mapLine('#e27a4f', 3, false, 2);
 }
 
+function landingTargetEllipseLine(): MapLine {
+  const line = mapLine('#ef7dc2', 2.6, false, 65);
+  line.name = 'map-landing-target-ellipse';
+  line.renderOrder = 9;
+  line.visible = false;
+  line.userData.mapSurfaceTargetRole = 'safe-ellipse';
+  return line;
+}
+
 function linePositions(line: MapLine): Float32Array {
   return line.userData.mapPositions as Float32Array;
 }
@@ -361,6 +525,7 @@ export class MapView {
   private completionLine = orbitLine('#fff0a8', true, 3.2);
   private encounterLine = orbitLine('#c88be8', true, 3.2);
   private entryLine = entryPathLine();
+  private landingTargetEllipse = landingTargetEllipseLine();
   private vesselMarker: THREE.Sprite;
   private nodeMarker: THREE.Sprite;
   private orbitHoverMarker: THREE.Sprite;
@@ -393,13 +558,20 @@ export class MapView {
   private panelContent: HTMLElement;
   private nodePanel: HTMLElement;
   private nodeQueue: HTMLElement;
+  private plannerInstruction: HTMLElement;
+  private predictedOutcomes: HTMLElement;
   private encounterInfo: HTMLElement;
   private entryInfo: HTMLElement;
   private dvReadout: HTMLElement;
   private etaReadout: HTMLElement;
   private postReadout: HTMLElement;
   private budgetReadout: HTMLElement;
+  private executionProgress: HTMLElement;
+  private executionProgressLabel: HTMLElement;
+  private executionProgressTrack: HTMLElement;
+  private executionProgressFill: HTMLElement;
   private autoExecuteBtn: HTMLButtonElement;
+  private resetNodeBtn: HTMLButtonElement;
   private cb: MapCallbacks;
   private focusBodyId = '';
   private followsActiveVessel = true;
@@ -408,6 +580,7 @@ export class MapView {
   private markerEvents = new Map<THREE.Object3D, { label: string; time: number }>();
   private nodeStep = 1;
   private nodeInputs = new Map<'prograde' | 'normal' | 'radial' | 'time', HTMLInputElement>();
+  private nodeResetSnapshots = new Map<string, ManeuverNode>();
   private lastPanelPhase: ManeuverPlan['phase'] | null = null;
   private currentElements: OrbitalElements | null = null;
   private readonly raycaster = new THREE.Raycaster();
@@ -433,11 +606,54 @@ export class MapView {
   private readonly projectedPoint = new THREE.Vector3();
   entryPrediction: EntryPrediction | null = null;
   landingTargetDirBF: Vec3 | null = null;
+  private landingTarget: MapLandingTarget | null = null;
+  private landingTargetEllipseDirectionsBF: readonly Vec3[] = [];
+  private landingTargetEllipseRadius = NaN;
+  private readonly landingTargetInertial = new Vec3();
   private entrySignature = '';
   private lastEntryPredictionAt = -Infinity;
 
   get node(): ManeuverNode | null {
     return this.cb.getManeuverPlan()?.node ?? null;
+  }
+
+  /** Set or clear the one mission-owned surface target shown by the map. */
+  setLandingTarget(target: Readonly<MapLandingTarget> | null): void {
+    if (!target) {
+      this.landingTarget = null;
+      this.landingTargetDirBF = null;
+      this.landingTargetEllipseDirectionsBF = [];
+      this.landingTargetEllipseRadius = NaN;
+      this.landingTargetMarker.visible = false;
+      this.landingTargetEllipse.visible = false;
+      delete this.landingTargetMarker.userData.label;
+      delete this.landingTargetEllipse.userData.label;
+      return;
+    }
+    const coordinatesValid = Number.isFinite(target.latitudeDegrees)
+      && target.latitudeDegrees >= -90 && target.latitudeDegrees <= 90
+      && Number.isFinite(target.longitudeDegrees)
+      && target.longitudeDegrees >= -180 && target.longitudeDegrees <= 180;
+    const ellipseValid = Number.isFinite(target.ellipse.semiMajorMeters)
+      && target.ellipse.semiMajorMeters > 0
+      && Number.isFinite(target.ellipse.semiMinorMeters)
+      && target.ellipse.semiMinorMeters > 0
+      && Number.isFinite(target.ellipse.headingDegrees);
+    if (!target.bodyId.trim() || !target.label.trim() || !coordinatesValid || !ellipseValid) {
+      throw new Error('Invalid map landing target');
+    }
+    this.landingTarget = {
+      bodyId: target.bodyId,
+      label: target.label,
+      latitudeDegrees: target.latitudeDegrees,
+      longitudeDegrees: target.longitudeDegrees,
+      ellipse: { ...target.ellipse },
+    };
+    this.landingTargetDirBF = mapLandingTargetDirection(target);
+    this.landingTargetEllipseDirectionsBF = [];
+    this.landingTargetEllipseRadius = NaN;
+    this.landingTargetMarker.userData.label = target.label;
+    this.landingTargetEllipse.userData.label = `${target.label} safe ellipse`;
   }
 
   constructor(private readonly uiRoot: HTMLElement, cb: MapCallbacks) {
@@ -451,7 +667,7 @@ export class MapView {
       });
     };
     window.addEventListener('resize', this.resizeHandler);
-    this.scene.background = new THREE.Color('#05080c');
+    this.scene.background = new THREE.Color(SPACE_BACKGROUND);
     this.starfield = makeStarfield(2600, 777);
     this.scene.add(this.starfield);
     this.scene.add(new THREE.AmbientLight('#8899aa', 1.6));
@@ -465,6 +681,7 @@ export class MapView {
       this.completionLine,
       this.encounterLine,
       this.entryLine,
+      this.landingTargetEllipse,
     );
     this.vesselLine.material.opacity = 0.32;
 
@@ -613,6 +830,9 @@ export class MapView {
     this.encounterMarker = mkSprite('#c88be8', 4);
     this.entryMarker = mkSprite('#e27a4f', 4, 'E');
     this.landingTargetMarker = mkSprite('#ef7dc2', 4, 'T');
+    this.landingTargetMarker.name = 'map-landing-target-marker';
+    this.landingTargetMarker.userData.mapSurfaceTargetRole = 'center';
+    this.landingTargetMarker.visible = false;
     this.scene.add(
       this.vesselMarker,
       this.nodeMarker,
@@ -635,12 +855,12 @@ export class MapView {
       this.scene.add(marker);
     }
     for (const [kind, axis, sign, label, color] of [
-      ['prograde', 'prograde', 1, 'Prograde', '#70d58c'],
-      ['retrograde', 'prograde', -1, 'Retrograde', '#70d58c'],
-      ['normal', 'normal', 1, 'Normal', '#b98ce8'],
-      ['antinormal', 'normal', -1, 'Anti-normal', '#b98ce8'],
-      ['radial-out', 'radial', 1, 'Radial out', '#6baee8'],
-      ['radial-in', 'radial', -1, 'Radial in', '#6baee8'],
+      ['prograde', 'prograde', 1, 'Prograde', MANEUVER_AXIS_PRESENTATION.prograde.color],
+      ['retrograde', 'prograde', -1, 'Retrograde', MANEUVER_AXIS_PRESENTATION.prograde.color],
+      ['normal', 'normal', 1, 'Normal', MANEUVER_AXIS_PRESENTATION.normal.color],
+      ['antinormal', 'normal', -1, 'Anti-normal', MANEUVER_AXIS_PRESENTATION.normal.color],
+      ['radial-out', 'radial', 1, 'Radial out', MANEUVER_AXIS_PRESENTATION.radial.color],
+      ['radial-in', 'radial', -1, 'Radial in', MANEUVER_AXIS_PRESENTATION.radial.color],
     ] as const) {
       const sprite = mkArrowSprite(color);
       this.nodeHandles.set(kind, { axis, sign, label, sprite });
@@ -687,6 +907,8 @@ export class MapView {
     collapse.title = 'Collapse maneuver planner';
     collapse.setAttribute('aria-label', 'Collapse maneuver planner');
     this.panelContent = el('div', 'map-panel-content', this.panel);
+    this.plannerInstruction = el('p', 'map-planner-instruction', this.panelContent);
+    this.plannerInstruction.setAttribute('aria-live', 'polite');
     this.nodeQueue = el('div', 'map-node-queue', this.panelContent);
     const btnRow = el('div', 'map-row map-node-actions', this.panelContent);
     const addBtn = el('button', 'hud-btn map-action-primary', btnRow, '+ Node') as HTMLButtonElement;
@@ -701,14 +923,26 @@ export class MapView {
       this.predictionDirty = true;
       this.refreshNodePanel();
     };
-    const warpBtn = el('button', 'hud-btn map-icon-btn', btnRow, '≫') as HTMLButtonElement;
+    this.resetNodeBtn = el('button', 'hud-btn map-action-reset', btnRow, 'RESET NODE') as HTMLButtonElement;
+    this.resetNodeBtn.dataset.action = 'maneuver-reset';
+    this.resetNodeBtn.title = 'Restore this node to the values it had when opened';
+    this.resetNodeBtn.setAttribute('aria-label', 'Reset selected maneuver node');
+    this.resetNodeBtn.onclick = () => {
+      const plan = cb.getManeuverPlan();
+      const snapshot = plan ? this.nodeResetSnapshots.get(plan.id) : null;
+      if (!plan || !snapshot || plan.phase === 'executing' || plan.phase === 'complete') return;
+      cb.onUpdateManeuverNode({ ...snapshot });
+      this.predictionDirty = true;
+      this.refreshNodePanel();
+    };
+    const warpBtn = el('button', 'hud-btn map-action-warp', btnRow, 'WARP TO BURN') as HTMLButtonElement;
     warpBtn.dataset.action = 'maneuver-warp';
     warpBtn.title = 'Warp to selected node';
     warpBtn.setAttribute('aria-label', 'Warp to selected node');
     warpBtn.onclick = () => {
       if (this.node) cb.onWarpToNode(this.node);
     };
-    this.autoExecuteBtn = el('button', 'hud-btn', btnRow, 'AUTO') as HTMLButtonElement;
+    this.autoExecuteBtn = el('button', 'hud-btn map-action-auto', btnRow, 'ARM AUTO') as HTMLButtonElement;
     this.autoExecuteBtn.dataset.action = 'maneuver-auto';
     this.autoExecuteBtn.title = 'Automatically orient, ignite the available engine, and execute (separation remains manual)';
     this.autoExecuteBtn.setAttribute('aria-label', 'Toggle automatic execution for selected maneuver');
@@ -729,14 +963,24 @@ export class MapView {
     };
 
     this.nodePanel = el('div', 'map-node-panel', this.panelContent);
-    const readoutRow = el('div', 'map-node-summary', this.panelContent);
+    this.predictedOutcomes = el('section', 'map-predicted-outcomes', this.panelContent);
+    this.predictedOutcomes.setAttribute('aria-label', 'Predicted maneuver outcomes');
+    const readoutRow = el('div', 'map-node-summary', this.predictedOutcomes);
     this.dvReadout = el('div', 'map-readout', readoutRow);
     this.etaReadout = el('div', 'map-readout map-readout-eta', readoutRow);
-    this.encounterInfo = el('div', 'map-encounter', this.panelContent);
+    this.postReadout = el('div', 'map-orbit-after', this.predictedOutcomes);
+    this.encounterInfo = el('div', 'map-encounter', this.predictedOutcomes);
+    this.budgetReadout = el('div', 'map-budget', this.predictedOutcomes);
+    this.executionProgress = el('div', 'map-execution-progress', this.predictedOutcomes);
+    this.executionProgressLabel = el('div', 'map-execution-progress-label', this.executionProgress);
+    this.executionProgressTrack = el('div', 'map-execution-progress-track', this.executionProgress);
+    this.executionProgressTrack.setAttribute('role', 'progressbar');
+    this.executionProgressTrack.setAttribute('aria-label', 'Maneuver execution progress');
+    this.executionProgressTrack.setAttribute('aria-valuemin', '0');
+    this.executionProgressTrack.setAttribute('aria-valuemax', '100');
+    this.executionProgressFill = el('div', 'map-execution-progress-fill', this.executionProgressTrack);
     const analysis = el('details', 'map-analysis', this.panelContent) as HTMLDetailsElement;
-    el('summary', '', analysis, 'TRAJECTORY DETAILS');
-    this.postReadout = el('div', 'map-orbit-after', analysis);
-    this.budgetReadout = el('div', 'map-budget', analysis);
+    el('summary', '', analysis, 'ENTRY DETAILS');
     this.entryInfo = el('div', 'map-entry-info', analysis);
     const resizeHandle = el('div', 'k-window-resize-handle map-panel-resize', this.panel);
     resizeHandle.setAttribute('role', 'separator');
@@ -1178,6 +1422,20 @@ export class MapView {
     this.cb.onUpdateManeuverNode(node);
     this.predictionDirty = true;
     this.syncNodeInputs();
+    this.updateResetNodeAvailability();
+  }
+
+  private updateResetNodeAvailability(): void {
+    const plan = this.cb.getManeuverPlan();
+    const snapshot = plan ? this.nodeResetSnapshots.get(plan.id) : null;
+    const node = plan?.node;
+    const editingLocked = plan?.phase === 'executing' || plan?.phase === 'complete';
+    const matchesSnapshot = !!node && !!snapshot &&
+      node.time === snapshot.time &&
+      node.prograde === snapshot.prograde &&
+      node.normal === snapshot.normal &&
+      node.radial === snapshot.radial;
+    this.resetNodeBtn.disabled = !plan || editingLocked || !snapshot || matchesSnapshot;
   }
 
   private timeAtOrbitFraction(fraction: number): number {
@@ -1291,11 +1549,24 @@ export class MapView {
     const node = this.node;
     const selectedPlan = this.cb.getManeuverPlan();
     const autoEnabled = selectedPlan ? this.cb.isManeuverAutoExecutionEnabled(selectedPlan.id) : false;
-    this.autoExecuteBtn.disabled = !selectedPlan;
-    this.autoExecuteBtn.classList.toggle('active', autoEnabled);
-    this.autoExecuteBtn.textContent = autoEnabled ? 'AUTO ON' : 'AUTO';
+    const phase = selectedPlan?.phase ?? null;
+    const presentation = maneuverPlannerPresentation(selectedPlan, autoEnabled);
+    this.plannerInstruction.textContent = presentation.instruction;
+    this.plannerInstruction.dataset.phase = phase ?? 'empty';
+    this.autoExecuteBtn.disabled = !selectedPlan || phase === 'executing' || phase === 'complete';
+    this.autoExecuteBtn.classList.toggle('active', presentation.autoState === 'armed');
+    this.autoExecuteBtn.classList.toggle('executing', presentation.autoState === 'executing');
+    this.autoExecuteBtn.textContent = presentation.autoLabel;
+    this.autoExecuteBtn.dataset.state = presentation.autoState;
     this.autoExecuteBtn.setAttribute('aria-pressed', String(autoEnabled));
     const plans = this.cb.getManeuverPlans();
+    const planIds = new Set(plans.map((plan) => plan.id));
+    for (const plan of plans) {
+      if (!this.nodeResetSnapshots.has(plan.id)) this.nodeResetSnapshots.set(plan.id, { ...plan.node });
+    }
+    for (const id of this.nodeResetSnapshots.keys()) {
+      if (!planIds.has(id)) this.nodeResetSnapshots.delete(id);
+    }
     this.nodeQueue.innerHTML = '';
     if (plans.length) {
       for (let index = 0; index < plans.length; index++) {
@@ -1316,23 +1587,25 @@ export class MapView {
         };
       }
     }
-    const phase = this.cb.getManeuverPlan()?.phase ?? null;
     const editingLocked = phase === 'executing' || phase === 'complete';
+    this.updateResetNodeAvailability();
     this.lastPanelPhase = phase;
     this.panel.classList.toggle('has-node', !!node);
+    this.predictedOutcomes.hidden = !node;
     if (!node) {
       const empty = el('div', 'map-empty', this.nodePanel);
       el('strong', '', empty, 'CLICK THE ORBIT TO PLAN');
-      el('span', '', empty, 'The brightened arc has a wide invisible hit area.');
+      el('span', '', empty, 'Choose where the burn should begin; you can move it later.');
       this.dvReadout.textContent = '';
       this.etaReadout.textContent = '';
       this.encounterInfo.textContent = '';
       this.postReadout.textContent = '';
       this.budgetReadout.textContent = '';
+      this.executionProgress.hidden = true;
       return;
     }
     const stepRow = el('div', 'map-step-row', this.nodePanel);
-    el('span', 'map-step-label', stepRow, 'Δv step');
+    el('span', 'map-step-label', stepRow, 'Δv step (m/s)');
     for (const step of [0.1, 1, 10, 100]) {
       const button = el('button', 'hud-btn', stepRow, String(step)) as HTMLButtonElement;
       button.classList.toggle('active', step === this.nodeStep);
@@ -1343,9 +1616,9 @@ export class MapView {
       };
     }
     const axes: Array<{ key: 'prograde' | 'normal' | 'radial' | 'time'; label: string; minus?: string; plus?: string }> = [
-      { key: 'prograde', label: 'Tangential', minus: 'Retrograde', plus: 'Prograde' },
-      { key: 'normal', label: 'Plane', minus: 'Anti-normal', plus: 'Normal' },
-      { key: 'radial', label: 'Radial', minus: 'Radial in', plus: 'Radial out' },
+      { key: 'prograde', label: MANEUVER_AXIS_PRESENTATION.prograde.label, minus: 'Retrograde', plus: 'Prograde' },
+      { key: 'normal', label: MANEUVER_AXIS_PRESENTATION.normal.label, minus: 'Anti-normal', plus: 'Normal' },
+      { key: 'radial', label: MANEUVER_AXIS_PRESENTATION.radial.label, minus: 'Radial in', plus: 'Radial out' },
       { key: 'time', label: 'Node ETA' },
     ];
     for (const ax of axes) {
@@ -1360,7 +1633,9 @@ export class MapView {
       plus.setAttribute('aria-label', ax.plus ?? 'Move node later');
       input.type = 'number';
       input.step = String(ax.key === 'time' ? 10 : this.nodeStep);
-      input.setAttribute('aria-label', `${ax.label} value`);
+      input.setAttribute('aria-label', ax.key === 'time'
+        ? `${ax.label} in seconds`
+        : `${ax.label} delta-v in meters per second`);
       minus.disabled = editingLocked;
       input.disabled = editingLocked;
       plus.disabled = editingLocked;
@@ -1738,9 +2013,9 @@ export class MapView {
         this.encounterMarker.position.set(moonPosition.x * SCALE, moonPosition.y * SCALE, moonPosition.z * SCALE);
         this.encounterMarker.visible = true;
         this.encounterInfo.textContent =
-          `${moon.name} encounter!\n` +
-          `SOI entry in ${((encounter.entryTime - t) / 60).toFixed(0)} min\n` +
-          `periapsis ${encounter.periapsisAltitude > 0 ? (encounter.periapsisAltitude / 1000).toFixed(0) + ' km' : 'IMPACT'}`;
+          `PREDICTED ENCOUNTER · ${moon.name}\n` +
+          `SOI ENTRY T−${Math.max(0, (encounter.entryTime - t) / 60).toFixed(0)} min  ·  ` +
+          `PERIAPSIS ${encounter.periapsisAltitude > 0 ? (encounter.periapsisAltitude / 1000).toFixed(0) + ' km' : 'IMPACT'}`;
       } else if (this.prediction.escape) {
         this.encounterLine.visible = false;
         const exitPosition = new Vec3();
@@ -1749,7 +2024,8 @@ export class MapView {
         this.encounterMarker.position.set(exitPosition.x * SCALE, exitPosition.y * SCALE, exitPosition.z * SCALE);
         this.encounterMarker.visible = true;
         this.encounterInfo.textContent =
-          `escapes ${body.name} SOI in ${((this.prediction.escape.exitTime - t) / 60).toFixed(0)} min`;
+          `PREDICTED ESCAPE · ${body.name} SOI  ·  ` +
+          `T−${Math.max(0, (this.prediction.escape.exitTime - t) / 60).toFixed(0)} min`;
       } else {
         this.encounterLine.visible = false;
         this.encounterMarker.visible = false;
@@ -1770,16 +2046,13 @@ export class MapView {
     }
 
     if (activePlan && node) {
-      const phase = activePlan.phase === 'overdue' ? ' · OVERDUE' : activePlan.phase === 'executing' ? ' · EXECUTING' : '';
-      this.dvReadout.textContent = `Δv ${nodeDeltaV(node).toFixed(1)} m/s${phase}`;
-      this.etaReadout.textContent = `burn ${node.time >= t ? 'in ' : ''}${(node.time - t).toFixed(0)} s`;
       const after = activePlan.targetOrbit;
       const postApoapsis = after.e < 1 ? `${((apoapsisOf(after) - body.radius) / 1000).toFixed(1)} km` : 'escape';
       const postPeriapsis = `${((periapsisOf(after) - body.radius) / 1000).toFixed(1)} km`;
       const postPeriod = periodOf(after);
       this.postReadout.textContent =
-        `TARGET ORBIT  Ap ${postApoapsis}  ·  Pe ${postPeriapsis}\n` +
-        `Inc ${(after.i * 180 / Math.PI).toFixed(2)}°  ·  Period ${Number.isFinite(postPeriod) ? `${(postPeriod / 60).toFixed(1)} min` : '—'}`;
+        `PREDICTED ORBIT  ·  Ap ${postApoapsis}  ·  Pe ${postPeriapsis}\n` +
+        `INCLINATION ${(after.i * 180 / Math.PI).toFixed(2)}°  ·  PERIOD ${Number.isFinite(postPeriod) ? `${(postPeriod / 60).toFixed(1)} min` : '—'}`;
       const craftAnalysis = analyzeCraft(
         v.craft,
         body.surfaceGravity,
@@ -1787,20 +2060,46 @@ export class MapView {
         game.flightTuning,
         body.def.atmosphere?.seaLevelPressure,
       );
-      const available = craftAnalysis.stages
-        .filter((stage) => stage.stageIndex >= v.currentStage)
-        .reduce((sum, stage) => sum + stage.deltaV, 0);
+      const remainingStages = craftAnalysis.stages.filter((stage) => stage.stageIndex >= v.currentStage);
+      const available = remainingStages.reduce((sum, stage) => sum + stage.deltaV, 0);
       const required = activePlan.initialDeltaV;
+      const durationDeltaV = activePlan.phase === 'executing' ? activePlan.remainingDeltaV : required;
+      const estimatedDuration = estimatedManeuverDuration(durationDeltaV, remainingStages);
+      const durationLabel = Number.isFinite(estimatedDuration) ? `${estimatedDuration.toFixed(0)} s` : 'UNAVAILABLE';
+      const phaseLabel = activePlan.phase === 'overdue' ? ' · OVERDUE' : '';
+      this.dvReadout.textContent = activePlan.phase === 'executing'
+        ? `TOTAL BURN ${required.toFixed(1)} m/s · EST. REMAINING ${durationLabel}`
+        : `TOTAL BURN ${required.toFixed(1)} m/s · EST. ${durationLabel}${phaseLabel}`;
+      const secondsToNode = node.time - t;
+      this.etaReadout.textContent = secondsToNode >= 0
+        ? `BURN START T−${secondsToNode.toFixed(0)} s`
+        : `BURN START ${Math.abs(secondsToNode).toFixed(0)} s AGO`;
       this.budgetReadout.textContent = activePlan.phase === 'executing'
-        ? `REMAINING ${activePlan.remainingDeltaV.toFixed(1)} m/s  ·  target held stable`
-        : `VESSEL Δv ${available.toFixed(0)} m/s  ·  margin ${(available - required).toFixed(0)} m/s`;
+        ? `BURN REMAINING ${activePlan.remainingDeltaV.toFixed(1)} m/s  ·  VEHICLE Δv ${available.toFixed(0)} m/s`
+        : `VEHICLE Δv ${available.toFixed(0)} m/s  ·  AFTER BURN ${(available - required).toFixed(0)} m/s`;
       this.budgetReadout.classList.toggle('warning', required > available);
+      const presentation = maneuverPlannerPresentation(
+        activePlan,
+        this.cb.isManeuverAutoExecutionEnabled(activePlan.id),
+      );
+      const progress = presentation.executionFraction;
+      this.executionProgress.hidden = progress === null;
+      if (progress !== null) {
+        const percent = Math.round(progress * 100);
+        this.executionProgressLabel.textContent = activePlan.phase === 'complete'
+          ? 'MANEUVER COMPLETE'
+          : `EXECUTION ${percent}%  ·  ${activePlan.remainingDeltaV.toFixed(1)} m/s REMAINING`;
+        this.executionProgressFill.style.width = `${percent}%`;
+        this.executionProgressTrack.setAttribute('aria-valuenow', String(percent));
+        this.executionProgressTrack.setAttribute('aria-valuetext', this.executionProgressLabel.textContent);
+      }
       this.syncNodeInputs();
     } else {
       this.dvReadout.textContent = '';
       this.etaReadout.textContent = '';
       this.postReadout.textContent = '';
       this.budgetReadout.textContent = '';
+      this.executionProgress.hidden = true;
     }
     this.updateEntryPrediction(game, body, elements, markerScale);
   }
@@ -1932,18 +2231,50 @@ export class MapView {
       this.entryMarker.visible = false;
       this.entryInfo.textContent = '';
     }
-    if (this.landingTargetDirBF) {
-      const targetInertial = bodyFixedToInertial(body, game.time, this.landingTargetDirBF, new Vec3());
-      const radius = body.radius * 1.02 * SCALE;
-      this.landingTargetMarker.position.set(
-        targetInertial.x * radius,
-        targetInertial.y * radius,
-        targetInertial.z * radius,
-      );
-      this.landingTargetMarker.visible = true;
-    } else {
+    this.updateLandingTarget(body, game.time);
+  }
+
+  private updateLandingTarget(body: Body, time: number): void {
+    const target = this.landingTarget;
+    const center = this.landingTargetDirBF;
+    if (!target || !center || target.bodyId !== body.id) {
       this.landingTargetMarker.visible = false;
+      this.landingTargetEllipse.visible = false;
+      return;
     }
+
+    bodyFixedToInertial(body, time, center, this.landingTargetInertial);
+    // A small physical lift prevents z-fighting without changing the ellipse axes.
+    const targetSurfaceRadius = body.radius + Math.max(30, body.radius * 0.00002);
+    const markerRadius = targetSurfaceRadius * SCALE;
+    this.landingTargetMarker.position.set(
+      this.landingTargetInertial.x * markerRadius,
+      this.landingTargetInertial.y * markerRadius,
+      this.landingTargetInertial.z * markerRadius,
+    );
+    this.landingTargetMarker.visible = true;
+
+    if (this.landingTargetEllipseDirectionsBF.length === 0 || this.landingTargetEllipseRadius !== body.radius) {
+      this.landingTargetEllipseDirectionsBF = mapLandingTargetEllipseDirections(target, body.radius);
+      this.landingTargetEllipseRadius = body.radius;
+      const positions = linePositions(this.landingTargetEllipse);
+      const surfaceRadius = targetSurfaceRadius * SCALE;
+      for (let index = 0; index < this.landingTargetEllipseDirectionsBF.length; index++) {
+        const direction = this.landingTargetEllipseDirectionsBF[index];
+        positions[index * 3] = direction.x * surfaceRadius;
+        positions[index * 3 + 1] = direction.y * surfaceRadius;
+        positions[index * 3 + 2] = direction.z * surfaceRadius;
+      }
+      commitLinePositions(this.landingTargetEllipse, positions);
+    }
+    bodyOrientation(body, time, _mapOrientation);
+    this.landingTargetEllipse.quaternion.set(
+      _mapOrientation.x,
+      _mapOrientation.y,
+      _mapOrientation.z,
+      _mapOrientation.w,
+    );
+    this.landingTargetEllipse.visible = true;
   }
 
   /** Release every scene and DOM resource owned by this map instance. */

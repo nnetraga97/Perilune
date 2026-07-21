@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "missionId": "artemis-iv",
+  "sources": [
+    {
+      "sourceId": "martiandays-starship-2019-concept",
+      "title": "SpaceX Starship",
+      "author": "MartianDays",
+      "publisher": "Sketchfab",
+      "modelUid": "a8a0b69f776841a1a465cd9fb3762fd2",
+      "modelPageUrl": "https://sketchfab.com/3d-models/spacex-starship-a8a0b69f776841a1a465cd9fb3762fd2",
+      "metadataUrl": "https://api.sketchfab.com/v3/models/a8a0b69f776841a1a465cd9fb3762fd2",
+      "publishedDate": "2019-09-30",
+      "retrievedDate": "2026-07-21",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "\"SpaceX Starship\" by MartianDays, available on Sketchfab, licensed under CC BY 4.0. Used unmodified; runtime transform only. No endorsement implied.",
+      "localPath": "models/martiandays-spacex-starship-2019.glb",
+      "mimeType": "model/gltf-binary",
+      "byteLength": 19007332,
+      "sha256": "287317f26516237ed154b9364914396d562552d330a3041000f6157f97c9304c",
+      "modifications": [],
+      "redistributionBasis": "CC BY 4.0 with attribution",
+      "trademarkReview": "No provider logo was found in the embedded texture atlases. The SpaceX and Starship names remain third-party marks; use is descriptive and must not imply endorsement.",
+      "accuracyBoundary": "This is the artist's 2019 generic Starship concept. It is not Starship HLS and must be labeled as an unchanged visual stand-in wherever it appears in the Artemis IV scenario."
+    }
+  ]
+}
