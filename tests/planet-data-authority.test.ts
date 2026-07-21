@@ -10,6 +10,7 @@ import {
 import { GameState } from '../src/sim/state';
 import { solidHeight } from '../src/sim/terrain';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
+import { samplePromotedHeightRegion, type FrozenSourceHeightRegion } from '../src/sim/sourceHeightAuthority';
 
 function direction(longitudeDegrees: number, latitudeDegrees: number): Vec3 {
   const longitude = longitudeDegrees * Math.PI / 180;
@@ -80,5 +81,43 @@ describe('frozen planet data authority', () => {
     expect(provider.buildSnapshot.recipe.hash).toBe(promotedRecipe.hash);
     expect(provider.buildSnapshot.recipe.sourceHeightRegion?.samples)
       .toBe(authority.region?.samples);
+  });
+
+  it('samples the checked south-polar grid in projected metres', () => {
+    const radius = 1_737_400;
+    const projectedX = -1;
+    const projectedY = 1;
+    const rho = Math.hypot(projectedX, projectedY);
+    const longitude = Math.atan2(projectedX, projectedY);
+    const latitude = 2 * Math.atan(rho / (2 * radius)) - Math.PI / 2;
+    const region: FrozenSourceHeightRegion = {
+      datasetId: 'polar-test', version: 'v1', digest: 'digest',
+      coverage: [-180, -90, 180, -89], verticalDatum: 'test', engineDatum: 'test',
+      width: 2, height: 2, blendBandDegrees: 0,
+      projection: 'south-polar-stereographic', sphereRadiusMeters: radius,
+      projectedExtentMeters: [-2, -2, 2, 2], sampleOriginMeters: [-1, 1],
+      pixelSizeMeters: 2, blendBandMeters: 1,
+      minimumHeightMeters: 100, maximumHeightMeters: 400,
+      samples: new Float32Array([100, 200, 300, 400]),
+    };
+    const sample = samplePromotedHeightRegion(region, {
+      x: Math.cos(latitude) * Math.cos(longitude),
+      y: Math.cos(latitude) * Math.sin(longitude),
+      z: Math.sin(latitude),
+    });
+    expect(sample?.heightMeters).toBeCloseTo(100, 2);
+    expect(sample?.sourceWeight).toBeCloseTo(1, 4);
+  });
+
+  it('freezes independent body authorities in one flight map', async () => {
+    const game = new GameState();
+    const earth = game.universe.get('earth');
+    const moon = game.universe.get('moon');
+    const [earthAuthority, moonAuthority] = await Promise.all([
+      game.prepareFlightAuthority(earth, 'parent'),
+      game.prepareFlightAuthority(moon, 'parent'),
+    ]);
+    expect(game.frozenFlightAuthority('earth')).toBe(earthAuthority);
+    expect(game.frozenFlightAuthority('moon')).toBe(moonAuthority);
   });
 });

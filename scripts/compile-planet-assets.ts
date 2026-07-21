@@ -54,7 +54,7 @@ const tierDimensions = {
   high: [4096, 2048],
 } as const;
 type CompiledTier = keyof typeof tierDimensions;
-type CompiledBody = 'veyra' | 'palla' | 'wisp' | 'earth' | 'moon';
+type CompiledBody = 'veyra' | 'palla' | 'wisp' | 'earth' | 'moon' | 'sun';
 
 function optionValues(name: string): string[] {
   const values: string[] = [];
@@ -70,7 +70,7 @@ function optionValues(name: string): string[] {
 const requestedBodies = optionValues('--body');
 const targetBodies = new Set<CompiledBody>(
   (requestedBodies.length > 0 ? requestedBodies : ['veyra']).map((bodyId) => {
-    if (!['veyra', 'palla', 'wisp', 'earth', 'moon'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
+    if (!['veyra', 'palla', 'wisp', 'earth', 'moon', 'sun'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
     return bodyId as CompiledBody;
   }),
 );
@@ -85,7 +85,7 @@ const writeGlobal = write && !fingerprintsOnly && targetBodies.has('veyra');
 
 interface RecipeRecord { bodyId: string; version: number; hash: string }
 interface ChannelOutput {
-  name: 'albedo' | 'normal' | 'material' | 'clouds' | 'heightMacro' | 'emissive' | 'localDetail' | 'surfaceClass' | 'surfaceClassRegional';
+  name: 'albedo' | 'normal' | 'material' | 'clouds' | 'heightMacro' | 'emissive' | 'localDetail' | 'surfaceClass' | 'surfaceClassRegional' | 'photosphereActivity';
   colorSpace: 'sRGB' | 'linear';
   logicalFormat: 'R8' | 'RGB8' | 'RG8' | 'RGBA8';
   packagePath: string;
@@ -105,6 +105,10 @@ interface ChannelOutput {
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function clampByte(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function rawHeightFingerprint(body: ReturnType<Universe['get']>): string | null {
@@ -164,7 +168,7 @@ function relativeAssetPath(path: string): string {
 function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['name'], mipmapped: boolean): Promise<void> {
   const executable = process.env.KTX_CLI ?? 'ktx';
   const colorChannel = channel === 'albedo' || channel === 'emissive';
-  const classChannel = channel === 'surfaceClass' || channel === 'surfaceClassRegional';
+  const classChannel = channel === 'surfaceClass' || channel === 'surfaceClassRegional' || channel === 'photosphereActivity';
   const format = colorChannel ? 'R8G8B8_SRGB' :
     classChannel ? 'R8_UNORM' : channel === 'material' || channel === 'localDetail' ? 'R8G8B8A8_UNORM' : 'R8G8_UNORM';
   const encoding = channel === 'heightMacro' || classChannel
@@ -440,6 +444,8 @@ const airlessSources = {
     ],
   },
 } as const;
+
+const moonColor2025Path = resolve(assetsRoot, 'sources/nasa-lro-moon-2025/lroc_color_16bit_srgb_4k.tif');
 
 function fillPolarObservationVoids(albedo: Uint8Array, width: number, height: number): Uint8Array {
   const pixelCount = width * height;
@@ -776,7 +782,7 @@ async function compileMoon(
     const [width, height] = tierDimensions[tier];
     console.log(`compiling moon/${tier} at ${width}x${height}`);
     const [albedo, heights, localDetail] = await Promise.all([
-      decodeAirlessAlbedo(airlessSources.palla.albedoPath, width, height, false),
+      decodeAirlessAlbedo(moonColor2025Path, width, height, false),
       pallaHeights(width, height),
       moonLocalDetailAtlas(width, height),
     ]);
@@ -785,6 +791,132 @@ async function compileMoon(
   }
   return packs;
 }
+
+const sunSourcePath = resolve(assetsRoot, 'sources/nasa-sdo-hmi-photosphere/sun-hmii-large.png');
+
+async function derivePhotosphereActivity(size: number): Promise<Uint8Array> {
+  const decoded = await sharp(sunSourcePath).removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
+  if (decoded.info.channels !== 3) throw new Error('HMI photosphere source must decode as RGB');
+  const { width, height } = decoded.info;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3;
+      if (Math.max(decoded.data[offset], decoded.data[offset + 1], decoded.data[offset + 2]) < 10) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX < minX || maxY < minY) throw new Error('HMI photosphere disk was not detected');
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const radius = Math.min(maxX - minX + 1, maxY - minY + 1) / 2;
+  const cropSize = Math.max(2, Math.floor(radius * 2));
+  const left = Math.max(0, Math.min(width - cropSize, Math.round(centerX - cropSize / 2)));
+  const top = Math.max(0, Math.min(height - cropSize, Math.round(centerY - cropSize / 2)));
+  const disk = await sharp(decoded.data, { raw: { width, height, channels: 3 } })
+    .extract({ left, top, width: cropSize, height: cropSize })
+    .resize(size, size, { kernel: sharp.kernel.lanczos3 })
+    .raw().toBuffer();
+  const linear = new Float32Array(size * size);
+  const radialSum = new Float64Array(256);
+  const radialCount = new Uint32Array(256);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const nx = ((x + 0.5) / size) * 2 - 1;
+      const ny = ((y + 0.5) / size) * 2 - 1;
+      const radius01 = Math.hypot(nx, ny);
+      const offset = (y * size + x) * 3;
+      const luminance = (disk[offset] * 0.2126 + disk[offset + 1] * 0.7152 + disk[offset + 2] * 0.0722) / 255;
+      const value = Math.pow(Math.max(0, luminance), 2.2);
+      linear[y * size + x] = value;
+      if (radius01 <= 0.985) {
+        const bin = Math.min(255, Math.floor(radius01 * 255));
+        radialSum[bin] += value;
+        radialCount[bin]++;
+      }
+    }
+  }
+  const baseline = new Float64Array(256);
+  for (let bin = 0; bin < baseline.length; bin++) {
+    baseline[bin] = radialCount[bin] ? radialSum[bin] / radialCount[bin] : (bin > 0 ? baseline[bin - 1] : 1);
+  }
+  const activity = new Uint8Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const radius01 = Math.hypot(((x + 0.5) / size) * 2 - 1, ((y + 0.5) / size) * 2 - 1);
+      if (radius01 > 0.985) {
+        activity[y * size + x] = 128;
+        continue;
+      }
+      const bin = Math.min(255, Math.floor(radius01 * 255));
+      const residual = Math.log2(Math.max(1e-5, linear[y * size + x]) / Math.max(1e-5, baseline[bin]));
+      activity[y * size + x] = clampByte(128 + Math.max(-1, Math.min(1, residual / 1.5)) * 112);
+    }
+  }
+  return activity;
+}
+
+async function compileSun(tiersToWrite: ReadonlySet<CompiledTier>): Promise<unknown[]> {
+  const packs: unknown[] = [];
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    const size = tier === 'low' ? 512 : tier === 'medium' ? 1024 : 2048;
+    console.log(`compiling sun/${tier} activity at ${size}x${size}`);
+    const data = await derivePhotosphereActivity(size);
+    const tierDir = resolve(assetsRoot, `generated/sun/${tier}`);
+    mkdirSync(tierDir, { recursive: true });
+    const fallbackPath = resolve(tierDir, 'photosphereActivity.png');
+    const encoderInput = resolve(tierDir, 'photosphereActivity.encoder.png');
+    await sharp(data, { raw: { width: size, height: size, channels: 1 } })
+      .png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
+    await sharp(data, { raw: { width: size, height: size, channels: 1 } })
+      .png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+    const packagePath = resolve(tierDir, 'photosphereActivity.ktx2');
+    try {
+      await runKtx(encoderInput, packagePath, 'photosphereActivity', true);
+    } finally {
+      rmSync(encoderInput, { force: true });
+    }
+    const channel: ChannelOutput = {
+      name: 'photosphereActivity', colorSpace: 'linear', logicalFormat: 'R8',
+      packagePath: relativeAssetPath(packagePath), fallbackPath: relativeAssetPath(fallbackPath),
+      packageChecksumSha256: sha256(readFileSync(packagePath)), fallbackChecksumSha256: sha256(readFileSync(fallbackPath)),
+      gpuFormat: 'r8', gpuBytes: fullMipRgbaBytes(size, size) / 4,
+      fallbackGpuBytes: fullMipRgbaBytes(size, size), fallbackLayout: 'r',
+      transcodeTargets: ['r8'], mipmapped: true, width: size, height: size,
+    };
+    packs.push({
+      bodyId: 'sun', tier, width, height, compressedBytes: statSync(packagePath).size,
+      transientBytes: size * size, bootCritical: false, channels: [channel],
+    });
+  }
+  return packs;
+}
+
+const sunSources = [{
+  id: 'nasa-sdo-hmi-visible-photosphere-2010-12-06',
+  url: 'https://svs.gsfc.nasa.gov/vis/a000000/a004200/a004269/sun-hmii-large.png',
+  author: 'NASA Scientific Visualization Studio and SDO/HMI',
+  license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+  attribution: 'NASA SDO/HMI visible photosphere, 2010-12-06',
+  checksumSha256: 'e3f4f8c030e1fe9e4171ae34bd9690b0cd2d7d23a1b48d766a98323a643ff5d0',
+  localPath: 'sources/nasa-sdo-hmi-photosphere/sun-hmii-large.png', authoringOnly: true,
+  sourceDimensions: [4104, 3840],
+  transformations: ['disk detection and centered crop', 'linear luminance conversion', 'radial limb baseline removal', 'bounded signed R8 activity residual', 'lossless mipmapped R8 packaging'],
+  bodies: ['sun'], channels: ['photosphereActivity'], review: nasaReview,
+  datum: 'observer image plane', verticalDatum: 'not-applicable', projection: 'orthographic full disk',
+  axisOrder: 'image-x,image-y', longitudeDirection: 'not-applicable', seamLongitudeDegrees: 0,
+  uvOrigin: 'north-west', valueScale: 1 / 112, valueOffset: -128 / 112,
+  noDataValue: null, validRange: [16, 240], observation: '2010-12-06 HMI continuum intensity',
+  productKind: 'measured', derivedRecipe: 'sun-photosphere-activity-v1', bodyReferenceFrameVersion: 'observer-image-2010-12-06',
+}] as const;
 
 const earthSources = [
   {
@@ -898,8 +1030,19 @@ const earthClassificationSources = [
 
 const moonSources = airlessSources.palla.sources.map((source) => ({
   ...source,
-  id: source.id.replace('palla', 'moon'),
-  attribution: source.attribution.replace('fictional moon Palla', 'Earth\'s Moon'),
+  ...(source.id.includes('color') ? {
+    id: 'nasa-lro-moon-color-2025-4k',
+    url: 'https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_4k.tif',
+    attribution: 'NASA SVS CGI Moon Kit 2025 LROC color map',
+    checksumSha256: '9731fa8af425b6c2f88f277ecca82bf8c603f3743894f64ed7b25c5bfefa22ff',
+    localPath: 'sources/nasa-lro-moon-2025/lroc_color_16bit_srgb_4k.tif',
+    sourceDimensions: [4096, 2048],
+    transformations: ['16-bit sRGB decode', 'Lanczos3 tier resampling', 'RGB8 fallback and BasisLZ KTX2 encoding'],
+  } : {
+    id: source.id.replace('palla', 'moon'),
+    attribution: source.attribution.replace('fictional moon Palla', 'Earth\'s Moon'),
+    transformations: ['0.5 metre unsigned LOLA elevation decode', 'single-valued pole stabilization', 'east/north tangent-slope derivation', 'lossless RG packaging'],
+  }),
   bodies: ['moon'],
   channels: source.channels.map((channel) => channel === 'material' ? 'heightMacro' : channel),
   datum: 'Moon mean-Earth/polar-axis body-fixed sphere',
@@ -913,7 +1056,7 @@ const moonSources = airlessSources.palla.sources.map((source) => ({
   valueOffset: source.id.includes('height') ? -10_000 : 0,
   noDataValue: null,
   validRange: source.id.includes('height') ? [-10_000, 10_000] : [0, 65_535],
-  observation: 'NASA SVS CGI Moon Kit release 4720',
+  observation: source.id.includes('color') ? 'NASA SVS CGI Moon Kit 2025 color product' : 'NASA SVS CGI Moon Kit release 4720 LOLA height',
   productKind: source.id.includes('height') ? 'modeled' : 'composited',
   derivedRecipe: 'moon-source-pack-v1',
   bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
@@ -1106,6 +1249,10 @@ if (write && !fingerprintsOnly) {
     generatedSources.push(...moonSources as unknown as Record<string, any>[]);
     generatedSources.push(...localMaterialSources.filter((source) => source.bodies.includes('moon')));
   }
+  if (targetBodies.has('sun')) {
+    generatedPacks.push(...await compileSun(targetTiers) as Record<string, any>[]);
+    generatedSources.push(...sunSources as unknown as Record<string, any>[]);
+  }
 }
 
 if (write && generatedPacks.length > 0) {
@@ -1121,7 +1268,10 @@ if (write && generatedPacks.length > 0) {
   }
   const sourceIds = new Set(generatedSources.map((source) => source.id));
   manifest.sources = [
-    ...manifest.sources.filter((source: Record<string, any>) => !sourceIds.has(source.id)),
+    ...manifest.sources.filter((source: Record<string, any>) => (
+      !sourceIds.has(source.id)
+      && !(targetBodies.has('moon') && source.id === 'nasa-lro-moon-color-8k')
+    )),
     ...generatedSources,
   ].sort((left: Record<string, any>, right: Record<string, any>) => left.id.localeCompare(right.id));
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

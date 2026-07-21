@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "nasa-pgda-lola-site01-5m",
+  "version": "site01-surface-5m-derived-10m-u16-v1",
+  "sourceSha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e",
+  "path": "generated/moon/site01/height-u16.bin",
+  "sha256": "ae96e29314fc50642b61fd07e45bb5f74ccdb1750b235ee4dde241d19fc04909",
+  "byteLength": 5120000,
+  "width": 1600,
+  "height": 1600,
+  "sourcePixelSizeMeters": 5,
+  "pixelSizeMeters": 10,
+  "projectedExtentMeters": [
+    -19000,
+    -20000,
+    -3000,
+    -4000
+  ],
+  "sampleOriginMeters": [
+    -18995,
+    -4005
+  ],
+  "projection": "south-polar-stereographic",
+  "sphereRadiusMeters": 1737400,
+  "referenceFrame": "MOON_ME DE421",
+  "verticalDatum": "1737400 m Moon reference sphere",
+  "quantizationMinimumMeters": -600,
+  "quantizationMaximumMeters": 2000,
+  "observedMinimumHeightMeters": -521.6683959960938,
+  "observedMaximumHeightMeters": 1959.1426086425781,
+  "blendBandMeters": 1000
+}

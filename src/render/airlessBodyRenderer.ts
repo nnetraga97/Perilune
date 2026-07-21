@@ -21,7 +21,7 @@ import { CoverageTransition } from './coverageTransition';
 import { PLANET_QUALITY, PlanetRenderer } from './planet';
 import { createAirlessGlobalMaterial } from './airless/globalMaterial';
 import { createAirlessSurfaceMaterial } from './airless/surfaceMaterial';
-import { createGlobalSphereGeometry } from './terrestrial/globalGeometry';
+import { createAirlessGlobalGeometry } from './terrestrial/globalGeometry';
 import { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
 import { terrainPresentationBand } from './terrainPresentation';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
@@ -50,7 +50,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
   readonly terrainGeneration: number;
   private readonly transition = new CoverageTransition();
   private readonly workerPool = typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool();
-  private compact!: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
+  private compact!: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
   private terrain!: PlanetRenderer;
   private scatter: TerrestrialScatter | null = null;
   private detail: CompactDetailController | null = null;
@@ -111,7 +111,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
   private buildStack(pack: Readonly<RuntimeBodyAssetPack> | null): void {
     const terrainRecipe = recipeForBody(this.body, this.authority);
     this.stagedAssetBytes = pack?.gpuBytes ?? 0;
-    const compactGeometry = createGlobalSphereGeometry(this.quality);
+    const compactGeometry = createAirlessGlobalGeometry(this.quality);
     const compactMaterial = pack
       ? createAirlessGlobalMaterial(pack, this.caps.maxAnisotropy, this.body.radius)
       : new THREE.MeshStandardMaterial({ color: this.descriptor.albedo.mid, roughness: 1, metalness: 0 });

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
-export const TERRAIN_DETAIL_PAGE_SLOTS = 4;
+/** Fixed 3x3 neighborhood retained around the low-altitude camera footprint. */
+export const TERRAIN_DETAIL_ATLAS_GRID = 3;
+export const TERRAIN_DETAIL_PAGE_SLOTS = TERRAIN_DETAIL_ATLAS_GRID ** 2;
 
 export interface TerrainDetailMaterialSlotState {
   readonly normalEnabled: { value: number };
@@ -131,8 +133,9 @@ vec4 sampleTerrainDetailSlot(
   vec2 pageUv = vec2(0.5);
   float coverage = terrainDetailCoordinates(face, bounds, gutterScaleBias, direction, pageUv);
   if (coverage <= 0.0) return vec4(0.0);
-  vec2 atlasOffset = vec2(mod(slotIndex, 2.0), floor(slotIndex / 2.0)) * 0.5;
-  vec4 pageSample = texture2D(page, pageUv * 0.5 + atlasOffset);
+  vec2 atlasOffset = vec2(mod(slotIndex, ${TERRAIN_DETAIL_ATLAS_GRID}.0), floor(slotIndex / ${TERRAIN_DETAIL_ATLAS_GRID}.0))
+    / ${TERRAIN_DETAIL_ATLAS_GRID}.0;
+  vec4 pageSample = texture2D(page, pageUv / ${TERRAIN_DETAIL_ATLAS_GRID}.0 + atlasOffset);
   vec3 color = clamp(pageSample.rgb * colorScale + colorBias, 0.0, 1.0);
   return vec4(color, terrainDetailOpacity * coverage * pageSample.a);
 }
@@ -143,8 +146,9 @@ vec4 sampleTerrainDetailNormalSlot(
   vec2 pageUv = vec2(0.5);
   float coverage = terrainDetailCoordinates(face, bounds, gutterScaleBias, direction, pageUv);
   if (coverage <= 0.0) return vec4(0.0);
-  vec2 atlasOffset = vec2(mod(slotIndex, 2.0), floor(slotIndex / 2.0)) * 0.5;
-  vec4 encoded = texture2D(page, pageUv * 0.5 + atlasOffset);
+  vec2 atlasOffset = vec2(mod(slotIndex, ${TERRAIN_DETAIL_ATLAS_GRID}.0), floor(slotIndex / ${TERRAIN_DETAIL_ATLAS_GRID}.0))
+    / ${TERRAIN_DETAIL_ATLAS_GRID}.0;
+  vec4 encoded = texture2D(page, pageUv / ${TERRAIN_DETAIL_ATLAS_GRID}.0 + atlasOffset);
   vec3 bodyNormal = normalize(encoded.rgb * 2.0 - 1.0);
   return vec4(bodyNormal, terrainDetailOpacity * coverage * encoded.a);
 }

@@ -22,6 +22,7 @@
     "validate:content": "npm run check:sol-constants && npm run check:height-authority && npm run check:surface-class-authority && node scripts/validate-content.mjs && tsx scripts/validate-game-content.ts",
     "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
     "compile:height-authority": "node scripts/compile-height-authority.mjs",
+    "compile:moon-site01-authority": "node scripts/compile-moon-site01-authority.mjs",
     "compile:surface-class-authority": "tsx scripts/compile-surface-class-authority.ts",
     "check:surface-class-authority": "tsx scripts/compile-surface-class-authority.ts",
     "check:height-authority": "tsx scripts/check-height-authority-artifact.ts",
@@ -39,6 +40,7 @@
     "profile:reentry": "tsx scripts/profile-reentry.ts",
     "fetch:planet-source": "node scripts/fetch-planet-source.mjs",
     "probe:planet-sources": "node scripts/probe-planet-detail-sources.mjs",
+    "probe:moon-sun-sources": "node scripts/probe-moon-sun-sources.mjs",
     "inspect:planet-authority": "node --import tsx scripts/inspect-planet-authority.mjs",
     "fetch:surface-class-sources": "node scripts/fetch-surface-class-sources.mjs"
   },

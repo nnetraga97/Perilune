@@ -113,11 +113,11 @@ export const EARTH_GEOLOGY_SCATTER_PROFILE = freezeProfile({
 export const MOON_REGOLITH_SCATTER_PROFILE = freezeProfile({
   name: 'moon-regolith',
   placement: 'solid',
-  densityScale: 0.16,
-  capacityScale: 0.2,
+  densityScale: 0.055,
+  capacityScale: 0.08,
   classes: [
-    { id: 'boulder', archetype: 'rock', rollWeight: 72, color: 0xa09d97, scaleBase: 0.25, scaleSpread: 0.65, roughness: 1 },
-    { id: 'clast', archetype: 'shrub', rollWeight: 28, color: 0x8d8984, scaleBase: 0.1, scaleSpread: 0.25, roughness: 1 },
+    { id: 'boulder', archetype: 'rock', rollWeight: 58, color: 0x706d68, scaleBase: 0.18, scaleSpread: 0.48, roughness: 1 },
+    { id: 'clast', archetype: 'shrub', rollWeight: 42, color: 0x625f5b, scaleBase: 0.06, scaleSpread: 0.14, roughness: 1 },
   ],
 });
 

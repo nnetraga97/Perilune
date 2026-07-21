@@ -15,6 +15,7 @@ import { BODY_VISUALS } from '../content/bodyVisuals';
 import { solVisualReferenceStation } from './solVisualReferenceStations';
 import { solidHeight } from '../sim/terrain';
 import { Vec3 } from '../core/vec3';
+import { installPlanetDataAuthority, planetDataAuthorityForBody, preparePlanetDataAuthority } from '../sim/planetDataAuthority';
 
 interface ReferenceApi {
   ready: boolean;
@@ -31,7 +32,7 @@ function direction(latitudeDegrees: number, longitudeDegrees: number): THREE.Vec
   );
 }
 
-async function loadFallbackPack(bodyId: 'earth' | 'moon', tier: QualityTier): Promise<RuntimeBodyAssetPack> {
+async function loadFallbackPack(bodyId: 'earth' | 'moon' | 'sun', tier: QualityTier): Promise<RuntimeBodyAssetPack> {
   const manifest = checkPlanetManifest(checkedPlanetArtifact);
   const pack = manifest.packs.find((candidate) => candidate.bodyId === bodyId && candidate.tier === tier);
   if (!pack) throw new Error(`Missing checked visual-reference pack ${bodyId}/${tier}`);
@@ -80,6 +81,10 @@ export async function runSolVisualReferenceProto(): Promise<void> {
   camera.position.set(0, 0, 0);
   const universe = new Universe([...SOL_SYSTEM], 'earth');
   const body: Body = universe.get(station.bodyId);
+  const referenceAuthority = station.id.startsWith('moon-site01-')
+    ? await preparePlanetDataAuthority(body, 'moon-site01')
+    : planetDataAuthorityForBody(body);
+  installPlanetDataAuthority(body, referenceAuthority);
   const cameraDirectionBodyFixed = direction(station.latitudeDegrees, station.longitudeDegrees);
   const sampledSurface = station.presentation === 'surface'
     ? solidHeight(body, new Vec3(
@@ -111,18 +116,15 @@ export async function runSolVisualReferenceProto(): Promise<void> {
   }
   camera.updateMatrixWorld(true);
 
-  const primaryPack = station.bodyId === 'earth' || station.bodyId === 'moon'
-    ? await loadFallbackPack(station.bodyId, quality)
-    : null;
+  const primaryPack = await loadFallbackPack(station.bodyId, quality);
   const renderer = createBodyRendererCandidate({
     body,
     caps: context.caps,
     quality,
     activeBodyBudgetBytes: primaryPack ? fallbackReferenceBudget(primaryPack) : undefined,
+    authority: referenceAuthority,
   });
-  if (station.bodyId === 'earth' || station.bodyId === 'moon') {
-    renderer.stageAssets(primaryPack);
-  }
+  renderer.stageAssets(primaryPack);
   scene.add(renderer.root);
   let secondaryRenderer: ReturnType<typeof createBodyRendererCandidate> | null = null;
   let secondaryFrame: BodyRenderFrame | null = null;

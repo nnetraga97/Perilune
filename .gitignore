@@ -12,6 +12,7 @@ artifacts/performance/
 assets/planets/sources/**/*.zip
 assets/planets/sources/**/*.tif
 assets/planets/sources/**/*.jpg
+assets/planets/sources/**/*.png
 assets/planets/sources/**/*.partial
 assets/planets/sources/noaa-gshhg-2.3.7/extracted/
 assets/planets/sources/usfws-nwi-ksc/*.geojson

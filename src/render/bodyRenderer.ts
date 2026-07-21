@@ -38,6 +38,8 @@ export interface BodyRenderFrame {
   readonly verticalFovRadians: number;
   /** Physical drawing-buffer height in pixels, including device pixel ratio. */
   readonly drawingBufferHeight: number;
+  /** Physical drawing-buffer width; optional for synthetic frames that assume 16:9. */
+  readonly drawingBufferWidth?: number;
   /** Analytic f64 projection authority, independent of any proxy mesh placement. */
   readonly projection: Readonly<CelestialProjection>;
   readonly orientation: QuaternionCoordinates;
@@ -95,6 +97,8 @@ export interface BodyRendererStats {
   readonly cloudHistoryBytes?: number;
   readonly heightCacheBytes?: number;
   readonly shadowBytes?: number;
+  /** Scene-linear diagnostic values before tone mapping; solar renderer only. */
+  readonly solarRegionLuminance?: Readonly<{ disk: number; corona: number; glare: number }>;
   readonly detailGpuBytes?: number;
   readonly detailPages?: number;
   readonly detailLevel?: number;

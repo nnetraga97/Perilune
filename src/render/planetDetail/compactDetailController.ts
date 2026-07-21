@@ -10,6 +10,48 @@ import { requestPlanetTile } from './tileRequest';
 import type { DetailTileAddress, PlanetDetailSourceAdapter } from './sourceAdapter';
 import { detailColorTransform } from './detailColorTransform';
 
+const COMPACT_DETAIL_GRID_SIZE = 3;
+const DEFAULT_DRAWING_BUFFER_ASPECT = 16 / 9;
+const MOON_COMPACT_DETAIL_CEILING_METERS = 2_000_000;
+const MOON_COARSE_GLOBAL_LEVEL = 2;
+
+/**
+ * Limits local detail to a level whose fixed 3x3 atlas covers every lunar
+ * surface point visible through the viewport, including its corners. This
+ * prevents a sharp center patch surrounded by the resident global parent.
+ */
+export function compactDetailLevelForViewport(
+  source: Readonly<PlanetDetailSourceAdapter>,
+  desiredLevel: number,
+  bodyRadius: number,
+  cameraDistance: number,
+  verticalFovRadians: number,
+  drawingBufferWidth: number,
+  drawingBufferHeight: number,
+): number {
+  if (!(bodyRadius > 0) || !(cameraDistance > bodyRadius)) return 0;
+  const height = Math.max(1, drawingBufferHeight);
+  const aspect = drawingBufferWidth > 0
+    ? Math.max(1, drawingBufferWidth / height)
+    : DEFAULT_DRAWING_BUFFER_ASPECT;
+  const halfVertical = verticalFovRadians * 0.5;
+  const halfHorizontal = Math.atan(Math.tan(halfVertical) * aspect);
+  const cornerRay = Math.atan(Math.hypot(Math.tan(halfVertical), Math.tan(halfHorizontal)));
+  const apparentRadius = Math.asin(Math.min(1, bodyRadius / cameraDistance));
+  const rayAngle = Math.min(apparentRadius, cornerRay);
+  const surfaceHalfAngle = rayAngle >= apparentRadius - 1e-9
+    ? Math.acos(Math.min(1, bodyRadius / cameraDistance))
+    : Math.asin(Math.min(1, cameraDistance / bodyRadius * Math.sin(rayAngle))) - rayAngle;
+
+  for (let level = Math.min(source.maxLevel, Math.max(0, desiredLevel)); level >= 0; level--) {
+    const matrix = source.matrix(level);
+    const longitudeHalfSpan = COMPACT_DETAIL_GRID_SIZE * Math.PI / matrix.width;
+    const latitudeHalfSpan = COMPACT_DETAIL_GRID_SIZE * Math.PI / (2 * matrix.height);
+    if (Math.min(longitudeHalfSpan, latitudeHalfSpan) >= surfaceHalfAngle) return level;
+  }
+  return 0;
+}
+
 export interface CompactDetailStats {
   readonly state: 'disabled' | 'resident-parent' | 'requesting' | 'crossfading' | 'ready' | 'failed';
   readonly level: number;
@@ -70,15 +112,20 @@ export class CompactDetailController {
     }
     const cameraDistance = Math.hypot(frame.cameraBodyFixed.x, frame.cameraBodyFixed.y, frame.cameraBodyFixed.z);
     if (!(cameraDistance > this.bodyRadius)) return this.suspend('camera-inside-body');
+    const altitude = Math.max(1, cameraDistance - this.bodyRadius);
     const apparentDiameter = 2 * Math.asin(Math.min(1, this.bodyRadius / cameraDistance));
     // A full-disk view is bounded by the drawing-buffer resolution, while the
     // resident global map already supplies more texels than the disk can show.
     // Streaming a moving 3x3 local atlas here only introduces page/level
     // transitions across the visible globe (notably around 12-15 Mm at Earth).
-    if (apparentDiameter <= frame.verticalFovRadians * CompactDetailController.FULL_DISK_VERTICAL_FOV_FRACTION) {
+    const moonCoarseDetailActive = this.bodyId === 'moon'
+      && altitude <= MOON_COMPACT_DETAIL_CEILING_METERS;
+    if (
+      apparentDiameter <= frame.verticalFovRadians * CompactDetailController.FULL_DISK_VERTICAL_FOV_FRACTION
+      && !moonCoarseDetailActive
+    ) {
       return this.suspend('resident-parent-full-disk');
     }
-    const altitude = Math.max(1, cameraDistance - this.bodyRadius);
     const metersPerPixel = 2 * altitude * Math.tan(frame.verticalFovRadians * 0.5) / Math.max(1, frame.drawingBufferHeight);
     const selectedSource = planetVisualDetailSourceForView(this.bodyId, frame.cameraBodyFixed, metersPerPixel, this.suppressedSources);
     if (selectedSource?.datasetId !== this.source?.datasetId) {
@@ -92,9 +139,28 @@ export class CompactDetailController {
     }
     if (!this.source) return this.suspend('no-source-fallback');
     const latitude = Math.asin(Math.max(-1, Math.min(1, frame.cameraBodyFixed.z / cameraDistance)));
-    const level = this.source.levelForProjectedFootprint(this.bodyRadius, latitude, metersPerPixel);
-    const selection = selectEquirectPages(this.source, level, frame.cameraBodyFixed);
-    if (!selection || level < 3) return this.suspend('resident-parent-is-sufficient');
+    const desiredLevel = this.source.levelForProjectedFootprint(this.bodyRadius, latitude, metersPerPixel);
+    const level = this.bodyId === 'moon'
+      ? compactDetailLevelForViewport(
+          this.source,
+          desiredLevel,
+          this.bodyRadius,
+          cameraDistance,
+          frame.verticalFovRadians,
+          frame.drawingBufferWidth ?? 0,
+          frame.drawingBufferHeight,
+        )
+      : desiredLevel;
+    const coarseMoonAtlas = this.bodyId === 'moon' && level === MOON_COARSE_GLOBAL_LEVEL;
+    const selection = selectEquirectPages(
+      this.source,
+      level,
+      frame.cameraBodyFixed,
+      coarseMoonAtlas ? 4 : COMPACT_DETAIL_GRID_SIZE,
+      coarseMoonAtlas ? 4 : COMPACT_DETAIL_GRID_SIZE,
+    );
+    const minimumUsefulLevel = this.bodyId === 'moon' ? MOON_COARSE_GLOBAL_LEVEL : 3;
+    if (!selection || level < minimumUsefulLevel) return this.suspend('resident-parent-is-sufficient');
     if (selection.signature === this.signature) return;
     this.signature = selection.signature;
     this.generation++;

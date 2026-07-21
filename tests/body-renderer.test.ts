@@ -57,7 +57,7 @@ function frame(overrides: Partial<BodyRenderFrame> = {}): BodyRenderFrame {
 }
 
 describe('body renderer adapters', () => {
-  test('legacy and star adapters accept procedural staging and reject authored packs', () => {
+  test('legacy rejects authored packs while star accepts only its own activity pack', () => {
     const solid = body('veyra');
     const star = body('auren');
     const legacyRenderer = new LegacyBodyRenderer(solid, bodyMaterialDescriptor(solid), caps, 'medium');
@@ -70,7 +70,16 @@ describe('body renderer adapters', () => {
     expect(() => legacyRenderer.stageAssets(null)).not.toThrow();
     expect(() => starRenderer.stageAssets(null)).not.toThrow();
     expect(() => legacyRenderer.stageAssets(pack)).toThrow(/procedural assets only/i);
-    expect(() => starRenderer.stageAssets(pack)).toThrow(/procedural assets only/i);
+    expect(() => starRenderer.stageAssets(pack)).toThrow(/cannot stage veyra assets on auren/i);
+    const activity = new THREE.DataTexture(new Uint8Array([128]), 1, 1, THREE.RedFormat);
+    const starPack: RuntimeBodyAssetPack = {
+      ...pack,
+      bodyId: 'auren',
+      gpuBytes: 1,
+      textures: new Map([['photosphereActivity', activity]]),
+    };
+    expect(() => starRenderer.stageAssets(starPack)).not.toThrow();
+    expect(starRenderer.stats()).toMatchObject({ assetTier: 'medium', assetBytes: 1 });
     legacyRenderer.dispose();
     starRenderer.dispose();
   });
@@ -210,6 +219,26 @@ describe('body renderer adapters', () => {
     const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(presentation.quaternion);
     expect(Math.abs(normal.dot(new THREE.Vector3(-1, 0, 0)))).toBeCloseTo(1, 5);
     expect(renderer.stats()).toMatchObject({ visible: 1, presentationMode: 'proxy' });
+
+    renderer.update(frame({
+      cameraSunDirection: { x: 1, y: 0, z: 0 },
+      solarVisibleFraction: 0.5,
+      solarOccluder: { direction: { x: 1, y: 0.01, z: 0 }, angularRadius: 0.04 },
+      projection: {
+        trueObserverDistance: 1e10,
+        angularRadius: 0.1,
+        projectedPixelRadius: 80,
+        proxyDepth: 3e8,
+        proxyRadius: 3e8 * Math.tan(0.1),
+        visibility: 'far-field',
+      },
+    }));
+    const diskUniforms = (disk.material as THREE.ShaderMaterial).uniforms;
+    const coronaUniforms = (corona.material as THREE.ShaderMaterial).uniforms;
+    expect(diskUniforms.uUseOccluder.value).toBe(1);
+    expect(coronaUniforms.uUseOccluder.value).toBe(1);
+    expect(coronaUniforms.uOccluderRadius.value).toBe(diskUniforms.uOccluderRadius.value);
+    expect(coronaUniforms.uOccluderCenter.value).toEqual(diskUniforms.uOccluderCenter.value);
     renderer.root.visible = false;
     expect(renderer.stats().visible).toBe(0);
   });

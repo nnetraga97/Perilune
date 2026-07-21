@@ -663,17 +663,23 @@ class PeriluneGame {
     this.game.clearFlightVessels();
     try {
       this.game.warpToLaunchDaylight(home);
+      const moon = this.game.universe.bodies.get('moon');
+      const preparedAuthorities = await Promise.all([
+        this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent'),
+        ...(moon ? [this.game.prepareFlightAuthority(moon, 'moon-site01')] : []),
+      ]);
+      for (const authority of preparedAuthorities) {
+        if (authority.fallbackReason) {
+          clientLog.warn('terrain.authority.fallback', {
+            bodyId: authority.bodyId,
+            generation: authority.generation,
+            reason: authority.fallbackReason,
+          });
+        }
+      }
       await Promise.all([
-        this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent').then((authority) => {
-          if (authority.fallbackReason) {
-            clientLog.warn('terrain.authority.fallback', {
-              bodyId: home.id,
-              generation: authority.generation,
-              reason: authority.fallbackReason,
-            });
-          }
-          return this.world.prepareFlightBody(home, authority);
-        }),
+        this.world.prepareFlightBody(home, this.game.frozenFlightAuthority(home.id)),
+        ...(moon ? [this.world.prepareFlightBody(moon, this.game.frozenFlightAuthority(moon.id), false)] : []),
         new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
       ]);
     } catch (error) {

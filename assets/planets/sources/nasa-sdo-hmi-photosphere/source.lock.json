@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-sdo-hmi-visible-photosphere-2010-12-06",
+  "product": "SDO/HMI visible photosphere full disk",
+  "sourceUrl": "https://svs.gsfc.nasa.gov/vis/a000000/a004200/a004269/sun-hmii-large.png",
+  "landingPage": "https://svs.gsfc.nasa.gov/4269/",
+  "localPath": "assets/planets/sources/nasa-sdo-hmi-photosphere/sun-hmii-large.png",
+  "sha256": "e3f4f8c030e1fe9e4171ae34bd9690b0cd2d7d23a1b48d766a98323a643ff5d0",
+  "byteLength": 9795072,
+  "dimensions": [4104, 3840],
+  "pixelFormat": "RGB8 PNG",
+  "observation": "2010-12-06 HMI continuum intensity",
+  "orientation": "pinned as-published full-disk observer image; crop center and radius recorded by compiler",
+  "license": "NASA media usage guidelines",
+  "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+  "authoringOnly": true
+}

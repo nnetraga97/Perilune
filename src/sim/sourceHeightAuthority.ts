@@ -22,6 +22,12 @@ export interface FrozenSourceHeightRegion {
   readonly width: number;
   readonly height: number;
   readonly blendBandDegrees: number;
+  readonly projection?: 'equirectangular' | 'south-polar-stereographic';
+  readonly sphereRadiusMeters?: number;
+  readonly projectedExtentMeters?: readonly [number, number, number, number];
+  readonly sampleOriginMeters?: readonly [number, number];
+  readonly pixelSizeMeters?: number;
+  readonly blendBandMeters?: number;
   readonly minimumHeightMeters: number;
   readonly maximumHeightMeters: number;
   readonly samples?: Float32Array;
@@ -75,9 +81,34 @@ export function samplePromotedHeightRegion(
   const longitude = Math.atan2(direction.y, direction.x) * 180 / Math.PI;
   const latitude = Math.asin(Math.max(-1, Math.min(1, direction.z / length))) * 180 / Math.PI;
   const [west, south, east, north] = region.coverage;
-  if (longitude < west || longitude > east || latitude < south || latitude > north) return null;
-  const x = (longitude - west) / (east - west) * (region.width - 1);
-  const y = (north - latitude) / (north - south) * (region.height - 1);
+  let x: number;
+  let y: number;
+  let linearWeight: number;
+  if (region.projection === 'south-polar-stereographic') {
+    if (!region.projectedExtentMeters || !region.sampleOriginMeters || !region.pixelSizeMeters || !region.sphereRadiusMeters) return null;
+    const longitudeRadians = longitude * Math.PI / 180;
+    const latitudeRadians = latitude * Math.PI / 180;
+    const rho = 2 * region.sphereRadiusMeters * Math.tan(Math.PI / 4 + latitudeRadians / 2);
+    const projectedX = rho * Math.sin(longitudeRadians);
+    const projectedY = rho * Math.cos(longitudeRadians);
+    const [projectedWest, projectedSouth, projectedEast, projectedNorth] = region.projectedExtentMeters;
+    if (projectedX < projectedWest || projectedX > projectedEast || projectedY < projectedSouth || projectedY > projectedNorth) return null;
+    x = (projectedX - region.sampleOriginMeters[0]) / region.pixelSizeMeters;
+    y = (region.sampleOriginMeters[1] - projectedY) / region.pixelSizeMeters;
+    const edgeDistanceMeters = Math.min(
+      projectedX - projectedWest,
+      projectedEast - projectedX,
+      projectedY - projectedSouth,
+      projectedNorth - projectedY,
+    );
+    linearWeight = Math.max(0, Math.min(1, edgeDistanceMeters / (region.blendBandMeters ?? 1)));
+  } else {
+    if (longitude < west || longitude > east || latitude < south || latitude > north) return null;
+    x = (longitude - west) / (east - west) * (region.width - 1);
+    y = (north - latitude) / (north - south) * (region.height - 1);
+    const edgeDistanceDegrees = Math.min(longitude - west, east - longitude, latitude - south, north - latitude);
+    linearWeight = Math.max(0, Math.min(1, edgeDistanceDegrees / region.blendBandDegrees));
+  }
   const x0 = Math.max(0, Math.min(region.width - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(region.height - 1, Math.floor(y)));
   const x1 = Math.min(region.width - 1, x0 + 1);
@@ -88,13 +119,6 @@ export function samplePromotedHeightRegion(
   const a = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
   const b = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
   const heightMeters = a + (b - a) * ty;
-  const edgeDistanceDegrees = Math.min(
-    longitude - west,
-    east - longitude,
-    latitude - south,
-    north - latitude,
-  );
-  const linearWeight = Math.max(0, Math.min(1, edgeDistanceDegrees / region.blendBandDegrees));
   const sourceWeight = linearWeight * linearWeight * (3 - 2 * linearWeight);
   return Object.freeze({ heightMeters, sourceWeight });
 }

@@ -6,13 +6,19 @@ export interface PhotosphereMaterial extends THREE.ShaderMaterial {
     uOpacity: THREE.IUniform<number>;
     uColor: THREE.IUniform<THREE.Color>;
     uGranulationStrength: THREE.IUniform<number>;
+    uActivityMap: THREE.IUniform<THREE.Texture>;
+    uUseActivity: THREE.IUniform<number>;
+    uActivityStrength: THREE.IUniform<number>;
     uOccluderCenter: THREE.IUniform<THREE.Vector2>;
     uOccluderRadius: THREE.IUniform<number>;
     uUseOccluder: THREE.IUniform<number>;
   };
 }
 
-export function createPhotosphereMaterial(color: THREE.ColorRepresentation): PhotosphereMaterial {
+export function createPhotosphereMaterial(
+  color: THREE.ColorRepresentation,
+  neutralActivity: THREE.Texture,
+): PhotosphereMaterial {
   const material = new THREE.ShaderMaterial({
     name: 'sol-photosphere',
     uniforms: {
@@ -20,6 +26,9 @@ export function createPhotosphereMaterial(color: THREE.ColorRepresentation): Pho
       uOpacity: { value: 1 },
       uColor: { value: new THREE.Color(color) },
       uGranulationStrength: { value: 0.055 },
+      uActivityMap: { value: neutralActivity },
+      uUseActivity: { value: 0 },
+      uActivityStrength: { value: 0.42 },
       uOccluderCenter: { value: new THREE.Vector2() },
       uOccluderRadius: { value: 0 },
       uUseOccluder: { value: 0 },
@@ -42,6 +51,9 @@ export function createPhotosphereMaterial(color: THREE.ColorRepresentation): Pho
       uniform float uOpacity;
       uniform vec3 uColor;
       uniform float uGranulationStrength;
+      uniform sampler2D uActivityMap;
+      uniform float uUseActivity;
+      uniform float uActivityStrength;
       uniform vec2 uOccluderCenter;
       uniform float uOccluderRadius;
       uniform float uUseOccluder;
@@ -69,9 +81,14 @@ export function createPhotosphereMaterial(color: THREE.ColorRepresentation): Pho
         // Four-term visual-light approximation: restrained center-to-limb falloff.
         float limb = 0.47 + 0.38 * mu + 0.15 * mu * mu;
         vec2 footprintFiltered = vDisk * 86.0;
-        float granulation = valueNoise(footprintFiltered + vec2(uTime * 0.002, 0.0)) - 0.5;
+        float footprint = max(length(dFdx(footprintFiltered)), length(dFdy(footprintFiltered)));
+        float granulationFade = 1.0 - smoothstep(0.35, 1.4, footprint);
+        float granulation = (valueNoise(footprintFiltered) - 0.5) * granulationFade;
         float broad = valueNoise(vDisk * 9.0 + vec2(17.0, 31.0)) - 0.5;
-        float modulation = 1.0 + granulation * uGranulationStrength + broad * 0.025;
+        vec2 activityUv = vec2(vDisk.x * 0.5 + 0.5, 0.5 - vDisk.y * 0.5);
+        float activity = (texture2D(uActivityMap, activityUv).r * 255.0 - 128.0) / 112.0;
+        float modulation = 1.0 + granulation * uGranulationStrength + broad * 0.012
+          + activity * uActivityStrength * uUseActivity;
         gl_FragColor = vec4(uColor * limb * modulation, uOpacity);
         #include <logdepthbuf_fragment>
       }

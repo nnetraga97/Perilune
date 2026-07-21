@@ -50,6 +50,7 @@ import {
   adaptExposure,
   createEnvironmentLightingState,
   environmentLighting,
+  landingVisibilityAid,
   localShadowPolicy,
   snapShadowCenter,
 } from './lightingPolicy';
@@ -140,6 +141,7 @@ interface MutableBodyRenderFrame {
   surfaceAnchorBodyFixed?: MutableVectorCoordinates;
   cameraBodyFixedVelocity: MutableVectorCoordinates;
   verticalFovRadians: number;
+  drawingBufferWidth: number;
   drawingBufferHeight: number;
   projection: CelestialProjection;
   orientation: MutableQuaternionCoordinates;
@@ -238,6 +240,7 @@ export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   private readonly environment: THREE.HemisphereLight;
+  private readonly landingLight: THREE.SpotLight;
   private readonly environmentState = createEnvironmentLightingState();
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
@@ -391,6 +394,20 @@ export class WorldScene {
     this.scene.add(this.srbSmoke.points);
     this.environment = new THREE.HemisphereLight('#0b1016', '#020304', 0.045);
     this.scene.add(this.environment);
+    // A broad, neutral descent light preserves night-side contrast while
+    // keeping the immediate landing area readable. Decay is intentionally zero
+    // because scene distances are measured in metres, not Three.js light units.
+    this.landingLight = new THREE.SpotLight(
+      '#dcecff',
+      0,
+      0,
+      THREE.MathUtils.degToRad(58),
+      0.55,
+      0,
+    );
+    this.landingLight.name = 'automatic-landing-visibility-aid';
+    this.landingLight.castShadow = false;
+    this.scene.add(this.landingLight, this.landingLight.target);
     this.configureShadowRenderer();
   }
 
@@ -501,6 +518,7 @@ export class WorldScene {
   async prepareFlightBody(
     body: Body,
     authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
+    claimTerrain = true,
   ): Promise<void> {
     if (this.disposed) throw new Error('World scene is disposed');
     const installed = planetDataAuthorityForBody(body);
@@ -508,7 +526,7 @@ export class WorldScene {
       throw new Error(`Flight authority is not installed for ${body.id}`);
     }
     this.bodyAuthorities.set(body.id, authority);
-    this.setFlightTerrainOwner(body.id);
+    if (claimTerrain) this.setFlightTerrainOwner(body.id);
     this.rendererFor(body);
     const manager = this.bodyRendererManagers.get(body.id);
     if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
@@ -527,6 +545,7 @@ export class WorldScene {
     if (currentAuthorityMismatch()) {
       throw new Error(`Renderer authority generation mismatch for ${body.id}`);
     }
+    if (!claimTerrain) return;
     if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
     if (manager.currentAssetPack() && manager.claimFlightResidency()) {
       this.flightPromotedBodyId = body.id;
@@ -967,6 +986,10 @@ export class WorldScene {
     const active = game.active;
     this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
+      if (this.landingLight) {
+        this.landingLight.intensity = 0;
+        this.landingLight.distance = 0;
+      }
       this.clearReentryEffect();
       this.setFlightTerrainOwner(null);
       this.lastBodyFrames?.clear();
@@ -977,6 +1000,7 @@ export class WorldScene {
     const body = game.bodyOf(active);
     this.context.renderer.getDrawingBufferSize(_drawingBufferSize);
     const verticalFovRadians = THREE.MathUtils.degToRad(this.camera.fov);
+    const drawingBufferWidth = Math.max(1, Math.floor(_drawingBufferSize.x));
     const drawingBufferHeight = Math.max(1, Math.floor(_drawingBufferSize.y));
     this.setFlightTerrainOwner(body.id);
     const t = game.time;
@@ -1133,6 +1157,7 @@ export class WorldScene {
           bodyFixedFrustum: [],
           cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
           verticalFovRadians: 0,
+          drawingBufferWidth: 0,
           drawingBufferHeight: 0,
           projection: computeCelestialProjection({
             centerRelative: { x: 1, y: 0, z: 0 },
@@ -1206,6 +1231,7 @@ export class WorldScene {
       }
       stableFrame.solarVisibleFraction = solarVisibleFraction;
       stableFrame.verticalFovRadians = verticalFovRadians;
+      stableFrame.drawingBufferWidth = drawingBufferWidth;
       stableFrame.drawingBufferHeight = drawingBufferHeight;
       stableFrame.projection = computeCelestialProjection({
         centerRelative: stableFrame.cameraRelativeOrigin,
@@ -1318,7 +1344,8 @@ export class WorldScene {
     const atmo = body.def.atmosphere;
     const rendererKind = this.bodyRenderers.get(body.id)?.kind;
     const solarVisibleFraction = this.lastBodyFrames.get(body.id)?.solarVisibleFraction ?? 1;
-    const dayness = Math.max(0, Vec3.dot(up, _sunDir));
+    const surfaceSunCosine = Vec3.dot(up, _sunDir);
+    const dayness = Math.max(0, surfaceSunCosine);
     const sunInFrame = Vec3.dot(_cameraForwardWorld, _sunDir)
       > Math.cos(verticalFovRadians * 0.65);
     const environment = environmentLighting(
@@ -1334,6 +1361,26 @@ export class WorldScene {
     this.environment.groundColor.set(environment.ground);
     this.environment.intensity = environment.intensity;
     (this.scene.background as THREE.Color).set(environment.background);
+    const landingAid = landingVisibilityAid(
+      body.def.surfaceKind,
+      alt,
+      surfaceSunCosine,
+      solarVisibleFraction,
+    );
+    this.landingLight.intensity = landingAid.intensity;
+    this.landingLight.distance = landingAid.distance;
+    this.landingLight.position.set(
+      -camOffset.x + up.x * 2,
+      -camOffset.y + up.y * 2,
+      -camOffset.z + up.z * 2,
+    );
+    const landingTargetDepth = Math.max(1_000, alt + 1_000);
+    this.landingLight.target.position.set(
+      this.landingLight.position.x - up.x * landingTargetDepth,
+      this.landingLight.position.y - up.y * landingTargetDepth,
+      this.landingLight.position.z - up.z * landingTargetDepth,
+    );
+    this.landingLight.target.updateMatrixWorld(true);
     this.context.renderer.toneMappingExposure = adaptExposure(
       this.context.renderer.toneMappingExposure,
       environment.exposure,

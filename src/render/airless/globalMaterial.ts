@@ -50,7 +50,7 @@ export function createAirlessGlobalMaterial(
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 }) as AirlessGlobalMaterial;
   const detail = createPlanetDetailMaterialState();
   Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId, bodyRadius, planetDetail: detail });
-  material.customProgramCacheKey = () => 'airless-global-v1:authored';
+  material.customProgramCacheKey = () => 'airless-global-v2:tangent-slope';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.airlessAlbedoMap = { value: albedo };
     shader.uniforms.airlessNormalMap = { value: normal };
@@ -89,11 +89,13 @@ uniform mat3 normalMatrix;
 varying vec3 vAirlessBodyDirection;
 	${BODY_FIXED_UV_GLSL}
 	${PLANET_DETAIL_GLSL}
-vec3 decodeAirlessOctNormal(vec2 encoded) {
-  vec2 f = encoded * 2.0 - 1.0;
-  vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
-  if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * sign(n.xy);
-  return normalize(n);
+vec3 decodeAirlessTangentSlope(vec2 encoded, vec3 bodyDirection) {
+  vec3 radial = normalize(bodyDirection);
+  float xy = length(radial.xy);
+  vec3 east = xy > 0.00001 ? vec3(-radial.y / xy, radial.x / xy, 0.0) : vec3(0.0, 1.0, 0.0);
+  vec3 north = normalize(cross(radial, east));
+  vec2 slope = ((encoded * 255.0 - 128.0) / 127.0) * 2.0;
+  return normalize(radial + east * slope.x + north * slope.y);
 }`,
       )
       .replace(
@@ -101,6 +103,8 @@ vec3 decodeAirlessOctNormal(vec2 encoded) {
 	`vec2 airlessUv = bodyFixedUv(vAirlessBodyDirection);
 	vec4 airlessPackedMaterial = texture2D(airlessMaterialMap, airlessUv);
 	vec4 airlessDetail = samplePlanetDetail(vAirlessBodyDirection);
+	float airlessPolarDetailFade = 1.0 - smoothstep(0.965, 0.99, abs(normalize(vAirlessBodyDirection).z));
+	airlessDetail.a *= airlessPolarDetailFade;
 	vec3 airlessResolvedAlbedo = mix(texture2D(airlessAlbedoMap, airlessUv).rgb, airlessDetail.rgb, airlessDetail.a);
 	diffuseColor.rgb *= airlessResolvedAlbedo * 0.30;
 diffuseColor.rgb *= mix(0.72, 1.0, airlessPackedMaterial.g);`,
@@ -111,8 +115,11 @@ diffuseColor.rgb *= mix(0.72, 1.0, airlessPackedMaterial.g);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
-        `vec3 airlessBodyNormal = decodeAirlessOctNormal(texture2D(airlessNormalMap, airlessUv).rg);
-airlessBodyNormal = normalize(mix(normalize(vAirlessBodyDirection), airlessBodyNormal, 0.28));
+        `vec3 airlessRadialNormal = normalize(vAirlessBodyDirection);
+vec3 airlessBodyNormal = decodeAirlessTangentSlope(texture2D(airlessNormalMap, airlessUv).rg, vAirlessBodyDirection);
+float airlessPolarNormalFade = 1.0 - smoothstep(0.965, 0.99, abs(airlessRadialNormal.z));
+float airlessPolarNormalWeight = mix(0.25, 1.0, airlessPolarNormalFade);
+airlessBodyNormal = normalize(mix(airlessRadialNormal, airlessBodyNormal, 0.28 * airlessPolarNormalWeight));
 normal = normalize(normalMatrix * airlessBodyNormal);`,
       );
   };

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-pgda-moon-site01-5m",
+  "product": "LOLA 5 m/pixel Site 01 Connecting Ridge",
+  "landingPage": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/",
+  "sourceBaseUrl": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/",
+  "referenceFrame": "MOON_ME DE421",
+  "projection": {
+    "name": "south-polar-stereographic",
+    "latitudeOfOriginDegrees": -90,
+    "centralMeridianDegrees": 0,
+    "sphereRadiusMeters": 1737400,
+    "pixelSizeMeters": 5,
+    "tiePointMeters": [-19000, -4000],
+    "dimensions": [3200, 3200],
+    "gridExtentMeters": [-19000, -20000, -3000, -4000]
+  },
+  "files": [
+    { "role": "surface", "name": "Site01_final_adj_5mpp_surf.tif", "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e", "byteLength": 40980810, "format": "Float32 GeoTIFF", "noData": "NaN", "validRangeMeters": [-523.1834106445312, 1959.496215820312] },
+    { "role": "count", "name": "Site01_final_adj_5mpp_ldec.tif", "sha256": "16d6ed21020ad48fa71d94e7437492acf5bf04118f52bcd292f57f22ead4cd23", "byteLength": 40980744, "format": "Float32 GeoTIFF" },
+    { "role": "slope", "name": "Site01_final_adj_5mpp_slp.tif", "sha256": "3a90035a4946b4a04b7332c52f0b2b1cff71648bd8c105e14d8a7e15c6bcfe8e", "byteLength": 40980776, "format": "Float32 GeoTIFF" },
+    { "role": "total-height-uncertainty", "name": "Site01_final_adj_5mpp_toterr.tif", "sha256": "cf2cf52f52d2aa51e60d058010d10b0ebfb1d3e920f5a2b9a46eb6c51054ab1c", "byteLength": 40980810, "format": "Float32 GeoTIFF" },
+    { "role": "slope-uncertainty", "name": "Site01_final_adj_5mpp_slperr.tif", "sha256": "52bc3b239f61605e6bb98bab6d6b17acd22389c59e57336862157f2fbd643a33", "byteLength": 40980810, "format": "Float32 GeoTIFF" }
+  ],
+  "license": "NASA data",
+  "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+  "authoringOnly": true
+}

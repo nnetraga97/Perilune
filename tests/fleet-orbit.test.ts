@@ -65,14 +65,31 @@ describe('Fleet orbit action', () => {
     expect(active.runtime.pos.isFinite()).toBe(true);
   });
 
-  it('does nothing without an active craft or when the target is the star', () => {
+  it('does nothing without an active craft', () => {
     const game = createLegacyGameState();
     expect(game.placeActiveInOrbit('palla')).toBe(false);
+  });
 
-    const active = game.spawnOnPad(buildProbe('Active'), 'Active');
-    const before = active.runtime.pos.clone();
-    expect(game.placeActiveInOrbit('auren')).toBe(false);
-    expect(active.runtime.bodyId).toBe('veyra');
-    expect(active.runtime.pos).toEqual(before);
+  it('places the active craft in a stable full-disk orbit around the Sun', () => {
+    const game = new GameState();
+    const active = game.spawnOnPad(buildProbe('Solar observer'), 'Solar observer');
+
+    expect(game.placeActiveInOrbit('sun')).toBe(true);
+
+    const sun = game.universe.get('sun');
+    const elements = stateToElements(sun.mu, active.runtime.pos, active.runtime.vel, game.time);
+    expect(active.runtime.bodyId).toBe('sun');
+    expect(active.runtime.situation).toBe('orbit');
+    expect(active.target).toBeNull();
+    expect(periapsisOf(elements)).toBeGreaterThan(sun.radius);
+    expect(apoapsisOf(elements)).toBeGreaterThan(periapsisOf(elements));
+    expect(elements.e).toBeGreaterThanOrEqual(0);
+    expect(elements.e).toBeLessThan(1);
+    expect(active.runtime.pos.isFinite()).toBe(true);
+    expect(active.runtime.vel.isFinite()).toBe(true);
+
+    game.update(PHYSICS_DT);
+    expect(active.runtime.bodyId).toBe('sun');
+    expect(active.runtime.situation).toBe('orbit');
   });
 });

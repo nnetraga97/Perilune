@@ -19,6 +19,7 @@ import { PersistentPlanetTileCache } from './persistentTileCache';
 import { planetVisualDetailSource, planetVisualDetailSourceForView } from './sourceRegistry';
 import type { DetailTileAddress, PlanetDetailSourceAdapter } from './sourceAdapter';
 import {
+  TERRAIN_DETAIL_ATLAS_GRID,
   TERRAIN_DETAIL_PAGE_SLOTS,
   terrainDetailState,
   type TerrainDetailMaterialState,
@@ -263,11 +264,11 @@ export class TerrainDetailController {
     const heightSource = planetHeightDetailSource(this.bodyId);
     const heightTiles = heightSource && (this.bodyId === 'moon' || source.datasetId === 'usda-naip-ksc-2025-29992')
       ? tiles.filter((tile) => intersectsCoverage(geographicBoundsForTerrainTile(tile), heightSource.coverage))
+        .slice(0, this.budget.maximumNumericRequestsPerGeneration)
       : [];
     try {
       if (jobs.length > this.budget.maximumVisualRequestsPerGeneration) throw new Error('Terrain visual-detail request budget exceeded');
-      if (heightTiles.length > this.budget.maximumNumericRequestsPerGeneration
-        || jobs.length + heightTiles.length > this.budget.maximumRequestsPerGeneration) {
+      if (jobs.length + heightTiles.length > this.budget.maximumRequestsPerGeneration) {
         throw new Error('Terrain numeric-detail request budget exceeded');
       }
       const fetchStarted = performance.now();
@@ -370,13 +371,13 @@ export class TerrainDetailController {
       const pageWidth = result.pages[0]?.width ?? 0;
       const pageHeight = result.pages[0]?.height ?? 0;
       if (pageWidth <= 0 || pageHeight <= 0) throw new Error('Terrain detail worker returned no complete pages');
-      const atlasWidth = pageWidth * 2;
-      const atlasHeight = pageHeight * 2;
+      const atlasWidth = pageWidth * TERRAIN_DETAIL_ATLAS_GRID;
+      const atlasHeight = pageHeight * TERRAIN_DETAIL_ATLAS_GRID;
       const colorAtlasPixels = new Uint8Array(atlasWidth * atlasHeight * 4);
       const normalAtlasPixels = new Uint8Array(atlasWidth * atlasHeight * 4);
       const copyIntoAtlas = (sourcePixels: Uint8Array | Uint8ClampedArray, slotIndex: number, target: Uint8Array): void => {
-        const slotX = slotIndex % 2;
-        const slotY = Math.floor(slotIndex / 2);
+        const slotX = slotIndex % TERRAIN_DETAIL_ATLAS_GRID;
+        const slotY = Math.floor(slotIndex / TERRAIN_DETAIL_ATLAS_GRID);
         for (let row = 0; row < pageHeight; row++) {
           const sourceOffset = row * pageWidth * 4;
           const targetOffset = ((slotY * pageHeight + row) * atlasWidth + slotX * pageWidth) * 4;

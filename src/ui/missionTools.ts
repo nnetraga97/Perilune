@@ -340,13 +340,17 @@ export class MissionTools {
     this.bodyList.innerHTML = '';
     const currentBodyId = game.active?.runtime.bodyId;
     for (const body of game.universe.bodies.values()) {
-      if (body.def.isStar) continue;
       const row = el('div', 'mission-row body-row', this.bodyList);
       const info = el('div', 'mission-row-info', row);
       el('strong', '', info, body.name);
       el('span', '', info, body.id === currentBodyId ? 'current SOI' : body.parent?.name ?? 'system body');
       const focus = el('button', 'hud-btn', row, 'Focus');
       focus.onclick = () => this.callbacks.onFocusBody(body.id);
+      if (body.def.isStar) {
+        const orbit = el('button', 'hud-btn', row, 'Orbit');
+        orbit.onclick = () => this.callbacks.onOrbitTarget(body.id);
+        continue;
+      }
       const targeted = game.active?.target === body.id;
       const target = el('button', 'hud-btn', row, targeted ? 'Clear' : 'Target');
       target.classList.toggle('active', targeted);

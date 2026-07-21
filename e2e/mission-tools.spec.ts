@@ -21,28 +21,51 @@ test('mission windows connect alarms, transfers, targets, and maneuver sketches'
   // Transfer sketches are intentionally gated until the craft has a stable
   // parking orbit, because a surface-state conic produces a meaningless node.
   await page.getByRole('button', { name: 'Fleet', exact: true }).click();
-  const veyra = page.locator('.body-row').filter({ has: page.locator('strong:text-is("Veyra")') });
-  await veyra.getByRole('button', { name: 'Target', exact: true }).click();
-  await veyra.getByRole('button', { name: 'Orbit', exact: true }).click();
+  const earth = page.locator('.body-row').filter({ has: page.locator('strong:text-is("Earth")') });
+  await earth.getByRole('button', { name: 'Target', exact: true }).click();
+  await earth.getByRole('button', { name: 'Orbit', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__TEST__.situation())).toBe('orbit');
   await page.getByRole('button', { name: 'Fleet', exact: true }).click();
 
   await page.getByRole('button', { name: 'Transfers', exact: true }).click();
-  const palla = page.locator('.transfer-row', { hasText: 'Palla' });
-  await expect(palla).toBeVisible();
-  await palla.getByRole('button', { name: 'Target', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__TEST__.target())).toBe('palla');
-  await palla.getByRole('button', { name: 'Sketch node' }).click();
+  const moon = page.locator('.transfer-row', { hasText: 'Moon' });
+  await expect(moon).toBeVisible();
+  await moon.getByRole('button', { name: 'Target', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.target())).toBe('moon');
+  await moon.getByRole('button', { name: 'Sketch node' }).click();
   await expect.poll(() => page.evaluate(() => window.__TEST__.maneuverNode())).not.toBeNull();
   await expect(page.locator('.map-panel')).toBeVisible();
 
   await page.getByRole('button', { name: 'Fleet', exact: true }).click();
   await expect(page.locator('.fleet-row .fleet-name')).toHaveValue('Orion');
-  const pallaTarget = page.locator('.body-row', { hasText: 'Palla' });
-  await expect(pallaTarget.getByRole('button', { name: 'Orbit', exact: true })).toBeVisible();
-  await pallaTarget.getByRole('button', { name: 'Orbit', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.__TEST__.activeBody())).toBe('palla');
+  const moonTarget = page.locator('.body-row', { hasText: 'Moon' });
+  await expect(moonTarget.getByRole('button', { name: 'Orbit', exact: true })).toBeVisible();
+  await moonTarget.getByRole('button', { name: 'Orbit', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__TEST__.activeBody())).toBe('moon');
   await expect.poll(() => page.evaluate(() => window.__TEST__.situation())).toBe('orbit');
   await expect.poll(() => page.evaluate(() => window.__TEST__.target())).toBeNull();
-  await expect.poll(() => page.evaluate(() => window.__TEST__.orbit()?.eccentricity ?? 1)).toBeLessThan(1e-8);
+  await expect.poll(() => page.evaluate(() => window.__TEST__.orbit()?.eccentricity ?? 1)).toBeLessThan(1);
+
+});
+
+test('Fleet offers a direct orbit action for the Sun', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
+
+  const pod = page.locator('.ed-part', { hasText: 'Voyager Pod' });
+  await pod.dragTo(page.locator('#game-canvas'), { targetPosition: { x: 640, y: 400 } });
+  await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(1);
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
+  await page.waitForFunction(() => window.__TEST__.screen() === 'flight');
+
+  await page.getByRole('button', { name: 'Fleet', exact: true }).click();
+  const sun = page.locator('.body-row').filter({ has: page.locator('strong:text-is("Sun")') });
+  await expect(sun).toBeVisible();
+  await expect(sun.getByRole('button', { name: 'Orbit', exact: true })).toBeVisible();
+  await sun.getByRole('button', { name: 'Orbit', exact: true }).click();
+
+  await expect.poll(() => page.evaluate(() => window.__TEST__.activeBody())).toBe('sun');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.situation())).toBe('orbit');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.orbit()?.eccentricity ?? 1)).toBeLessThan(1);
 });

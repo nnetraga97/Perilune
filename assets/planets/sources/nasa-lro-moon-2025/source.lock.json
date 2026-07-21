@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-lro-moon-color-2025-4k",
+  "product": "NASA CGI Moon Kit 2025 LROC color",
+  "sourceUrl": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_4k.tif",
+  "landingPage": "https://svs.gsfc.nasa.gov/4720/",
+  "localPath": "assets/planets/sources/nasa-lro-moon-2025/lroc_color_16bit_srgb_4k.tif",
+  "sha256": "9731fa8af425b6c2f88f277ecca82bf8c603f3743894f64ed7b25c5bfefa22ff",
+  "byteLength": 61891324,
+  "dimensions": [4096, 2048],
+  "pixelFormat": "RGB16",
+  "colorSpace": "sRGB ICC",
+  "projection": "simple cylindrical equirectangular",
+  "axisConvention": "north-up, east-positive longitude, west seam",
+  "release": "2025 CGI Moon Kit color product",
+  "license": "NASA media usage guidelines",
+  "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+  "authoringOnly": true
+}

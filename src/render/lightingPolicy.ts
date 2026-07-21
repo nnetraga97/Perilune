@@ -1,8 +1,17 @@
 import * as THREE from 'three';
 import type { QualityTier } from './bodyRenderer';
 
-export { adaptExposure, createEnvironmentLightingState, environmentLighting } from './exposurePolicy';
-export type { EnvironmentLighting, MutableEnvironmentLighting } from './exposurePolicy';
+export {
+  adaptExposure,
+  createEnvironmentLightingState,
+  environmentLighting,
+  landingVisibilityAid,
+} from './exposurePolicy';
+export type {
+  EnvironmentLighting,
+  LandingVisibilityAid,
+  MutableEnvironmentLighting,
+} from './exposurePolicy';
 
 const _shadowForward = new THREE.Vector3();
 const _shadowReferenceUp = new THREE.Vector3();

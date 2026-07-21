@@ -58,7 +58,7 @@ export function createAirlessSurfaceMaterial(
     planetDetail: detail,
     terrainDetail,
   });
-  material.customProgramCacheKey = () => `airless-surface-v2:${pack ? 'authored' : 'fallback'}:${tier}`;
+  material.customProgramCacheKey = () => `airless-surface-v3:tangent-slope:${pack ? 'authored' : 'fallback'}:${tier}`;
   if (!pack) return material;
 
   const albedo = requiredTexture(pack, 'albedo');
@@ -119,11 +119,13 @@ varying vec3 vAirlessDetailAnchor;
 	${BODY_FIXED_UV_GLSL}
 	${PLANET_DETAIL_GLSL}
 	${TERRAIN_DETAIL_GLSL}
-vec3 decodeAirlessSurfaceOctNormal(vec2 encoded) {
-  vec2 f = encoded * 2.0 - 1.0;
-  vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
-  if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * sign(n.xy);
-  return normalize(n);
+vec3 decodeAirlessSurfaceTangentSlope(vec2 encoded, vec3 bodyDirection) {
+  vec3 radial = normalize(bodyDirection);
+  float xy = length(radial.xy);
+  vec3 east = xy > 0.00001 ? vec3(-radial.y / xy, radial.x / xy, 0.0) : vec3(0.0, 1.0, 0.0);
+  vec3 north = normalize(cross(radial, east));
+  vec2 slope = ((encoded * 255.0 - 128.0) / 127.0) * 2.0;
+  return normalize(radial + east * slope.x + north * slope.y);
 }
 vec4 sampleAirlessLocal(vec2 uv) {
   vec2 wrapped = fract(uv);
@@ -164,6 +166,8 @@ vec3 sampleAirlessLocalNormal(vec3 anchor, vec3 bodyNormal) {
 	vec4 airlessSurfaceMaterial = texture2D(airlessMaterialMap, airlessSurfaceUv);
 	vec4 airlessSurfaceDetail = samplePlanetDetail(vAirlessBodyDirection);
 	vec4 airlessTerrainDetail = sampleTerrainDetail(vAirlessBodyDirection);
+float airlessPolarDetailFade = 1.0 - smoothstep(0.965, 0.99, abs(normalize(vAirlessBodyDirection).z));
+airlessTerrainDetail.a *= airlessPolarDetailFade;
 float airlessLocalFootprint = max(max(length(fwidth(vAirlessDetailAnchor.yz / 6.0)), length(fwidth(vAirlessDetailAnchor.xz / 6.0))), length(fwidth(vAirlessDetailAnchor.xy / 6.0)));
 float airlessLocalFade = airlessUseLocalDetail * (1.0 - smoothstep(0.035, 0.28, airlessLocalFootprint));
 vec4 airlessLocal = sampleAirlessLocalTriplanar(vAirlessDetailAnchor, normalize(vAirlessGeometryNormal));
@@ -182,12 +186,14 @@ roughnessFactor = mix(roughnessFactor, airlessLocal.a, airlessLocalFade * 0.55);
       .replace(
         '#include <normal_fragment_maps>',
         `vec3 airlessRadialNormal = normalize(vAirlessBodyDirection);
-vec3 airlessMacroNormal = decodeAirlessSurfaceOctNormal(texture2D(airlessNormalMap, airlessSurfaceUv).rg);
+vec3 airlessMacroNormal = decodeAirlessSurfaceTangentSlope(texture2D(airlessNormalMap, airlessSurfaceUv).rg, vAirlessBodyDirection);
 vec3 airlessMacroDelta = airlessMacroNormal - airlessRadialNormal * dot(airlessMacroNormal, airlessRadialNormal);
+airlessMacroDelta *= 1.0 - smoothstep(0.965, 0.99, abs(airlessRadialNormal.z));
 vec3 airlessComposedNormal = normalize(normalize(vAirlessGeometryNormal) + airlessMacroDelta * airlessMacroNormalWeight);
 vec3 airlessLocalNormal = sampleAirlessLocalNormal(vAirlessDetailAnchor, normalize(vAirlessGeometryNormal));
 airlessComposedNormal = normalize(mix(airlessComposedNormal, airlessLocalNormal, airlessLocalFade * 0.14));
 vec4 airlessSourceNormal = sampleTerrainDetailNormal(vAirlessBodyDirection);
+airlessSourceNormal.a *= airlessPolarDetailFade;
 vec3 airlessSourceDelta = airlessSourceNormal.rgb - airlessRadialNormal * dot(airlessSourceNormal.rgb, airlessRadialNormal);
 airlessComposedNormal = normalize(airlessComposedNormal + airlessSourceDelta * airlessSourceNormal.a * terrainDetailNormalStrength);
 normal = normalize(normalMatrix * airlessComposedNormal);`,

@@ -155,7 +155,7 @@ export class GameState {
   readonly alarms: GameAlarm[] = [];
   private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
-  private flightAuthority: FrozenPlanetDataAuthority;
+  private readonly flightAuthorities = new Map<string, FrozenPlanetDataAuthority>();
 
   constructor(
     mode: GameMode = 'sandbox',
@@ -167,8 +167,9 @@ export class GameState {
     this.universe = new Universe([...(options.bodies ?? SOL_SYSTEM)], options.homeBodyId ?? HOME_BODY_ID);
     this.campaign = createCampaign(mode);
     const home = this.universe.get(this.universe.homeBodyId);
-    this.flightAuthority = planetDataAuthorityForBody(home);
-    installPlanetDataAuthority(home, this.flightAuthority);
+    const homeAuthority = planetDataAuthorityForBody(home);
+    this.flightAuthorities.set(home.id, homeAuthority);
+    installPlanetDataAuthority(home, homeAuthority);
   }
 
   /** Prepare and freeze numeric terrain authority before any launch placement. */
@@ -181,12 +182,14 @@ export class GameState {
     }
     const authority = await preparePlanetDataAuthority(body, request);
     installPlanetDataAuthority(body, authority);
-    this.flightAuthority = authority;
+    this.flightAuthorities.set(body.id, authority);
     return authority;
   }
 
-  frozenFlightAuthority(): Readonly<FrozenPlanetDataAuthority> {
-    return this.flightAuthority;
+  frozenFlightAuthority(bodyId = this.universe.homeBodyId): Readonly<FrozenPlanetDataAuthority> {
+    const authority = this.flightAuthorities.get(bodyId);
+    if (!authority) throw new Error(`No frozen flight authority for ${bodyId}`);
+    return authority;
   }
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
@@ -306,9 +309,9 @@ export class GameState {
     const installedAuthority = planetDataAuthorityForBody(home);
     const recipe = recipeForBody(home, installedAuthority);
     if (
-      installedAuthority.generation !== this.flightAuthority.generation
-      || recipe.authorityGeneration !== this.flightAuthority.generation
-      || recipe.terrainGeneration !== this.flightAuthority.terrainGeneration
+      installedAuthority.generation !== this.frozenFlightAuthority(home.id).generation
+      || recipe.authorityGeneration !== this.frozenFlightAuthority(home.id).generation
+      || recipe.terrainGeneration !== this.frozenFlightAuthority(home.id).terrainGeneration
     ) {
       throw new Error(`Launch terrain authority generation mismatch for ${home.name}`);
     }
@@ -382,7 +385,6 @@ export class GameState {
     const gv = this.active;
     if (!gv) return false;
     const body = this.universe.get(bodyId);
-    if (body.def.isStar) return false;
 
     // Resolve the old rails/landed pose before changing the vessel's primary.
     this.setWarp(0, false);

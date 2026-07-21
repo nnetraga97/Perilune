@@ -8,8 +8,9 @@ import { decodeFloat32Tiff } from '../render/planetDetail/numericTiff';
 import { kscNavd88ToEgm2008Correction } from '../render/planetDetail/heightDatum';
 import { requestPlanetTile } from '../render/planetDetail/tileRequest';
 import type { FrozenSourceHeightRegion } from './sourceHeightAuthority';
+import moonSite01 from '../../assets/planets/moon-site01-authority.json';
 
-export type PlanetAuthorityRequest = 'parent' | 'ksc-launch';
+export type PlanetAuthorityRequest = 'parent' | 'ksc-launch' | 'moon-site01';
 export type PlanetAuthorityMode = 'resident-parent' | 'promoted-region';
 
 export interface FrozenPlanetDataAuthority {
@@ -145,6 +146,59 @@ async function prepareKscAuthority(body: Body): Promise<FrozenPlanetDataAuthorit
   return authority;
 }
 
+async function prepareMoonSite01Authority(body: Body): Promise<FrozenPlanetDataAuthority> {
+  const cached = promoted.get(`${body.id}:${moonSite01.version}`);
+  if (cached) return cached;
+  const response = await fetch(`/planets/${moonSite01.path}`, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`Site 01 authority HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== moonSite01.byteLength) throw new Error('Site 01 authority byte length changed');
+  if (!globalThis.crypto?.subtle) throw new Error('Site 01 authority requires SHA-256 support');
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const digest = [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join('');
+  if (digest !== moonSite01.sha256) throw new Error('Site 01 authority checksum changed');
+  const samples = new Float32Array(moonSite01.width * moonSite01.height);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const span = moonSite01.quantizationMaximumMeters - moonSite01.quantizationMinimumMeters;
+  for (let index = 0; index < samples.length; index++) {
+    samples[index] = moonSite01.quantizationMinimumMeters + view.getUint16(index * 2, true) / 65535 * span;
+  }
+  const region: FrozenSourceHeightRegion = Object.freeze({
+    datasetId: moonSite01.datasetId,
+    version: moonSite01.version,
+    digest,
+    coverage: Object.freeze([-180, -90, 180, -89] as const),
+    verticalDatum: moonSite01.verticalDatum,
+    engineDatum: moonSite01.verticalDatum,
+    width: moonSite01.width,
+    height: moonSite01.height,
+    blendBandDegrees: 0,
+    projection: 'south-polar-stereographic' as const,
+    sphereRadiusMeters: moonSite01.sphereRadiusMeters,
+    projectedExtentMeters: Object.freeze([...moonSite01.projectedExtentMeters]) as readonly [number, number, number, number],
+    sampleOriginMeters: Object.freeze([...moonSite01.sampleOriginMeters]) as readonly [number, number],
+    pixelSizeMeters: moonSite01.pixelSizeMeters,
+    blendBandMeters: moonSite01.blendBandMeters,
+    minimumHeightMeters: moonSite01.observedMinimumHeightMeters,
+    maximumHeightMeters: moonSite01.observedMaximumHeightMeters,
+    samples,
+  });
+  const generation = `${moonSite01.version}:${digest}`;
+  const authority = Object.freeze({
+    bodyId: body.id,
+    datasetId: moonSite01.datasetId,
+    version: moonSite01.version,
+    coverage: region.coverage,
+    datum: moonSite01.verticalDatum,
+    generation,
+    terrainGeneration: generationNumber(generation),
+    mode: 'promoted-region' as const,
+    region,
+  });
+  promoted.set(`${body.id}:${moonSite01.version}`, authority);
+  return authority;
+}
+
 export function planetDataAuthorityForBody(body: Body): FrozenPlanetDataAuthority {
   return installed.get(body) ?? parentAuthority(body);
 }
@@ -160,11 +214,19 @@ export async function preparePlanetDataAuthority(
   body: Body,
   request: PlanetAuthorityRequest,
 ): Promise<FrozenPlanetDataAuthority> {
-  if (request === 'parent' || body.id !== 'earth') return parentAuthority(body);
+  if (request === 'parent') return parentAuthority(body);
+  if (request === 'moon-site01') {
+    if (body.id !== 'moon') return parentAuthority(body);
+    try {
+      return await prepareMoonSite01Authority(body);
+    } catch (error) {
+      return parentAuthority(body, `Site 01 promotion unavailable: ${String(error)}`);
+    }
+  }
+  if (body.id !== 'earth') return parentAuthority(body);
   try {
     return await prepareKscAuthority(body);
   } catch (error) {
     return parentAuthority(body, `KSC promotion unavailable: ${String(error)}`);
   }
 }
-

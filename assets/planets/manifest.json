@@ -37,6 +37,20 @@
       "high": 134217728
     }
   },
+  "numericAuthorities": [
+    {
+      "bodyId": "moon",
+      "datasetId": "nasa-pgda-lola-site01-5m",
+      "version": "site01-surface-5m-derived-10m-u16-v1",
+      "path": "generated/moon/site01/height-u16.bin",
+      "sha256": "ae96e29314fc50642b61fd07e45bb5f74ccdb1750b235ee4dde241d19fc04909",
+      "byteLength": 5120000,
+      "width": 1600,
+      "height": 1600,
+      "projection": "south-polar-stereographic",
+      "referenceFrame": "MOON_ME DE421"
+    }
+  ],
   "sources": [
     {
       "id": "nasa-black-marble-earth-2016",
@@ -205,9 +219,10 @@
         2880
       ],
       "transformations": [
-        "0.5 meter unsigned LOLA elevation decode",
-        "body-space oct normal derivation",
-        "UASTC KTX2 encoding"
+        "0.5 metre unsigned LOLA elevation decode",
+        "single-valued pole stabilization",
+        "east/north tangent-slope derivation",
+        "lossless RG packaging"
       ],
       "bodies": [
         "moon"
@@ -237,7 +252,7 @@
         -10000,
         10000
       ],
-      "observation": "NASA SVS CGI Moon Kit release 4720",
+      "observation": "NASA SVS CGI Moon Kit release 4720 LOLA height",
       "productKind": "modeled",
       "derivedRecipe": "moon-source-pack-v1",
       "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
@@ -277,20 +292,21 @@
       }
     },
     {
-      "id": "nasa-lro-moon-color-8k",
-      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_8k.tif",
+      "id": "nasa-lro-moon-color-2025-4k",
+      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_4k.tif",
       "author": "NASA Scientific Visualization Studio and LRO",
       "license": "NASA",
       "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
-      "attribution": "NASA LRO/LOLA; used for Earth's Moon without recoloring",
-      "checksumSha256": "db7808e878b6a55eb409bb231eab8deb477f84b5c9d7396d76ff73e5d54992d9",
-      "localPath": "sources/nasa-lro-palla/lroc_color_16bit_srgb_8k.tif",
+      "attribution": "NASA SVS CGI Moon Kit 2025 LROC color map",
+      "checksumSha256": "9731fa8af425b6c2f88f277ecca82bf8c603f3743894f64ed7b25c5bfefa22ff",
+      "localPath": "sources/nasa-lro-moon-2025/lroc_color_16bit_srgb_4k.tif",
       "authoringOnly": true,
       "sourceDimensions": [
-        8192,
-        4096
+        4096,
+        2048
       ],
       "transformations": [
+        "16-bit sRGB decode",
         "Lanczos3 tier resampling",
         "RGB8 fallback and BasisLZ KTX2 encoding"
       ],
@@ -321,7 +337,7 @@
         0,
         65535
       ],
-      "observation": "NASA SVS CGI Moon Kit release 4720",
+      "observation": "NASA SVS CGI Moon Kit 2025 color product",
       "productKind": "composited",
       "derivedRecipe": "moon-source-pack-v1",
       "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
@@ -394,6 +410,59 @@
         "endorsementSafe": true,
         "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
       }
+    },
+    {
+      "id": "nasa-sdo-hmi-visible-photosphere-2010-12-06",
+      "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004200/a004269/sun-hmii-large.png",
+      "author": "NASA Scientific Visualization Studio and SDO/HMI",
+      "license": "NASA",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA SDO/HMI visible photosphere, 2010-12-06",
+      "checksumSha256": "e3f4f8c030e1fe9e4171ae34bd9690b0cd2d7d23a1b48d766a98323a643ff5d0",
+      "localPath": "sources/nasa-sdo-hmi-photosphere/sun-hmii-large.png",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        4104,
+        3840
+      ],
+      "transformations": [
+        "disk detection and centered crop",
+        "linear luminance conversion",
+        "radial limb baseline removal",
+        "bounded signed R8 activity residual",
+        "lossless mipmapped R8 packaging"
+      ],
+      "bodies": [
+        "sun"
+      ],
+      "channels": [
+        "photosphereActivity"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      },
+      "datum": "observer image plane",
+      "verticalDatum": "not-applicable",
+      "projection": "orthographic full disk",
+      "axisOrder": "image-x,image-y",
+      "longitudeDirection": "not-applicable",
+      "seamLongitudeDegrees": 0,
+      "uvOrigin": "north-west",
+      "valueScale": 0.008928571428571428,
+      "valueOffset": -1.1428571428571428,
+      "noDataValue": null,
+      "validRange": [
+        16,
+        240
+      ],
+      "observation": "2010-12-06 HMI continuum intensity",
+      "productKind": "measured",
+      "derivedRecipe": "sun-photosphere-activity-v1",
+      "bodyReferenceFrameVersion": "observer-image-2010-12-06"
     },
     {
       "id": "natural-earth-ii-3.2.0",
@@ -1844,7 +1913,7 @@
       "tier": "low",
       "width": 1024,
       "height": 512,
-      "compressedBytes": 1650830,
+      "compressedBytes": 1590253,
       "transientBytes": 7864320,
       "bootCritical": false,
       "channels": [
@@ -1854,8 +1923,8 @@
           "logicalFormat": "RGB8",
           "packagePath": "generated/moon/low/albedo.ktx2",
           "fallbackPath": "generated/moon/low/albedo.webp",
-          "packageChecksumSha256": "79650b291872e2a3dcd504c42d3ba94ee28f8a58ec2dd358d0c27ec680346aa3",
-          "fallbackChecksumSha256": "d7ccf10db4e15186234079f99d0a5ec01e22f959a92077e9323ceac8969e2a1c",
+          "packageChecksumSha256": "3f86d177b9cfc3b41730245138f5b2eaeb8f97fca060a13ddeaab5429691ad35",
+          "fallbackChecksumSha256": "fadf987bb078d84925865690bf46b62d6f29bf2f739509354590f6be4a56dbcf",
           "gpuFormat": "etc2-rgb",
           "gpuBytes": 349544,
           "fallbackGpuBytes": 2796204,
@@ -1872,8 +1941,8 @@
           "logicalFormat": "RG8",
           "packagePath": "generated/moon/low/normal.ktx2",
           "fallbackPath": "generated/moon/low/normal.png",
-          "packageChecksumSha256": "04c3fcf00c60392b630538340b6075eb6052b9e0fab60cbee8a927dbe296e3f1",
-          "fallbackChecksumSha256": "95b63ea49155fc8d18dd907da88f370cdf3c8527dc33ebdd131632ea8ce82f05",
+          "packageChecksumSha256": "c3056e4225b1da14571b846ad6d8e999fecd3f55e092e834bf6fbc0511d77741",
+          "fallbackChecksumSha256": "e8469c986c0553f5f82e3be1f7b65c81d2bfe5e02c9ddf8d6d3a2b3d238569f9",
           "gpuFormat": "bc5-rg",
           "gpuBytes": 699088,
           "fallbackGpuBytes": 2796204,
@@ -1891,8 +1960,8 @@
           "logicalFormat": "RGBA8",
           "packagePath": "generated/moon/low/material.ktx2",
           "fallbackPath": "generated/moon/low/material.png",
-          "packageChecksumSha256": "c32fd438af8785706b065ae0d60b11166e6f360022e3218a338004441b0a538f",
-          "fallbackChecksumSha256": "5b5fd1bdd784dae278639da411c68dd94c2628ad8a5dd3b474274bceaa730b9c",
+          "packageChecksumSha256": "2fe6032425a94cd2bd3c8ddef5a07e3b791772f781b579a44cecb6f97419f18f",
+          "fallbackChecksumSha256": "6696f889327064ee30fb07dd3c8bdc7ab5df8488cda3c156fdfa18b397428c0f",
           "gpuFormat": "bc3-rgba",
           "gpuBytes": 699088,
           "fallbackGpuBytes": 2796204,
@@ -1947,7 +2016,7 @@
       "tier": "medium",
       "width": 2048,
       "height": 1024,
-      "compressedBytes": 6266932,
+      "compressedBytes": 6116210,
       "transientBytes": 31457280,
       "bootCritical": false,
       "channels": [
@@ -1957,8 +2026,8 @@
           "logicalFormat": "RGB8",
           "packagePath": "generated/moon/medium/albedo.ktx2",
           "fallbackPath": "generated/moon/medium/albedo.webp",
-          "packageChecksumSha256": "cab52206a0f2eda7decf598c2c8af56123a4e74d8a43dc1221757ed602383db9",
-          "fallbackChecksumSha256": "cdb0f9cc790fd52d9f51666d1bbb8fbe69922f10408c0e751600b371682251d9",
+          "packageChecksumSha256": "365f75f932281a86d7636d9d77eeb678610e2fe075bcd0b36e102686db7793be",
+          "fallbackChecksumSha256": "18faaa2977dea2f1516bf7267c942f66e8667d2948a8e598615e74c98c94a644",
           "gpuFormat": "etc2-rgb",
           "gpuBytes": 1398120,
           "fallbackGpuBytes": 11184812,
@@ -1975,8 +2044,8 @@
           "logicalFormat": "RG8",
           "packagePath": "generated/moon/medium/normal.ktx2",
           "fallbackPath": "generated/moon/medium/normal.png",
-          "packageChecksumSha256": "0fb4c8ae7b9d1499d4a53246276dae89285494e0d2aec9cfbc5734c339f740f7",
-          "fallbackChecksumSha256": "b2b9238990f82fe72a3ca6cebf38110dcd85ad73f06dc92322f703f781b95b0d",
+          "packageChecksumSha256": "60c2ae9890c0ac1e353f5ab018dab522c4898dc43072e972fa26e4bef379943a",
+          "fallbackChecksumSha256": "cb27ca945b1c345b12f554a8e6024517c50cbada237a2a49816c966bc97a8dd0",
           "gpuFormat": "bc5-rg",
           "gpuBytes": 2796240,
           "fallbackGpuBytes": 11184812,
@@ -1994,8 +2063,8 @@
           "logicalFormat": "RGBA8",
           "packagePath": "generated/moon/medium/material.ktx2",
           "fallbackPath": "generated/moon/medium/material.png",
-          "packageChecksumSha256": "1dcbf47aaf9dc980b8f6aade6978a8d23eb912aa319e3bc222e0f091cfddd98f",
-          "fallbackChecksumSha256": "2070fe3289915094e4ec081172542b80c43bb88bea98270142ef4cc03901f0b7",
+          "packageChecksumSha256": "b00323463bcb8d9747c2d5a8e33c9732776427e4a1dc5abe2e9a8f96bc1a2362",
+          "fallbackChecksumSha256": "3647898d27d86cff9f81fe270575b8807bc01b8726713b744d0752ba49472377",
           "gpuFormat": "bc3-rgba",
           "gpuBytes": 2796240,
           "fallbackGpuBytes": 11184812,
@@ -2050,7 +2119,7 @@
       "tier": "high",
       "width": 4096,
       "height": 2048,
-      "compressedBytes": 23297808,
+      "compressedBytes": 23047238,
       "transientBytes": 125829120,
       "bootCritical": false,
       "channels": [
@@ -2060,8 +2129,8 @@
           "logicalFormat": "RGB8",
           "packagePath": "generated/moon/high/albedo.ktx2",
           "fallbackPath": "generated/moon/high/albedo.webp",
-          "packageChecksumSha256": "222cc4e35037ab0f3c7621e2a9cd831ece0ebac787305a265eb82475ac9fe412",
-          "fallbackChecksumSha256": "3964a0b9eb2d5b32da7eff2ff919156608053e40711b8b1989515f98abf5013b",
+          "packageChecksumSha256": "e4553bf3e008c44a2aa94dc1f05106b8f0f52d0b92a89107862c5b9545050de3",
+          "fallbackChecksumSha256": "fa4516306755798e9f4a436e4de567f535e08157d3e489e0cb5977a40ea02185",
           "gpuFormat": "etc2-rgb",
           "gpuBytes": 5592424,
           "fallbackGpuBytes": 44739244,
@@ -2078,8 +2147,8 @@
           "logicalFormat": "RG8",
           "packagePath": "generated/moon/high/normal.ktx2",
           "fallbackPath": "generated/moon/high/normal.png",
-          "packageChecksumSha256": "50e2df42b1509d97e8ec7a978c99879f9b38c57d284db5a48de6857581dcf786",
-          "fallbackChecksumSha256": "389936e4a6b2a248df9921d730fcbb88d6722464d11134f5ace6b63da53c98e8",
+          "packageChecksumSha256": "9200553bc725ddd1ec4364e2993e994264a67c67a2f4e5b3f36b9b627683e6b0",
+          "fallbackChecksumSha256": "e449b968639629df359601b3a9541c7e5f89b57cbb443c17c9479d5620b0dfc4",
           "gpuFormat": "bc5-rg",
           "gpuBytes": 11184848,
           "fallbackGpuBytes": 44739244,
@@ -2097,8 +2166,8 @@
           "logicalFormat": "RGBA8",
           "packagePath": "generated/moon/high/material.ktx2",
           "fallbackPath": "generated/moon/high/material.png",
-          "packageChecksumSha256": "53adc4d58632b96c2d328d3bd57338fd0321dc85b1732fe78b17fdc12e5312c9",
-          "fallbackChecksumSha256": "71ad2cf2086c99db862273d67484e471588112ba3b1314960d203ceb60f35e97",
+          "packageChecksumSha256": "4dee1f2e1ff2e1b51cdcf5a2ea22d1330b878a11de81e22b8a59ab664280fa0a",
+          "fallbackChecksumSha256": "2bd4d7aeb1e187b1e27efb38350df6821aa65a89fd8d58c3599d31d941701b39",
           "gpuFormat": "bc3-rgba",
           "gpuBytes": 11184848,
           "fallbackGpuBytes": 44739244,
@@ -2212,6 +2281,96 @@
             "astc-rgba"
           ],
           "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "sun",
+      "tier": "low",
+      "width": 1024,
+      "height": 512,
+      "compressedBytes": 172062,
+      "transientBytes": 262144,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "photosphereActivity",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/sun/low/photosphereActivity.ktx2",
+          "fallbackPath": "generated/sun/low/photosphereActivity.png",
+          "packageChecksumSha256": "0b705a0ba0e90aeb6a88a0d5b751b1e190b19a207d446b7ea547bbf5f11707e0",
+          "fallbackChecksumSha256": "208473e24889ca4a9c28c05acdcc87e22134b5be3a2906da7f7fc7417c5dfa0c",
+          "gpuFormat": "r8",
+          "gpuBytes": 349525,
+          "fallbackGpuBytes": 1398100,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": true,
+          "width": 512,
+          "height": 512
+        }
+      ]
+    },
+    {
+      "bodyId": "sun",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 699560,
+      "transientBytes": 1048576,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "photosphereActivity",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/sun/medium/photosphereActivity.ktx2",
+          "fallbackPath": "generated/sun/medium/photosphereActivity.png",
+          "packageChecksumSha256": "90fc857b36d1cd8224f8d9aff1e6b8c4324d098166ef046ce511490614419760",
+          "fallbackChecksumSha256": "d5e3d17572cd5252caad7147b030b2df8671fbc3438542ff1a8b25f6238bbc1f",
+          "gpuFormat": "r8",
+          "gpuBytes": 1398101,
+          "fallbackGpuBytes": 5592404,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": true,
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "bodyId": "sun",
+      "tier": "high",
+      "width": 4096,
+      "height": 2048,
+      "compressedBytes": 2902494,
+      "transientBytes": 4194304,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "photosphereActivity",
+          "colorSpace": "linear",
+          "logicalFormat": "R8",
+          "packagePath": "generated/sun/high/photosphereActivity.ktx2",
+          "fallbackPath": "generated/sun/high/photosphereActivity.png",
+          "packageChecksumSha256": "c5a826326d154fe859a231c3478ae7baa83f7b926ff8ecf4c29c1094e1be369d",
+          "fallbackChecksumSha256": "346719453fc9fea30b3162b10f26e0f8a0ae659573cc72391660bf8d5962d878",
+          "gpuFormat": "r8",
+          "gpuBytes": 5592405,
+          "fallbackGpuBytes": 22369620,
+          "fallbackLayout": "r",
+          "transcodeTargets": [
+            "r8"
+          ],
+          "mipmapped": true,
+          "width": 2048,
+          "height": 2048
         }
       ]
     },

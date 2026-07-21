@@ -7,12 +7,12 @@ describe('planet visual-detail budgets', () => {
     expect(planetDetailBudget('medium')).toMatchObject({
       enabled: true, activeGpuBytes: 16 * 1024 * 1024, gpuBytes: 32 * 1024 * 1024, decodedCpuBytes: 24 * 1024 * 1024,
       persistentBytes: 256 * 1024 * 1024, concurrentRequests: 4,
-      maximumVisualRequestsPerGeneration: 9, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 13,
+      maximumVisualRequestsPerGeneration: 16, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 20,
     });
     expect(planetDetailBudget('high')).toMatchObject({
       enabled: true, activeGpuBytes: 16 * 1024 * 1024, gpuBytes: 64 * 1024 * 1024, decodedCpuBytes: 48 * 1024 * 1024,
       persistentBytes: 512 * 1024 * 1024, concurrentRequests: 6,
-      maximumVisualRequestsPerGeneration: 9, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 13,
+      maximumVisualRequestsPerGeneration: 16, maximumNumericRequestsPerGeneration: 4, maximumRequestsPerGeneration: 20,
     });
   });
 
@@ -28,8 +28,8 @@ describe('planet visual-detail budgets', () => {
     expect(budget.stats()).toEqual({ proxyRequests: 2, proxyBytes: 6 });
   });
 
-  it('fits one complete 3x3 source atlas within every enabled tier', () => {
-    expect(512 * 3 * 512 * 3 * 4).toBeLessThanOrEqual(planetDetailBudget('medium').gpuBytes);
-    expect(512 * 3 * 512 * 3 * 4).toBeLessThanOrEqual(planetDetailBudget('high').gpuBytes);
+  it('fits one complete 4x4 coarse source atlas within every enabled tier', () => {
+    expect(512 * 4 * 512 * 4 * 4).toBeLessThanOrEqual(planetDetailBudget('medium').gpuBytes);
+    expect(512 * 4 * 512 * 4 * 4).toBeLessThanOrEqual(planetDetailBudget('high').gpuBytes);
   });
 });

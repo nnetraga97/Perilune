@@ -18,3 +18,15 @@ export function createGlobalSphereGeometry(tier: QualityTier): THREE.SphereGeome
   installBodyFixedDirectionAttribute(geometry);
   return geometry;
 }
+
+/**
+ * Uniform triangular sphere used by authored airless bodies. Unlike a UV
+ * sphere it has no longitude fan at either pole; shaders derive map UVs from
+ * the body-direction attribute, so geometry UV seams are unnecessary.
+ */
+export function createAirlessGlobalGeometry(tier: QualityTier): THREE.BufferGeometry {
+  const detail = tier === 'low' ? 4 : tier === 'medium' ? 5 : 6;
+  const geometry = new THREE.IcosahedronGeometry(1, detail);
+  installBodyFixedDirectionAttribute(geometry);
+  return geometry;
+}

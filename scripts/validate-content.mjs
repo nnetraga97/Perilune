@@ -88,7 +88,7 @@ if (recipeFile) {
 }
 
 const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL', 'LGPL-3.0']);
-const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'emissive', 'localDetail', 'surfaceClass', 'surfaceClassRegional']);
+const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'emissive', 'localDetail', 'surfaceClass', 'surfaceClassRegional', 'photosphereActivity']);
 const channelContracts = {
   albedo: {
     colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
@@ -125,6 +125,10 @@ const channelContracts = {
   surfaceClassRegional: {
     colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
     transcodeTargets: ['r8'], mipmapped: false,
+  },
+  photosphereActivity: {
+    colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
+    transcodeTargets: ['r8'],
   },
 };
 const tierDimensions = {
@@ -220,15 +224,16 @@ function validateKtx2(packageFile, pack, channel) {
   const channelWidth = channel.width ?? pack.width;
   const channelHeight = channel.height ?? pack.height;
   const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
+  const r8Channel = classChannel || channel.name === 'photosphereActivity';
   const expectedLevels = classChannel ? 1 : fullMipLevelCount(channelWidth, channelHeight);
 
   if (pixelWidth !== channelWidth || pixelHeight !== channelHeight) {
     errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${channelWidth}x${channelHeight}`);
   }
   const directHeight = channel.name === 'heightMacro';
-  const expectedVkFormat = classChannel ? 9 : directHeight ? 16 : 0; // VK_FORMAT_R8_UNORM / R8G8_UNORM
+  const expectedVkFormat = r8Channel ? 9 : directHeight ? 16 : 0; // VK_FORMAT_R8_UNORM / R8G8_UNORM
   if (vkFormat !== expectedVkFormat || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
-    errors.push(`${label} must be a 2D ${classChannel ? 'lossless R8' : directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
+    errors.push(`${label} must be a 2D ${r8Channel ? 'lossless R8' : directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
       `with vkFormat ${expectedVkFormat}, typeSize 1, and one face`);
   }
   if (levelCount !== expectedLevels) {
@@ -266,7 +271,7 @@ function validateKtx2(packageFile, pack, channel) {
       descriptorBlockSize < 40 || descriptorBlockSize > dfdLength - 4) {
       errors.push(`${label} DFD descriptor is malformed`);
     }
-    const expectedEncoding = classChannel
+    const expectedEncoding = r8Channel
       ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 1, blockWidth: 0, blockHeight: 0,
         name: 'lossless R8 with Zstd' }
       : directHeight
@@ -336,7 +341,7 @@ function validateKtx2(packageFile, pack, channel) {
     if (supercompressionScheme === 2) {
       const mipWidth = Math.max(1, channelWidth >> level);
       const mipHeight = Math.max(1, channelHeight >> level);
-      const expectedUncompressedBytes = classChannel
+      const expectedUncompressedBytes = r8Channel
         ? mipWidth * mipHeight
         : directHeight
         ? mipWidth * mipHeight * 2
@@ -746,11 +751,11 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
   if (!Array.isArray(manifest.packs)) {
     errors.push('Manifest packs must be an array');
   } else {
-    const hasSolContent = manifest.packs.some((pack) => pack.bodyId === 'earth' || pack.bodyId === 'moon') ||
+    const hasSolContent = manifest.packs.some((pack) => ['sun', 'earth', 'moon'].includes(pack.bodyId)) ||
       (Array.isArray(manifest.sources) && manifest.sources.some((source) =>
-        Array.isArray(source.bodies) && source.bodies.some((bodyId) => bodyId === 'earth' || bodyId === 'moon')));
+        Array.isArray(source.bodies) && source.bodies.some((bodyId) => ['sun', 'earth', 'moon'].includes(bodyId))));
     for (const tier of ['low', 'medium', 'high']) {
-      for (const bodyId of ['veyra', ...(hasSolContent ? ['earth', 'moon'] : [])]) {
+      for (const bodyId of ['veyra', ...(hasSolContent ? ['sun', 'earth', 'moon'] : [])]) {
         const count = manifest.packs.filter((pack) => pack.bodyId === bodyId && pack.tier === tier).length;
         if (count !== 1) errors.push(`Manifest must contain exactly one ${bodyId} ${tier} pack, got ${count}`);
       }
@@ -800,6 +805,13 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
           errors.push(`Pack moon/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
         }
       }
+      if (pack.bodyId === 'sun') {
+        const exactChannels = ['photosphereActivity'];
+        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
+        if (presentChannels.length !== 1 || !presentChannels.includes('photosphereActivity')) {
+          errors.push(`Pack sun/${pack.tier} must have exact channel photosphereActivity`);
+        }
+      }
       if (!Array.isArray(pack.channels) || pack.channels.length === 0) {
         errors.push(`Pack ${pack.bodyId}/${pack.tier} has no channels`);
         continue;
@@ -828,6 +840,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         const channelWidth = channel.width ?? pack.width;
         const channelHeight = channel.height ?? pack.height;
         const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
+        const r8Channel = classChannel || channel.name === 'photosphereActivity';
         const derivedFallbackGpuBytes = dimensions
           ? classChannel ? channelWidth * channelHeight : fullMipRgbaBytes(channelWidth, channelHeight)
           : null;
@@ -856,8 +869,8 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (!gpuFormat) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has unknown GPU format`);
         } else if (dimensions) {
-          const derivedGpuBytes = classChannel
-            ? channelWidth * channelHeight * gpuFormat.blockBytes
+          const derivedGpuBytes = r8Channel
+            ? (classChannel ? channelWidth * channelHeight : fullMipChainBytes(channelWidth, channelHeight, gpuFormat))
             : fullMipChainBytes(channelWidth, channelHeight, gpuFormat);
           if (channel.gpuBytes !== derivedGpuBytes) {
             errors.push(
@@ -931,7 +944,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
       errors.push('Medium boot-critical packs exceed transfer budget');
     }
     for (const tier of hasSolContent ? ['low', 'medium', 'high'] : []) {
-      const combinedSolPackBytes = ['earth', 'moon'].reduce(
+      const combinedSolPackBytes = ['sun', 'earth', 'moon'].reduce(
         (sum, bodyId) => sum + (worstCaseByTierAndBody.get(`${tier}/${bodyId}`) ?? 0),
         0,
       );
@@ -939,6 +952,22 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
       if (Number.isInteger(budgets.totalRendererGpuBytes?.[tier]) &&
         combinedSolBytes > budgets.totalRendererGpuBytes[tier]) {
         errors.push(`Combined Sol ${tier} renderer assets exceed total renderer GPU budget`);
+      }
+    }
+  }
+  if (manifest.numericAuthorities !== undefined && !Array.isArray(manifest.numericAuthorities)) {
+    errors.push('Planet manifest numericAuthorities must be an array when present');
+  } else {
+    for (const authority of manifest.numericAuthorities ?? []) {
+      requireString(authority.bodyId, 'Numeric authority bodyId');
+      requireString(authority.datasetId, 'Numeric authority datasetId');
+      requireString(authority.version, 'Numeric authority version');
+      requirePositiveInteger(authority.byteLength, 'Numeric authority byteLength');
+      const authorityPath = safeManifestAssetPath(dirname(manifestPath), authority.path, 'Numeric authority');
+      if (authorityPath && !existsSync(authorityPath)) errors.push(`Numeric authority is missing: ${authorityPath}`);
+      if (authorityPath && existsSync(authorityPath)) {
+        if (statSync(authorityPath).size !== authority.byteLength) errors.push(`Numeric authority byte length changed: ${authority.path}`);
+        if (sha256File(authorityPath) !== authority.sha256) errors.push(`Numeric authority checksum changed: ${authority.path}`);
       }
     }
   }

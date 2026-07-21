@@ -21,13 +21,14 @@ describe('Sol visual reference stations', () => {
   it('covers the Sun, global Earth, atmosphere descent, ocean, and lunar matrix', () => {
     const ids = new Set(SOL_VISUAL_REFERENCE_STATIONS.map((station) => station.id));
     for (const required of [
-      'sun-from-earth', 'sun-partial-occultation',
+      'sun-from-earth', 'sun-zoomed-disk', 'sun-partial-occultation',
       'earth-day-full', 'earth-terminator-full', 'earth-night-full',
       'earth-limb-2000km', 'earth-low-orbit', 'earth-low-orbit-alt-sun', 'earth-100km', 'earth-20km',
       'earth-10km', 'earth-ksc-1km', 'earth-ksc-ground', 'earth-ksc-coast-transect',
       'earth-1km', 'earth-ground', 'earth-ocean-horizon',
-      'moon-from-earth', 'moon-near-full', 'moon-far-full', 'moon-polar',
-      'moon-low-orbit', 'moon-surface',
+      'moon-from-earth', 'moon-near-full', 'moon-far-full', 'moon-polar', 'moon-south-pole-orbit',
+      'moon-detail-2000km', 'moon-detail-1100km', 'moon-detail-300km', 'moon-low-orbit', 'moon-surface',
+      'moon-site01-10km', 'moon-site01-1km', 'moon-site01-surface',
     ]) expect(ids.has(required), required).toBe(true);
   });
 

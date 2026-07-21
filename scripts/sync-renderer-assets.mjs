@@ -73,6 +73,15 @@ for (const pack of checkedArtifact.manifest.packs) {
     }
   }
 }
+for (const authority of checkedArtifact.manifest.numericAuthorities ?? []) {
+  const source = checkedAssetPath(planetSourceDir, authority.path);
+  const expected = await readFile(source);
+  const checksum = createHash('sha256').update(expected).digest('hex');
+  if (expected.byteLength !== authority.byteLength || checksum !== authority.sha256) {
+    throw new Error(`Validated numeric authority mismatch for ${authority.path}`);
+  }
+  checkedPlanetFiles.push({ relativePath: authority.path, checksum, source, expected });
+}
 await rm(planetStagedDir, { recursive: true, force: true });
 await mkdir(planetStagedDir, { recursive: true });
 try {

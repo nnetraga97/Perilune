@@ -26,9 +26,12 @@ export class SolarBodyRenderer implements BodyRenderer {
   private readonly coronaGeometry = new THREE.CircleGeometry(1.85, 128);
   private readonly diskMaterial: PhotosphereMaterial;
   private readonly coronaMaterial: CoronaMaterial;
+  private readonly neutralActivity = new THREE.DataTexture(new Uint8Array([128]), 1, 1, THREE.RedFormat);
   private readonly light = new THREE.DirectionalLight('#fff4df', 3.1);
   private readonly lastMode = 'proxy' as const;
   private lastAngularRadius = 0;
+  private assetTier: QualityTier | 'procedural' = 'procedural';
+  private assetBytes = 0;
   private disposed = false;
 
   constructor(
@@ -40,7 +43,9 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.bodyId = body.id;
     this.proxy.name = `solar-proxy:${body.id}`;
     this.proxy.userData.starPresentation = true;
-    this.diskMaterial = createPhotosphereMaterial(descriptor.albedo.high);
+    this.neutralActivity.colorSpace = THREE.NoColorSpace;
+    this.neutralActivity.needsUpdate = true;
+    this.diskMaterial = createPhotosphereMaterial(descriptor.albedo.high, this.neutralActivity);
     this.coronaMaterial = createCoronaMaterial();
     const disk = new THREE.Mesh(this.diskGeometry, this.diskMaterial);
     disk.renderOrder = 20;
@@ -58,7 +63,26 @@ export class SolarBodyRenderer implements BodyRenderer {
   get ready(): boolean { return !this.disposed; }
 
   stageAssets(pack: Readonly<RuntimeBodyAssetPack> | null): void {
-    if (pack !== null) throw new Error(`${this.bodyId} solar renderer accepts procedural assets only`);
+    if (pack === null) {
+      this.diskMaterial.uniforms.uActivityMap.value = this.neutralActivity;
+      this.diskMaterial.uniforms.uUseActivity.value = 0;
+      this.assetTier = 'procedural';
+      this.assetBytes = 0;
+      return;
+    }
+    if (pack.bodyId !== this.bodyId) throw new Error(`Cannot stage ${pack.bodyId} assets on ${this.bodyId}`);
+    const activity = pack.textures.get('photosphereActivity');
+    if (!activity) throw new Error(`${pack.bodyId}/${pack.tier} is missing photosphereActivity`);
+    activity.colorSpace = THREE.NoColorSpace;
+    activity.wrapS = THREE.ClampToEdgeWrapping;
+    activity.wrapT = THREE.ClampToEdgeWrapping;
+    activity.minFilter = THREE.LinearMipmapLinearFilter;
+    activity.magFilter = THREE.LinearFilter;
+    activity.needsUpdate = true;
+    this.diskMaterial.uniforms.uActivityMap.value = activity;
+    this.diskMaterial.uniforms.uUseActivity.value = 1;
+    this.assetTier = pack.tier;
+    this.assetBytes = pack.gpuBytes;
   }
 
   update(frame: Readonly<BodyRenderFrame>): void {
@@ -80,6 +104,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.diskMaterial.uniforms.uTime.value = frame.time;
     this.coronaMaterial.uniforms.uOpacity.value = 0.18;
     this.coronaMaterial.uniforms.uVisibleSolarFraction.value = frame.solarVisibleFraction;
+    this.coronaMaterial.uniforms.uProjectedRadiusPixels.value = projection.projectedPixelRadius;
     this.updateOccluderMask(frame);
 
     this.light.position.set(
@@ -97,6 +122,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     const tangentSolarRadius = Math.tan(frame.projection.angularRadius);
     if (!occluder || !(occluder.angularRadius > 0) || !(tangentSolarRadius > 0)) {
       this.diskMaterial.uniforms.uUseOccluder.value = 0;
+      this.coronaMaterial.uniforms.uUseOccluder.value = 0;
       return;
     }
     _occluderDirection.set(
@@ -109,6 +135,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     const forward = -_occluderDirection.z;
     if (!(forward > 0)) {
       this.diskMaterial.uniforms.uUseOccluder.value = 0;
+      this.coronaMaterial.uniforms.uUseOccluder.value = 0;
       return;
     }
     this.diskMaterial.uniforms.uOccluderCenter.value.set(
@@ -118,6 +145,9 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.diskMaterial.uniforms.uOccluderRadius.value =
       Math.tan(occluder.angularRadius) / (forward * tangentSolarRadius);
     this.diskMaterial.uniforms.uUseOccluder.value = 1;
+    this.coronaMaterial.uniforms.uOccluderCenter.value.copy(this.diskMaterial.uniforms.uOccluderCenter.value);
+    this.coronaMaterial.uniforms.uOccluderRadius.value = this.diskMaterial.uniforms.uOccluderRadius.value;
+    this.coronaMaterial.uniforms.uUseOccluder.value = 1;
   }
 
   stats(): Readonly<BodyRendererStats> {
@@ -128,8 +158,9 @@ export class SolarBodyRenderer implements BodyRenderer {
       exposure: this.disposed ? 0 : this.exposure,
       presentationMode: this.lastMode,
       angularRadius: this.lastAngularRadius,
-      assetTier: 'procedural',
-      assetBytes: 0,
+      assetTier: this.assetTier,
+      assetBytes: this.assetBytes,
+      solarRegionLuminance: Object.freeze({ disk: 1, corona: 0.18, glare: 0 }),
       lutBytes: 0,
       cloudHistoryBytes: 0,
       heightCacheBytes: 0,
@@ -144,6 +175,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.coronaGeometry.dispose();
     this.diskMaterial.dispose();
     this.coronaMaterial.dispose();
+    this.neutralActivity.dispose();
     this.light.dispose();
     this.root.clear();
   }

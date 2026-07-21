@@ -663,9 +663,12 @@ describe('planet asset loading boundary', () => {
     expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
     const production = checkPlanetManifest(checkedPlanetArtifact);
-    expect(production.packs).toHaveLength(11);
+    expect(production.packs).toHaveLength(14);
     expect(production.hasPack('earth', 'low')).toBe(true);
     expect(production.hasPack('earth', 'medium')).toBe(true);
+    expect(production.hasPack('sun', 'low')).toBe(true);
+    expect(production.hasPack('sun', 'medium')).toBe(true);
+    expect(production.hasPack('sun', 'high')).toBe(true);
     expect(production.hasPack('earth', 'high')).toBe(true);
     expect(production.hasPack('moon', 'low')).toBe(true);
     expect(production.hasPack('moon', 'medium')).toBe(true);
