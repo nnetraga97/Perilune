@@ -91,6 +91,7 @@ const RESOURCE_META: Readonly<Record<Exclude<HudResource, 'ore'>, {
 
 const SAS_MODES: Array<{ mode: SasMode; label?: string; icon?: NavballIcon; title: string }> = [
   { mode: 'stability', label: '◎', title: 'Stability assist' },
+  { mode: 'ascent', label: '↑', title: 'Launch guidance' },
   { mode: 'prograde', icon: 'prograde', title: 'Prograde' },
   { mode: 'retrograde', icon: 'retrograde', title: 'Retrograde' },
   { mode: 'normal', label: '△', title: 'Normal' },
@@ -256,7 +257,8 @@ export class FlightHud {
       this.gaugeHosts.set(resource, indicator);
       this.gaugeTooltips.set(resource, el('span', 'hud-resource-tooltip', indicator, meta.label));
     }
-    mk('Map', 'Toggle map view (M)', cb.onToggleMap);
+    const mapBtn = mk('Map', 'Toggle map view (M)', cb.onToggleMap);
+    mapBtn.dataset.action = 'map';
     mk('QS', 'Quicksave (F5)', cb.onQuickSave);
     mk('QL', 'Quickload (F9)', cb.onQuickLoad);
     mk('Revert', 'Revert to launch', cb.onRevert);

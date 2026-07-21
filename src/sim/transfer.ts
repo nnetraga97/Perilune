@@ -43,6 +43,13 @@ export interface TransferPlan {
   accuracy: 'refined-intercept' | 'phase-estimate';
 }
 
+export interface MoonCourseCorrection {
+  /** Small follow-up node that corrects finite-burn departure error. */
+  node: ManeuverNode;
+  /** Numerically predicted lunar periapsis after the correction. */
+  approachAltitude: number;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _targetR = new Vec3();
@@ -257,12 +264,23 @@ export function refineLambertMoonTransfer(
     };
   };
 
-  for (const candidate of alternates) {
+  // The cheapest Lambert solution is not necessarily the useful lunar
+  // approach once the patched-conic encounter is evaluated. Compare a bounded
+  // set of the lowest-dV candidates and choose the one closest to the requested
+  // periapsis instead of accepting the first Moon encounter, which can be a
+  // high flyby that the capture tutorial cannot complete.
+  for (const candidate of alternates.slice(0, 32)) {
     const candidateApproach = evaluateApproach(candidate.node, candidate.transferTime);
     if (!candidateApproach) continue;
-    resolved = candidate;
-    resolvedApproach = candidateApproach;
-    break;
+    if (
+      !resolved
+      || !resolvedApproach
+      || candidateApproach.score < resolvedApproach.score
+      || (candidateApproach.score === resolvedApproach.score && candidate.deltaV < resolved.deltaV)
+    ) {
+      resolved = candidate;
+      resolvedApproach = candidateApproach;
+    }
   }
   if (!resolved || !resolvedApproach) return null;
 
@@ -393,6 +411,73 @@ function refineMoonIntercept(
     transferTime,
     targetAltitude,
   ) ?? (best ? { node: best.node, approachAltitude: best.approachAltitude, transferTime } : null);
+}
+
+/**
+ * Plan a bounded post-departure correction from the live Earth-centered state.
+ * Long tutorial burns cannot exactly reproduce an impulsive node; this small
+ * follow-up burn restores the intended low lunar approach from the achieved
+ * trajectory instead of leaving the player on an unreachable high flyby.
+ */
+export function planMoonCourseCorrection(
+  universe: Universe,
+  time: number,
+  from: Body,
+  moon: Body,
+  vesselPosition: Readonly<Vec3>,
+  vesselVelocity: Readonly<Vec3>,
+  targetAltitude = Math.max(50_000, moon.radius * 0.15),
+): MoonCourseCorrection | null {
+  if (moon.parent !== from) return null;
+  const reference = stateToElements(from.mu, vesselPosition, vesselVelocity, time);
+  const correctionTime = time + 30;
+  const horizon = Math.max(172_800, moon.orbitalPeriod * 0.15);
+  type Candidate = MoonCourseCorrection & { score: number; deltaV: number };
+  const evaluate = (node: ManeuverNode): Candidate | null => {
+    const encounter = predictTrajectory(
+      universe,
+      from,
+      orbitAfterNode(reference, node),
+      node.time,
+      horizon,
+    ).encounter;
+    if (!encounter || encounter.bodyId !== moon.id) return null;
+    return {
+      node,
+      approachAltitude: encounter.periapsisAltitude,
+      score: Math.abs(encounter.periapsisAltitude - targetAltitude),
+      deltaV: Math.hypot(node.prograde, node.normal, node.radial),
+    };
+  };
+
+  let best = evaluate({ time: correctionTime, prograde: 0, normal: 0, radial: 0 });
+  if (!best) return null;
+  if (best.approachAltitude >= 30_000 && best.approachAltitude <= 500_000) return null;
+  let componentStep = 25;
+  for (let pass = 0; pass < 14 && best.score > 5_000; pass++) {
+    let improved = false;
+    for (const component of ['prograde', 'normal', 'radial'] as const) {
+      for (const direction of [-1, 1]) {
+        const candidate = evaluate({
+          ...best.node,
+          [component]: best.node[component] + direction * componentStep,
+        });
+        if (
+          candidate
+          && (candidate.score < best.score
+            || (candidate.score === best.score && candidate.deltaV < best.deltaV))
+        ) {
+          best = candidate;
+          improved = true;
+        }
+      }
+    }
+    componentStep *= improved ? 0.7 : 0.5;
+  }
+  return best.approachAltitude <= 500_000 ? {
+    node: best.node,
+    approachAltitude: best.approachAltitude,
+  } : null;
 }
 
 function nearestFuturePhaseTime(

@@ -502,8 +502,13 @@ export class Editor {
     }
   }
 
-  private loadCraft(craft: Craft): void {
-    this.pushHistory();
+  loadCraft(craft: Craft, recordHistory = true): void {
+    if (recordHistory) this.pushHistory();
+    else {
+      this.history = [];
+      this.redoHistory = [];
+      this.updateHistoryButtons();
+    }
     this.restoreCraftSnapshot(craft);
     this.fitCamera();
   }

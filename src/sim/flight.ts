@@ -30,6 +30,7 @@ import {
 } from './bodyOrientation';
 import type { BufferedResult, ScienceKeyId } from './science';
 import { LEGACY_FLIGHT_TUNING, type FlightTuning } from './gameplayTuning';
+import { launchGuidance } from './guidance';
 
 export type SasMode =
   | 'off'
@@ -40,6 +41,7 @@ export type SasMode =
   | 'antinormal'
   | 'radial-out'
   | 'radial-in'
+  | 'ascent'
   | 'node'
   | 'custom';
 
@@ -122,11 +124,10 @@ export function refreshDerived(v: VesselRuntime): void {
   v.crossfeedIndex = buildCrossfeedIndex(v.craft);
   let cap = 0;
   for (const p of v.craft.parts) {
-    const b = defOf(p).battery;
+    const def = defOf(p);
+    const b = def.battery;
     if (b) cap += b.capacity;
-    const pod = defOf(p).pod;
-    if (pod) cap += 50;
-    if (defOf(p).probe) cap += 30;
+    cap += def.resources?.charge ?? 0;
   }
   v.charge.capacity = cap;
   v.charge.amount = Math.min(v.charge.amount, cap);
@@ -990,10 +991,10 @@ function stepElectricity(v: VesselRuntime, ctx: StepContext, dt: number): void {
       const lit = !behind;
       if (lit) net += def.solar.chargeRate;
     }
-    if (def.probe) net -= 0.35;
-    if (def.pod) net -= 0.15;
+    if (def.probe) net -= 0.035;
+    if (def.pod) net -= 0.015;
   }
-  if (v.sas !== 'off') net -= 0.4;
+  if (v.sas !== 'off') net -= 0.04;
   v.charge.amount = clamp(v.charge.amount + net * dt, 0, v.charge.capacity);
 }
 
@@ -1095,6 +1096,9 @@ function computeCommandTorque(v: VesselRuntime, body: Body, out: Vec3, dt: numbe
   if (surfaceRef) _refVel.sub(surfaceVelocity(body, v.pos, _wind));
   const dir = _err;
   switch (v.sas) {
+    case 'ascent':
+      dir.copy(launchGuidance(v, body).dir);
+      break;
     case 'prograde':
       dir.copy(_refVel).normalize();
       break;

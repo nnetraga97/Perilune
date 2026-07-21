@@ -1170,11 +1170,28 @@ export function injectUiStyles(): void {
       /* ============================== tutorial */
       .tut-box { position: absolute; left: 260px; top: 56px; width: 320px;
         background: rgba(14,24,32,0.95); border: 1px solid var(--ui-accent);
-        border-radius: 10px; padding: 12px 14px; pointer-events: auto; z-index: 40; }
+        border-radius: 10px; padding: 10px 14px 12px; pointer-events: auto; z-index: 40;
+        box-shadow:0 12px 32px rgba(0,0,0,.36); }
+      .tut-box.dragging { user-select:none; box-shadow:0 18px 42px rgba(0,0,0,.48); }
+      .tut-header { display:flex; align-items:center; justify-content:space-between; gap:10px;
+        min-height:24px; cursor:grab; touch-action:none; outline:none; }
+      .tut-header:focus-visible { box-shadow:inset 0 0 0 1px var(--ui-accent); border-radius:4px; }
+      .tut-box.dragging .tut-header { cursor:grabbing; }
       .tut-progress { font-size: 10px; letter-spacing: 2px; color: var(--ui-accent); }
+      .tut-move-hint { color:#718995; font:8px var(--ui-mono); letter-spacing:1.2px; }
       .tut-title { font-size: 15px; margin: 4px 0 6px; color: #fff; }
       .tut-text { font-size: 12.5px; line-height: 1.5; color: #c4d2dd; }
-      .tut-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+      .tut-actions { display: flex; justify-content: flex-end; flex-wrap:wrap; gap: 6px; margin-top: 10px; }
+      .tut-actions .hud-btn { min-height:30px; }
+      .tut-actions [hidden] { display:none !important; }
+      .tut-actions .tut-continue { border-color:#77bdd8; background:#17394a; color:#effbff; }
+      .tut-actions .tut-second-light { border-color:#9784c7; color:#f3efff; }
+      @media (max-width:700px) {
+        .tut-box { position:fixed; left:8px; right:8px; top:calc(8px + env(safe-area-inset-top));
+          width:auto; padding:10px 12px; border-radius:8px; }
+        .tut-title { font-size:14px; }
+        .tut-text { font-size:11.5px; line-height:1.4; }
+      }
   `;
   document.head.appendChild(style);
 }

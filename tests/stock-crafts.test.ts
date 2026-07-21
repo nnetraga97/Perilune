@@ -2,19 +2,261 @@ import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import {
   BUILT_IN_CRAFTS,
+  createFirstLightRocket,
   createOdysseyOrbiter,
+  createSecondLightCraft,
   createWayfarerDemonstrator,
 } from '../src/content/crafts';
+import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
 import { partById } from '../src/content/parts';
 import { validateCraftFile } from '../src/save/persistence';
 import { deriveInterstageShroud } from '../src/sim/interstage';
 import { analyzeCraft, buildAutoStages } from '../src/sim/vessel';
 import { evaluateStructure } from '../src/sim/structure';
 import { Vec3 } from '../src/core/vec3';
+import { apoapsisOf, elementsAtTime, periapsisOf, stateToElements } from '../src/core/orbit';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import { ascentGuidance } from '../src/sim/guidance';
+import { maxThrust } from '../src/sim/flight';
+import { planMoonCourseCorrection, planTransfer } from '../src/sim/transfer';
+import { estimateBurnTime, nodeBurnVector, orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
 
 describe('built-in craft library', () => {
+  it('reaches Earth orbit with a verified Moon intercept and capture reserve', () => {
+    const craft = createFirstLightRocket();
+    expect(BUILT_IN_CRAFTS.map((entry) => entry.id)).toContain('first-light-launch-vehicle');
+    expect(validateCraftFile(JSON.parse(JSON.stringify(craft)))).not.toBeNull();
+    expect(craft.parts).toHaveLength(35);
+    expect(craft.parts.filter((part) => part.defId === 'batt-m')).toHaveLength(1);
+    expect(craft.stages.map((stage) => stage.partKeys.map((key) => (
+      craft.parts.find((part) => part.key === key)!.defId
+    )))).toEqual([
+      ['eng-mule', 'srb-torch', 'srb-torch', 'srb-torch', 'srb-torch'],
+      ['dec-radial', 'dec-radial', 'dec-radial', 'dec-radial'],
+      ['dec-m', 'eng-mule'],
+      ['dec-interstage-ms', 'eng-pike'],
+      ['dec-s', 'eng-ember'],
+      ['dec-s'],
+      ['chute-main'],
+    ]);
+
+    const analysis = analyzeCraft(
+      craft,
+      9.80665,
+      101_325,
+      GAMEPLAY_PROFILES.sol.flightTuning,
+    );
+    expect(analysis.totalDeltaV).toBeGreaterThan(12_000);
+    expect(analysis.stages[0].twrStart).toBeGreaterThan(2.5);
+    expect(analysis.stages[0].twrStart).toBeLessThan(2.8);
+    expect(analysis.warnings).toEqual([]);
+
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    let vessel = game.spawnOnPad(craft, craft.name);
+    expect(vessel.runtime.charge.capacity).toBe(1_150);
+    vessel.runtime.controls.throttle = 1;
+    vessel.runtime.sas = 'ascent';
+    expect(game.fireStage(vessel)).toBe(true);
+
+    let boostersDropped = false;
+    let coreStaged = false;
+    let orbitalEngineStaged = false;
+    let lunarEngineStaged = false;
+    let orbitReached = false;
+
+    for (let frame = 0; frame < 120_000 && !orbitReached; frame++) {
+      game.update(PHYSICS_DT);
+      vessel = game.active!;
+      const runtime = vessel.runtime;
+      const earth = game.bodyOf(vessel);
+      const altitude = runtime.pos.length() - earth.radius;
+      const elements = stateToElements(earth.mu, runtime.pos, runtime.vel, game.time);
+      const periapsis = elements.e < 1 ? periapsisOf(elements) - earth.radius : -Infinity;
+      const thrust = maxThrust(
+        runtime,
+        earth.pressureAt(altitude),
+        game.flightTuning,
+        earth.def.atmosphere?.seaLevelPressure,
+      );
+
+      if (!boostersDropped) {
+        const boosters = runtime.craft.parts.filter((part) => part.defId === 'srb-torch');
+        if (boosters.length > 0 && boosters.every((part) => (part.resources.solidFuel ?? 0) <= 1e-6)) {
+          expect(game.fireStage(vessel)).toBe(true);
+          boostersDropped = true;
+        }
+      } else if (!coreStaged && altitude >= 80_000) {
+        expect(game.fireStage(vessel)).toBe(true);
+        coreStaged = true;
+      } else if (coreStaged && !orbitalEngineStaged && thrust <= 1) {
+        expect(game.fireStage(vessel)).toBe(true);
+        orbitalEngineStaged = true;
+      } else if (orbitalEngineStaged && !lunarEngineStaged && thrust <= 1) {
+        expect(game.fireStage(vessel)).toBe(true);
+        lunarEngineStaged = true;
+      } else if (lunarEngineStaged) {
+        orbitReached = periapsis >= 100_000 && runtime.situation === 'orbit';
+        if (orbitReached) runtime.controls.throttle = 0;
+      }
+    }
+
+    expect(orbitReached).toBe(true);
+    expect(vessel.runtime.situation).toBe('orbit');
+    expect(vessel.runtime.charge.amount / vessel.runtime.charge.capacity).toBeGreaterThan(0.95);
+    expect(vessel.runtime.events.some((event) => event.severity === 'danger')).toBe(false);
+
+    const earth = game.bodyOf(vessel);
+    const moon = game.universe.get('moon');
+    const direction = vessel.runtime.pos.x * vessel.runtime.vel.y
+      - vessel.runtime.pos.y * vessel.runtime.vel.x >= 0 ? 1 : -1;
+    const transfer = planTransfer(game.universe, game.time, earth, moon, {
+      parkRadius: vessel.runtime.pos.length(),
+      vesselAngle: Math.atan2(vessel.runtime.pos.y, vessel.runtime.pos.x),
+      parkingOrbitDirection: direction,
+      vesselPosition: vessel.runtime.pos,
+      vesselVelocity: vessel.runtime.vel,
+    });
+    const reserve = analyzeCraft(
+      vessel.runtime.craft,
+      earth.surfaceGravity,
+      0,
+      game.flightTuning,
+      earth.def.atmosphere?.seaLevelPressure,
+    );
+    expect(transfer?.accuracy).toBe('refined-intercept');
+    expect(transfer?.approachAltitude).toBeLessThan(400_000);
+    const reference = stateToElements(
+      earth.mu,
+      vessel.runtime.pos,
+      vessel.runtime.vel,
+      game.time,
+    );
+    const prediction = predictTrajectory(
+      game.universe,
+      earth,
+      orbitAfterNode(reference, transfer!.suggestedNode),
+      transfer!.suggestedNode.time,
+      transfer!.transferTime * 1.45,
+    );
+    expect(prediction.encounter?.bodyId).toBe('moon');
+    expect(prediction.encounter?.periapsisAltitude).toBeLessThan(400_000);
+    expect(reserve.totalDeltaV).toBeGreaterThan(
+      transfer!.departureDv + transfer!.arrivalDv + 500,
+    );
+
+    const powered = reserve.stages.find((stage) => stage.thrust > 0)!;
+    const burnDuration = estimateBurnTime(
+      transfer!.departureDv,
+      powered.thrust,
+      vessel.runtime.massProps.mass,
+      powered.isp,
+    );
+    const burnStart = transfer!.suggestedNode.time - burnDuration / 2;
+    elementsAtTime(reference, burnStart, vessel.runtime.pos, vessel.runtime.vel);
+    game.time = burnStart;
+    const burnDirection = nodeBurnVector(reference, transfer!.suggestedNode, new Vec3()).normalize();
+    vessel.runtime.sas = 'node';
+    vessel.runtime.sasCustomDir.copy(burnDirection);
+    let remainingDv = transfer!.departureDv;
+    for (let frame = 0; frame < 60_000 && remainingDv > 0.5; frame++) {
+      const accel = powered.thrust / vessel.runtime.massProps.mass;
+      vessel.runtime.controls.throttle = Math.max(0.08, Math.min(1, remainingDv / Math.max(2, accel * 4)));
+      game.update(PHYSICS_DT);
+      remainingDv = Math.max(0, remainingDv - vessel.runtime.properAccel * PHYSICS_DT);
+    }
+    vessel.runtime.controls.throttle = 0;
+    const achieved = stateToElements(earth.mu, vessel.runtime.pos, vessel.runtime.vel, game.time);
+    const finiteBurnPrediction = predictTrajectory(
+      game.universe,
+      earth,
+      achieved,
+      game.time,
+      transfer!.transferTime * 1.45,
+    );
+    const correction = planMoonCourseCorrection(
+      game.universe,
+      game.time,
+      earth,
+      moon,
+      vessel.runtime.pos,
+      vessel.runtime.vel,
+    );
+    const correctedPrediction = correction ? predictTrajectory(
+      game.universe,
+      earth,
+      orbitAfterNode(achieved, correction.node),
+      correction.node.time,
+      moon.orbitalPeriod * 0.15,
+    ) : null;
+    expect(finiteBurnPrediction.encounter?.bodyId).toBe('moon');
+    expect(finiteBurnPrediction.encounter?.periapsisAltitude).toBeGreaterThan(500_000);
+    expect(correction).not.toBeNull();
+    expect(Math.hypot(
+      correction!.node.prograde,
+      correction!.node.normal,
+      correction!.node.radial,
+    )).toBeLessThan(100);
+    expect(correctedPrediction?.encounter?.bodyId).toBe('moon');
+    expect(correctedPrediction?.encounter?.periapsisAltitude).toBeGreaterThan(30_000);
+    expect(correctedPrediction?.encounter?.periapsisAltitude).toBeLessThan(500_000);
+  });
+
+  it('joins the First Light heat shield directly to its separator', () => {
+    const craft = createFirstLightRocket();
+    const shield = craft.parts.find((part) => part.defId === 'shield-s')!;
+    const separator = craft.parts.find((part) => part.defId === 'dec-s')!;
+    const shieldBottom = shield.position.y - partById(shield.defId).shape.height / 2;
+    const separatorTop = separator.position.y + partById(separator.defId).shape.height / 2;
+
+    expect(separator.parentKey).toBe(shield.key);
+    expect(shieldBottom).toBeCloseTo(separatorTop, 6);
+  });
+
+  it('starts Second Light in a transfer-ready Earth parking orbit', () => {
+    const craft = createSecondLightCraft();
+    expect(validateCraftFile(JSON.parse(JSON.stringify(craft)))).not.toBeNull();
+    expect(craft.parts).toHaveLength(8);
+    expect(craft.parts.map((part) => part.defId)).toEqual(expect.arrayContaining([
+      'pod-voyager',
+      'chute-main',
+      'shield-s',
+      'batt-m',
+      'tank-s4',
+      'eng-ember',
+    ]));
+    expect(craft.parts.filter((part) => part.defId === 'tank-s4')).toHaveLength(2);
+    expect(craft.parts.find((part) => part.defId === 'eng-ember')?.activated).toBe(true);
+    expect(craft.stages.map((stage) => stage.partKeys.map((key) => (
+      craft.parts.find((part) => part.key === key)!.defId
+    )))).toEqual([['eng-ember'], ['dec-s'], ['chute-main']]);
+
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    const vessel = game.spawnInOrbit(craft, craft.name, 'earth', 200_000);
+    vessel.runtime.currentStage = 1;
+    expect(vessel.runtime.currentStage).toBe(1);
+    expect(vessel.runtime.charge.amount).toBe(1_150);
+    expect(vessel.runtime.controls.throttle).toBe(0);
+    const earth = game.bodyOf(vessel);
+    const moon = game.universe.get('moon');
+    const orbit = stateToElements(earth.mu, vessel.runtime.pos, vessel.runtime.vel, game.time);
+    expect(apoapsisOf(orbit) - earth.radius).toBeCloseTo(200_000, 3);
+    expect(periapsisOf(orbit) - earth.radius).toBeCloseTo(200_000, 3);
+    const transfer = planTransfer(game.universe, game.time, earth, moon, {
+      parkRadius: vessel.runtime.pos.length(),
+      vesselAngle: 0,
+      parkingOrbitDirection: 1,
+      vesselPosition: vessel.runtime.pos,
+      vesselVelocity: vessel.runtime.vel,
+    });
+    expect(transfer?.accuracy).toBe('refined-intercept');
+    expect(transfer?.approachAltitude).toBeGreaterThan(30_000);
+    expect(transfer?.approachAltitude).toBeLessThan(500_000);
+    const reserve = analyzeCraft(craft, earth.surfaceGravity, 0, game.flightTuning);
+    expect(reserve.totalDeltaV).toBeGreaterThan(
+      transfer!.departureDv + transfer!.arrivalDv + 500,
+    );
+  });
+
   it('offers Odyssey as a complete launch-to-orbit vehicle with an orbital reserve stage', () => {
     expect(BUILT_IN_CRAFTS.map((craft) => craft.id)).toContain('odyssey-orbital-vehicle');
     const craft = createOdysseyOrbiter();

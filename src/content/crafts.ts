@@ -1,4 +1,5 @@
-import { addPart, createCraft, type Craft } from '../sim/vessel';
+import { addPart, createCraft, removeSubtree, type Craft } from '../sim/vessel';
+import { partById } from './parts';
 
 export interface BuiltInCraftDefinition {
   readonly id: string;
@@ -11,6 +12,146 @@ const identity = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
 
 function yaw(angle: number) {
   return { x: 0, y: Math.sin(angle / 2), z: 0, w: Math.cos(angle / 2) };
+}
+
+/**
+ * A forgiving Earth-orbit trainer for the First Light tutorial. Its generous
+ * staged propulsion lets a new pilot learn the shape and timing of an orbit
+ * without requiring an optimal ascent, while the capsule retains a shield and
+ * chute for later return practice.
+ */
+export function createFirstLightRocket(): Craft {
+  const craft = createCraft('First Light Launch Vehicle');
+  const below = (defId: string, parent: ReturnType<typeof addPart>) => addPart(
+    craft,
+    defId,
+    parent.key,
+    'stack-bottom',
+    {
+      x: 0,
+      y: parent.position.y
+        - (partById(parent.defId).shape.height + partById(defId).shape.height) / 2,
+      z: 0,
+    },
+    identity,
+  );
+
+  const pod = addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 21, z: 0 }, identity);
+  const chuteDef = partById('chute-main');
+  const chute = addPart(craft, 'chute-main', pod.key, 'stack-top', {
+    x: 0,
+    y: pod.position.y + (partById(pod.defId).shape.height + chuteDef.shape.height) / 2,
+    z: 0,
+  }, identity);
+  const shield = below('shield-s', pod);
+  const capsuleSeparator = below('dec-s', shield);
+
+  // This high-efficiency stage supplies the final insertion trim, then keeps
+  // the large majority of its reserve for trans-lunar injection and capture.
+  // Its retained battery bank supports the full Earth-to-Moon lesson.
+  const lunarBattery = below('batt-m', capsuleSeparator);
+  const lunarTankUpper = below('tank-s4', lunarBattery);
+  const lunarTankLower = below('tank-s4', lunarTankUpper);
+  const lunarEngine = below('eng-ember', lunarTankLower);
+  const lunarSeparator = below('dec-s', lunarEngine);
+
+  // Dedicated Earth orbital-insertion stage. It is discarded before the
+  // Moon lesson so the efficient Ember stage carries no spent launch mass.
+  const serviceTankUpper = below('tank-s4', lunarSeparator);
+  const serviceTankMiddle = below('tank-s4', serviceTankUpper);
+  const serviceTankLower = below('tank-s4', serviceTankMiddle);
+  const orbitalEngine = below('eng-pike', serviceTankLower);
+
+  const interstage = below('dec-interstage-ms', orbitalEngine);
+  const upperTank1 = below('tank-m8', interstage);
+  const upperTank2 = below('tank-m8', upperTank1);
+  const secondStageEngine = below('eng-mule', upperTank2);
+  const coreSeparator = below('dec-m', secondStageEngine);
+
+  const coreTank1 = below('tank-m8', coreSeparator);
+  const coreTank2 = below('tank-m8', coreTank1);
+  const coreTank3 = below('tank-m8', coreTank2);
+  const coreTank4 = below('tank-m8', coreTank3);
+  const mule = below('eng-mule', coreTank4);
+
+  const boosterKeys: number[] = [];
+  const radialDecouplerKeys: number[] = [];
+  for (let index = 0; index < 4; index++) {
+    const angle = index * Math.PI / 2;
+    const decoupler = addPart(
+      craft,
+      'dec-radial',
+      coreTank3.key,
+      'surface',
+      { x: Math.sin(angle) * 1.37, y: coreTank3.position.y, z: Math.cos(angle) * 1.37 },
+      yaw(angle),
+      1,
+    );
+    const booster = addPart(
+      craft,
+      'srb-torch',
+      decoupler.key,
+      'surface',
+      { x: Math.sin(angle) * 2.09, y: coreTank3.position.y, z: Math.cos(angle) * 2.09 },
+      identity,
+      2,
+    );
+    addPart(
+      craft,
+      'nose-s',
+      booster.key,
+      'stack-top',
+      {
+        x: Math.sin(angle) * 2.09,
+        y: coreTank3.position.y
+          + (partById(booster.defId).shape.height + partById('nose-s').shape.height) / 2,
+        z: Math.cos(angle) * 2.09,
+      },
+      identity,
+      3,
+    );
+    radialDecouplerKeys.push(decoupler.key);
+    boosterKeys.push(booster.key);
+  }
+
+  craft.stages = [
+    { partKeys: [mule.key, ...boosterKeys] },
+    { partKeys: radialDecouplerKeys },
+    { partKeys: [coreSeparator.key, secondStageEngine.key] },
+    { partKeys: [interstage.key, orbitalEngine.key] },
+    { partKeys: [lunarSeparator.key, lunarEngine.key] },
+    { partKeys: [capsuleSeparator.key] },
+    { partKeys: [chute.key] },
+  ];
+  return craft;
+}
+
+/**
+ * Known-good checkpoint for the lunar half of First Light. The launch stages
+ * are gone, the retained Ember is active, and only recovery actions remain in
+ * the stage queue. GameState supplies the circular Earth parking orbit.
+ */
+export function createSecondLightCraft(): Craft {
+  const craft = createFirstLightRocket();
+  craft.name = 'Second Light Lunar Transfer Vehicle';
+  const ember = craft.parts.find((part) => part.defId === 'eng-ember');
+  if (!ember) throw new Error('First Light is missing its retained Ember engine');
+  const lunarSeparator = craft.parts.find((part) => (
+    part.parentKey === ember.key && part.defId === 'dec-s'
+  ));
+  if (!lunarSeparator) throw new Error('First Light is missing its lunar-stage separator');
+  removeSubtree(craft, lunarSeparator.key);
+  ember.activated = true;
+
+  const capsuleSeparator = craft.parts.find((part) => part.defId === 'dec-s');
+  const chute = craft.parts.find((part) => part.defId === 'chute-main');
+  if (!capsuleSeparator || !chute) throw new Error('Second Light is missing recovery hardware');
+  craft.stages = [
+    { partKeys: [ember.key] },
+    { partKeys: [capsuleSeparator.key] },
+    { partKeys: [chute.key] },
+  ];
+  return craft;
 }
 
 /** The authored all-parts demonstration vehicle shown in the Blender handoff. */
@@ -197,6 +338,12 @@ export function createOdysseyOrbiter(): Craft {
 }
 
 export const BUILT_IN_CRAFTS: readonly BuiltInCraftDefinition[] = Object.freeze([
+  Object.freeze({
+    id: 'first-light-launch-vehicle',
+    name: 'First Light Launch Vehicle',
+    description: 'Guided Earth-to-Moon trainer · staged launch vehicle · shielded capsule recovery',
+    create: createFirstLightRocket,
+  }),
   Object.freeze({
     id: 'wayfarer-heavy-demonstrator',
     name: 'Wayfarer Heavy Demonstrator',

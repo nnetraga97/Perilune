@@ -702,12 +702,14 @@ export class MapView {
       this.refreshNodePanel();
     };
     const warpBtn = el('button', 'hud-btn map-icon-btn', btnRow, '≫') as HTMLButtonElement;
+    warpBtn.dataset.action = 'maneuver-warp';
     warpBtn.title = 'Warp to selected node';
     warpBtn.setAttribute('aria-label', 'Warp to selected node');
     warpBtn.onclick = () => {
       if (this.node) cb.onWarpToNode(this.node);
     };
     this.autoExecuteBtn = el('button', 'hud-btn', btnRow, 'AUTO') as HTMLButtonElement;
+    this.autoExecuteBtn.dataset.action = 'maneuver-auto';
     this.autoExecuteBtn.title = 'Automatically orient, ignite the available engine, and execute (separation remains manual)';
     this.autoExecuteBtn.setAttribute('aria-label', 'Toggle automatic execution for selected maneuver');
     this.autoExecuteBtn.onclick = () => {

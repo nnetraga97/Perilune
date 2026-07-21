@@ -58,7 +58,9 @@ import {
 } from './sim/science';
 import type { CollectOutcome } from './sim/science';
 import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
+import { createFirstLightRocket, createSecondLightCraft } from './content/crafts';
 import { maneuverAutomationCommand } from './sim/maneuverAutomation';
+import { planMoonCourseCorrection, planTransfer } from './sim/transfer';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -118,6 +120,8 @@ class PeriluneGame {
   private editorLongPressTimer: number | null = null;
   private lastFrame = performance.now();
   private launchedCraft: Craft | null = null;
+  private firstLightSession = false;
+  private firstLightMoonCorrectionApplied = false;
   private missionStart = 0;
   private maneuver = new ManeuverPlanController();
   private autoManeuverPlanId: string | null = null;
@@ -340,7 +344,15 @@ class PeriluneGame {
       getQualityTier: () => this.world.qualityTier(),
       maxAnisotropy: this.ctx.caps.maxAnisotropy,
     });
-    this.tutorial = new Tutorial(this.uiRoot);
+    this.tutorial = new Tutorial(this.uiRoot, {
+      onComplete: (phase) => {
+        this.game.flags[phase === 'earth' ? 'tutorialDone' : 'tutorialMoonDone'] = true;
+        this.scheduleAutosave();
+      },
+      onRevert: () => this.revert(),
+      onContinueToMoon: () => this.planFirstLightMoonTransfer(),
+      onStartSecondLight: () => this.startSecondLight(),
+    });
     window.addEventListener('pagehide', this.onPageHide);
     this.cheatSheet = new CheatSheet(this.uiRoot, this.input);
     const profile = browserProfileStore();
@@ -413,7 +425,9 @@ class PeriluneGame {
     });
     this.menu = new MainMenu(this.uiRoot, {
       onFirstLight: () => {
-        this.newGame('sandbox');
+        this.newGame('sandbox', 'sol');
+        this.firstLightSession = true;
+        this.editor.loadCraft(createFirstLightRocket(), false);
         this.tutorial.start();
         this.toEditor();
       },
@@ -578,14 +592,17 @@ class PeriluneGame {
       return;
     }
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
+    this.firstLightSession = false;
     this.editor.refreshCampaign();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
 
-  private newGame(mode: GameMode): void {
-    const profile = GAMEPLAY_PROFILES[this.uiSettings?.gameSystem ?? 'sol'];
+  private newGame(mode: GameMode, systemOverride?: keyof typeof GAMEPLAY_PROFILES): void {
+    const profile = GAMEPLAY_PROFILES[systemOverride ?? this.uiSettings?.gameSystem ?? 'sol'];
     this.game = new GameState(mode, profile);
+    this.firstLightSession = false;
+    this.firstLightMoonCorrectionApplied = false;
     this.maneuver = new ManeuverPlanController();
     this.autoManeuverPlanId = null;
     this.autoManeuverPauseLoggedFor = null;
@@ -663,23 +680,21 @@ class PeriluneGame {
     this.game.clearFlightVessels();
     try {
       this.game.warpToLaunchDaylight(home);
-      const moon = this.game.universe.bodies.get('moon');
-      const preparedAuthorities = await Promise.all([
-        this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent'),
-        ...(moon ? [this.game.prepareFlightAuthority(moon, 'moon-site01')] : []),
-      ]);
-      for (const authority of preparedAuthorities) {
-        if (authority.fallbackReason) {
-          clientLog.warn('terrain.authority.fallback', {
-            bodyId: authority.bodyId,
-            generation: authority.generation,
-            reason: authority.fallbackReason,
-          });
-        }
+      const authority = await this.game.prepareFlightAuthority(
+        home,
+        home.id === 'earth' ? 'ksc-launch' : 'parent',
+      );
+      if (authority.fallbackReason) {
+        clientLog.warn('terrain.authority.fallback', {
+          bodyId: authority.bodyId,
+          generation: authority.generation,
+          reason: authority.fallbackReason,
+        });
       }
       await Promise.all([
-        this.world.prepareFlightBody(home, this.game.frozenFlightAuthority(home.id)),
-        ...(moon ? [this.world.prepareFlightBody(moon, this.game.frozenFlightAuthority(moon.id), false)] : []),
+        // The launch boundary preloads only the active launch region. Secondary
+        // bodies remain on their resident parent data until flight approaches them.
+        this.world.prepareFlightBody(home, authority),
         new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
       ]);
     } catch (error) {
@@ -795,11 +810,17 @@ class PeriluneGame {
   private revert(): void {
     if (!this.launchedCraft) return;
     this.game.clearFlightVessels();
+    this.maneuver = new ManeuverPlanController();
+    this.autoManeuverPlanId = null;
+    this.autoManeuverPauseLoggedFor = null;
+    this.pendingWarpStop = null;
+    this.firstLightMoonCorrectionApplied = false;
     const home = this.game.universe.get(this.game.universe.homeBodyId);
     this.game.warpToLaunchDaylight(home);
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.game.setWarp(0, false);
     this.toFlight();
+    if (this.firstLightSession) this.tutorial.restartAfterRevert();
   }
 
   private runScience(): void {
@@ -1700,7 +1721,20 @@ class PeriluneGame {
     this.perf.frame(dtMs, this.ctx.renderer);
     this.windows.update();
 
-    this.tutorial.update({ game: this.game, editor: this.editor, screen: this.screen });
+    const tutorialVessel = this.game.active;
+    const tutorialManeuver = tutorialVessel
+      ? this.maneuver.nextFor(tutorialVessel.runtime.id, tutorialVessel.runtime.bodyId)
+      : null;
+    this.tutorial.update({
+      game: this.game,
+      editor: this.editor,
+      screen: this.screen,
+      mapVisible: this.map.visible,
+      maneuverPlanned: tutorialManeuver !== null,
+      maneuverAutoExecution: tutorialManeuver !== null
+        && this.autoManeuverPlanId === tutorialManeuver.id,
+      warpRate: this.game.warpRate,
+    });
 
     if (this.keys.has('F3')) {
       this.keys.delete('F3');
@@ -1792,7 +1826,7 @@ class PeriluneGame {
       const remaining = this.maneuver.consumeDeliveredDeltaV(
         v.properAccel,
         thrustDirection,
-        dt,
+        dt * (this.game.railsWarp ? 1 : this.game.warpRate),
         0.5,
         activePlan.id,
       );
@@ -1804,6 +1838,37 @@ class PeriluneGame {
         this.maneuver.clear(activePlan.id);
         const achieved = stateToElements(body.mu, v.pos, v.vel, this.game.time);
         this.maneuver.rebaseFirst(v.id, body.id, achieved);
+        if (
+          this.firstLightSession
+          && !this.firstLightMoonCorrectionApplied
+          && body.id === 'earth'
+          && gv.target === 'moon'
+        ) {
+          this.firstLightMoonCorrectionApplied = true;
+          const moon = this.game.universe.bodies.get('moon');
+          const correction = moon ? planMoonCourseCorrection(
+            this.game.universe,
+            this.game.time,
+            body,
+            moon,
+            v.pos,
+            v.vel,
+          ) : null;
+          if (correction) {
+            this.createManeuverNode(correction.node);
+            const correctionPlan = this.maneuver.current;
+            if (correctionPlan) this.autoManeuverPlanId = correctionPlan.id;
+            logEvent(
+              v,
+              this.game.time,
+              `Finite-burn correction planned: ${Math.hypot(
+                correction.node.prograde,
+                correction.node.normal,
+                correction.node.radial,
+              ).toFixed(0)} m/s for a ${(correction.approachAltitude / 1000).toFixed(0)} km lunar approach.`,
+            );
+          }
+        }
       }
     }
   }
@@ -1831,6 +1896,63 @@ class PeriluneGame {
     const body = this.game.bodyOf(gv);
     const reference = stateToElements(body.mu, gv.runtime.pos, gv.runtime.vel, this.game.time);
     this.maneuver.create(gv.runtime.id, body.id, reference, node);
+  }
+
+  private planFirstLightMoonTransfer(): boolean {
+    const gv = this.game.active;
+    const moon = this.game.universe.bodies.get('moon');
+    if (!gv || !moon || gv.runtime.bodyId !== 'earth' || gv.runtime.situation !== 'orbit') return false;
+    const earth = this.game.bodyOf(gv);
+    const orbit = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, this.game.time);
+    if (!(orbit.e < 1) || periapsisOf(orbit) <= earth.radius) return false;
+    const parkingOrbitDirection = gv.runtime.pos.x * gv.runtime.vel.y
+      - gv.runtime.pos.y * gv.runtime.vel.x >= 0 ? 1 : -1;
+    const plan = planTransfer(this.game.universe, this.game.time, earth, moon, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+    if (
+      !plan
+      || plan.accuracy !== 'refined-intercept'
+      || plan.approachAltitude === undefined
+      || plan.approachAltitude > 500_000
+    ) return false;
+
+    this.maneuver = new ManeuverPlanController();
+    this.autoManeuverPlanId = null;
+    this.autoManeuverPauseLoggedFor = null;
+    this.firstLightMoonCorrectionApplied = false;
+    gv.target = moon.id;
+    this.createManeuverNode(plan.suggestedNode);
+    if (!this.map.visible) this.toggleMap();
+    logEvent(
+      gv.runtime,
+      this.game.time,
+      `Moon intercept planned: ${plan.departureDv.toFixed(0)} m/s, predicted approach ${(plan.approachAltitude! / 1000).toFixed(0)} km.`,
+    );
+    return true;
+  }
+
+  private startSecondLight(): boolean {
+    this.game.clearFlightVessels();
+    this.maneuver = new ManeuverPlanController();
+    this.autoManeuverPlanId = null;
+    this.autoManeuverPauseLoggedFor = null;
+    this.pendingWarpStop = null;
+    this.firstLightMoonCorrectionApplied = false;
+    this.firstLightSession = true;
+    this.launchedCraft = createFirstLightRocket();
+    const craft = createSecondLightCraft();
+    const vessel = this.game.spawnInOrbit(craft, craft.name, 'earth', 200_000);
+    vessel.runtime.currentStage = 1;
+    vessel.runtime.controls.throttle = 0;
+    vessel.runtime.sas = 'stability';
+    this.game.setWarp(0, false);
+    this.toFlight(false);
+    return this.planFirstLightMoonTransfer();
   }
 }
 

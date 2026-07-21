@@ -18,7 +18,7 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
       id: 'first-light',
       eyebrow: 'GUIDED',
       title: 'FIRST LIGHT',
-      detail: 'Learn the program',
+      detail: 'Earth orbit to the Moon',
       primary: !save,
     },
     {

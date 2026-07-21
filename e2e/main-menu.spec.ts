@@ -78,6 +78,82 @@ test('command deck becomes a two-column layout on a narrow viewport', async ({ p
   await page.screenshot({ path: 'test-results/perilune-menu-narrow.png', fullPage: true });
 });
 
+test('First Light opens with the prepared Sol trainer and guided launch card', async ({ page }) => {
+  const launchRequests: string[] = [];
+  page.on('request', (request) => launchRequests.push(request.url()));
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'First Light tutorial' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
+
+  await expect(page.locator('input.ed-name')).toHaveValue('First Light Launch Vehicle');
+  await expect.poll(() => page.evaluate(() => window.__TEST__?.partCount())).toBe(35);
+  await expect.poll(() => page.evaluate(() => window.__TEST__?.stageCount())).toBe(7);
+  const tutorial = page.locator('.tut-box');
+  await expect(tutorial).toBeVisible();
+  await expect(page.locator('.tut-title')).toHaveText('The mission: make an orbit');
+  await expect(page.locator('.tut-text')).toContainText('moving sideways fast enough to keep falling around Earth');
+  await expect(page.getByRole('button', { name: 'Previous step' })).toBeDisabled();
+  await expect(tutorial.getByRole('button', { name: 'Revert to launch' })).toBeDisabled();
+  await expect(page.locator('.tut-continue')).toBeHidden();
+  const tutorialBox = await tutorial.boundingBox();
+  expect(tutorialBox).not.toBeNull();
+  expect(tutorialBox!.x).toBeGreaterThanOrEqual(0);
+  expect(tutorialBox!.x + tutorialBox!.width).toBeLessThanOrEqual(393);
+  expect(tutorialBox!.y).toBeGreaterThanOrEqual(0);
+  expect(tutorialBox!.y + tutorialBox!.height).toBeLessThanOrEqual(852);
+
+  const handle = page.locator('.tut-header');
+  const handleBox = await handle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2 + 40);
+  await page.mouse.up();
+  const movedBox = await tutorial.boundingBox();
+  expect(movedBox).not.toBeNull();
+  expect(movedBox!.y).toBeGreaterThan(tutorialBox!.y + 20);
+  expect(movedBox!.x).toBeGreaterThanOrEqual(0);
+  expect(movedBox!.x + movedBox!.width).toBeLessThanOrEqual(393);
+  expect(movedBox!.y + movedBox!.height).toBeLessThanOrEqual(852);
+
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
+  expect(launchRequests.some((url) => url.includes('/moon/site01/'))).toBe(false);
+  const tutorialRevert = tutorial.getByRole('button', { name: 'Revert to launch' });
+  await expect(tutorialRevert).toBeEnabled();
+  await page.keyboard.press('z');
+  await expect(page.locator('.tut-title')).toHaveText('Engage launch guidance');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(250);
+  await tutorialRevert.click();
+  await expect(page.locator('.tut-title')).toHaveText('Set full throttle');
+  await expect.poll(() => page.evaluate(() => window.__TEST__?.altitude())).toBeLessThan(100);
+});
+
+test('Second Light starts from a prepared Earth orbit with a Moon node', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'First Light tutorial' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
+
+  const tutorial = page.locator('.tut-box');
+  const secondLight = tutorial.getByRole('button', { name: 'Start Second Light' });
+  await expect(secondLight).toBeVisible();
+  await secondLight.click();
+
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
+  await expect(page.locator('.tut-title')).toHaveText('Read the Moon transfer node');
+  await expect(secondLight).toBeHidden();
+  await expect(page.locator('.map-panel')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Toggle automatic execution for selected maneuver' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__TEST__?.activeBody())).toBe('earth');
+  const orbit = await page.evaluate(() => window.__TEST__?.orbit());
+  expect(orbit?.apoapsisAltitude).toBeCloseTo(200_000, -2);
+  expect(orbit?.periapsisAltitude).toBeCloseTo(200_000, -2);
+  await expect(tutorial.getByRole('button', { name: 'Revert to launch' })).toBeEnabled();
+});
+
 test('a live autosave appears in the catalog and enables Continue Mission', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
