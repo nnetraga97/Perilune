@@ -186,6 +186,29 @@ describe('buildVesselVisual', () => {
     expect(visual.plumes.get(eng.key)!.children).toHaveLength(1);
   });
 
+  it('animates the Homecoming canopy from hidden through reefed to fully open', () => {
+    const craft = createCraft('recovery');
+    const chute = addPart(craft, 'chute-main', null, 'root', { x: 0, y: 0, z: 0 });
+    const visual = buildVesselVisual(craft, fakeLibrary());
+    const rig = visual.parachutes.get(chute.key)!;
+
+    expect(rig.visible).toBe(false);
+    expect(rig.getObjectByName('parachute-canopy')).toBeDefined();
+    expect(rig.getObjectByName('parachute-lines')).toBeDefined();
+
+    chute.parachuteDeployFraction = 0.15;
+    syncVesselVisual(visual, craft, 0, 1, 0.5, undefined, 1);
+    expect(rig.visible).toBe(true);
+    expect(rig.scale.x).toBeGreaterThan(0.08);
+    expect(rig.scale.x).toBeLessThan(1);
+
+    chute.parachuteDeployFraction = 1;
+    for (let i = 0; i < 20; i++) syncVesselVisual(visual, craft, 0, 1, 0.1, undefined, 2 + i * 0.1);
+    expect(rig.userData.deployment).toBeGreaterThan(0.99);
+    expect(rig.scale.x).toBeGreaterThan(0.98);
+    disposeVesselVisual(visual);
+  });
+
   it('renders a layered SRB flame at full power even when vessel throttle is zero', () => {
     const craft = createCraft('solid');
     const booster = addPart(craft, 'srb-flare', null, 'root', { x: 0, y: 0, z: 0 });

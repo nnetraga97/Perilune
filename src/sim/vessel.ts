@@ -45,6 +45,8 @@ export interface PartInstance {
   /** Runtime flags. */
   activated?: boolean;
   deployed?: boolean;
+  /** Current parachute opening amount for rendering; recomputed by flight physics. */
+  parachuteDeployFraction?: number;
   temperature?: number;
   /** Latched before separation so the detached separator keeps its shroud. */
   interstageShroud?: InterstageShroudSpec;

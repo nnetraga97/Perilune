@@ -82,6 +82,8 @@ export interface VesselVisual {
   partMeshes: Map<number, THREE.Object3D>;
   /** Plume groups keyed by engine part key; one child holder per authored nozzle anchor. */
   plumes: Map<number, THREE.Group>;
+  /** Animated canopy rigs keyed by parachute part key. */
+  parachutes: Map<number, THREE.Group>;
   /** Geometries created for this visual rather than borrowed from shared caches. */
   ownedGeometries: Set<THREE.BufferGeometry>;
   /** Flight-only material variants; their geometry and textures remain borrowed. */
@@ -187,6 +189,62 @@ function buildPlumeHolder(baseScale: number, solid: boolean): THREE.Group {
   return holder;
 }
 
+/**
+ * A lightweight flight-only parachute rig. The checked model remains the
+ * packed housing; this canopy grows from its top once physics starts opening
+ * the chute, so editor portraits and stowed vessels keep their authored look.
+ */
+function buildParachuteRig(
+  def: PartDef,
+  ownedGeometries: Set<THREE.BufferGeometry>,
+  ownedMaterials: Set<THREE.Material>,
+): THREE.Group {
+  const rig = new THREE.Group();
+  const radius = THREE.MathUtils.clamp(Math.sqrt(def.parachute!.dragArea / Math.PI) * 0.3, 0.8, 2.8);
+  const canopyGeometry = new THREE.SphereGeometry(radius, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+  const canopyMaterial = new THREE.MeshStandardMaterial({
+    color: def.color ?? '#b4562e',
+    emissive: '#241007',
+    emissiveIntensity: 0.08,
+    metalness: 0,
+    roughness: 0.86,
+    side: THREE.DoubleSide,
+  });
+  ownedGeometries.add(canopyGeometry);
+  ownedMaterials.add(canopyMaterial);
+  const canopy = new THREE.Mesh(canopyGeometry, canopyMaterial);
+  canopy.name = 'parachute-canopy';
+  canopy.position.y = radius * 0.9;
+  canopy.scale.y = 0.42;
+  canopy.castShadow = true;
+  canopy.receiveShadow = true;
+  rig.add(canopy);
+
+  const lineHeight = canopy.position.y;
+  const linePositions: number[] = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    linePositions.push(
+      0, 0, 0,
+      Math.cos(angle) * radius * 0.94, lineHeight, Math.sin(angle) * radius * 0.94,
+    );
+  }
+  const lineGeometry = new THREE.BufferGeometry();
+  lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+  const lineMaterial = new THREE.LineBasicMaterial({ color: '#ddd4c6', transparent: true, opacity: 0.88 });
+  ownedGeometries.add(lineGeometry);
+  ownedMaterials.add(lineMaterial);
+  const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+  lines.name = 'parachute-lines';
+  rig.add(lines);
+
+  rig.name = 'parachute-rig';
+  rig.position.y = def.shape.height / 2;
+  rig.visible = false;
+  rig.userData.deployment = 0;
+  return rig;
+}
+
 export function buildVesselVisual(
   craft: Craft,
   models?: PartModelLibrary,
@@ -195,6 +253,7 @@ export function buildVesselVisual(
   const group = new THREE.Group();
   const partMeshes = new Map<number, THREE.Object3D>();
   const plumes = new Map<number, THREE.Group>();
+  const parachutes = new Map<number, THREE.Group>();
   const ownedGeometries = new Set<THREE.BufferGeometry>();
   const ownedMaterials = new Set<THREE.Material>();
   const materialVariants = new Map<THREE.Material, THREE.Material>();
@@ -229,11 +288,17 @@ export function buildVesselVisual(
       holder.add(plumeGroup);
       plumes.set(part.key, plumeGroup);
     }
+    if (def.parachute) {
+      const parachute = buildParachuteRig(def, ownedGeometries, ownedMaterials);
+      holder.add(parachute);
+      parachutes.set(part.key, parachute);
+    }
   }
   return {
     group,
     partMeshes,
     plumes,
+    parachutes,
     ownedGeometries,
     ownedMaterials,
     craftVersionSeen: craft.parts.length,
@@ -256,6 +321,7 @@ export function disposeVesselVisual(visual: VesselVisual): void {
   visual.group.clear();
   visual.partMeshes.clear();
   visual.plumes.clear();
+  visual.parachutes.clear();
 }
 
 /**
@@ -281,6 +347,7 @@ export function syncVesselVisual(
         visual.group.remove(mesh);
         visual.partMeshes.delete(key);
         visual.plumes.delete(key);
+        visual.parachutes.delete(key);
       }
     }
     visual.craftVersionSeen = craft.parts.length;
@@ -289,6 +356,23 @@ export function syncVesselVisual(
   // Plumes follow throttle; vacuum broadens them. Each nozzle's child flame is
   // scaled in place so its authored anchor placement remains exact.
   for (const part of craft.parts) {
+    const parachute = visual.parachutes.get(part.key);
+    if (parachute) {
+      const target = THREE.MathUtils.clamp(part.parachuteDeployFraction ?? (part.deployed ? 1 : 0), 0, 1);
+      const previous = Number(parachute.userData.deployment ?? 0);
+      const response = target > previous ? 4.8 : 8;
+      let deployment = previous + (target - previous) * (1 - Math.exp(-response * Math.max(0, dt)));
+      if (Math.abs(deployment - target) < 0.001) deployment = target;
+      parachute.userData.deployment = deployment;
+      parachute.visible = deployment > 0.004;
+      const opened = THREE.MathUtils.smootherstep(deployment, 0, 1);
+      const radialScale = THREE.MathUtils.lerp(0.08, 1, opened);
+      const verticalScale = THREE.MathUtils.lerp(0.16, 1, opened);
+      const breathe = 1 + Math.sin(effectTime * 2.6 + part.key) * 0.012 * opened;
+      parachute.scale.set(radialScale * breathe, verticalScale, radialScale * breathe);
+      parachute.rotation.x = Math.sin(effectTime * 1.7 + part.key * 0.7) * 0.018 * opened;
+      parachute.rotation.z = Math.cos(effectTime * 1.5 + part.key) * 0.022 * opened;
+    }
     const plumeGroup = visual.plumes.get(part.key);
     if (!plumeGroup) continue;
     const def = defOf(part);

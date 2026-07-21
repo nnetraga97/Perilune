@@ -276,6 +276,7 @@ describe('body renderer adapters', () => {
       group,
       partMeshes: new Map(),
       plumes: new Map(),
+      parachutes: new Map(),
       ownedGeometries: new Set([ownedGeometry]),
       ownedMaterials: new Set(),
       craftVersionSeen: 0,

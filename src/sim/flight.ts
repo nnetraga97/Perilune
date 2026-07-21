@@ -518,7 +518,9 @@ export function stepVessel(
   // ------------------------------------------------------------- parachutes
   for (const p of v.craft.parts) {
     const chute = defOf(p).parachute;
-    if (!chute || !p.activated) continue;
+    if (!chute) continue;
+    p.parachuteDeployFraction = 0;
+    if (!p.activated) continue;
     const aglAlt = body.def.surfaceKind === 'solid'
       ? r - groundRadiusInertial(body, _up, time)
       : Infinity;
@@ -533,6 +535,7 @@ export function stepVessel(
         deployFrac = 0.15; // semi-deployed
       }
     }
+    p.parachuteDeployFraction = deployFrac;
     if (deployFrac > 0) {
       const speed = _vAir.length();
       if (speed > 1) {
