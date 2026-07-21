@@ -14,7 +14,7 @@ import { injectUiStyles, spotlight } from './kit';
 export interface TutorialContext {
   game: GameState | null;
   editor: Editor;
-  screen: 'menu' | 'editor' | 'flight';
+  screen: 'menu' | 'editor' | 'flight' | 'mission-briefing' | 'mission-replay';
 }
 
 interface TutorialStep {

@@ -2,7 +2,7 @@ import type { SaveGame } from '../save/schema';
 import { iconButton } from './icons';
 import { el, injectUiStyles } from './kit';
 
-export type MissionEntry = 'continue' | 'first-light' | 'exploration' | 'program' | 'sandbox';
+export type MissionEntry = 'continue' | 'first-light' | 'artemis-iv' | 'exploration' | 'program' | 'sandbox';
 
 export interface MenuMission {
   id: MissionEntry;
@@ -20,6 +20,13 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
       title: 'FIRST LIGHT',
       detail: 'Learn the program',
       primary: !save,
+    },
+    {
+      id: 'artemis-iv',
+      eyebrow: 'MISSION REPLAY',
+      title: 'ARTEMIS IV',
+      detail: 'Deliver I-Hab to Gateway',
+      primary: false,
     },
     {
       id: 'exploration',
@@ -63,6 +70,7 @@ export function menuMissions(save: SaveGame | null): readonly MenuMission[] {
 export interface MainMenuCallbacks {
   onContinue(): Promise<void> | void;
   onFirstLight(): void;
+  onArtemisIV(): void;
   onSandbox(): void;
   onExploration(): void;
   onProgram(): void;
@@ -107,6 +115,7 @@ export function bindMenuContinueSave(
 const actionLabels: Record<MissionEntry, string> = {
   continue: 'Continue Mission',
   'first-light': 'First Light tutorial',
+  'artemis-iv': 'Artemis IV mission replay',
   sandbox: 'Sandbox — just build and fly',
   exploration: 'Exploration — unlock technology with science',
   program: 'Space Program — funding, technology, and contracts',
@@ -154,6 +163,13 @@ export class MainMenu {
     this.root.style.display = visible ? '' : 'none';
   }
 
+  focusMission(mission: MissionEntry): void {
+    const label = actionLabels[mission];
+    requestAnimationFrame(() => {
+      this.commandDeck.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)?.focus();
+    });
+  }
+
   private rebuildCommandDeck(): void {
     this.commandDeck.replaceChildren();
     const missions = menuMissions(this.continueSave);
@@ -172,6 +188,7 @@ export class MainMenu {
       button.onclick = () => {
         if (mission.id === 'continue') void this.callbacks.onContinue();
         else if (mission.id === 'first-light') this.callbacks.onFirstLight();
+        else if (mission.id === 'artemis-iv') this.callbacks.onArtemisIV();
         else if (mission.id === 'exploration') this.callbacks.onExploration();
         else if (mission.id === 'program') this.callbacks.onProgram();
         else this.callbacks.onSandbox();

@@ -27,7 +27,7 @@ describe('main-menu mission hierarchy', () => {
   it('leads with Continue when an autosave exists', () => {
     const missions = menuMissions(save);
     expect(missions.map((mission) => mission.id)).toEqual([
-      'continue', 'first-light', 'exploration', 'program', 'sandbox',
+      'continue', 'first-light', 'artemis-iv', 'exploration', 'program', 'sandbox',
     ]);
     expect(missions.find((mission) => mission.primary)?.id).toBe('continue');
     expect(missions[0].detail).toContain('Pathfinder');
@@ -37,9 +37,14 @@ describe('main-menu mission hierarchy', () => {
   it('omits dead Continue and promotes First Light without a save', () => {
     const missions = menuMissions(null);
     expect(missions.map((mission) => mission.id)).toEqual([
-      'first-light', 'exploration', 'program', 'sandbox',
+      'first-light', 'artemis-iv', 'exploration', 'program', 'sandbox',
     ]);
     expect(missions.find((mission) => mission.primary)?.id).toBe('first-light');
+    expect(missions.find((mission) => mission.id === 'artemis-iv')).toMatchObject({
+      eyebrow: 'MISSION REPLAY',
+      title: 'ARTEMIS IV',
+      detail: 'Deliver I-Hab to Gateway',
+    });
   });
 });
 

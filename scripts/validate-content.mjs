@@ -2,6 +2,10 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256Bytes, sha256File } from './lib/canonical-json.mjs';
+import {
+  validateArtemisReferenceArtifact,
+  validateArtemisSourceLock,
+} from './lib/artemis-source-registry.mjs';
 import { validateCheckedPartManifest, validatePartAssetInputs } from './lib/part-asset-schema.mjs';
 import { validatePlanetSourceLock } from './lib/planet-source-registry.mjs';
 
@@ -49,10 +53,50 @@ const detailSourceLock = loadJson(
   resolve(root, 'assets/planets/sol-detail-source-lock.json'),
   'Sol detail source lock',
 );
+const artemisSourceLockPath = resolve(root, 'assets/missions/artemis-iv/sources/source.lock.json');
+const artemisReferenceArtifactPath = resolve(root, 'src/generated/artemis-iv-reference-track.json');
+const artemisSourceLock = loadJson(artemisSourceLockPath, 'Artemis IV source lock');
+const artemisReferenceArtifact = loadJson(
+  artemisReferenceArtifactPath,
+  'Artemis IV reference trajectory',
+);
 
 if (detailSourceLock) {
   for (const error of validatePlanetSourceLock(detailSourceLock)) {
     errors.push(`Sol detail source lock: ${error}`);
+  }
+}
+
+if (artemisSourceLock) {
+  const sourceErrors = validateArtemisSourceLock(artemisSourceLock);
+  for (const error of sourceErrors) errors.push(`Artemis IV source lock: ${error}`);
+  if (sourceErrors.length === 0 && artemisReferenceArtifact) {
+    const generator = artemisSourceLock.referenceTrajectory.generatedArtifact;
+    for (const [label, relativePath, expectedBytes, expectedSha256] of [
+      ['generator script', generator.script, generator.scriptByteLength, generator.scriptSha256],
+      ['requirements file', generator.requirements, generator.requirementsByteLength,
+        generator.requirementsSha256],
+    ]) {
+      const authoringPath = resolve(root, relativePath);
+      if (!existsSync(authoringPath)) {
+        errors.push(`Artemis IV ${label} is missing: ${authoringPath}`);
+      } else {
+        if (statSync(authoringPath).size !== expectedBytes) {
+          errors.push(`Artemis IV ${label} byte length does not match the source lock`);
+        }
+        if (sha256File(authoringPath) !== expectedSha256) {
+          errors.push(`Artemis IV ${label} SHA-256 does not match the source lock`);
+        }
+      }
+    }
+    const artifactBytes = readFileSync(artemisReferenceArtifactPath);
+    for (const error of validateArtemisReferenceArtifact(
+      artemisSourceLock,
+      artemisReferenceArtifact,
+      artifactBytes,
+    )) {
+      errors.push(`Artemis IV reference trajectory: ${error}`);
+    }
   }
 }
 
@@ -989,6 +1033,7 @@ if (errors.length) {
   writeFileSync(checkedManifestPath, `${JSON.stringify(artifact, null, 2)}\n`);
   console.log(
     `content validation passed: ${recipeFile.recipes.length} recipes, ` +
-      `${manifest.sources.length} sources, ${manifest.packs.length} packs`,
+      `${manifest.sources.length} sources, ${manifest.packs.length} packs, ` +
+      `${artemisReferenceArtifact.samples.length} Artemis reference states`,
   );
 }

@@ -58,6 +58,13 @@ import {
   bindFlightAerialPerspective,
   FlightAerialPerspectiveController,
 } from './flightAerialPerspective';
+import {
+  MissionEntityRenderer,
+  type MissionRenderLayers,
+  type MissionRenderPath,
+  type MissionRenderableEntity,
+} from './missionEntityRenderer';
+import type { MissionCameraPose } from './missionCameraController';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -159,6 +166,37 @@ interface MutableBodyRenderFrame {
   allowFlightTerrain: boolean;
 }
 
+/** Structural subset of Universe required by the camera-relative body stage. */
+export interface MissionCelestialUniverse {
+  readonly root: Body;
+  readonly bodies: ReadonlyMap<string, Body>;
+  absolutePosition(body: Body, time: number, outPosition: Vec3, outVelocity?: Vec3): void;
+}
+
+/** Render-facing adapter for EvaluatedMissionFrame plus its immutable universe. */
+export interface MissionWorldFrame {
+  readonly universe: MissionCelestialUniverse;
+  readonly universeTimeSeconds: number;
+  readonly focusBodyId: string;
+  readonly entities: readonly Readonly<MissionRenderableEntity>[];
+  readonly paths?: readonly Readonly<MissionRenderPath>[];
+  readonly layers?: Readonly<MissionRenderLayers>;
+}
+
+interface CelestialBodyStageInput {
+  readonly universe: MissionCelestialUniverse;
+  readonly focusBody: Body;
+  readonly time: number;
+  readonly cameraAbsolute: Readonly<Vec3>;
+  readonly cameraForward: Readonly<Vec3>;
+  readonly deltaSeconds: number;
+  readonly verticalFovRadians: number;
+  readonly drawingBufferWidth: number;
+  readonly drawingBufferHeight: number;
+  readonly allowFlightTerrain: boolean;
+  readonly surfaceAnchorBodyRelative?: Readonly<Vec3>;
+}
+
 function copyCoordinates(target: MutableVectorCoordinates, source: Readonly<VectorCoordinates>): void {
   target.x = source.x; target.y = source.y; target.z = source.z;
 }
@@ -253,6 +291,15 @@ export class WorldScene {
   private readonly checkedPlanetManifest: CheckedPlanetManifest;
   private readonly planetAssetLoader: PlanetAssetLoader;
   private vesselVisuals = new Map<string, VesselVisual>();
+  private missionEntities: MissionEntityRenderer | null = null;
+  private presentationMode: 'idle' | 'flight' | 'mission' = 'idle';
+  /** Shared camera state is borrowed by replay and restored exactly on exit. */
+  private missionPresentationSnapshot: {
+    readonly fov: number;
+    readonly quaternion: THREE.Quaternion;
+    readonly up: THREE.Vector3;
+    readonly exposure: number;
+  } | null = null;
   private readonly srbSmoke: SrbSmokePool;
   private readonly launchSite: THREE.Group;
   private readonly flightAerial = new FlightAerialPerspectiveController();
@@ -467,10 +514,10 @@ export class WorldScene {
     this.context.renderer.shadowMap.needsUpdate = true;
   }
 
-  private updateLocalSolarShadow(altitude: number): void {
+  private updateLocalSolarShadow(altitude: number, cameraDistance = this.camDist): void {
     const light = this.bodyRenderers.get('sun')?.shadowLight;
     if (!light) return;
-    const policy = localShadowPolicy(this.quality, this.camDist, altitude);
+    const policy = localShadowPolicy(this.quality, cameraDistance, altitude);
     light.castShadow = policy.enabled;
     if (!policy.enabled) return;
     light.shadow.mapSize.set(policy.mapSize, policy.mapSize);
@@ -559,6 +606,17 @@ export class WorldScene {
       throw new Error(`Flight-scale visual pack unavailable for ${body.id}`);
     }
     this.flightPromotedBodyId = body.id;
+  }
+
+  /**
+   * Prepare compact authored body visuals for a replay without claiming the
+   * active-flight terrain residency budget.
+   */
+  async prepareMissionBody(
+    body: Body,
+    authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
+  ): Promise<void> {
+    await this.prepareFlightBody(body, authority, false);
   }
 
   qualityTier(): QualityTier { return this.quality; }
@@ -978,6 +1036,208 @@ export class WorldScene {
     this.setFlightTerrainOwner(null);
   }
 
+  /** Remove replay-owned GPU objects while retaining shared body renderers. */
+  resetMissionState(): void {
+    this.missionEntities?.reset();
+    this.lastBodyFrames.clear();
+    if (this.landingLight) {
+      this.landingLight.intensity = 0;
+      this.landingLight.distance = 0;
+    }
+    this.launchSite.visible = false;
+    const snapshot = this.missionPresentationSnapshot;
+    if (snapshot) {
+      this.camera.fov = snapshot.fov;
+      this.camera.quaternion.copy(snapshot.quaternion);
+      this.camera.up.copy(snapshot.up);
+      this.camera.updateProjectionMatrix();
+      this.context.renderer.toneMappingExposure = snapshot.exposure;
+      this.missionPresentationSnapshot = null;
+    }
+    if (this.presentationMode === 'mission') this.presentationMode = 'idle';
+  }
+
+  /** Fully release the mission layer. Safe to call repeatedly on replay exit. */
+  disposeMissionState(): void {
+    this.missionEntities?.dispose();
+    this.missionEntities = null;
+    this.resetMissionState();
+  }
+
+  /**
+   * Camera-relative celestial stage shared by flight and mission replay. The
+   * caller supplies focus/camera authority explicitly; no active vessel is
+   * required. Flight-only terrain remains an explicit opt-in.
+   */
+  private updateCelestialBodyStage(input: Readonly<CelestialBodyStageInput>): void {
+    const {
+      universe,
+      focusBody,
+      time,
+      cameraAbsolute,
+      cameraForward,
+      deltaSeconds,
+      verticalFovRadians,
+      drawingBufferWidth,
+      drawingBufferHeight,
+      allowFlightTerrain,
+      surfaceAnchorBodyRelative,
+    } = input;
+
+    // Keep star direction in f64 until the final camera-relative conversion.
+    universe.absolutePosition(universe.root, time, _starAbs);
+    _sunDir.copy(_starAbs).sub(cameraAbsolute).normalize();
+
+    const renderSet = this.renderSet;
+    renderSet.clear();
+    const considerBodies = this.considerBodies;
+    considerBodies.length = 0;
+    const consider = (candidate: Body | null): void => {
+      if (candidate && !considerBodies.some((existing) => existing.id === candidate.id)) considerBodies.push(candidate);
+    };
+    consider(focusBody);
+    consider(universe.root);
+    consider(focusBody.parent);
+    for (const child of focusBody.children) consider(child);
+    for (const sibling of focusBody.parent?.children ?? []) consider(sibling);
+
+    const sampledBodyIds = this.sampledBodyIds;
+    sampledBodyIds.clear();
+    for (const body of considerBodies) {
+      universe.absolutePosition(body, time, _bodyAbs);
+      Vec3.sub(_bodyAbs, cameraAbsolute, _rel);
+      const distance = _rel.length();
+      renderSet.add(body.id);
+      _tmp.copy(cameraAbsolute).sub(_bodyAbs);
+      inertialToBodyFixed(body, time, _tmp, _camBF);
+      inertialToBodyFixed(body, time, cameraForward, _cameraViewDirectionBF).normalize();
+      const surfaceAnchorBodyFixed = body.id === focusBody.id && surfaceAnchorBodyRelative
+        ? inertialToBodyFixed(body, time, surfaceAnchorBodyRelative, _surfaceAnchorBF)
+        : undefined;
+      bodyOrientation(body, time, _bodyQ);
+      _bodySunDir.copy(_starAbs).sub(_bodyAbs);
+      if (_bodySunDir.lengthSq() > 0) {
+        inertialToBodyFixed(body, time, _bodySunDir, _bodySunDir).normalize();
+      }
+      const renderer = this.rendererFor(body);
+      if (!renderer) continue;
+      renderer.root.visible = true;
+      const previousFrame = this.lastBodyFrames.get(body.id);
+      bodyFixedCameraVelocity(_camBF, previousFrame, deltaSeconds, _cameraVelocity);
+      let stableFrame = previousFrame as MutableBodyRenderFrame | undefined;
+      if (!stableFrame) {
+        stableFrame = {
+          cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
+          cameraBodyFixed: { x: 0, y: 0, z: 0 },
+          cameraViewDirectionBodyFixed: { x: 0, y: 0, z: -1 },
+          bodyFixedFrustum: [],
+          cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
+          verticalFovRadians: 0,
+          drawingBufferWidth: 0,
+          drawingBufferHeight: 0,
+          projection: computeCelestialProjection({
+            centerRelative: { x: 1, y: 0, z: 0 },
+            bodyRadius: 1,
+            verticalFovRadians: Math.PI / 3,
+            drawingBufferHeight: 1,
+            physicalFarMeters: this.camera.far,
+            farField: false,
+          }),
+          orientation: { x: 0, y: 0, z: 0, w: 1 },
+          cameraSunDirection: { x: 0, y: 0, z: 0 },
+          bodySunDirection: { x: 0, y: 0, z: 0 },
+          solarVisibleFraction: 1,
+          solarOccluder: {
+            direction: { x: 0, y: 0, z: 0 },
+            angularRadius: 0,
+          },
+          time: 0,
+          deltaSeconds: 0,
+          framePressure: false,
+          altitude: 0,
+          allowFlightTerrain: false,
+        };
+      }
+      copyCoordinates(stableFrame.cameraRelativeOrigin, _rel);
+      copyCoordinates(stableFrame.cameraBodyFixed, _camBF);
+      copyCoordinates(stableFrame.cameraViewDirectionBodyFixed, _cameraViewDirectionBF);
+      bodyFixedFrustumPlanes(this.camera, _bodyQ, _rel, stableFrame.bodyFixedFrustum);
+      copyCoordinates(stableFrame.cameraBodyFixedVelocity, _cameraVelocity);
+      if (surfaceAnchorBodyFixed) {
+        stableFrame.surfaceAnchorBodyFixed ??= { x: 0, y: 0, z: 0 };
+        copyCoordinates(stableFrame.surfaceAnchorBodyFixed, surfaceAnchorBodyFixed);
+      } else {
+        stableFrame.surfaceAnchorBodyFixed = undefined;
+      }
+      copyCoordinates(stableFrame.orientation, _bodyQ);
+      stableFrame.orientation.w = _bodyQ.w;
+      copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
+      copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
+      let solarVisibleFraction = 1;
+      stableFrame.solarOccluder ??= {
+        direction: { x: 0, y: 0, z: 0 },
+        angularRadius: 0,
+      };
+      stableFrame.solarOccluder.angularRadius = 0;
+      const solarAngularRadius = universe.root.radius > 0
+        ? Math.asin(Math.min(
+          1,
+          universe.root.radius / Math.max(universe.root.radius, _starAbs.distanceTo(cameraAbsolute)),
+        ))
+        : 0;
+      if (solarAngularRadius > 0) {
+        for (const occluder of universe.bodies.values()) {
+          if (occluder.def.isStar) continue;
+          universe.absolutePosition(occluder, time, _occluderAbs);
+          _occluderDirection.copy(_occluderAbs).sub(cameraAbsolute);
+          const occluderDistance = _occluderDirection.length();
+          if (!(occluderDistance > 0)) continue;
+          const occlusion = celestialOcclusion(
+            { direction: _sunDir, angularRadius: solarAngularRadius },
+            {
+              direction: _occluderDirection,
+              angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
+            },
+          );
+          if (occlusion.intersects && occlusion.sourceVisibleFraction < solarVisibleFraction) {
+            solarVisibleFraction = occlusion.sourceVisibleFraction;
+            copyCoordinates(stableFrame.solarOccluder.direction, _occluderDirection);
+            stableFrame.solarOccluder.angularRadius = Math.asin(
+              Math.min(1, occluder.radius / occluderDistance),
+            );
+          }
+        }
+      }
+      stableFrame.solarVisibleFraction = solarVisibleFraction;
+      stableFrame.verticalFovRadians = verticalFovRadians;
+      stableFrame.drawingBufferWidth = drawingBufferWidth;
+      stableFrame.drawingBufferHeight = drawingBufferHeight;
+      stableFrame.projection = computeCelestialProjection({
+        centerRelative: stableFrame.cameraRelativeOrigin,
+        bodyRadius: body.radius,
+        verticalFovRadians,
+        drawingBufferHeight,
+        physicalFarMeters: this.camera.far,
+        preferredProxyDepth: this.camera.far * 0.74,
+        farField: body.def.surfaceKind === 'star',
+      });
+      stableFrame.time = time;
+      stableFrame.deltaSeconds = deltaSeconds;
+      stableFrame.framePressure = deltaSeconds > 1 / 30;
+      stableFrame.altitude = distance - body.radius;
+      stableFrame.allowFlightTerrain = allowFlightTerrain
+        && body.id === focusBody.id
+        && body.def.surfaceKind === 'solid';
+      this.lastBodyFrames.set(body.id, stableFrame);
+      sampledBodyIds.add(body.id);
+      renderer.update(stableFrame);
+    }
+    for (const [id, renderer] of this.bodyRenderers) {
+      if (!renderSet.has(id)) renderer.root.visible = false;
+    }
+    pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
+  }
+
   /**
    * Update the whole scene for this frame.
    * Returns the camera's absolute position for other systems (map etc).
@@ -986,6 +1246,7 @@ export class WorldScene {
     const active = game.active;
     this.activeVesselId = active?.runtime.id ?? null;
     if (!active) {
+      this.presentationMode = 'idle';
       if (this.landingLight) {
         this.landingLight.intensity = 0;
         this.landingLight.distance = 0;
@@ -996,6 +1257,8 @@ export class WorldScene {
       this.srbSmoke?.clear();
       return;
     }
+    if (this.presentationMode === 'mission') this.disposeMissionState();
+    this.presentationMode = 'flight';
     const v = active.runtime;
     const body = game.bodyOf(active);
     this.context.renderer.getDrawingBufferSize(_drawingBufferSize);
@@ -1102,162 +1365,19 @@ export class WorldScene {
     this.camera.getWorldDirection(_cameraForwardThree);
     _cameraForwardWorld.set(_cameraForwardThree.x, _cameraForwardThree.y, _cameraForwardThree.z);
 
-    // Keep star direction in f64 until the final camera-relative conversion.
-    game.universe.absolutePosition(game.universe.root, t, _starAbs);
-    _sunDir.copy(_starAbs).sub(_camAbs).normalize();
-
-    // ---- planets: full LOD for the SOI body and its close family; simple
-    // spheres beyond.
-    const renderSet = this.renderSet;
-    renderSet.clear();
-    const considerBodies = this.considerBodies;
-    considerBodies.length = 0;
-    const consider = (candidate: Body | null): void => {
-      if (candidate && !considerBodies.some((existing) => existing.id === candidate.id)) considerBodies.push(candidate);
-    };
-    consider(body);
-    consider(game.universe.root);
-    consider(body.parent);
-    for (const child of body.children) consider(child);
-    for (const sibling of body.parent?.children ?? []) {
-      consider(sibling);
-    }
-
-    const sampledBodyIds = this.sampledBodyIds;
-    sampledBodyIds.clear();
-    for (const b of considerBodies) {
-      game.universe.absolutePosition(b, t, _bodyAbs);
-      Vec3.sub(_bodyAbs, _camAbs, _rel); // body center in camera-relative world
-      const dist = _rel.length();
-      renderSet.add(b.id);
-      _tmp.copy(_camAbs).sub(_bodyAbs);
-      inertialToBodyFixed(b, t, _tmp, _camBF);
-      inertialToBodyFixed(b, t, _cameraForwardWorld, _cameraViewDirectionBF).normalize();
-      const surfaceAnchorBodyFixed = b.id === body.id
-        ? inertialToBodyFixed(b, t, v.pos, _surfaceAnchorBF)
-        : undefined;
-      bodyOrientation(b, t, _bodyQ);
-      _bodySunDir.copy(_starAbs).sub(_bodyAbs);
-      if (_bodySunDir.lengthSq() > 0) {
-        // Terrestrial shaders sample body-fixed directions. Keep their solar
-        // vector in that same frame so the day side rotates with the globe.
-        inertialToBodyFixed(b, t, _bodySunDir, _bodySunDir).normalize();
-      }
-      const renderer = this.rendererFor(b);
-      if (!renderer) continue;
-      renderer.root.visible = true;
-      const previousFrame = this.lastBodyFrames.get(b.id);
-      bodyFixedCameraVelocity(_camBF, previousFrame, dt, _cameraVelocity);
-      let stableFrame = previousFrame as MutableBodyRenderFrame | undefined;
-      if (!stableFrame) {
-        stableFrame = {
-          cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
-          cameraBodyFixed: { x: 0, y: 0, z: 0 },
-          cameraViewDirectionBodyFixed: { x: 0, y: 0, z: -1 },
-          bodyFixedFrustum: [],
-          cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
-          verticalFovRadians: 0,
-          drawingBufferWidth: 0,
-          drawingBufferHeight: 0,
-          projection: computeCelestialProjection({
-            centerRelative: { x: 1, y: 0, z: 0 },
-            bodyRadius: 1,
-            verticalFovRadians: Math.PI / 3,
-            drawingBufferHeight: 1,
-            physicalFarMeters: this.camera.far,
-            farField: false,
-          }),
-          orientation: { x: 0, y: 0, z: 0, w: 1 },
-          cameraSunDirection: { x: 0, y: 0, z: 0 },
-          bodySunDirection: { x: 0, y: 0, z: 0 },
-          solarVisibleFraction: 1,
-          solarOccluder: {
-            direction: { x: 0, y: 0, z: 0 },
-            angularRadius: 0,
-          },
-          time: 0,
-          deltaSeconds: 0,
-          framePressure: false,
-          altitude: 0,
-          allowFlightTerrain: false,
-        };
-      }
-      copyCoordinates(stableFrame.cameraRelativeOrigin, _rel);
-      copyCoordinates(stableFrame.cameraBodyFixed, _camBF);
-      copyCoordinates(stableFrame.cameraViewDirectionBodyFixed, _cameraViewDirectionBF);
-      bodyFixedFrustumPlanes(this.camera, _bodyQ, _rel, stableFrame.bodyFixedFrustum);
-      copyCoordinates(stableFrame.cameraBodyFixedVelocity, _cameraVelocity);
-      if (surfaceAnchorBodyFixed) {
-        stableFrame.surfaceAnchorBodyFixed ??= { x: 0, y: 0, z: 0 };
-        copyCoordinates(stableFrame.surfaceAnchorBodyFixed, surfaceAnchorBodyFixed);
-      } else {
-        stableFrame.surfaceAnchorBodyFixed = undefined;
-      }
-      copyCoordinates(stableFrame.orientation, _bodyQ);
-      stableFrame.orientation.w = _bodyQ.w;
-      copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
-      copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
-      let solarVisibleFraction = 1;
-      stableFrame.solarOccluder ??= {
-        direction: { x: 0, y: 0, z: 0 },
-        angularRadius: 0,
-      };
-      stableFrame.solarOccluder.angularRadius = 0;
-      const solarAngularRadius = game.universe.root.radius > 0
-        ? Math.asin(Math.min(1, game.universe.root.radius / Math.max(game.universe.root.radius, _starAbs.distanceTo(_camAbs))))
-        : 0;
-      if (solarAngularRadius > 0) {
-        for (const occluder of game.universe.bodies.values()) {
-          if (occluder.def.isStar) continue;
-          game.universe.absolutePosition(occluder, t, _occluderAbs);
-          _occluderDirection.copy(_occluderAbs).sub(_camAbs);
-          const occluderDistance = _occluderDirection.length();
-          if (!(occluderDistance > 0)) continue;
-          const occlusion = celestialOcclusion(
-            { direction: _sunDir, angularRadius: solarAngularRadius },
-            {
-              direction: _occluderDirection,
-              angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
-            },
-          );
-          if (occlusion.intersects && occlusion.sourceVisibleFraction < solarVisibleFraction) {
-            solarVisibleFraction = occlusion.sourceVisibleFraction;
-            copyCoordinates(stableFrame.solarOccluder.direction, _occluderDirection);
-            stableFrame.solarOccluder.angularRadius = Math.asin(
-              Math.min(1, occluder.radius / occluderDistance),
-            );
-          }
-        }
-      }
-      stableFrame.solarVisibleFraction = solarVisibleFraction;
-      stableFrame.verticalFovRadians = verticalFovRadians;
-      stableFrame.drawingBufferWidth = drawingBufferWidth;
-      stableFrame.drawingBufferHeight = drawingBufferHeight;
-      stableFrame.projection = computeCelestialProjection({
-        centerRelative: stableFrame.cameraRelativeOrigin,
-        bodyRadius: b.radius,
-        verticalFovRadians,
-        drawingBufferHeight,
-        physicalFarMeters: this.camera.far,
-        // Keep the solar proxy behind lunar apogee while remaining inside the
-        // projection authority's 0.75-far-plane safety cap.
-        preferredProxyDepth: this.camera.far * 0.74,
-        farField: b.def.surfaceKind === 'star',
-      });
-      stableFrame.time = t;
-      stableFrame.deltaSeconds = dt;
-      stableFrame.framePressure = dt > 1 / 30;
-      stableFrame.altitude = dist - b.radius;
-      stableFrame.allowFlightTerrain = b.id === body.id && b.def.surfaceKind === 'solid';
-      this.lastBodyFrames.set(b.id, stableFrame);
-      sampledBodyIds.add(b.id);
-      renderer.update(stableFrame);
-    }
-    // Hide renderers of bodies no longer relevant.
-    for (const [id, renderer] of this.bodyRenderers) {
-      if (!renderSet.has(id)) renderer.root.visible = false;
-    }
-    pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
+    this.updateCelestialBodyStage({
+      universe: game.universe,
+      focusBody: body,
+      time: t,
+      cameraAbsolute: _camAbs,
+      cameraForward: _cameraForwardWorld,
+      deltaSeconds: dt,
+      verticalFovRadians,
+      drawingBufferWidth,
+      drawingBufferHeight,
+      allowFlightTerrain: true,
+      surfaceAnchorBodyRelative: v.pos,
+    });
 
     // LC-39B is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.
@@ -1389,6 +1509,127 @@ export class WorldScene {
     this.updateLocalSolarShadow(alt);
   }
 
+  /**
+   * Render one deterministic mission snapshot without an active GameVessel.
+   * `frame` and `cameraPose` are both focus-body-relative structural data.
+   */
+  updateMission(
+    frame: Readonly<MissionWorldFrame>,
+    cameraPose: Readonly<MissionCameraPose>,
+    dt: number,
+  ): void {
+    if (this.disposed) throw new Error('World scene is disposed');
+    const focusBody = frame.universe.bodies.get(frame.focusBodyId);
+    if (!focusBody) throw new Error(`Mission focus body not found: ${frame.focusBodyId}`);
+    const enteringMission = this.presentationMode !== 'mission';
+    if (enteringMission && !this.missionPresentationSnapshot) {
+      this.missionPresentationSnapshot = {
+        fov: this.camera.fov,
+        quaternion: this.camera.quaternion.clone(),
+        up: this.camera.up.clone(),
+        exposure: this.context.renderer.toneMappingExposure,
+      };
+    }
+    this.presentationMode = 'mission';
+    this.activeVesselId = null;
+    this.setFlightTerrainOwner(null);
+    this.clearReentryEffect();
+    this.srbSmoke.clear();
+    this.launchSite.visible = false;
+    this.landingLight.intensity = 0;
+    this.landingLight.distance = 0;
+    for (const visual of this.vesselVisuals.values()) visual.group.visible = false;
+
+    if (enteringMission || cameraPose.discontinuity) this.lastBodyFrames.clear();
+    this.context.renderer.getDrawingBufferSize(_drawingBufferSize);
+    const drawingBufferWidth = Math.max(1, Math.floor(_drawingBufferSize.x));
+    const drawingBufferHeight = Math.max(1, Math.floor(_drawingBufferSize.y));
+    const fov = Number.isFinite(cameraPose.fieldOfViewDegrees)
+      ? THREE.MathUtils.clamp(cameraPose.fieldOfViewDegrees, 15, 82)
+      : 52;
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    _cameraBodyRelative.set(cameraPose.position.x, cameraPose.position.y, cameraPose.position.z);
+    frame.universe.absolutePosition(focusBody, frame.universeTimeSeconds, _bodyAbs);
+    _camAbs.copy(_bodyAbs).add(_cameraBodyRelative);
+    _camOffset.set(
+      cameraPose.target.x - cameraPose.position.x,
+      cameraPose.target.y - cameraPose.position.y,
+      cameraPose.target.z - cameraPose.position.z,
+    );
+    if (_camOffset.lengthSq() < 1e-12) _camOffset.set(0, 1, 0);
+    _cameraOrbitUp.set(cameraPose.up.x, cameraPose.up.y, cameraPose.up.z);
+    if (_cameraOrbitUp.lengthSq() < 1e-12) _cameraOrbitUp.set(0, 0, 1);
+    else _cameraOrbitUp.normalize();
+    this.camera.position.set(0, 0, 0);
+    this.camera.up.set(_cameraOrbitUp.x, _cameraOrbitUp.y, _cameraOrbitUp.z);
+    this.camera.lookAt(_camOffset.x, _camOffset.y, _camOffset.z);
+    this.camera.updateMatrixWorld(true);
+    this.camera.getWorldDirection(_cameraForwardThree);
+    _cameraForwardWorld.set(_cameraForwardThree.x, _cameraForwardThree.y, _cameraForwardThree.z);
+
+    const safeDelta = THREE.MathUtils.clamp(Number.isFinite(dt) ? dt : 0, 0, 0.1);
+    const verticalFovRadians = THREE.MathUtils.degToRad(this.camera.fov);
+    this.updateCelestialBodyStage({
+      universe: frame.universe,
+      focusBody,
+      time: frame.universeTimeSeconds,
+      cameraAbsolute: _camAbs,
+      cameraForward: _cameraForwardWorld,
+      deltaSeconds: safeDelta,
+      verticalFovRadians,
+      drawingBufferWidth,
+      drawingBufferHeight,
+      allowFlightTerrain: false,
+    });
+
+    this.missionEntities ??= new MissionEntityRenderer(this.scene);
+    this.missionEntities.update(
+      frame.entities,
+      _cameraBodyRelative,
+      this.camera,
+      drawingBufferHeight,
+      frame.paths,
+      frame.layers,
+    );
+
+    const altitude = _cameraBodyRelative.length() - focusBody.radius;
+    const radialUp = _tmp.copy(_cameraBodyRelative);
+    if (radialUp.lengthSq() < 1e-12) radialUp.set(0, 0, 1);
+    else radialUp.normalize();
+    const rendererKind = this.bodyRenderers.get(focusBody.id)?.kind;
+    const solarVisibleFraction = this.lastBodyFrames.get(focusBody.id)?.solarVisibleFraction ?? 1;
+    const surfaceSunCosine = Vec3.dot(radialUp, _sunDir);
+    const dayness = Math.max(0, surfaceSunCosine);
+    const sunInFrame = Vec3.dot(_cameraForwardWorld, _sunDir)
+      > Math.cos(verticalFovRadians * 0.65);
+    const environment = environmentLighting(
+      rendererKind,
+      focusBody.def.atmosphere?.height ?? 0,
+      altitude,
+      dayness,
+      solarVisibleFraction,
+      sunInFrame,
+      this.environmentState,
+    );
+    this.environment.color.set(environment.sky);
+    this.environment.groundColor.set(environment.ground);
+    this.environment.intensity = environment.intensity;
+    (this.scene.background as THREE.Color).set(environment.background);
+    this.context.renderer.toneMappingExposure = cameraPose.discontinuity || enteringMission
+      ? environment.exposure
+      : adaptExposure(this.context.renderer.toneMappingExposure, environment.exposure, safeDelta);
+    _tmp.set(cameraPose.target.x, cameraPose.target.y, cameraPose.target.z);
+    this.updateLocalSolarShadow(altitude, _cameraBodyRelative.distanceTo(_tmp));
+  }
+
+  missionEntityStats(): Readonly<{ visuals: number; proxyVisuals: number; paths: number }> | null {
+    return this.missionEntities?.stats() ?? null;
+  }
+
   private bodyOf(game: GameState, gv: GameVessel): Body {
     return game.universe.get(gv.runtime.bodyId);
   }
@@ -1454,6 +1695,8 @@ export class WorldScene {
     this.flightPromotedBodyId = null;
     this.flightPromotionPending.clear();
     this.flightPromotionFailed.clear();
+    this.missionEntities?.dispose();
+    this.missionEntities = null;
     this.clearReentryEffect();
     for (const visual of this.vesselVisuals.values()) {
       this.scene.remove(visual.group);

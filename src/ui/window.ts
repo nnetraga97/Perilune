@@ -10,7 +10,7 @@ import { el, injectUiStyles } from './kit';
 import { iconButton, type UtilityIcon } from './icons';
 import { ProfileStore } from './profileStore';
 
-export type WindowScreen = 'flight' | 'editor' | 'menu' | 'any';
+export type WindowScreen = 'flight' | 'editor' | 'menu' | 'mission-briefing' | 'mission-replay' | 'any';
 
 export interface WindowDef {
   id: string;
@@ -257,9 +257,9 @@ export class WindowManager {
     this.launcher.classList.toggle('k-launcher-floating', host === null);
   }
 
-  setScreen(screen: 'flight' | 'editor' | 'menu'): void {
+  setScreen(screen: Exclude<WindowScreen, 'any'>): void {
     this.screen = screen;
-    this.launcher.style.display = screen === 'menu' ? 'none' : '';
+    this.launcher.style.display = screen === 'flight' || screen === 'editor' ? '' : 'none';
     this.applyScreen();
   }
 

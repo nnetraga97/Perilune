@@ -10,7 +10,7 @@
  * cheat sheet but have no keydown handler.
  */
 
-export type BindingScreen = 'flight' | 'editor';
+export type BindingScreen = 'flight' | 'editor' | 'mission-replay';
 
 export interface KeyBinding {
   /** Stable remap key; derived from screen/group/label when omitted. */

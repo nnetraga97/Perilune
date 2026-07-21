@@ -25,11 +25,21 @@ test('landing page and utility launchers use the approved hierarchy', async ({ p
   await expect(menu).toHaveCSS('background-image', /perilune-command-deck-bg\.jpg/);
   await expect(page.getByRole('button', { name: 'Continue Mission' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'First Light tutorial' })).toHaveClass(/perilune-mission-primary/);
+  const artemis = page.getByRole('button', { name: 'Artemis IV mission replay' });
+  await expect(artemis).toBeVisible();
+  await expect(artemis).not.toHaveClass(/perilune-mission-primary/);
   await expect(page.getByRole('button', { name: 'Save & Load' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
   await expectNoViewportOverflow(page);
   await page.screenshot({ path: 'test-results/perilune-menu-desktop.png', fullPage: true });
+
+  await artemis.click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'mission-briefing');
+  await expect(page.getByRole('heading', { name: 'ARTEMIS IV' })).toBeVisible();
+  await expect(page.getByText(/Mission facts and the Gateway reference orbit are source-backed/)).toBeVisible();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'menu');
 
   await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');

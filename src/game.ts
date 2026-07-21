@@ -7,9 +7,16 @@ import * as THREE from 'three';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { Vec3 } from './core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
+import { Universe } from './sim/universe';
 import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
 import { createRenderContext, RenderContext } from './render/context';
 import { WorldScene } from './render/worldScene';
+import type { MissionRenderPath } from './render/missionEntityRenderer';
+import {
+  lvlhBasis,
+  MissionCameraController,
+  type MissionCameraMode,
+} from './render/missionCameraController';
 import { checkPartModelManifest } from './render/partModelManifest';
 import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
 import checkedPartArtifact from './generated/checked-part-manifest.json';
@@ -43,6 +50,12 @@ import { AccountWindow } from './ui/account';
 import { telemetry } from './telemetry/service';
 import { clientLog } from './telemetry/log';
 import { bindMenuContinueSave, MainMenu } from './ui/mainMenu';
+import { ArtemisBriefing } from './ui/artemisBriefing';
+import {
+  MissionReplay,
+  type MissionReplayCamera,
+  type MissionReplayLayer,
+} from './ui/missionReplay';
 import { el, injectUiStyles } from './ui/kit';
 import {
   craftCost,
@@ -58,9 +71,22 @@ import {
 } from './sim/science';
 import type { CollectOutcome } from './sim/science';
 import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
+import {
+  ARTEMIS_IV_APPROACH_LVLH_SAMPLES,
+  ARTEMIS_IV_MISSION,
+  ARTEMIS_IV_REFERENCE_ORBIT_POINTS,
+  ARTEMIS_IV_TIMELINE,
+} from './content/missions/artemisIV';
+import { MissionPlaybackClock } from './mission/playbackClock';
+import { MissionPlaybackState } from './mission/playbackState';
+import {
+  MISSION_PLAYBACK_RATES,
+  type EvaluatedMissionFrame,
+  type MissionPlaybackRate,
+} from './mission/types';
 import { maneuverAutomationCommand } from './sim/maneuverAutomation';
 
-type Screen = 'menu' | 'editor' | 'flight';
+type Screen = 'menu' | 'editor' | 'flight' | 'mission-briefing' | 'mission-replay';
 
 type EditorGestureKind = 'part-press' | 'canvas-press' | 'part-drag' | 'orbit' | 'pan' | 'secondary-press' | 'secondary-orbit' | 'pinch';
 
@@ -93,6 +119,24 @@ class PeriluneGame {
   private unsubscribeGpuRestoration: (() => void) | null = null;
   private screen: Screen = 'menu';
   private menu!: MainMenu;
+  private artemisBriefing!: ArtemisBriefing;
+  private artemisReplayUi!: MissionReplay;
+  private readonly artemisUniverse = new Universe(
+    [...GAMEPLAY_PROFILES.sol.bodies],
+    GAMEPLAY_PROFILES.sol.homeBodyId,
+  );
+  private readonly artemisPlayback = new MissionPlaybackState(ARTEMIS_IV_MISSION);
+  private artemisClock: MissionPlaybackClock | null = null;
+  private artemisFrame: EvaluatedMissionFrame | null = null;
+  private readonly artemisCamera = new MissionCameraController();
+  private artemisEntryGeneration = 0;
+  private artemisLayers: Record<MissionReplayLayer, boolean> = {
+    'reference-orbit': true,
+    'approach-corridor': true,
+    labels: true,
+    telemetry: true,
+    'source-notes': false,
+  };
   private uiRoot!: HTMLElement;
   private keys = new Set<string>();
   private readonly touchFlightControl: Record<FlightControlAxis, number> = {
@@ -411,12 +455,41 @@ class PeriluneGame {
         void this.writeSave('auto', 'autosave');
       },
     });
+    this.artemisBriefing = new ArtemisBriefing(this.uiRoot, {
+      objective: ARTEMIS_IV_MISSION.objective,
+      phases: ARTEMIS_IV_MISSION.phases.map((phase) => ({
+        title: phase.title,
+        detail: phase.contextOnly ? 'Authored mission context' : phase.narrative,
+        contextOnly: phase.contextOnly,
+      })),
+      sources: ARTEMIS_IV_MISSION.sources.map((source) => ({
+        label: `${source.publisher} — ${source.title}`,
+        url: source.url,
+      })),
+      fidelityNote: ARTEMIS_IV_MISSION.disclaimer,
+    }, {
+      onBegin: () => this.beginArtemisReplay(),
+      onBack: () => this.showMenu(),
+    });
+    this.artemisReplayUi = new MissionReplay(this.uiRoot, {
+      onTogglePlay: () => this.artemisClock?.togglePlayback(),
+      onSeek: (time) => this.seekArtemis(time),
+      onPreviousPhase: () => this.stepArtemisPhase(-1),
+      onNextPhase: () => this.stepArtemisPhase(1),
+      onRestartPhase: () => this.restartArtemisPhase(),
+      onRate: (rate) => this.setArtemisRate(rate),
+      onCamera: (camera) => this.setArtemisCamera(camera),
+      onReturnToDirector: () => this.artemisCamera.returnToDirector(),
+      onLayer: (layer, enabled) => { this.artemisLayers[layer] = enabled; },
+      onExit: () => this.showMenu(),
+    });
     this.menu = new MainMenu(this.uiRoot, {
       onFirstLight: () => {
         this.newGame('sandbox');
         this.tutorial.start();
         this.toEditor();
       },
+      onArtemisIV: () => this.openArtemisBriefing(),
       onSandbox: () => {
         this.newGame('sandbox');
         this.toEditor();
@@ -437,7 +510,7 @@ class PeriluneGame {
     this.unsubscribeMenuSave = bindMenuContinueSave(this.saveSync, this.menu);
     void this.auth.start();
     this.windows.addAction('keyboard', 'Keyboard reference (?)', () => {
-      if (this.screen === 'flight' || this.screen === 'editor') {
+      if (this.screen === 'flight' || this.screen === 'editor' || this.screen === 'mission-replay') {
         this.cheatSheet.toggle(this.screen as BindingScreen);
       }
     });
@@ -450,6 +523,22 @@ class PeriluneGame {
     // All ACTIONS in tests go through real UI events.
     (window as unknown as Record<string, unknown>).__TEST__ = {
       screen: () => this.screen,
+      artemisReplay: () => ({
+        time: this.artemisFrame?.timeSeconds ?? null,
+        phase: this.artemisFrame?.phase.id ?? null,
+        playing: this.artemisClock?.isPlaying ?? false,
+        rate: this.artemisClock?.rate ?? null,
+        camera: this.artemisCamera.cameraMode(),
+        fieldOfView: this.world.camera.fov,
+        event: this.artemisFrame?.latestEvent?.id ?? null,
+        dockings: this.artemisFrame?.dockings.map((docking) => ({ ...docking })) ?? [],
+        entities: this.artemisFrame?.entities.map((entity) => ({
+          id: entity.id,
+          attachedTo: entity.attachedToEntityId,
+          position: { ...entity.position },
+        })) ?? [],
+        render: this.world.missionEntityStats(),
+      }),
       partVisualSource: (key: number) => this.editor.visualSourceForPart(key),
       plumeCount: (key: number) => this.world.plumeCountForPart(key),
       plumeState: (key: number) => this.world.plumeStateForPart(key),
@@ -571,6 +660,231 @@ class PeriluneGame {
   }
 
   // ------------------------------------------------------------------ menu
+  private openArtemisBriefing(): void {
+    this.leaveArtemisReplay();
+    this.screen = 'mission-briefing';
+    document.getElementById('game-canvas')?.classList.remove('vab-active');
+    this.menu.setVisible(false);
+    this.editor.setVisible(false);
+    this.hud.root.style.display = 'none';
+    this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(null);
+    this.windows.setScreen('mission-briefing');
+    this.artemisReplayUi.setVisible(false);
+    this.artemisBriefing.setVisible(true);
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
+  }
+
+  private async beginArtemisReplay(): Promise<void> {
+    if (this.screen !== 'mission-briefing') return;
+    const generation = ++this.artemisEntryGeneration;
+    const moon = this.artemisUniverse.get(ARTEMIS_IV_MISSION.focusBodyId);
+    try {
+      await this.world.prepareMissionBody(moon);
+    } catch (error) {
+      if (generation !== this.artemisEntryGeneration || this.screen !== 'mission-briefing') return;
+      clientLog.error('sim.boundary.error', error, {
+        boundary: 'artemis-mission-prepare',
+        errorType: 'MissionReplayPreparationFailure',
+      });
+      throw new Error('Could not prepare the lunar scene. Retry the replay.');
+    }
+    if (generation !== this.artemisEntryGeneration || this.screen !== 'mission-briefing') return;
+
+    const firstPhase = ARTEMIS_IV_MISSION.phases[0];
+    this.artemisClock = new MissionPlaybackClock({
+      startTimeSeconds: ARTEMIS_IV_MISSION.startTimeSeconds,
+      endTimeSeconds: ARTEMIS_IV_MISSION.endTimeSeconds,
+    }, {
+      initialRate: firstPhase.suggestedRate,
+      initiallyPlaying: false,
+    });
+    this.artemisFrame = this.artemisPlayback.evaluate(this.artemisClock.timeSeconds);
+    this.artemisCamera.reset();
+    this.artemisCamera.setReducedMotion(this.uiSettings?.reducedMotion ?? false);
+    this.artemisLayers = Object.fromEntries(
+      ARTEMIS_IV_MISSION.layers.map((layer) => [layer.id, layer.defaultVisible]),
+    ) as Record<MissionReplayLayer, boolean>;
+
+    this.screen = 'mission-replay';
+    this.artemisBriefing.setVisible(false);
+    this.artemisReplayUi.setVisible(true);
+    this.menu.setVisible(false);
+    this.editor.setVisible(false);
+    this.hud.root.style.display = 'none';
+    this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(null);
+    this.windows.setScreen('mission-replay');
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
+  }
+
+  private leaveArtemisReplay(): void {
+    this.artemisEntryGeneration++;
+    this.artemisClock?.pause();
+    this.artemisClock = null;
+    this.artemisFrame = null;
+    this.artemisCamera.reset();
+    this.world?.disposeMissionState();
+    this.artemisBriefing?.setVisible(false);
+    this.artemisReplayUi?.setVisible(false);
+  }
+
+  private seekArtemis(timeSeconds: number): void {
+    this.artemisClock?.seek(timeSeconds);
+  }
+
+  private stepArtemisPhase(direction: number): void {
+    if (!this.artemisClock) return;
+    const frame = this.artemisPlayback.evaluate(this.artemisClock.timeSeconds);
+    const current = ARTEMIS_IV_MISSION.phases.findIndex((phase) => phase.id === frame.phase.id);
+    const nextIndex = Math.max(0, Math.min(ARTEMIS_IV_MISSION.phases.length - 1, current + direction));
+    if (nextIndex === current) return;
+    this.artemisClock.jumpToPhase(ARTEMIS_IV_MISSION.phases[nextIndex], { applySuggestedRate: true });
+  }
+
+  private restartArtemisPhase(): void {
+    if (!this.artemisClock) return;
+    const frame = this.artemisPlayback.evaluate(this.artemisClock.timeSeconds);
+    this.artemisClock.restartPhase(frame.phase);
+  }
+
+  private setArtemisRate(rate: number): void {
+    if (!this.artemisClock || !MISSION_PLAYBACK_RATES.some((candidate) => candidate === rate)) return;
+    this.artemisClock.setRate(rate as MissionPlaybackRate);
+  }
+
+  private stepArtemisRate(direction: number): void {
+    if (!this.artemisClock) return;
+    const current = MISSION_PLAYBACK_RATES.indexOf(this.artemisClock.rate);
+    const next = Math.max(0, Math.min(MISSION_PLAYBACK_RATES.length - 1, current + direction));
+    this.artemisClock.setRate(MISSION_PLAYBACK_RATES[next]);
+  }
+
+  private setArtemisCamera(camera: MissionReplayCamera): void {
+    const mode: MissionCameraMode = camera === 'gateway'
+      ? 'gateway-orbit'
+      : camera === 'orion'
+        ? 'orion-follow'
+        : camera === 'moon'
+          ? 'moon-overview'
+          : camera;
+    this.artemisCamera.setMode(mode);
+  }
+
+  private artemisUiCamera(): MissionReplayCamera {
+    const mode = this.artemisCamera.cameraMode();
+    if (mode === 'gateway-orbit') return 'gateway';
+    if (mode === 'orion-follow') return 'orion';
+    if (mode === 'moon-overview') return 'moon';
+    return mode;
+  }
+
+  private artemisRenderPaths(frame: Readonly<EvaluatedMissionFrame>): readonly MissionRenderPath[] {
+    const paths: MissionRenderPath[] = [{
+      id: 'gateway-reference-nrho',
+      kind: 'reference-orbit',
+      points: ARTEMIS_IV_REFERENCE_ORBIT_POINTS,
+      color: '#62b9d2',
+      closed: false,
+    }];
+    const gateway = frame.entitiesById.gateway;
+    if (!gateway) return paths;
+    const basis = lvlhBasis(gateway.position, gateway.velocity);
+    const corridorPoints = ARTEMIS_IV_APPROACH_LVLH_SAMPLES
+      .filter((sample) => sample.timeSeconds >= ARTEMIS_IV_TIMELINE.approachStart)
+      .map((sample) => ({
+        x: gateway.position.x
+          + basis.radial.x * sample.position.x
+          + basis.alongTrack.x * sample.position.y
+          + basis.normal.x * sample.position.z,
+        y: gateway.position.y
+          + basis.radial.y * sample.position.x
+          + basis.alongTrack.y * sample.position.y
+          + basis.normal.y * sample.position.z,
+        z: gateway.position.z
+          + basis.radial.z * sample.position.x
+          + basis.alongTrack.z * sample.position.y
+          + basis.normal.z * sample.position.z,
+      }));
+    paths.push({
+      id: 'orion-representative-approach',
+      kind: 'approach-corridor',
+      points: corridorPoints,
+      color: '#d5a85a',
+      closed: false,
+    });
+    return paths;
+  }
+
+  private updateArtemisReplay(wallDeltaSeconds: number): void {
+    const clock = this.artemisClock;
+    if (!clock) return;
+    const snapshot = clock.advance(wallDeltaSeconds);
+    const frame = this.artemisPlayback.evaluate(snapshot.timeSeconds);
+    this.artemisFrame = frame;
+    const moon = this.artemisUniverse.get(frame.focusBodyId);
+    const cameraPose = this.artemisCamera.update({
+      timeSeconds: frame.timeSeconds,
+      focusBodyId: frame.focusBodyId,
+      focusBodyRadius: moon.radius,
+      entities: frame.entities,
+      directorCue: frame.directorCue,
+      frameDefinitions: ARTEMIS_IV_MISSION.frames,
+    }, wallDeltaSeconds, {
+      discontinuity: snapshot.lastChange.discontinuity,
+      discontinuityToken: snapshot.lastChange.discontinuityToken,
+      reducedMotion: this.uiSettings?.reducedMotion ?? false,
+    });
+    this.world.updateMission({
+      universe: this.artemisUniverse,
+      universeTimeSeconds: frame.universeTimeSeconds,
+      focusBodyId: frame.focusBodyId,
+      entities: frame.entities,
+      paths: this.artemisRenderPaths(frame),
+      layers: {
+        referenceOrbit: this.artemisLayers['reference-orbit'],
+        approachCorridor: this.artemisLayers['approach-corridor'],
+        labels: this.artemisLayers.labels,
+      },
+    }, cameraPose, wallDeltaSeconds);
+
+    const phaseIndex = ARTEMIS_IV_MISSION.phases.findIndex((phase) => phase.id === frame.phase.id);
+    const telemetry = (id: string): number => frame.telemetryById[id]?.value ?? 0;
+    this.artemisReplayUi.update({
+      time: frame.timeSeconds,
+      duration: ARTEMIS_IV_MISSION.endTimeSeconds,
+      playing: snapshot.isPlaying,
+      rate: snapshot.rate,
+      phaseIndex,
+      phases: ARTEMIS_IV_MISSION.phases.map((phase) => ({
+        id: phase.id,
+        title: phase.title,
+        start: phase.startTimeSeconds,
+        end: phase.endTimeSeconds,
+        contextOnly: phase.contextOnly,
+      })),
+      narrative: frame.phase.narrative,
+      fidelity: frame.phase.contextOnly
+        ? 'CONTEXT ONLY · REPRESENTATIVE CHOREOGRAPHY · PROXY VISUALS'
+        : 'REFERENCE NRHO · REPRESENTATIVE APPROACH · PROXY VISUALS',
+      rangeMeters: telemetry('range-to-gateway'),
+      closingRateMps: telemetry('closing-rate'),
+      relativeSpeedMps: telemetry('relative-speed'),
+      eventLabel: frame.latestEvent?.title,
+      camera: this.artemisUiCamera(),
+      directorActive: this.artemisCamera.directorActive(),
+      layers: { ...this.artemisLayers },
+      disclaimer: ARTEMIS_IV_MISSION.disclaimer,
+      sources: ARTEMIS_IV_MISSION.sources.map((source) => ({
+        label: `${source.publisher} — ${source.title}`,
+        url: source.url,
+        fidelity: source.fidelity,
+      })),
+    });
+  }
+
   private async continueAutosave(): Promise<void> {
     const save = await this.saveSync.read('auto');
     if (!save) {
@@ -599,6 +913,8 @@ class PeriluneGame {
   }
 
   private showMenu(): void {
+    const returningFromArtemis = this.screen === 'mission-briefing' || this.screen === 'mission-replay';
+    this.leaveArtemisReplay();
     this.resetTouchFlightControls();
     this.screen = 'menu';
     document.getElementById('game-canvas')?.classList.remove('vab-active');
@@ -610,9 +926,11 @@ class PeriluneGame {
     this.windows.setLauncherHost(null);
     this.windows.setScreen('menu');
     if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
+    if (returningFromArtemis) this.menu.focusMission('artemis-iv');
   }
 
   private toEditor(): void {
+    this.leaveArtemisReplay();
     this.resetTouchFlightControls();
     this.paused = false;
     this.screen = 'editor';
@@ -630,6 +948,7 @@ class PeriluneGame {
   }
 
   private toFlight(spawn = true): void {
+    this.leaveArtemisReplay();
     this.paused = false;
     this.screen = 'flight';
     document.getElementById('game-canvas')?.classList.remove('vab-active');
@@ -787,6 +1106,7 @@ class PeriluneGame {
     this.world.camera.fov = settings.fov;
     this.world.cameraSmoothing = settings.cameraSmoothing && !settings.reducedMotion;
     this.world.setReducedMotion(settings.reducedMotion);
+    this.artemisCamera.setReducedMotion(settings.reducedMotion);
     this.world.camera.updateProjectionMatrix();
     this.editor.camera.fov = settings.fov;
     this.editor.camera.updateProjectionMatrix();
@@ -1157,13 +1477,25 @@ class PeriluneGame {
 
   private bindInput(canvas: HTMLCanvasElement): void {
     window.addEventListener('keydown', (e) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const target = e.target as HTMLElement | null;
+      if ((this.screen === 'mission-briefing' || this.screen === 'mission-replay') && e.code === 'Escape') {
+        e.preventDefault();
+        if (this.screen === 'mission-replay' && this.cheatSheet.visible) this.cheatSheet.hide();
+        else this.showMenu();
+        return;
+      }
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (
+        this.screen === 'mission-replay'
+        && target?.closest('button,select,textarea,a,summary')
+        && e.code !== 'Escape'
+      ) return;
       this.keys.add(e.code);
       if (this.cheatSheet.visible && (e.code === 'Escape' || e.code === 'Slash')) {
         this.cheatSheet.hide();
         return;
       }
-      if (this.screen === 'flight' || this.screen === 'editor') {
+      if (this.screen === 'flight' || this.screen === 'editor' || this.screen === 'mission-replay') {
         this.input.dispatch(e, this.screen as BindingScreen);
       }
     });
@@ -1292,6 +1624,8 @@ class PeriluneGame {
       }
       else if (this.screen === 'flight') {
         this.world.orbitCamera(dx, dy);
+      } else if (this.screen === 'mission-replay') {
+        this.artemisCamera.orbit(dx * 0.004, dy * 0.004);
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -1331,6 +1665,8 @@ class PeriluneGame {
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
         this.world.camDist = Math.max(4, Math.min(2000, this.world.camDist * factor));
+      } else if (this.screen === 'mission-replay') {
+        this.artemisCamera.zoom(factor);
       }
       e.preventDefault();
     }, { passive: false });
@@ -1340,6 +1676,7 @@ class PeriluneGame {
   private registerBindings(): void {
     const flight = 'flight' as const;
     const editor = 'editor' as const;
+    const replay = 'mission-replay' as const;
     const vessel = (fn: (v: import('./sim/flight').VesselRuntime) => void) => () => {
       const gv = this.game.active;
       if (gv) fn(gv.runtime);
@@ -1399,6 +1736,21 @@ class PeriluneGame {
         this.pendingWarpStop = null;
         this.game.setWarp(0, false);
       }) },
+      // ---- Artemis mission replay
+      { code: 'Escape', screen: replay, group: 'Replay', label: 'Exit to command deck', keyLabel: 'Esc', preventDefault: true, handler: () => this.showMenu() },
+      { code: 'Space', screen: replay, group: 'Replay', label: 'Play / pause', keyLabel: 'Space', preventDefault: true, handler: () => this.artemisClock?.togglePlayback() },
+      { code: 'ArrowLeft', screen: replay, group: 'Replay', label: 'Previous phase', keyLabel: '←', preventDefault: true, handler: () => this.stepArtemisPhase(-1) },
+      { code: 'ArrowRight', screen: replay, group: 'Replay', label: 'Next phase', keyLabel: '→', preventDefault: true, handler: () => this.stepArtemisPhase(1) },
+      { code: 'KeyR', screen: replay, group: 'Replay', label: 'Restart current phase', handler: () => this.restartArtemisPhase() },
+      { code: 'Comma', screen: replay, group: 'Time', label: 'Slower playback', handler: () => this.stepArtemisRate(-1) },
+      { code: 'Period', screen: replay, group: 'Time', label: 'Faster playback', handler: () => this.stepArtemisRate(1) },
+      { code: 'Digit1', screen: replay, group: 'Camera', label: 'Director camera', handler: () => this.setArtemisCamera('director') },
+      { code: 'Digit2', screen: replay, group: 'Camera', label: 'Gateway camera', handler: () => this.setArtemisCamera('gateway') },
+      { code: 'Digit3', screen: replay, group: 'Camera', label: 'Orion camera', handler: () => this.setArtemisCamera('orion') },
+      { code: 'Digit4', screen: replay, group: 'Camera', label: 'Moon overview', handler: () => this.setArtemisCamera('moon') },
+      { code: 'Digit5', screen: replay, group: 'Camera', label: 'Free camera', handler: () => this.setArtemisCamera('free') },
+      { code: 'Home', screen: replay, group: 'Camera', label: 'Return to Director', handler: () => this.artemisCamera.returnToDirector() },
+      { code: '', screen: replay, group: 'Camera', label: 'Manual camera takeover', keyLabel: 'Drag / wheel' },
       // ---- editor
       { code: 'Delete', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Del', handler: () => this.editor.deleteSelected() },
       { code: 'Backspace', screen: editor, group: 'Workshop', label: 'Delete selected part / drop held', keyLabel: 'Bksp', handler: () => this.editor.deleteSelected() },
@@ -1436,7 +1788,9 @@ class PeriluneGame {
       { code: '', screen: editor, group: 'Workshop', label: 'Zoom', keyLabel: 'Wheel' },
       // ---- help (both screens)
       { code: 'Slash', shift: true, screen: 'any', group: 'Help', label: 'Show this cheat sheet', keyLabel: '?', handler: () => {
-        if (this.screen === 'flight' || this.screen === 'editor') this.cheatSheet.toggle(this.screen as BindingScreen);
+        if (this.screen === 'flight' || this.screen === 'editor' || this.screen === 'mission-replay') {
+          this.cheatSheet.toggle(this.screen as BindingScreen);
+        }
       } },
     );
     for (const group of ACTION_GROUP_IDS) {
@@ -1688,6 +2042,14 @@ class PeriluneGame {
       const stats = this.world.renderStats();
       this.perf.setRendererMetrics(stats);
       if (!this.ctx.renderPaused) this.gpuProfiler.poll();
+      this.perf.setGpuMetrics(this.gpuProfiler.metrics());
+    } else if (this.screen === 'mission-replay') {
+      this.updateArtemisReplay(realDt);
+      if (!this.ctx.renderPaused) {
+        this.gpuProfiler.submit('flight', () => this.world.render());
+        this.gpuProfiler.poll();
+      }
+      this.perf.setRendererMetrics(this.world.renderStats());
       this.perf.setGpuMetrics(this.gpuProfiler.metrics());
     } else if (this.screen === 'editor') {
       this.editor.update();

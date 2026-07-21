@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "missionId": "artemis-iv",
+  "retrievedOn": "2026-07-21",
+  "allowedHosts": [
+    "naif.jpl.nasa.gov",
+    "ntrs.nasa.gov",
+    "www.nasa.gov"
+  ],
+  "sources": [
+    {
+      "id": "nasa-artemis-iv-mission",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "Artemis IV",
+      "url": "https://www.nasa.gov/mission/artemis-iv/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Artemis IV is planned as the first Artemis mission to Gateway.",
+        "Published schedule and architecture details remain subject to revision."
+      ]
+    },
+    {
+      "id": "nasa-gateway-about",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "Gateway: About",
+      "url": "https://www.nasa.gov/reference/gateway-about/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Orion is planned to deliver Lunar I-Hab to Gateway during Artemis IV.",
+        "Gateway's initial elements include HALO."
+      ]
+    },
+    {
+      "id": "nasa-gateway-capabilities",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "Gateway Capabilities",
+      "url": "https://www.nasa.gov/gateway-capabilities/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Gateway will operate in a near-rectilinear halo orbit around the Moon.",
+        "NASA describes the orbit period as approximately 6.5 days."
+      ]
+    },
+    {
+      "id": "nasa-artemis-iv-gateway-assembly",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "NASA's Artemis IV: Building First Lunar Space Station",
+      "url": "https://www.nasa.gov/general/nasas-artemis-iv-building-first-lunar-space-station/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Orion is planned to transport I-Hab to lunar orbit and act as its tug.",
+        "The crew is planned to dock I-Hab to HALO and activate Gateway."
+      ]
+    },
+    {
+      "id": "ntrs-nrho-reference-20190030294",
+      "kind": "technical-report",
+      "fidelity": "reference-trajectory",
+      "publisher": "NASA Technical Reports Server",
+      "title": "A 15-Year Near-Rectilinear Halo Orbit Reference Trajectory",
+      "url": "https://ntrs.nasa.gov/citations/20190030294",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "The published engineering reference is a southern L2 9:2 lunar-synodic-resonant NRHO.",
+        "The reference has an average period of 6.562 days and published perilune-radius range of 3,196 to 3,557 kilometers.",
+        "The reference is idealized and generic rather than an Artemis IV spacecraft ephemeris."
+      ]
+    },
+    {
+      "id": "ntrs-nrho-rendezvous-20230000757",
+      "kind": "technical-report",
+      "fidelity": "verified-source",
+      "publisher": "NASA Technical Reports Server",
+      "title": "A Robust Navigation Design for NRHO Rendezvous",
+      "url": "https://ntrs.nasa.gov/citations/20230000757",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "NRHO rendezvous may be described in relative local-vertical/local-horizontal coordinates.",
+        "The report supports operational concepts, not an exact Artemis IV rendezvous ephemeris."
+      ]
+    },
+    {
+      "id": "naif-dsg-nrho-label-2018",
+      "kind": "metadata",
+      "fidelity": "reference-trajectory",
+      "publisher": "NASA/JPL Navigation and Ancillary Information Facility",
+      "title": "Deep Space Gateway NRHO SPK label",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/misc/MORE_PROJECTS/DSG/nrho.lbl",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "The generic DSG reference platform uses NAIF target ID -60000.",
+        "The distributed trajectory is stored relative to Earth and spans 2020 through 2035.",
+        "The file can contain microsecond-scale data gaps."
+      ]
+    },
+    {
+      "id": "naif-dsg-nrho-spk-2018",
+      "kind": "kernel",
+      "fidelity": "reference-trajectory",
+      "publisher": "NASA/JPL Navigation and Ancillary Information Facility",
+      "title": "15-year Deep Space Gateway NRHO reference SPK",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/misc/MORE_PROJECTS/DSG/receding_horiz_3189_1burnApo_DiffCorr_15yr.bsp",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Supplies the generic DSG reference platform state for offline sampling."
+      ],
+      "artifact": {
+        "filename": "receding_horiz_3189_1burnApo_DiffCorr_15yr.bsp",
+        "byteLength": 41020416,
+        "sha256": "114bf4bf418237d28b8945e05d7a04d90358199f62d50f9bf14f38b13985f8ec"
+      }
+    },
+    {
+      "id": "jpl-de440s-spk-2020",
+      "kind": "kernel",
+      "fidelity": "reference-trajectory",
+      "publisher": "NASA/JPL Navigation and Ancillary Information Facility",
+      "title": "DE440s planetary ephemeris SPK",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Supplies the Earth and Moon states required to transform the Earth-relative DSG SPK into a Moon-centered state."
+      ],
+      "artifact": {
+        "filename": "de440s.bsp",
+        "byteLength": 32726016,
+        "sha256": "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2"
+      }
+    },
+    {
+      "id": "naif-leapseconds-0012",
+      "kind": "kernel",
+      "fidelity": "reference-trajectory",
+      "publisher": "NASA/JPL Navigation and Ancillary Information Facility",
+      "title": "NAIF leap-seconds kernel 0012",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "Supplies the locked time-system conversion used to record human-readable source epochs."
+      ],
+      "artifact": {
+        "filename": "naif0012.tls",
+        "byteLength": 5257,
+        "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"
+      }
+    },
+    {
+      "id": "nasa-brand-guidelines",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "NASA Brand Guidelines",
+      "url": "https://www.nasa.gov/nasa-brand-center/brand-guidelines/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "NASA insignia and identifiers require appropriate authorization and must not imply endorsement."
+      ]
+    },
+    {
+      "id": "nasa-images-media-guidelines",
+      "kind": "web-page",
+      "fidelity": "verified-source",
+      "publisher": "NASA",
+      "title": "NASA Images and Media Usage Guidelines",
+      "url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "retrievedOn": "2026-07-21",
+      "supportedClaims": [
+        "NASA media usage must follow attribution and non-endorsement guidance."
+      ]
+    }
+  ],
+  "referenceTrajectory": {
+    "id": "gateway-nrho-reference-revolution-2028-11",
+    "fidelity": "reference-trajectory",
+    "coordinateFrame": "MOON_J2000",
+    "positionUnits": "m",
+    "velocityUnits": "m/s",
+    "timeUnits": "s",
+    "sourceIds": [
+      "ntrs-nrho-reference-20190030294",
+      "naif-dsg-nrho-label-2018",
+      "naif-dsg-nrho-spk-2018",
+      "jpl-de440s-spk-2020",
+      "naif-leapseconds-0012"
+    ],
+    "kernelSourceIds": [
+      "naif-dsg-nrho-spk-2018",
+      "jpl-de440s-spk-2020",
+      "naif-leapseconds-0012"
+    ],
+    "selection": {
+      "startEtSeconds": 911282822.4185674,
+      "stopEtSeconds": 911850028.9700515,
+      "sampleStepSeconds": 900,
+      "method": "Successive Moon-centered radius minima selected from the generic reference SPK; fixed ET bounds make regeneration deterministic. The dates are a source-segment choice, not Artemis IV mission dates."
+    },
+    "generatedArtifact": {
+      "path": "src/generated/artemis-iv-reference-track.json",
+      "byteLength": 171635,
+      "sha256": "e32da4409e14d7b770ed8cce07d864a16e00557f1b8f13f57f648c44e4b3b92e",
+      "script": "scripts/compile-artemis-reference-track.py",
+      "scriptByteLength": 12238,
+      "scriptSha256": "46b717f05643fecf822409ec6611955b7e723a23f99d5d13d70bd7d112104361",
+      "requirements": "scripts/requirements-artemis-reference.txt",
+      "requirementsByteLength": 29,
+      "requirementsSha256": "02d25a175d3ad376bcae9454caeebca40feae13cf6a933ee0769b78c0f59da79",
+      "command": "python3 -m venv .artemis-venv && .artemis-venv/bin/python -m pip install -r scripts/requirements-artemis-reference.txt && node scripts/fetch-artemis-reference-kernels.mjs && .artemis-venv/bin/python scripts/compile-artemis-reference-track.py"
+    },
+    "disclaimer": "Official idealized Gateway reference trajectory; this is not an Artemis IV flight trajectory or prediction."
+  }
+}
