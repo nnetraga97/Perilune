@@ -9,7 +9,7 @@
  * plenty for planning; the maneuver planner refines the burn.
  */
 import { Vec3 } from '../core/vec3';
-import { periodOf, stateToElements } from '../core/orbit';
+import { elementsAtTime, periodOf, stateToElements } from '../core/orbit';
 import { orbitAfterNode, predictTrajectory, type ManeuverNode } from './maneuver';
 import type { Body, Universe } from './universe';
 
@@ -45,6 +45,247 @@ export interface TransferPlan {
 
 const _r = new Vec3();
 const _v = new Vec3();
+const _targetR = new Vec3();
+const _targetV = new Vec3();
+const _lambertV = new Vec3();
+const _rHat = new Vec3();
+const _nHat = new Vec3();
+const _tHat = new Vec3();
+const _dv = new Vec3();
+
+function stumpff(z: number): { c: number; s: number } {
+  if (z > 1e-6) {
+    const root = Math.sqrt(z);
+    return {
+      c: (1 - Math.cos(root)) / z,
+      s: (root - Math.sin(root)) / (root * root * root),
+    };
+  }
+  if (z < -1e-6) {
+    const root = Math.sqrt(-z);
+    return {
+      c: (Math.cosh(root) - 1) / -z,
+      s: (Math.sinh(root) - root) / (root * root * root),
+    };
+  }
+  return {
+    c: 1 / 2 - z / 24 + z * z / 720,
+    s: 1 / 6 - z / 120 + z * z / 5040,
+  };
+}
+
+/** Zero-revolution Lambert departure velocity for a prograde 3D transfer. */
+export function solveLambertDeparture(
+  mu: number,
+  departurePosition: Readonly<Vec3>,
+  arrivalPosition: Readonly<Vec3>,
+  timeOfFlight: number,
+  progradeNormal: Readonly<Vec3>,
+  out: Vec3,
+): Vec3 | null {
+  const r1 = departurePosition.length();
+  const r2 = arrivalPosition.length();
+  if (!(mu > 0 && r1 > 0 && r2 > 0 && timeOfFlight > 0)) return null;
+
+  const cosine = Math.max(-1, Math.min(1, Vec3.dot(departurePosition, arrivalPosition) / (r1 * r2)));
+  const cross = Vec3.cross(departurePosition, arrivalPosition, new Vec3());
+  const sineMagnitude = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+  const sine = Vec3.dot(cross, progradeNormal) >= 0 ? sineMagnitude : -sineMagnitude;
+  const denominator = 1 - cosine;
+  if (denominator < 1e-12 || Math.abs(sine) < 1e-12) return null;
+  const a = sine * Math.sqrt((r1 * r2) / denominator);
+  if (Math.abs(a) < 1e-9) return null;
+
+  const transferTimeAt = (z: number): { time: number; y: number } | null => {
+    const { c, s } = stumpff(z);
+    if (!(c > 0)) return null;
+    const y = r1 + r2 + a * (z * s - 1) / Math.sqrt(c);
+    if (!(y > 0)) return null;
+    const x = Math.sqrt(y / c);
+    const transferTime = (x * x * x * s + a * Math.sqrt(y)) / Math.sqrt(mu);
+    return Number.isFinite(transferTime) ? { time: transferTime, y } : null;
+  };
+
+  const target = timeOfFlight;
+  let lowerZ: number | null = null;
+  let upperZ: number | null = null;
+  let previousZ: number | null = null;
+  let previousTime = 0;
+  const zMin = -4 * Math.PI * Math.PI;
+  const zMax = 4 * Math.PI * Math.PI;
+  for (let index = 0; index <= 800; index++) {
+    const z = zMin + (zMax - zMin) * index / 800;
+    const sample = transferTimeAt(z);
+    if (!sample) continue;
+    if (previousZ !== null && previousTime <= target && sample.time >= target) {
+      lowerZ = previousZ;
+      upperZ = z;
+      break;
+    }
+    previousZ = z;
+    previousTime = sample.time;
+  }
+  if (lowerZ === null || upperZ === null) return null;
+
+  let lo: number = lowerZ;
+  let hi: number = upperZ;
+  for (let iteration = 0; iteration < 64; iteration++) {
+    const middle: number = (lo + hi) / 2;
+    const sample = transferTimeAt(middle);
+    if (!sample || sample.time < target) lo = middle;
+    else hi = middle;
+  }
+  const solution = transferTimeAt((lo + hi) / 2);
+  if (!solution) return null;
+  const f = 1 - solution.y / r1;
+  const g = a * Math.sqrt(solution.y / mu);
+  if (Math.abs(g) < 1e-9) return null;
+  out.set(
+    (arrivalPosition.x - f * departurePosition.x) / g,
+    (arrivalPosition.y - f * departurePosition.y) / g,
+    (arrivalPosition.z - f * departurePosition.z) / g,
+  );
+  return out.isFinite() ? out : null;
+}
+
+function lambertMoonNode(
+  universe: Universe,
+  from: Body,
+  moon: Body,
+  reference: ReturnType<typeof stateToElements>,
+  burnTime: number,
+  transferTime: number,
+): ManeuverNode | null {
+  elementsAtTime(reference, burnTime, _r, _v);
+  universe.localPosition(moon, burnTime + transferTime, _targetR, _targetV);
+  Vec3.cross(_r, _v, _nHat).normalize();
+  const departureVelocity = solveLambertDeparture(
+    from.mu,
+    _r,
+    _targetR,
+    transferTime,
+    _nHat,
+    _lambertV,
+  );
+  if (!departureVelocity) return null;
+  _rHat.copy(_r).normalize();
+  Vec3.cross(_nHat, _rHat, _tHat).normalize();
+  _dv.copy(departureVelocity).sub(_v);
+  return {
+    time: burnTime,
+    prograde: Vec3.dot(_dv, _tHat),
+    normal: Vec3.dot(_dv, _nHat),
+    radial: Vec3.dot(_dv, _rHat),
+  };
+}
+
+export function refineLambertMoonTransfer(
+  universe: Universe,
+  from: Body,
+  moon: Body,
+  reference: ReturnType<typeof stateToElements>,
+  time: number,
+  parkingPeriod: number,
+  nominalTransferTime: number,
+  targetAltitude: number,
+): { node: ManeuverNode; approachAltitude: number; transferTime: number } | null {
+  type LambertCandidate = {
+    node: ManeuverNode;
+    transferTime: number;
+    deltaV: number;
+  };
+  const earliest = time + 5;
+  const latest = time + parkingPeriod;
+  let best: LambertCandidate | null = null;
+  const alternates: LambertCandidate[] = [];
+  const consider = (burnTime: number, transferTime: number): void => {
+    const node = lambertMoonNode(universe, from, moon, reference, burnTime, transferTime);
+    if (!node) return;
+    const deltaV = Math.hypot(node.prograde, node.normal, node.radial);
+    if (!Number.isFinite(deltaV) || deltaV <= 0) return;
+    const candidate = { node, transferTime, deltaV };
+    if (!best || deltaV < best.deltaV) best = candidate;
+    alternates.push(candidate);
+    if (alternates.length > 96) {
+      alternates.sort((a, b) => a.deltaV - b.deltaV);
+      alternates.length = 64;
+    }
+  };
+
+  // A real inclined lunar orbit does not generally share the textbook
+  // coplanar Hohmann window. Search the next parking-orbit revolution and a
+  // compact family of practical coast times, then refine the cheapest route.
+  for (let coastIndex = 0; coastIndex <= 14; coastIndex++) {
+    const transferTime = nominalTransferTime * (0.3 + coastIndex * 0.05);
+    for (let burnIndex = 0; burnIndex <= 32; burnIndex++) {
+      consider(earliest + (latest - earliest) * burnIndex / 32, transferTime);
+    }
+  }
+  if (!best) return null;
+
+  let burnHalfWidth = parkingPeriod / 32;
+  let coastHalfWidth = nominalTransferTime * 0.05;
+  for (let pass = 0; pass < 4; pass++) {
+    const center = best as LambertCandidate;
+    for (let coastStep = -3; coastStep <= 3; coastStep++) {
+      const transferTime = Math.max(60, center.transferTime + coastHalfWidth * coastStep / 3);
+      for (let burnStep = -3; burnStep <= 3; burnStep++) {
+        const burnTime = Math.max(
+          earliest,
+          Math.min(latest, center.node.time + burnHalfWidth * burnStep / 3),
+        );
+        consider(burnTime, transferTime);
+      }
+    }
+    burnHalfWidth /= 3;
+    coastHalfWidth /= 3;
+  }
+
+  alternates.sort((a, b) => a.deltaV - b.deltaV);
+  let resolved: LambertCandidate | null = null;
+  let resolvedApproach: { altitude: number; score: number } | null = null;
+  const evaluateApproach = (
+    node: ManeuverNode,
+    transferTime: number,
+  ): { altitude: number; score: number } | null => {
+    const postBurn = orbitAfterNode(reference, node);
+    const encounter = predictTrajectory(universe, from, postBurn, node.time, transferTime * 1.65).encounter;
+    if (!encounter || encounter.bodyId !== moon.id) return null;
+    return {
+      altitude: encounter.periapsisAltitude,
+      score: Math.abs(encounter.periapsisAltitude - targetAltitude),
+    };
+  };
+
+  for (const candidate of alternates) {
+    const candidateApproach = evaluateApproach(candidate.node, candidate.transferTime);
+    if (!candidateApproach) continue;
+    resolved = candidate;
+    resolvedApproach = candidateApproach;
+    break;
+  }
+  if (!resolved || !resolvedApproach) return null;
+
+  let node = { ...resolved.node };
+  let approach = resolvedApproach;
+  let componentStep = Math.max(25, resolved.deltaV * 0.025);
+  for (let pass = 0; pass < 9 && approach.score > 2_000; pass++) {
+    let improved = false;
+    for (const component of ['prograde', 'normal', 'radial'] as const) {
+      for (const direction of [-1, 1]) {
+        const candidateNode = { ...node, [component]: node[component] + direction * componentStep };
+        const candidateApproach = evaluateApproach(candidateNode, resolved.transferTime);
+        if (candidateApproach && candidateApproach.score < approach.score) {
+          node = candidateNode;
+          approach = candidateApproach;
+          improved = true;
+        }
+      }
+    }
+    componentStep *= improved ? 0.65 : 0.5;
+  }
+  return { node, approachAltitude: approach.altitude, transferTime: resolved.transferTime };
+}
 
 function angleOf(universe: Universe, body: Body, t: number): number {
   universe.localPosition(body, t, _r);
@@ -80,7 +321,7 @@ function refineMoonIntercept(
   opts: TransferOptions,
   nominalNode: ManeuverNode,
   transferTime: number,
-): { node: ManeuverNode; approachAltitude: number } | null {
+): { node: ManeuverNode; approachAltitude: number; transferTime: number } | null {
   type InterceptCandidate = {
     node: ManeuverNode;
     approachAltitude: number;
@@ -118,28 +359,40 @@ function refineMoonIntercept(
       bestIndex = index;
     }
   }
-  if (!best) return null;
-
-  let lo = earliest + (latest - earliest) * Math.max(0, bestIndex - 1) / coarseSteps;
-  let hi = earliest + (latest - earliest) * Math.min(coarseSteps, bestIndex + 1) / coarseSteps;
-  for (let pass = 0; pass < 5; pass++) {
-    let passBest: InterceptCandidate | null = null;
-    let passIndex = 0;
-    for (let index = 0; index <= 6; index++) {
-      const candidate = evaluate(lo + (hi - lo) * index / 6);
-      if (candidate && (!passBest || candidate.score < passBest.score)) {
-        passBest = candidate;
-        passIndex = index;
+  if (best) {
+    let lo = earliest + (latest - earliest) * Math.max(0, bestIndex - 1) / coarseSteps;
+    let hi = earliest + (latest - earliest) * Math.min(coarseSteps, bestIndex + 1) / coarseSteps;
+    for (let pass = 0; pass < 5; pass++) {
+      let passBest: InterceptCandidate | null = null;
+      let passIndex = 0;
+      for (let index = 0; index <= 6; index++) {
+        const candidate = evaluate(lo + (hi - lo) * index / 6);
+        if (candidate && (!passBest || candidate.score < passBest.score)) {
+          passBest = candidate;
+          passIndex = index;
+        }
       }
+      if (!passBest) break;
+      if (passBest.score < best.score) best = passBest;
+      const width = (hi - lo) / 6;
+      const center = lo + width * passIndex;
+      lo = Math.max(earliest, center - width);
+      hi = Math.min(latest, center + width);
     }
-    if (!passBest) break;
-    if (passBest.score < best.score) best = passBest;
-    const width = (hi - lo) / 6;
-    const center = lo + width * passIndex;
-    lo = Math.max(earliest, center - width);
-    hi = Math.min(latest, center + width);
+    if (best.score <= Math.max(100_000, moon.radius * 0.25)) {
+      return { node: best.node, approachAltitude: best.approachAltitude, transferTime };
+    }
   }
-  return best ? { node: best.node, approachAltitude: best.approachAltitude } : null;
+  return refineLambertMoonTransfer(
+    universe,
+    from,
+    moon,
+    reference,
+    time,
+    parkingPeriod,
+    transferTime,
+    targetAltitude,
+  ) ?? (best ? { node: best.node, approachAltitude: best.approachAltitude, transferTime } : null);
 }
 
 function nearestFuturePhaseTime(
@@ -238,18 +491,25 @@ function planMoonTransfer(
   };
   const refined = refineMoonIntercept(universe, time, from, moon, opts, nominalNode, tT);
   const suggestedNode = refined?.node ?? nominalNode;
+  const plannedTransferTime = refined?.transferTime ?? tT;
+  const plannedWindowTime = refined ? suggestedNode.time : windowTime;
+  const plannedTimeToWindow = Math.max(0, plannedWindowTime - time);
+  const vesselAngleAtBurn = vesselAngle + n1 * plannedTimeToWindow;
+  const plannedPhaseNeeded = refined
+    ? norm2pi(angleOf(universe, moon, plannedWindowTime) - vesselAngleAtBurn)
+    : phaseNeeded;
   return {
     fromId: from.id,
     targetId: moon.id,
     targetName: moon.name,
     kind: 'moon',
     phaseNow,
-    phaseNeeded,
-    timeToWindow: Math.max(0, timeToWindow),
-    windowTime,
+    phaseNeeded: plannedPhaseNeeded,
+    timeToWindow: plannedTimeToWindow,
+    windowTime: plannedWindowTime,
     burnTime: suggestedNode.time,
-    transferTime: tT,
-    departureDv,
+    transferTime: plannedTransferTime,
+    departureDv: Math.hypot(suggestedNode.prograde, suggestedNode.normal, suggestedNode.radial),
     arrivalDv,
     suggestedNode,
     approachAltitude: refined?.approachAltitude,

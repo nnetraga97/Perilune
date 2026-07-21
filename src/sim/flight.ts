@@ -29,6 +29,7 @@ import {
   surfaceVelocity,
 } from './bodyOrientation';
 import type { BufferedResult, ScienceKeyId } from './science';
+import { LEGACY_FLIGHT_TUNING, type FlightTuning } from './gameplayTuning';
 
 export type SasMode =
   | 'off'
@@ -212,6 +213,7 @@ export interface StepContext {
   time: number; // absolute sim time
   /** Sun direction (unit) in body-inertial frame for solar charging. */
   sunDir: Vec3;
+  flightTuning: Readonly<FlightTuning>;
 }
 
 export interface StepResult {
@@ -238,21 +240,64 @@ export function engineHasFuel(
 }
 
 /** Total available thrust (N) at current throttle=1 in current atmosphere. */
-export function maxThrust(v: VesselRuntime, pressure: number): number {
+export function maxThrust(
+  v: VesselRuntime,
+  pressure: number,
+  tuning: Readonly<FlightTuning> = LEGACY_FLIGHT_TUNING,
+  seaLevelPressure = 101_325,
+): number {
   let total = 0;
   for (const p of v.craft.parts) {
     const eng = defOf(p).engine;
     if (!eng || !p.activated) continue;
     if (!engineHasFuel(v.craft, p, v.crossfeedIndex)) continue;
-    const frac = Math.min(1, pressure / 101_325);
+    const frac = Math.min(1, pressure / seaLevelPressure);
     if (eng.airBreathing) {
-      total += eng.thrustVac * frac;
+      total += eng.thrustVac * frac * tuning.thrustMultiplier;
       continue;
     }
     const isp = eng.ispVac + (eng.ispSea - eng.ispVac) * frac;
-    total += eng.thrustVac * (isp / eng.ispVac);
+    total += eng.thrustVac * (isp / eng.ispVac) * tuning.thrustMultiplier;
   }
   return total;
+}
+
+/**
+ * Ignite the throttleable engine set that owns the current maneuver stage.
+ * This never fires a separator, advances the stage cursor, or lights solids.
+ */
+export function igniteManeuverEngines(v: VesselRuntime): string[] {
+  const byKey = new Map(v.craft.parts.map((part) => [part.key, part]));
+  const active = v.craft.parts.some((part) => (
+    Boolean(defOf(part).engine)
+    && part.activated
+    && engineHasFuel(v.craft, part, v.crossfeedIndex)
+  ));
+  if (active) return [];
+
+  const igniteFrom = (stageIndex: number, allowUnfiredStage: boolean): string[] => {
+    const stage = v.craft.stages[stageIndex];
+    if (!stage) return [];
+    const parts = stage.partKeys.map((key) => byKey.get(key)).filter((part): part is PartInstance => Boolean(part));
+    if (allowUnfiredStage && parts.some((part) => Boolean(defOf(part).decoupler))) return [];
+    const ignited: string[] = [];
+    for (const part of parts) {
+      const def = defOf(part);
+      if (!def.engine || def.engine.propellant === 'solidFuel') continue;
+      if (!engineHasFuel(v.craft, part, v.crossfeedIndex)) continue;
+      part.activated = true;
+      ignited.push(def.name);
+    }
+    return ignited;
+  };
+
+  // Prefer the most recently fired propulsion stage (for an engine disabled
+  // through an action group), then a current engine-only stage.
+  for (let index = Math.min(v.currentStage - 1, v.craft.stages.length - 1); index >= 0; index--) {
+    const ignited = igniteFrom(index, false);
+    if (ignited.length) return ignited;
+  }
+  return igniteFrom(v.currentStage, true);
 }
 
 /** A prelaunch craft releases only when an ignited engine can actually thrust. */
@@ -337,6 +382,7 @@ export function stepVessel(
     if (def.pod) wheelTorque += def.pod.torque;
     if (def.probe) wheelTorque += def.probe.torque;
   }
+  wheelTorque *= ctx.flightTuning.attitudeControlMultiplier;
   const hasCharge = v.charge.amount > 0.01;
   if (!hasCharge) wheelTorque *= 0.05;
   _torqueC.set(
@@ -364,12 +410,14 @@ export function stepVessel(
       // Air-breathing: thrust scales with air density, flames out in vacuum.
       const airFactor = Math.min(1, density / 1.2);
       if (airFactor < 0.02) continue;
-      isp = eng.ispVac;
-      thrust = eng.thrustVac * airFactor * effThrottle;
+      isp = eng.ispVac * ctx.flightTuning.ispMultiplier;
+      thrust = eng.thrustVac * ctx.flightTuning.thrustMultiplier * airFactor * effThrottle;
     } else {
-      const frac = Math.min(1, pressure / 101_325);
-      isp = eng.ispVac + (eng.ispSea - eng.ispVac) * frac;
-      thrust = eng.thrustVac * (isp / eng.ispVac) * effThrottle;
+      const referencePressure = body.def.atmosphere?.seaLevelPressure ?? 101_325;
+      const frac = Math.min(1, pressure / referencePressure);
+      const baseIsp = eng.ispVac + (eng.ispSea - eng.ispVac) * frac;
+      isp = baseIsp * ctx.flightTuning.ispMultiplier;
+      thrust = eng.thrustVac * (baseIsp / eng.ispVac) * ctx.flightTuning.thrustMultiplier * effThrottle;
     }
     const flow = thrust / (isp * G0); // kg/s
     const requestedMass = flow * dt;
@@ -414,25 +462,42 @@ export function stepVessel(
   }
 
   // -------------------------------------------------------------------- RCS
-  if (v.controls.rcs && hasCharge) {
+  if (v.controls.rcs && findMonoprop(v.craft) > 0) {
     let rcsThrust = 0;
     for (const p of v.craft.parts) {
       const rcs = defOf(p).rcs;
-      if (rcs && (findMonoprop(v.craft) > 0)) rcsThrust += rcs.thrust;
+      if (rcs) rcsThrust += rcs.thrust * ctx.flightTuning.rcsThrustMultiplier;
     }
     if (rcsThrust > 0) {
       // Translation
       const t = v.controls.translate;
       if (t.lengthSq() > 1e-6) {
-        _tmp.copy(t).normalize().scale(rcsThrust);
+        const translationDemand = Math.min(1, t.length());
+        const translationThrust = rcsThrust * translationDemand;
+        _tmp.copy(t).normalize().scale(translationThrust);
         v.att.rotate(_tmp, _tmp);
         _force.add(_tmp);
-        drainMonoprop(v.craft, (rcsThrust / (240 * G0)) * dt / RESOURCE_DENSITY.monoprop);
+        drainMonoprop(v.craft, (translationThrust / (240 * G0)) * dt / RESOURCE_DENSITY.monoprop);
       }
       // Attitude assist
-      const rcsTorque = rcsThrust * 2.2; // lever approximation
-      _torqueC.x = clamp(_torqueC.x + clamp(_cmdTorque.x, -rcsTorque, rcsTorque) * 0.5, -wheelTorque - rcsTorque, wheelTorque + rcsTorque);
-      _torqueC.z = clamp(_torqueC.z + clamp(_cmdTorque.z, -rcsTorque, rcsTorque) * 0.5, -wheelTorque - rcsTorque, wheelTorque + rcsTorque);
+      const lever = 3.5;
+      const rcsTorque = rcsThrust * lever;
+      const supplementX = clamp(_cmdTorque.x - _torqueC.x, -rcsTorque, rcsTorque);
+      const supplementY = clamp(_cmdTorque.y - _torqueC.y, -rcsTorque, rcsTorque);
+      const supplementZ = clamp(_cmdTorque.z - _torqueC.z, -rcsTorque, rcsTorque);
+      _torqueC.x += supplementX;
+      _torqueC.y += supplementY;
+      _torqueC.z += supplementZ;
+      const equivalentAttitudeThrust = Math.min(
+        rcsThrust,
+        Math.hypot(supplementX, supplementY, supplementZ) / lever,
+      );
+      if (equivalentAttitudeThrust > 1e-6) {
+        drainMonoprop(
+          v.craft,
+          (equivalentAttitudeThrust / (240 * G0)) * dt / RESOURCE_DENSITY.monoprop,
+        );
+      }
     }
   }
 
@@ -971,7 +1036,7 @@ function stepThermal(
     // Heat shields facing the flow soak heat into ablator instead.
     // Scale tuned so subsonic flight is warm at most and re-entry at
     // ~2.8 km/s demands a heat shield (see ascent integration test).
-    const heatIn = (flux * exposure) / 4.0e5;
+    const heatIn = (flux * exposure * ctx.flightTuning.thermalLoadMultiplier) / 4.0e5;
     if (def.heatShield && (p.resources.ablator ?? 0) > 0 && heatIn > 2) {
       const ablate = Math.min(p.resources.ablator ?? 0, heatIn * dt * 0.008);
       p.resources.ablator = (p.resources.ablator ?? 0) - ablate;

@@ -8,13 +8,13 @@
 import { Vec3 } from '../core/vec3';
 import { GameState } from '../sim/state';
 import { G0, defOf, analyzeCraft } from '../sim/vessel';
-import { oreConcentration, oreCapacityOf } from '../sim/resources';
+import { oreCapacityOf } from '../sim/resources';
 import type { SasMode } from '../sim/flight';
 import type { CommsStatus } from '../sim/comms';
 import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from '../sim/maneuver';
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading, projectNavDirection } from './navball';
-import { inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
+import { surfaceVelocity } from '../sim/bodyOrientation';
 import { el, injectUiStyles } from './kit';
 import { appendNavballIcon, type NavballIcon } from './icons';
 import type { EntryPrediction } from '../sim/entry';
@@ -651,7 +651,12 @@ export class FlightHud {
     const atmosphereHeight = body.def.atmosphere?.height ?? 0;
     const atmosphereDepth = atmosphereHeight > 0 ? Math.max(0, Math.min(1, 1 - alt / atmosphereHeight)) : 0;
     this.setStatus(this.gFill, this.gText, v.properAccel / G0 / 5, `${(v.properAccel / G0).toFixed(2)} g`);
-    this.setStatus(this.qFill, this.qText, v.aero.dynamicPressure / 40_000, `${(v.aero.dynamicPressure / 1000).toFixed(1)} kPa`);
+    this.setStatus(
+      this.qFill,
+      this.qText,
+      v.aero.dynamicPressure / game.flightTuning.nominalMaxQPa,
+      `${(v.aero.dynamicPressure / 1000).toFixed(1)} kPa`,
+    );
     this.setStatus(this.atmosphereFill, this.atmosphereText, atmosphereDepth, `${(atmosphereDepth * 100).toFixed(0)}%`);
     this.qText.title = `Peak Q ${(this.peakQ / 1000).toFixed(1)} kPa`;
     let fuel = 0,
@@ -682,6 +687,7 @@ export class FlightHud {
       fuelFraction: fuelMax > 0 ? fuel / fuelMax : null,
       chargeFraction: v.charge.capacity > 0 ? v.charge.amount / v.charge.capacity : null,
       dynamicPressurePa: v.aero.dynamicPressure,
+      dynamicPressureLimitPa: game.flightTuning.nominalMaxQPa,
       properG: v.properAccel / G0,
       commsBlocked: this.commsBlocked,
       nodeBurnStartEta,
@@ -708,7 +714,7 @@ export class FlightHud {
     if (stageSig !== this.lastStageRender) {
       this.lastStageRender = stageSig;
       this.stageListEl.innerHTML = '';
-      const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(alt));
+      const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(alt), game.flightTuning, body.def.atmosphere?.seaLevelPressure);
       v.craft.stages.forEach((stage, i) => {
         const div = document.createElement('div');
         div.className = `hud-stage ${i < v.currentStage ? 'spent' : i === v.currentStage ? 'next' : ''}`;
@@ -857,10 +863,6 @@ export class FlightHud {
       const science = el('button', 'hud-btn hud-part-action', popup, 'Run experiment');
       science.onclick = () => this.cb.onRunScience();
     }
-    if (definition.resourceScanner) {
-      const survey = el('button', 'hud-btn hud-part-action', popup, 'Survey resources');
-      survey.onclick = () => this.cb.onSurvey();
-    }
   }
 
   private setStatus(fill: HTMLElement, text: HTMLElement, fraction: number, label: string): void {
@@ -877,7 +879,7 @@ export class FlightHud {
     const v = gv.runtime;
     const body = game.bodyOf(gv);
     const altitude = v.pos.length() - body.radius;
-    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(altitude));
+    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(altitude), game.flightTuning, body.def.atmosphere?.seaLevelPressure);
     const candidates = analysis.stages.filter((stage) => stage.thrust > 0);
     const stage = candidates.find((candidate) => candidate.stageIndex >= v.currentStage)
       ?? [...candidates].reverse().find((candidate) => candidate.stageIndex < v.currentStage);
@@ -920,69 +922,11 @@ export class FlightHud {
     this.entryCard.classList.toggle('warning', !prediction.lands);
   }
 
-  /** ISRU systems panel: drill/converter toggles, survey, local ore. */
-  private updateSystems(game: GameState): void {
-    const gv = game.active!;
-    const v = gv.runtime;
-    const systems = v.craft.parts.filter((p) => {
-      const d = defOf(p);
-      return d.drill || d.converter;
-    });
-    const hasScanner = v.craft.parts.some((p) => defOf(p).resourceScanner);
-    const landed = v.situation === 'landed' || v.situation === 'prelaunch';
-    const scanned = game.scannedBodies.has(v.bodyId);
-
-    const sig = `${systems.map((p) => `${p.key}:${p.activated ? 1 : 0}`).join('|')}~${hasScanner}~${landed}~${scanned}~${v.situation}`;
-    if (sig !== this.lastSysRender) {
-      this.lastSysRender = sig;
-      this.sysPanel.innerHTML = '';
-      this.oreHereEl = null;
-      if (!systems.length && !hasScanner) {
-        this.sysPanel.style.display = 'none';
-      } else {
-        this.sysPanel.style.display = '';
-        const title = el('div', 'hud-stage-title', this.sysPanel, 'SYSTEMS');
-        void title;
-        for (const p of systems) {
-          const d = defOf(p);
-          const b = el(
-            'button',
-            'hud-btn hud-sys-toggle',
-            this.sysPanel,
-            `${d.drill ? '⛏' : '⚗'} ${d.name}: ${p.activated ? 'ON' : 'OFF'}`,
-          );
-          b.classList.toggle('active', !!p.activated);
-          b.title = d.drill
-            ? 'Drill extracts ore while landed (uses charge)'
-            : 'Converter refines ore into propellant (uses charge)';
-          b.onclick = () => this.cb.onToggleSystem(p.key);
-        }
-        if (hasScanner) {
-          const b = el('button', 'hud-btn hud-sys-toggle', this.sysPanel, '🛰 Survey resources');
-          b.title = scanned
-            ? 'This body is already surveyed'
-            : 'Survey the resource field (needs stable orbit above 25 km, 20 charge)';
-          b.onclick = () => this.cb.onSurvey();
-        }
-        if (systems.some((p) => defOf(p).drill)) {
-          this.oreHereEl = el('div', 'hud-node-info', this.sysPanel, '');
-        }
-      }
-    }
-
-    // Live local-ore readout (cheap noise sample; only while landed).
-    if (this.oreHereEl) {
-      if (!landed) {
-        this.oreHereEl.textContent = '';
-      } else if (!scanned) {
-        this.oreHereEl.textContent = 'Ore here: ?? (survey from orbit)';
-      } else {
-        const body = game.bodyOf(gv);
-        const dir = inertialToBodyFixed(body, game.time, v.pos, new Vec3()).normalize();
-        const conc = oreConcentration(body, dir);
-        this.oreHereEl.textContent = `Ore here: ${(conc * 100).toFixed(0)}%`;
-      }
-    }
+  /** Mining and resource surveying are intentionally outside the playable game. */
+  private updateSystems(_game: GameState): void {
+    this.sysPanel.style.display = 'none';
+    this.sysPanel.replaceChildren();
+    this.oreHereEl = null;
   }
 
   private appendResourceIcon(parent: HTMLElement, paths: readonly string[]): void {

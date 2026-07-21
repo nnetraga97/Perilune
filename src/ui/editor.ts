@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import { wrapOrbitAngle } from '../core/cameraOrbit';
+import type { FlightTuning } from '../sim/gameplayTuning';
+import type { GameplaySystemId } from '../content/gameplayProfiles';
 import {
   ACTION_GROUP_IDS,
   addPart,
@@ -190,6 +192,8 @@ export interface EditorCallbacks {
   onLaunch(craft: Craft): Promise<string | null>;
   onExit(): void;
   campaign(): CampaignState;
+  flightTuning(): Readonly<FlightTuning>;
+  systemId(): GameplaySystemId;
 }
 
 export class Editor {
@@ -244,6 +248,7 @@ export class Editor {
   private searchInput!: HTMLInputElement;
   private sortSelect!: HTMLSelectElement;
   private craftListEl!: HTMLElement;
+  private builtInListEl!: HTMLElement;
   private statsDirty = true;
   private activeCategory: PartDef['category'] = 'pods';
   private snapIndex = 2;
@@ -415,16 +420,7 @@ export class Editor {
     this.envSelect = document.createElement('select');
     this.envSelect.className = 'ed-name';
     this.envSelect.style.width = '100%';
-    for (const [val, label] of [
-      ['veyra-sl', 'Veyra · sea level'],
-      ['veyra-vac', 'Veyra · vacuum'],
-      ['palla', 'Palla · surface'],
-    ]) {
-      const o = document.createElement('option');
-      o.value = val;
-      o.textContent = label;
-      this.envSelect.appendChild(o);
-    }
+    this.configureEnvironmentOptions();
     this.envSelect.onchange = () => (this.statsDirty = true);
     envPanel.appendChild(this.envSelect);
 
@@ -457,9 +453,9 @@ export class Editor {
 
     const builtInPanel = el('div', 'ed-panel ed-built-in-panel', craftGroup);
     builtInPanel.innerHTML = '<h3>BUILT-IN CRAFT</h3>';
-    const builtInList = el('div', 'ed-craft-list', builtInPanel);
-    builtInList.dataset.section = 'built-in-crafts';
-    this.renderBuiltInCraftList(builtInList);
+    this.builtInListEl = el('div', 'ed-craft-list', builtInPanel);
+    this.builtInListEl.dataset.section = 'built-in-crafts';
+    this.renderBuiltInCraftList(this.builtInListEl);
 
     const craftPanel = el('div', 'ed-panel', craftGroup);
     craftPanel.innerHTML = '<h3>SAVED CRAFT</h3>';
@@ -497,7 +493,7 @@ export class Editor {
       row.dataset.craftId = definition.id;
       const copy = el('div', 'ed-craft-copy', row);
       el('strong', '', copy, definition.name);
-      const analysis = analyzeCraft(craft, 9.42, 101_325);
+      const analysis = analyzeCraft(craft, 9.42, 101_325, this.cb.flightTuning());
       el('span', '', copy, `${craft.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
       const load = el('button', 'hud-btn', row, 'Load');
       load.setAttribute('aria-label', `Load built-in craft ${definition.name}`);
@@ -521,7 +517,7 @@ export class Editor {
       const row = el('div', 'ed-craft-item', this.craftListEl);
       const copy = el('div', 'ed-craft-copy', row);
       el('strong', '', copy, name);
-      const analysis = analyzeCraft(saved, 9.42, 101_325);
+      const analysis = analyzeCraft(saved, 9.42, 101_325, this.cb.flightTuning());
       el('span', '', copy, `${saved.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
       const loadBtn = el('button', 'hud-btn', row, 'Load');
       loadBtn.setAttribute('aria-label', name);
@@ -562,14 +558,21 @@ export class Editor {
     const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
     const query = this.searchInput?.value.trim().toLowerCase() ?? '';
     const parts = PARTS.filter((part) => (
-      (!query && part.category === this.activeCategory)
-      || (query && `${part.name} ${part.blurb} ${part.category}`.toLowerCase().includes(query))
+      !part.drill && !part.converter && !part.resourceScanner && !part.oreCapacity
+      && (
+        (!query && part.category === this.activeCategory)
+        || (query && `${part.name} ${part.blurb} ${part.category}`.toLowerCase().includes(query))
+      )
     ));
     if (this.sortSelect?.value === 'mass') parts.sort((a, b) => a.massDry - b.massDry);
     else if (this.sortSelect?.value === 'thrust') parts.sort((a, b) => (b.engine?.thrustVac ?? 0) - (a.engine?.thrustVac ?? 0));
     else if (this.sortSelect?.value === 'name') parts.sort((a, b) => a.name.localeCompare(b.name));
     for (const def of parts) {
       const unlocked = isPartUnlocked(this.cb.campaign(), def);
+      const tuning = this.cb.flightTuning();
+      const displayBlurb = tuning === undefined || tuning.ispMultiplier === 1
+        ? def.blurb
+        : `Flight-qualified ${def.category.replace('-', ' ')} hardware for real-scale Sol missions.`;
       const card = el('div', unlocked ? 'ed-part' : 'ed-part ed-part-locked', this.partListEl);
       card.draggable = unlocked && !coarsePointer;
       card.setAttribute('aria-disabled', String(!unlocked));
@@ -579,18 +582,20 @@ export class Editor {
       const stats = [
         `${def.massDry} kg`,
         `${def.cost} funds`,
-        def.engine ? `${(def.engine.thrustVac / 1000).toFixed(0)} kN` : '',
+        def.engine ? `${(def.engine.thrustVac * tuning.thrustMultiplier / 1000).toFixed(0)} kN` : '',
       ].filter(Boolean).join(' · ');
       el('div', 'ed-part-info', copy, stats);
       if (!unlocked) el('div', 'ed-part-tech', copy, `LOCKED · ${technologyForPart(def).name}`);
-      el('div', 'ed-part-blurb', copy, def.blurb);
+      el('div', 'ed-part-blurb', copy, displayBlurb);
       card.title = [
         def.name,
-        def.blurb,
+        displayBlurb,
         `Dry mass: ${def.massDry} kg`,
         `Max temperature: ${def.maxTemp} K`,
         `Crash tolerance: ${def.crashTolerance} m/s`,
-        def.engine ? `Thrust: ${(def.engine.thrustVac / 1000).toFixed(1)} kN · Isp ${def.engine.ispSea}/${def.engine.ispVac} s` : '',
+        def.engine
+          ? `Thrust: ${(def.engine.thrustVac * tuning.thrustMultiplier / 1000).toFixed(1)} kN · Isp ${Math.round(def.engine.ispSea * tuning.ispMultiplier)}/${Math.round(def.engine.ispVac * tuning.ispMultiplier)} s`
+          : '',
         def.resources ? `Resources: ${Object.entries(def.resources).map(([key, value]) => `${key} ${value}`).join(', ')}` : '',
       ].filter(Boolean).join('\n');
       card.onclick = () => {
@@ -1621,9 +1626,9 @@ export class Editor {
 
   private refreshStats(): void {
     const env = this.envSelect.value;
-    const gravity = env === 'palla' ? 1.51 : 9.42;
-    const pressure = env === 'veyra-sl' ? 101_325 : 0;
-    const a = analyzeCraft(this.craft, gravity, pressure);
+    const gravity = env === 'moon' ? 1.62 : env === 'palla' ? 1.51 : env.startsWith('earth') ? 9.80665 : 9.42;
+    const pressure = env.endsWith('-sl') ? 101_325 : 0;
+    const a = analyzeCraft(this.craft, gravity, pressure, this.cb.flightTuning());
     const props = computeMassProperties(this.craft);
     const aero = buildAeroModel(this.craft);
     const campaign = this.cb.campaign();
@@ -1688,6 +1693,9 @@ export class Editor {
 
   /** Refresh palette access, campaign balance, and launch readiness after progression changes. */
   refreshCampaign(): void {
+    this.configureEnvironmentOptions();
+    this.builtInListEl.replaceChildren();
+    this.renderBuiltInCraftList(this.builtInListEl);
     this.renderPartList();
     this.statsDirty = true;
     this.rebuildVisual();
@@ -1696,7 +1704,12 @@ export class Editor {
   private refreshStages(): void {
     this.stagesEl.innerHTML = '';
     const env = this.envSelect.value;
-    const analysis = analyzeCraft(this.craft, env === 'palla' ? 1.51 : 9.42, env === 'veyra-sl' ? 101_325 : 0);
+    const analysis = analyzeCraft(
+      this.craft,
+      env === 'moon' ? 1.62 : env === 'palla' ? 1.51 : env.startsWith('earth') ? 9.80665 : 9.42,
+      env.endsWith('-sl') ? 101_325 : 0,
+      this.cb.flightTuning(),
+    );
     const assigned = new Set(this.craft.stages.flatMap((stage) => stage.partKeys));
     const unstaged = el('div', 'ed-stage ed-unstaged', this.stagesEl);
     el('div', 'ed-stage-title', unstaged, 'UNSTAGED');
@@ -1736,6 +1749,20 @@ export class Editor {
       }
       if (!renderedParts) el('span', 'ed-part-info', parts, 'drop staged parts here');
     });
+  }
+
+  private configureEnvironmentOptions(): void {
+    const options = this.cb.systemId() === 'sol'
+      ? [['earth-sl', 'Earth · sea level'], ['earth-vac', 'Earth · vacuum'], ['moon', 'Moon · surface']]
+      : [['veyra-sl', 'Veyra · sea level'], ['veyra-vac', 'Veyra · vacuum'], ['palla', 'Palla · surface']];
+    if (options.some(([value]) => value === this.envSelect.value)) return;
+    this.envSelect.replaceChildren();
+    for (const [value, label] of options) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      this.envSelect.appendChild(option);
+    }
   }
 
   private renderStagePart(parent: HTMLElement, part: PartInstance): void {

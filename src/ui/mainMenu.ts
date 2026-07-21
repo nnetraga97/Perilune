@@ -136,9 +136,9 @@ export class MainMenu {
       'div',
       'perilune-menu-tagline',
       masthead,
-      'Build with care. Fly beyond Veyra. Bring them home.',
+      'Build with care. Fly beyond home. Bring them back.',
     );
-    el('div', 'perilune-menu-build', this.root, 'VEYRA ORBITAL PROGRAM · DEVELOPMENT BUILD');
+    el('div', 'perilune-menu-build', this.root, 'ORBITAL FLIGHT PROGRAM · DEVELOPMENT BUILD');
 
     this.commandDeck = el('nav', 'perilune-command-deck', this.root);
     this.commandDeck.setAttribute('aria-label', 'Mission and utility actions');

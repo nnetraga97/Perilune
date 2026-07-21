@@ -10,6 +10,7 @@ const nominal: FlightCompanionSnapshot = {
   fuelFraction: 1,
   chargeFraction: 1,
   dynamicPressurePa: 0,
+  dynamicPressureLimitPa: 40_000,
   properG: 1,
   commsBlocked: false,
   nodeBurnStartEta: null,
@@ -42,6 +43,21 @@ describe('flight companion callouts', () => {
     });
     expect(advisory).toMatchObject({ id: 'alert-high-q', tone: 'warning' });
     expect(advisory?.message).toContain('38.5 kPa');
+  });
+
+  it('uses the active vehicle profile for the high-Q warning level', () => {
+    expect(chooseFlightCompanionAdvisory({
+      ...nominal,
+      situation: 'flying',
+      dynamicPressurePa: 50_000,
+      dynamicPressureLimitPa: 75_000,
+    })).toMatchObject({ id: 'phase-flying' });
+    expect(chooseFlightCompanionAdvisory({
+      ...nominal,
+      situation: 'flying',
+      dynamicPressurePa: 65_000,
+      dynamicPressureLimitPa: 75_000,
+    })).toMatchObject({ id: 'alert-high-q' });
   });
 
   it('announces the centered maneuver burn window', () => {

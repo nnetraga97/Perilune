@@ -18,6 +18,7 @@ export interface FlightCompanionSnapshot {
   fuelFraction: number | null;
   chargeFraction: number | null;
   dynamicPressurePa: number;
+  dynamicPressureLimitPa: number;
   properG: number;
   commsBlocked: boolean;
   nodeBurnStartEta: number | null;
@@ -94,7 +95,7 @@ export function chooseFlightCompanionAdvisory(
     };
   }
 
-  if (snapshot.dynamicPressurePa >= 35_000) {
+  if (snapshot.dynamicPressurePa >= snapshot.dynamicPressureLimitPa * 0.85) {
     return {
       id: 'alert-high-q',
       headline: 'Heavy air-load',

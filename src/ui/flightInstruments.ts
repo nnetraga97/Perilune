@@ -152,7 +152,7 @@ export class FlightInstruments {
     const v = gv.runtime;
     const body = game.bodyOf(gv);
     const altitude = v.pos.length() - body.radius;
-    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(altitude));
+    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(altitude), game.flightTuning, body.def.atmosphere?.seaLevelPressure);
     const stage = analysis.stages[v.currentStage];
     const remainingDeltaV = analysis.stages
       .filter((candidate) => candidate.stageIndex >= v.currentStage)

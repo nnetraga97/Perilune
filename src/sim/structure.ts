@@ -79,6 +79,7 @@ export function evaluateStructure(
   properAccel: Readonly<Vec3>,
   dynamicPressure: number,
   aoaSin: number,
+  strengthScale = 1,
 ): StructureReport {
   const byKey = new Map<number, Node>();
   let root: Node | null = null;
@@ -147,7 +148,7 @@ export function evaluateStructure(
     const area = Math.PI * r * r;
     const isSurface = n.part.attach === 'surface';
     const strengthMultiplier = jointStrengthMultiplier(n.part, parent.part);
-    const axialLimit = area * (isSurface ? SURFACE_STRENGTH : STACK_STRENGTH) * strengthMultiplier;
+    const axialLimit = area * (isSurface ? SURFACE_STRENGTH : STACK_STRENGTH) * strengthMultiplier * strengthScale;
     const bendingLimit = axialLimit * BENDING_FACTOR * Math.max(r, 0.1);
 
     // A joint cut has two sides. Loading only the child subtree makes the

@@ -1,15 +1,12 @@
-import {
-  LEGACY_AUREN_HOME_BODY_ID,
-  LEGACY_AUREN_SYSTEM,
-} from './legacyAurenSystem';
+import { LEGACY_AUREN_SYSTEM } from './legacyAurenSystem';
 import { GameState } from '../../src/sim/state';
 import type { GameMode } from '../../src/sim/campaign';
 import { migrateSave, type SaveGame } from '../../src/save/schema';
 import { restoreGame } from '../../src/save/persistence';
+import { GAMEPLAY_PROFILES } from '../../src/content/gameplayProfiles';
 
 export const LEGACY_GAME_STATE_OPTIONS = Object.freeze({
-  bodies: LEGACY_AUREN_SYSTEM,
-  homeBodyId: LEGACY_AUREN_HOME_BODY_ID,
+  ...GAMEPLAY_PROFILES.legacy,
 });
 
 /**

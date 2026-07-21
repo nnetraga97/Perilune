@@ -48,7 +48,6 @@ const CONTRACT_CONTEXT: Readonly<Record<string, {
   'palla-landing': { kind: 'landing', targetBodyId: 'palla' },
   'first-docking': { kind: 'docking', targetBodyId: null },
   'outer-moon-landing': { kind: 'landing', targetBodyId: null },
-  'surface-industry': { kind: 'surface-industry', targetBodyId: null },
 };
 
 function contractRelevance(
@@ -65,7 +64,6 @@ function contractRelevance(
   if (contract.id === 'science-return' && ['landed', 'splashed'].includes(situation)) score += 5;
   if (contract.id === 'first-launch' && situation === 'prelaunch') score += 6;
   if (contract.id === 'outer-moon-landing' && ['brimm', 'glacia', 'mote'].includes(currentBodyId)) score += 4;
-  if (contract.id === 'surface-industry') score += 1;
   return score;
 }
 
@@ -258,7 +256,13 @@ export function buildFlightDirectorSnapshot(
   const horizontalSpeed = Math.sqrt(Math.max(0, relativeVelocity.lengthSq() - verticalSpeed * verticalSpeed));
   const elements = stateToElements(body.mu, vessel.pos, vessel.vel, game.time);
   const bound = elements.e < 1;
-  const analysis = analyzeCraft(vessel.craft, body.surfaceGravity, body.pressureAt(altitude));
+  const analysis = analyzeCraft(
+    vessel.craft,
+    body.surfaceGravity,
+    body.pressureAt(altitude),
+    game.flightTuning,
+    body.def.atmosphere?.seaLevelPressure,
+  );
   const stage = analysis.stages[vessel.currentStage] ?? null;
   const totalDeltaV = analysis.stages
     .filter((candidate) => candidate.stageIndex >= vessel.currentStage)
@@ -328,7 +332,8 @@ export function buildFlightDirectorSnapshot(
   const chargeFraction = fraction(vessel.charge.amount, vessel.charge.capacity);
   const monopropFraction = fraction(monoprop, monopropCapacity);
   const priority = resolvedFlightPhase === 'lost' || controlBlocked
-    || vessel.aero.dynamicPressure >= 35_000 || vessel.properAccel / G0 >= 4 || hardArrival
+    || vessel.aero.dynamicPressure >= game.flightTuning.nominalMaxQPa * 0.85
+    || vessel.properAccel / G0 >= 4 || hardArrival
     ? 'safety'
     : missionAchieved ? 'efficiency' : 'mission';
   const allowedActions = allowedActionsFor(resolvedFlightPhase, priority, controlBlocked);

@@ -108,7 +108,7 @@ export const TECHNOLOGIES: readonly TechnologyDef[] = [
   {
     id: 'planetary-industry',
     name: 'Planetary Industry',
-    brief: 'Prospecting, extraction, storage, and conversion hardware for sustained surface operations.',
+    brief: 'Dormant resource hardware retained outside the playable technology tree.',
     scienceCost: 300,
     requires: 'surface-operations',
   },
@@ -187,15 +187,6 @@ export const CONTRACTS: readonly ContractDef[] = [
     rewardReputation: 8,
     requiresTech: 'deep-space-systems',
     requiredBodyIds: ['tyran', 'brimm', 'glacia', 'mote'],
-  },
-  {
-    id: 'surface-industry',
-    name: 'Make Fuel Under Another Sky',
-    brief: 'Convert locally mined ore into propellant on a planetary surface.',
-    achievement: 'campaign:surface-industry',
-    rewardFunds: 25_000,
-    rewardReputation: 8,
-    requiresTech: 'planetary-industry',
   },
 ];
 

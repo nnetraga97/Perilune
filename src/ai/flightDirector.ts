@@ -29,7 +29,6 @@ export const FLIGHT_DIRECTOR_OBJECTIVE_KINDS = [
   'science-return',
   'landing',
   'docking',
-  'surface-industry',
   'safe-flight',
 ] as const;
 

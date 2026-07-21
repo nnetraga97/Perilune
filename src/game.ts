@@ -20,7 +20,7 @@ import { Tutorial } from './ui/tutorial';
 import { GpuSubmissionProfiler, PerfOverlay } from './ui/perfOverlay';
 import { GpuTimerRing } from './render/gpuTimer';
 import { restoreGame } from './save/persistence';
-import { logEvent } from './sim/flight';
+import { igniteManeuverEngines, logEvent, maxThrust } from './sim/flight';
 import { CommsStatus, evaluateComms, needsCommsForControl } from './sim/comms';
 import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from './sim/maneuver';
 import { ManeuverPlanController } from './sim/maneuverPlan';
@@ -57,6 +57,8 @@ import {
   transmitScience as transmitBufferedScience,
 } from './sim/science';
 import type { CollectOutcome } from './sim/science';
+import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
+import { maneuverAutomationCommand } from './sim/maneuverAutomation';
 
 type Screen = 'menu' | 'editor' | 'flight';
 
@@ -78,7 +80,7 @@ interface EditorGesture {
 
 class PeriluneGame {
   private ctx!: RenderContext;
-  private game = new GameState();
+  private game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
   private world!: WorldScene;
   private partModels!: PartModelLibrary;
   private ktx2Loader: KTX2Loader | null = null;
@@ -118,6 +120,8 @@ class PeriluneGame {
   private launchedCraft: Craft | null = null;
   private missionStart = 0;
   private maneuver = new ManeuverPlanController();
+  private autoManeuverPlanId: string | null = null;
+  private autoManeuverPauseLoggedFor: string | null = null;
   private precisionControl = false;
   private paused = false;
   private uiHidden = false;
@@ -243,6 +247,8 @@ class PeriluneGame {
       onLaunch: (craft) => this.launch(craft),
       onExit: () => this.showMenu(),
       campaign: () => this.game.campaign,
+      flightTuning: () => this.game.flightTuning,
+      systemId: () => this.game.systemId,
     }, this.partModels, this.ctx.renderer);
     this.hud = new FlightHud(this.uiRoot, {
       onStage: () => this.stage(),
@@ -315,8 +321,14 @@ class PeriluneGame {
       onSelectManeuverNode: (id) => this.maneuver.select(id),
       onCreateManeuverNode: (node) => this.createManeuverNode(node),
       onUpdateManeuverNode: (node) => this.maneuver.update(node),
-      onDeleteManeuverNode: () => this.maneuver.clear(),
+      onDeleteManeuverNode: () => {
+        const selected = this.maneuver.current?.id ?? null;
+        if (selected === this.autoManeuverPlanId) this.autoManeuverPlanId = null;
+        this.maneuver.clear();
+      },
       onWarpToNode: (node) => this.warpToNode(node),
+      isManeuverAutoExecutionEnabled: (id) => this.autoManeuverPlanId === id,
+      onToggleManeuverAutoExecution: (id) => this.toggleManeuverAutoExecution(id),
       onCreateAlarm: (time, label, kind) => {
         this.missionTools.addAlarm(time, label, kind);
       },
@@ -380,18 +392,23 @@ class PeriluneGame {
       },
     }, this.uiRoot);
     this.utilityTools = new UtilityTools(this.windows, profile, this.input, () => this.game, {
-      onSave: (slot, label) => this.saveSync.write(this.game, slot, label),
+      persistenceStatus: () => this.game.persistence === 'enabled'
+        ? { enabled: true }
+        : { enabled: false, reason: 'Legacy Auren is session-only. Save, load, sync, and Continue are unavailable.' },
+      onSave: (slot, label) => this.writeSave(slot, label),
       onLoad: (slot) => this.loadSlot(slot),
-      onListSaves: () => this.saveSync.list(),
-      onRefreshSaves: () => this.saveSync.refresh(),
-      onDeleteSave: (slot) => this.saveSync.delete(slot),
-      onResolveConflict: (slot, choice) => this.saveSync.resolveConflict(slot, choice),
+      onListSaves: () => this.game.persistence === 'enabled' ? this.saveSync.list() : Promise.resolve([]),
+      onRefreshSaves: () => this.game.persistence === 'enabled' ? this.saveSync.refresh() : Promise.resolve(),
+      onDeleteSave: (slot) => this.game.persistence === 'enabled' ? this.saveSync.delete(slot) : Promise.resolve(false),
+      onResolveConflict: (slot, choice) => this.game.persistence === 'enabled'
+        ? this.saveSync.resolveConflict(slot, choice)
+        : Promise.resolve(false),
       onSavesChanged: (listener) => this.saveSync.subscribe(listener),
       onSettings: (settings) => this.applySettings(settings),
       onTelemetry: (enabled) => telemetry.setEnabled(enabled),
       onCampaignChanged: () => {
         this.editor.refreshCampaign();
-        void this.saveSync.write(this.game, 'auto', 'autosave');
+        void this.writeSave('auto', 'autosave');
       },
     });
     this.menu = new MainMenu(this.uiRoot, {
@@ -560,20 +577,25 @@ class PeriluneGame {
       this.menu.setContinueSave(null);
       return;
     }
-    this.game = restoreGame(save);
+    this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
     this.editor.refreshCampaign();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
   }
 
   private newGame(mode: GameMode): void {
-    this.game = new GameState(mode);
+    const profile = GAMEPLAY_PROFILES[this.uiSettings?.gameSystem ?? 'sol'];
+    this.game = new GameState(mode, profile);
+    this.maneuver = new ManeuverPlanController();
+    this.autoManeuverPlanId = null;
+    this.autoManeuverPauseLoggedFor = null;
     this.editor.refreshCampaign();
     telemetry.track('game_started', {
       mode,
+      system: profile.id,
       account: this.auth.state.kind === 'signed-in' ? 'signed-in' : 'guest',
     });
-    clientLog.info('game.start', { mode });
+    clientLog.info('game.start', { mode, system: profile.id });
   }
 
   private showMenu(): void {
@@ -604,7 +626,7 @@ class PeriluneGame {
     this.windows.setScreen('editor');
     this.editor.refreshCampaign();
     if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
-    void this.saveSync.write(this.game, 'auto', 'autosave');
+    void this.writeSave('auto', 'autosave');
   }
 
   private toFlight(spawn = true): void {
@@ -642,7 +664,7 @@ class PeriluneGame {
     try {
       this.game.warpToLaunchDaylight(home);
       await Promise.all([
-        this.game.prepareFlightAuthority(home, 'ksc-launch').then((authority) => {
+        this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent').then((authority) => {
           if (authority.fallbackReason) {
             clientLog.warn('terrain.authority.fallback', {
               bodyId: home.id,
@@ -693,18 +715,29 @@ class PeriluneGame {
   }
 
   private quickSave(): void {
-    void this.saveSync.write(this.game, 'quick', 'quicksave').then((ok) => {
+    if (this.game.persistence !== 'enabled') {
+      const gv = this.game.active;
+      if (gv) logEvent(gv.runtime, this.game.time, 'Legacy Auren is session-only; quicksave is unavailable.', 'warning');
+      return;
+    }
+    void this.writeSave('quick', 'quicksave').then((ok) => {
       const gv = this.game.active;
       if (gv) logEvent(gv.runtime, this.game.time, ok ? 'Quicksaved.' : 'Quicksave FAILED', ok ? 'info' : 'danger');
     });
   }
 
+  private writeSave(slot: string, label: string): Promise<boolean> {
+    if (this.game.persistence !== 'enabled') return Promise.resolve(false);
+    return this.saveSync.write(this.game, slot, label);
+  }
+
   private scheduleAutosave(): void {
+    if (this.game.persistence !== 'enabled') return;
     if (this.autosaveScheduled) return;
     this.autosaveScheduled = true;
     const run = () => {
       this.autosaveScheduled = false;
-      void this.saveSync.write(this.game, 'auto', 'autosave');
+      void this.writeSave('auto', 'autosave');
     };
     if ('requestIdleCallback' in window) {
       window.requestIdleCallback(run, { timeout: 5_000 });
@@ -714,13 +747,19 @@ class PeriluneGame {
   }
 
   private async quickLoad(): Promise<void> {
+    if (this.game.persistence !== 'enabled') {
+      const gv = this.game.active;
+      if (gv) logEvent(gv.runtime, this.game.time, 'Legacy Auren is session-only; quickload is unavailable.', 'warning');
+      return;
+    }
     await this.loadSlot('quick');
   }
 
   private async loadSlot(slot: string): Promise<void> {
+    if (this.game.persistence !== 'enabled') return;
     const save = await this.saveSync.read(slot);
     if (!save) return;
-    this.game = restoreGame(save);
+    this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
     this.editor.refreshCampaign();
     this.world.resetDynamicState();
     if (this.game.active) this.toFlight(false);
@@ -771,7 +810,7 @@ class PeriluneGame {
       logEvent(v, this.game.time, 'No collectable science here — the site is exhausted or its result is already aboard.', 'warning');
       return;
     }
-    void this.saveSync.write(this.game, 'auto', 'autosave');
+    void this.writeSave('auto', 'autosave');
   }
 
   private announceCollectedScience(v: import('./sim/flight').VesselRuntime, outcome: CollectOutcome): void {
@@ -792,7 +831,7 @@ class PeriluneGame {
     const outcome = autoCollectScience(this.game, gv);
     if (!outcome || outcome.collected.length === 0) return;
     this.announceCollectedScience(gv.runtime, outcome);
-    void this.saveSync.write(this.game, 'auto', 'autosave');
+    void this.writeSave('auto', 'autosave');
   }
 
   private transmitScience(): void {
@@ -813,7 +852,7 @@ class PeriluneGame {
     );
     this.completeCampaignContracts();
     this.editor.refreshCampaign();
-    void this.saveSync.write(this.game, 'auto', 'autosave');
+    void this.writeSave('auto', 'autosave');
   }
 
   private recover(): void {
@@ -842,7 +881,7 @@ class PeriluneGame {
     );
     this.completeCampaignContracts();
     this.editor.refreshCampaign();
-    void this.saveSync.write(this.game, 'auto', 'autosave');
+    void this.writeSave('auto', 'autosave');
   }
 
   private warpToNode(node: ManeuverNode): void {
@@ -850,7 +889,13 @@ class PeriluneGame {
     if (!gv) return;
     const body = this.game.bodyOf(gv);
     const v = gv.runtime;
-    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
+    const analysis = analyzeCraft(
+      v.craft,
+      body.surfaceGravity,
+      body.pressureAt(v.pos.length() - body.radius),
+      this.game.flightTuning,
+      body.def.atmosphere?.seaLevelPressure,
+    );
     const candidates = analysis.stages.filter((stage) => stage.thrust > 0);
     const stage = candidates.find((candidate) => candidate.stageIndex >= v.currentStage)
       ?? [...candidates].reverse().find((candidate) => candidate.stageIndex < v.currentStage);
@@ -1668,13 +1713,66 @@ class PeriluneGame {
     const plan = this.maneuver.nextFor(v.id, body.id);
     if (!plan) return;
 
-    const analysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
+    const pressure = body.pressureAt(v.pos.length() - body.radius);
+    const analysis = analyzeCraft(
+      v.craft,
+      body.surfaceGravity,
+      pressure,
+      this.game.flightTuning,
+      body.def.atmosphere?.seaLevelPressure,
+    );
     const powered = analysis.stages.find((stage) => stage.stageIndex >= v.currentStage && stage.thrust > 0)
       ?? [...analysis.stages].reverse().find((stage) => stage.thrust > 0);
     const burnDuration = powered
       ? estimateBurnTime(plan.initialDeltaV, powered.thrust, v.massProps.mass, powered.isp)
       : 0;
     const burnStart = plan.node.time - (Number.isFinite(burnDuration) ? burnDuration / 2 : 0);
+    const autoEnabled = this.autoManeuverPlanId === plan.id;
+    if (autoEnabled) {
+      v.sas = 'node';
+      v.sasCustomDir.copy(plan.burnDirection);
+      const thrustDirection = v.att.rotate(new Vec3(0, 1, 0), new Vec3());
+      const alignment = Vec3.dot(thrustDirection, plan.burnDirection);
+      let availableThrust = maxThrust(
+        v,
+        pressure,
+        this.game.flightTuning,
+        body.def.atmosphere?.seaLevelPressure,
+      );
+      if (this.game.time >= burnStart && alignment >= 0.985 && availableThrust <= 1) {
+        const ignited = igniteManeuverEngines(v);
+        if (ignited.length) {
+          for (const name of ignited) logEvent(v, this.game.time, `${name} automatic ignition`);
+          availableThrust = maxThrust(
+            v,
+            pressure,
+            this.game.flightTuning,
+            body.def.atmosphere?.seaLevelPressure,
+          );
+        }
+      }
+      const command = maneuverAutomationCommand({
+        burnReady: this.game.time >= burnStart,
+        controlBlocked: this.controlBlocked,
+        availableThrust,
+        alignment,
+        remainingDeltaV: plan.remainingDeltaV,
+        vesselMass: v.massProps.mass,
+      });
+      v.controls.throttle = command.throttle;
+      if (command.state === 'aborted') {
+        this.autoManeuverPlanId = null;
+        logEvent(v, this.game.time, 'Automatic maneuver aborted: flight controls unavailable.', 'warning');
+      } else if (command.state === 'waiting-for-stage') {
+        if (this.autoManeuverPauseLoggedFor !== plan.id) {
+          logEvent(v, this.game.time, 'Automatic maneuver paused: stage manually, then execution will resume.', 'warning');
+          this.autoManeuverPauseLoggedFor = plan.id;
+        }
+      } else if (command.beginExecution) {
+        this.maneuver.beginExecution(plan.id);
+        this.autoManeuverPauseLoggedFor = null;
+      }
+    }
     if ((plan.phase === 'planned' || plan.phase === 'overdue') && v.controls.throttle > 0.001 && this.game.time >= burnStart) {
       this.maneuver.beginExecution(plan.id);
     }
@@ -1693,13 +1791,32 @@ class PeriluneGame {
         activePlan.id,
       );
       if (remaining <= 0) {
-        if (v.sas === 'node') v.controls.throttle = 0;
+        v.controls.throttle = 0;
         logEvent(v, this.game.time, 'Maneuver complete.');
+        if (this.autoManeuverPlanId === activePlan.id) this.autoManeuverPlanId = null;
+        this.autoManeuverPauseLoggedFor = null;
         this.maneuver.clear(activePlan.id);
         const achieved = stateToElements(body.mu, v.pos, v.vel, this.game.time);
         this.maneuver.rebaseFirst(v.id, body.id, achieved);
       }
     }
+  }
+
+  private toggleManeuverAutoExecution(id: string): void {
+    const gv = this.game.active;
+    const plan = this.maneuver.all.find((candidate) => candidate.id === id);
+    if (!gv || !plan || plan.vesselId !== gv.runtime.id) return;
+    if (this.autoManeuverPlanId === id) {
+      this.autoManeuverPlanId = null;
+      gv.runtime.controls.throttle = 0;
+      logEvent(gv.runtime, this.game.time, 'Automatic maneuver disarmed.');
+      return;
+    }
+    this.autoManeuverPlanId = id;
+    this.autoManeuverPauseLoggedFor = null;
+    gv.runtime.sas = 'node';
+    gv.runtime.controls.throttle = 0;
+    logEvent(gv.runtime, this.game.time, 'Automatic maneuver armed. Engine ignition is automatic; separation remains manual.');
   }
 
   private createManeuverNode(node: ManeuverNode): void {

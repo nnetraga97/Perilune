@@ -12,6 +12,6 @@ describe('system-aware campaign contracts', () => {
   });
 
   it('preserves the compact campaign board for explicit legacy tests', () => {
-    expect(contractsForBodies(AUREN_SYSTEM.map((body) => body.id))).toHaveLength(7);
+    expect(contractsForBodies(AUREN_SYSTEM.map((body) => body.id))).toHaveLength(6);
   });
 });

@@ -38,8 +38,10 @@ import {
 } from '../sim/science';
 import { PARTS } from '../content/parts';
 import { clientLog } from '../telemetry/log';
+import type { GameplaySystemId } from '../content/gameplayProfiles';
 
 export interface UiSettings {
+  gameSystem: GameplaySystemId;
   uiScale: number;
   accent: 'cyan' | 'amber' | 'violet';
   reducedMotion: boolean;
@@ -53,6 +55,7 @@ export interface UiSettings {
 }
 
 const DEFAULT_SETTINGS: UiSettings = {
+  gameSystem: 'sol',
   uiScale: 1,
   accent: 'cyan',
   reducedMotion: false,
@@ -66,6 +69,7 @@ const DEFAULT_SETTINGS: UiSettings = {
 };
 
 export interface UtilityCallbacks {
+  persistenceStatus(): { enabled: boolean; reason?: string };
   onSave(slot: string, label: string): Promise<boolean>;
   onLoad(slot: string): Promise<void>;
   onListSaves(): Promise<UnifiedSaveSlot[]>;
@@ -136,6 +140,7 @@ export function filterScienceArchiveRecords(
 
 const TECH_NODE_WIDTH = 172;
 const TECH_NODE_HEIGHT = 112;
+const PLAYABLE_TECHNOLOGIES = TECHNOLOGIES.filter((technology) => technology.id !== 'planetary-industry');
 const TECH_TREE_LAYOUT: Readonly<Record<string, { x: number; y: number }>> = {
   foundations: { x: 24, y: 188 },
   'orbital-engineering': { x: 234, y: 86 },
@@ -270,7 +275,7 @@ export class UtilityTools {
     this.programMetric(
       metrics,
       'DEPLOYED',
-      `${campaign.unlockedTech.length}/${TECHNOLOGIES.length}`,
+      `${campaign.unlockedTech.filter((id) => id !== 'planetary-industry').length}/${PLAYABLE_TECHNOLOGIES.length}`,
       'technologies',
     );
 
@@ -323,7 +328,7 @@ export class UtilityTools {
     svg.setAttribute('viewBox', '0 0 1060 470');
     svg.setAttribute('aria-hidden', 'true');
     canvas.appendChild(svg);
-    for (const technology of TECHNOLOGIES) {
+    for (const technology of PLAYABLE_TECHNOLOGIES) {
       if (!technology.requires) continue;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', techConnectorPath(technology.requires, technology.id));
@@ -333,7 +338,7 @@ export class UtilityTools {
       svg.appendChild(path);
     }
 
-    for (const technology of TECHNOLOGIES) {
+    for (const technology of PLAYABLE_TECHNOLOGIES) {
       const position = TECH_TREE_LAYOUT[technology.id];
       if (!position) continue;
       const unlocked = game.campaign.unlockedTech.includes(technology.id);
@@ -819,6 +824,11 @@ export class UtilityTools {
     if (!this.savesEl) return;
     const content = this.savesEl;
     content.replaceChildren();
+    const persistence = this.callbacks.persistenceStatus();
+    if (!persistence.enabled) {
+      el('div', 'mission-empty', content, persistence.reason ?? 'Saving is unavailable for this session.');
+      return;
+    }
     const create = el('div', 'utility-create', content);
     const name = document.createElement('input');
     name.className = 'k-input';
@@ -892,6 +902,13 @@ export class UtilityTools {
   private renderSettings(): void {
     if (!this.settingsEl) return;
     this.settingsEl.replaceChildren();
+    this.addGameSystemSelect();
+    el(
+      'div',
+      'utility-muted',
+      this.settingsEl,
+      'Applies to the next New Game. Legacy Auren sessions are temporary and cannot be saved.',
+    );
     this.addRange('UI scale', 'uiScale', 0.8, 1.4, 0.05);
     this.addSelect('Accent palette', 'accent', [
       ['cyan', 'Cyan'], ['amber', 'Amber'], ['violet', 'Violet'],
@@ -945,6 +962,28 @@ export class UtilityTools {
     }
     select.value = this.settings[key];
     select.onchange = () => { this.settings[key] = select.value as UiSettings['accent']; this.commitSettings(); };
+    row.appendChild(select);
+  }
+
+  private addGameSystemSelect(): void {
+    const row = el('label', 'utility-setting', this.settingsEl!);
+    el('span', '', row, 'New Game system');
+    const select = document.createElement('select');
+    select.className = 'k-select';
+    for (const [value, text] of [
+      ['sol', 'Sol — new visuals'],
+      ['legacy', 'Legacy Auren — original system'],
+    ] as Array<[GameplaySystemId, string]>) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      select.appendChild(option);
+    }
+    select.value = this.settings.gameSystem;
+    select.onchange = () => {
+      this.settings.gameSystem = select.value as GameplaySystemId;
+      this.commitSettings();
+    };
     row.appendChild(select);
   }
 

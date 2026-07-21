@@ -14,6 +14,7 @@ import {
   RESOURCE_DENSITY,
   partById,
 } from '../content/parts';
+import { LEGACY_FLIGHT_TUNING, type FlightTuning } from './gameplayTuning';
 
 export const G0 = 9.80665;
 
@@ -466,6 +467,8 @@ export function analyzeCraft(
   craft: Craft,
   gravity = 9.42,
   atmPressure = 101_325,
+  tuning: Readonly<FlightTuning> = LEGACY_FLIGHT_TUNING,
+  seaLevelPressure = 101_325,
 ): CraftAnalysis {
   const warnings: string[] = [];
   const sim = new Map<number, SimPart>();
@@ -596,8 +599,8 @@ export function analyzeCraft(
   };
 
   const ispAt = (eng: NonNullable<PartDef['engine']>): number => {
-    const frac = Math.min(1, atmPressure / 101_325);
-    return eng.ispVac + (eng.ispSea - eng.ispVac) * frac;
+    const frac = Math.min(1, atmPressure / seaLevelPressure);
+    return (eng.ispVac + (eng.ispSea - eng.ispVac) * frac) * tuning.ispMultiplier;
   };
 
   const stages: StageAnalysis[] = [];
@@ -642,10 +645,10 @@ export function analyzeCraft(
     for (const sp of litEngines) {
       const eng = sp.def.engine!;
       // Air-breathing engines scale with ambient pressure and die in vacuum.
-      const isp = eng.airBreathing ? eng.ispVac : ispAt(eng);
+      const isp = eng.airBreathing ? eng.ispVac * tuning.ispMultiplier : ispAt(eng);
       const thrustHere = eng.airBreathing
-        ? eng.thrustVac * Math.min(1, atmPressure / 101_325)
-        : eng.thrustVac * (isp / eng.ispVac);
+        ? eng.thrustVac * Math.min(1, atmPressure / seaLevelPressure) * tuning.thrustMultiplier
+        : eng.thrustVac * (isp / (eng.ispVac * tuning.ispMultiplier)) * tuning.thrustMultiplier;
       thrust += thrustHere;
       flowSum += thrustHere / (isp * G0);
     }

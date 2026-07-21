@@ -13,6 +13,8 @@ import { orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
 import { stateToElements } from '../src/core/orbit';
 import { buildAeroModel } from '../src/sim/aero';
 import { computeMassProperties } from '../src/sim/vessel';
+import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
+import { createOdysseyOrbiter } from '../src/content/crafts';
 
 function buildProbe(): Craft {
   const craft = createCraft('Probe');
@@ -22,6 +24,38 @@ function buildProbe(): Craft {
 }
 
 describe('transfer planner', () => {
+  it('solves an inclined Earth-Moon transfer into a verified lunar approach', () => {
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    const gv = game.spawnInOrbit(createOdysseyOrbiter(), 'Odyssey', 'earth', 200_000);
+    const earth = game.universe.get('earth');
+    const moon = game.universe.get('moon');
+    const plan = planTransfer(game.universe, game.time, earth, moon, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection: 1,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+
+    expect(plan?.accuracy).toBe('refined-intercept');
+    expect(plan?.suggestedNode.normal).not.toBe(0);
+    expect(plan?.departureDv).toBeGreaterThan(3_000);
+    expect(plan?.departureDv).toBeLessThan(4_500);
+    expect(plan?.approachAltitude).toBeGreaterThan(50_000);
+    expect(plan?.approachAltitude).toBeLessThan(500_000);
+
+    const reference = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    const prediction = predictTrajectory(
+      game.universe,
+      earth,
+      orbitAfterNode(reference, plan!.suggestedNode),
+      plan!.suggestedNode.time,
+      plan!.transferTime * 1.65,
+    );
+    expect(prediction.encounter?.bodyId).toBe('moon');
+    expect(prediction.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
+  }, 15_000);
+
   it('plans a transfer to the moon Palla with a verifiable phase window', () => {
     const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);

@@ -35,7 +35,8 @@ import {
 } from './flight';
 import { evaluateStructure, splitAtJoint } from './structure';
 import { groundRadiusInertial } from './terrain';
-import { stepIsru } from './resources';
+import { SOL_FLIGHT_TUNING, type FlightTuning } from './gameplayTuning';
+import type { GameplaySystemId } from '../content/gameplayProfiles';
 import {
   bodyFixedAttitudeToInertial,
   bodyFixedToInertial,
@@ -109,6 +110,9 @@ export interface GameAlarm {
 export interface GameStateOptions {
   readonly bodies?: readonly BodyDef[];
   readonly homeBodyId?: string;
+  readonly systemId?: GameplaySystemId;
+  readonly persistence?: 'enabled' | 'session-only';
+  readonly flightTuning?: Readonly<FlightTuning>;
 }
 
 const _r = new Vec3();
@@ -119,6 +123,9 @@ const _sun = new Vec3();
 
 export class GameState {
   readonly universe: Universe;
+  readonly systemId: GameplaySystemId;
+  readonly persistence: 'enabled' | 'session-only';
+  readonly flightTuning: Readonly<FlightTuning>;
   time = 0;
   vessels: GameVessel[] = [];
   activeVesselId: string | null = null;
@@ -154,6 +161,9 @@ export class GameState {
     mode: GameMode = 'sandbox',
     options: Readonly<GameStateOptions> = {},
   ) {
+    this.systemId = options.systemId ?? 'sol';
+    this.persistence = options.persistence ?? 'enabled';
+    this.flightTuning = options.flightTuning ?? SOL_FLIGHT_TUNING;
     this.universe = new Universe([...(options.bodies ?? SOL_SYSTEM)], options.homeBodyId ?? HOME_BODY_ID);
     this.campaign = createCampaign(mode);
     const home = this.universe.get(this.universe.homeBodyId);
@@ -942,41 +952,12 @@ export class GameState {
     return steps;
   }
 
-  /** Slow systems that run for every vessel in any regime (ISRU, etc.). */
-  private stepBackgroundSystems(dt: number): void {
-    for (const gv of this.vessels) {
-      const propellantMade = stepIsru(this, gv, dt);
-      if (
-        propellantMade > 0
-        && (gv.runtime.situation === 'landed' || gv.runtime.situation === 'prelaunch')
-      ) {
-        this.flags['campaign:surface-industry'] = true;
-      }
-    }
+  /** Reserved for slow fleet-wide systems. Resource mining is intentionally unavailable. */
+  private stepBackgroundSystems(_dt: number): void {
   }
 
-  /**
-   * Survey the current body's resource field. Requires a resource scanner
-   * aboard, an orbit above 25 km, and 20 units of charge.
-   */
-  performScan(gv: GameVessel): { ok: boolean; reason?: string } {
-    const v = gv.runtime;
-    const hasScanner = v.craft.parts.some((p) => defOf(p).resourceScanner);
-    if (!hasScanner) return { ok: false, reason: 'No resource scanner aboard' };
-    if (v.situation !== 'orbit') {
-      return { ok: false, reason: 'A survey needs a stable orbit' };
-    }
-    const body = this.bodyOf(gv);
-    const alt = v.pos.length() - body.radius;
-    if (alt < 25_000) return { ok: false, reason: 'Orbit too low for a survey (25 km minimum)' };
-    if (this.scannedBodies.has(v.bodyId)) {
-      return { ok: false, reason: `${body.name} is already surveyed` };
-    }
-    if (v.charge.amount < 20) return { ok: false, reason: 'Insufficient charge (20 needed)' };
-    v.charge.amount -= 20;
-    this.scannedBodies.add(v.bodyId);
-    logEvent(v, this.time, `Resource survey of ${body.name} complete`);
-    return { ok: true };
+  performScan(_gv: GameVessel): { ok: boolean; reason?: string } {
+    return { ok: false, reason: 'Resource surveying and ISRU are not available.' };
   }
 
   /** Make a vessel the active (controlled) one. */
@@ -1025,7 +1006,12 @@ export class GameState {
       this.universe.absolutePosition(body, this.time, _br);
       _sun.copy(_br).scale(-1).normalize(); // toward the star at origin
 
-      const ctx: StepContext = { body, time: this.time, sunDir: _sun };
+      const ctx: StepContext = {
+        body,
+        time: this.time,
+        sunDir: _sun,
+        flightTuning: this.flightTuning,
+      };
       const result = stepVessel(v, ctx, dt);
 
       if (result.terminalFailure) {
@@ -1073,6 +1059,7 @@ export class GameState {
           _r.set(0, v.properAccel, 0),
           v.aero.dynamicPressure,
           Math.sin(v.aero.aoa),
+          this.flightTuning.structuralStrengthMultiplier,
         );
         if (report.failures.length) {
           const worst = report.failures.sort((a, b) => b.utilization - a.utilization)[0];

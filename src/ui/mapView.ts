@@ -337,6 +337,8 @@ export interface MapCallbacks {
   onUpdateManeuverNode(node: ManeuverNode): void;
   onDeleteManeuverNode(): void;
   onWarpToNode(node: ManeuverNode): void;
+  isManeuverAutoExecutionEnabled(id: string): boolean;
+  onToggleManeuverAutoExecution(id: string): void;
   onCreateAlarm(time: number, label: string, kind: AlarmKind): void;
   onSetTarget(bodyId: string | null): void;
   onWarpToTime(time: number, margin: number): void;
@@ -397,6 +399,7 @@ export class MapView {
   private etaReadout: HTMLElement;
   private postReadout: HTMLElement;
   private budgetReadout: HTMLElement;
+  private autoExecuteBtn: HTMLButtonElement;
   private cb: MapCallbacks;
   private focusBodyId = '';
   private followsActiveVessel = true;
@@ -703,6 +706,15 @@ export class MapView {
     warpBtn.setAttribute('aria-label', 'Warp to selected node');
     warpBtn.onclick = () => {
       if (this.node) cb.onWarpToNode(this.node);
+    };
+    this.autoExecuteBtn = el('button', 'hud-btn', btnRow, 'AUTO') as HTMLButtonElement;
+    this.autoExecuteBtn.title = 'Automatically orient, ignite the available engine, and execute (separation remains manual)';
+    this.autoExecuteBtn.setAttribute('aria-label', 'Toggle automatic execution for selected maneuver');
+    this.autoExecuteBtn.onclick = () => {
+      const plan = cb.getManeuverPlan();
+      if (!plan) return;
+      cb.onToggleManeuverAutoExecution(plan.id);
+      this.refreshNodePanel();
     };
     const alarmBtn = el('button', 'hud-btn map-icon-btn', btnRow, '⌁') as HTMLButtonElement;
     alarmBtn.title = 'Create maneuver alarm';
@@ -1275,6 +1287,12 @@ export class MapView {
     this.nodePanel.innerHTML = '';
     this.nodeInputs.clear();
     const node = this.node;
+    const selectedPlan = this.cb.getManeuverPlan();
+    const autoEnabled = selectedPlan ? this.cb.isManeuverAutoExecutionEnabled(selectedPlan.id) : false;
+    this.autoExecuteBtn.disabled = !selectedPlan;
+    this.autoExecuteBtn.classList.toggle('active', autoEnabled);
+    this.autoExecuteBtn.textContent = autoEnabled ? 'AUTO ON' : 'AUTO';
+    this.autoExecuteBtn.setAttribute('aria-pressed', String(autoEnabled));
     const plans = this.cb.getManeuverPlans();
     this.nodeQueue.innerHTML = '';
     if (plans.length) {
@@ -1760,7 +1778,13 @@ export class MapView {
       this.postReadout.textContent =
         `TARGET ORBIT  Ap ${postApoapsis}  ·  Pe ${postPeriapsis}\n` +
         `Inc ${(after.i * 180 / Math.PI).toFixed(2)}°  ·  Period ${Number.isFinite(postPeriod) ? `${(postPeriod / 60).toFixed(1)} min` : '—'}`;
-      const craftAnalysis = analyzeCraft(v.craft, body.surfaceGravity, body.pressureAt(v.pos.length() - body.radius));
+      const craftAnalysis = analyzeCraft(
+        v.craft,
+        body.surfaceGravity,
+        body.pressureAt(v.pos.length() - body.radius),
+        game.flightTuning,
+        body.def.atmosphere?.seaLevelPressure,
+      );
       const available = craftAnalysis.stages
         .filter((stage) => stage.stageIndex >= v.currentStage)
         .reduce((sum, stage) => sum + stage.deltaV, 0);
