@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GameState } from '../src/sim/state';
+import type { GameState } from '../src/sim/state';
 import { addPart, createCraft } from '../src/sim/vessel';
 import { autoCollectScience, transmitScience } from '../src/sim/science';
+import { createLegacyGameState } from './fixtures/legacyGameState';
 
 /** Veyra's radius is 1e6 m and space-low ends at half a radius. */
 const SPACE_LOW_ALTITUDE = 120_000;
@@ -26,7 +27,7 @@ function moveTo(gv: ReturnType<GameState['spawnInOrbit']>, altitude: number): vo
 
 describe('automatic science collection', () => {
   it('collects on arriving at a new site without a manual press', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawn(game);
 
     const outcome = autoCollectScience(game, gv);
@@ -37,7 +38,7 @@ describe('automatic science collection', () => {
   });
 
   it('reports the site so the caller can still show a popup', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawn(game);
 
     const outcome = autoCollectScience(game, gv);
@@ -48,7 +49,7 @@ describe('automatic science collection', () => {
   });
 
   it('does not fire again while parked at the same site', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawn(game);
     expect(autoCollectScience(game, gv)).not.toBeNull();
 
@@ -57,7 +58,7 @@ describe('automatic science collection', () => {
   });
 
   it('fires again when the situation genuinely changes', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawn(game);
     expect(autoCollectScience(game, gv)).not.toBeNull();
 
@@ -70,7 +71,7 @@ describe('automatic science collection', () => {
   });
 
   it('does not re-collect at the same site after transmitting', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = spawn(game);
     autoCollectScience(game, gv);
     transmitScience(game, gv);
@@ -79,7 +80,7 @@ describe('automatic science collection', () => {
   });
 
   it('tracks sites per vessel rather than globally', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const first = spawn(game);
     const second = spawn(game);
 
@@ -88,7 +89,7 @@ describe('automatic science collection', () => {
   });
 
   it('returns null when the craft carries no valid experiment here', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('bare pod');
     addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     craft.stages = [];

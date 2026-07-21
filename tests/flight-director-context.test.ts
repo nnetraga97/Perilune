@@ -6,6 +6,7 @@ import {
   buildFlightDirectorSnapshot,
   type PreviousFlightDirectorDecision,
 } from '../src/ui/flightDirectorSnapshot';
+import { createLegacyGameState } from './fixtures/legacyGameState';
 
 function capsule() {
   const craft = createCraft('Context capsule');
@@ -49,7 +50,7 @@ function placeOrbitAttempt(game: GameState, trueAnomaly: number): void {
 
 describe('flight director mission context', () => {
   it('gives a fresh Veyra launch an explicit stable-orbit objective without a contract', () => {
-    const game = new GameState('sandbox');
+    const game = createLegacyGameState('sandbox');
     const vessel = game.spawnOnPad(capsule(), 'First Light');
 
     const result = snapshot(game);
@@ -70,7 +71,7 @@ describe('flight director mission context', () => {
   });
 
   it('selects the phase-relevant orbit contract instead of blindly taking the first active contract', () => {
-    const game = new GameState('program');
+    const game = createLegacyGameState('program');
     game.campaign.activeContracts.push('science-return', 'veyra-orbit');
     game.spawnOnPad(capsule(), 'Contract flight');
 
@@ -85,7 +86,7 @@ describe('flight director mission context', () => {
   });
 
   it('marks the simulator-defined 85 km Veyra orbit as achieved and changes to efficiency priority', () => {
-    const game = new GameState('sandbox');
+    const game = createLegacyGameState('sandbox');
     game.spawnInOrbit(capsule(), 'Orbiter', 'veyra', 100_000);
 
     const result = snapshot(game);
@@ -100,7 +101,7 @@ describe('flight director mission context', () => {
   });
 
   it('distinguishes ascent, coast, and circularization using simulator-derived orbit margins', () => {
-    const ascent = new GameState('sandbox');
+    const ascent = createLegacyGameState('sandbox');
     const ascendingVessel = ascent.spawnOnPad(capsule(), 'Ascent');
     ascendingVessel.runtime.situation = 'flying';
     expect(snapshot(ascent).phase).toMatchObject({
@@ -108,14 +109,14 @@ describe('flight director mission context', () => {
       allowedActions: ['begin-gravity-turn', 'hold-ascent', 'throttle-up', 'throttle-down', 'stage-when-ready'],
     });
 
-    const coast = new GameState('sandbox');
+    const coast = createLegacyGameState('sandbox');
     placeOrbitAttempt(coast, 0);
     expect(snapshot(coast).phase).toMatchObject({
       flightPhase: 'coast-to-apoapsis',
       allowedActions: ['coast-to-apoapsis', 'hold', 'review-map'],
     });
 
-    const circularize = new GameState('sandbox');
+    const circularize = createLegacyGameState('sandbox');
     placeOrbitAttempt(circularize, Math.PI - 0.01);
     expect(snapshot(circularize).phase).toMatchObject({
       flightPhase: 'circularization',
@@ -124,7 +125,7 @@ describe('flight director mission context', () => {
   });
 
   it('lets immediate flight risk override mission progress', () => {
-    const game = new GameState('sandbox');
+    const game = createLegacyGameState('sandbox');
     const vessel = game.spawnOnPad(capsule(), 'High Q');
     vessel.runtime.aero.dynamicPressure = 40_000;
 
@@ -135,7 +136,7 @@ describe('flight director mission context', () => {
   });
 
   it('carries only the previous decision for the same vessel', () => {
-    const game = new GameState('sandbox');
+    const game = createLegacyGameState('sandbox');
     const vessel = game.spawnOnPad(capsule(), 'Continuity');
     game.time = 20;
     const previous: PreviousFlightDirectorDecision = {

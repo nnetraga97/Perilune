@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { addPart, createCraft } from '../src/sim/vessel';
 import { collectScience, encodeScienceKey } from '../src/sim/science';
+import { createLegacyGameState } from './fixtures/legacyGameState';
 
 /** Engine + decoupler + crewed pod: firing stage 0 hands control to the pod. */
 function podOverEngine(name: string) {
@@ -22,7 +23,7 @@ function bufferedTotal(game: GameState): number {
 describe('buffered science across a stage separation', () => {
   it('follows the crewed component when control transfers', () => {
     const { craft } = podOverEngine('science carrier');
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     const collected = collectScience(game, gv);
     expect(collected.collected.length).toBeGreaterThan(0);
@@ -38,7 +39,7 @@ describe('buffered science across a stage separation', () => {
 
   it('does not strand science on the discarded debris', () => {
     const { craft } = podOverEngine('science carrier');
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     collectScience(game, gv);
 
@@ -52,7 +53,7 @@ describe('buffered science across a stage separation', () => {
 
   it('never duplicates buffered results across the split', () => {
     const { craft } = podOverEngine('science carrier');
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     collectScience(game, gv);
     const held = gv.runtime.scienceBuffer.size;
@@ -64,7 +65,7 @@ describe('buffered science across a stage separation', () => {
 
   it('preserves the stored result values, not just the entry count', () => {
     const { craft } = podOverEngine('science carrier');
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     collectScience(game, gv);
     const before = [...gv.runtime.scienceBuffer].map(([keyId, result]) => [keyId, result.heldValue] as const);
@@ -85,7 +86,7 @@ describe('buffered science across a stage separation', () => {
     addPart(craft, 'sci-survey', pod.key, 'surface', { x: 0.4, y: 0, z: 0 });
     craft.stages = [{ partKeys: [decoupler.key] }, { partKeys: [engine.key] }];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     collectScience(game, gv);
     const held = gv.runtime.scienceBuffer.size;

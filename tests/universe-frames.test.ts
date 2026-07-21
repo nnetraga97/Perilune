@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { Universe } from '../src/sim/universe';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 
-const universe = new Universe([...AUREN_SYSTEM]);
+const universe = new Universe([...LEGACY_AUREN_SYSTEM]);
 const T = 12_345.678;
 
 describe('Universe frame math', () => {
