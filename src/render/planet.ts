@@ -2,10 +2,12 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import type { Body } from '../sim/universe';
+import { recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
 import type { QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
 import type { TerrainChunkWorkerPool } from './terrain/chunkWorkerPool';
+import { DEFAULT_TERRAIN_GEOMETRY_BUDGET } from './resourceAccounting';
 import { PlanetTerrainEngine } from './terrain/planetTerrainEngine';
 import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from './terrain/terrainPolicy';
 import { createBodySurfaceProvider } from './terrain/surfaceProvider';
@@ -26,7 +28,6 @@ import {
 
 export { terrainGridIndices } from './terrain/chunkGeometry';
 
-const DEFAULT_TERRAIN_ALLOCATION_BYTES = 128 * 1024 * 1024;
 
 export interface PlanetQuality {
   /** Grid resolution per streamed tile edge. */
@@ -70,6 +71,8 @@ export interface PlanetRendererOptions {
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly now?: () => number;
   readonly diagnosticSource?: string;
+  /** Exact frozen recipe shared by simulation contact and terrain workers. */
+  readonly recipe?: Readonly<BodyFeatureRecipe>;
 }
 
 export interface PlanetDiagnosticContext extends RenderDiagnosticContext {
@@ -90,6 +93,8 @@ export interface PlanetRendererStats {
   selectionPasses: number;
   selectionReused: boolean;
   geometryBytes: number;
+  pending: number;
+  activeTransitions: number;
 }
 
 export interface TerrainChunkKeyInfo {
@@ -208,6 +213,7 @@ export class PlanetRenderer {
     chunks: 0, visible: 0, built: 0, triangles: 0, coverageGaps: 0,
     overlapChunks: 0, scheduleMs: 0, installMs: 0, geometryBytes: 0,
     selectionMs: 0, balanceMs: 0, selectionPasses: 0, selectionReused: false,
+    pending: 0, activeTransitions: 0,
   };
 
   constructor(
@@ -219,15 +225,17 @@ export class PlanetRenderer {
     this.material = options.material ?? new THREE.MeshLambertMaterial({ vertexColors: true });
     this.diagnostics = options.diagnostics;
     const policy = enginePolicy(quality);
+    const recipe = options.recipe ?? recipeForBody(body);
     const provider = createBodySurfaceProvider(body, {
-      generation: 1,
+      generation: recipe.terrainGeneration,
       gridResolution: policy.gridResolution,
+      recipe,
     });
     this.engine = new PlanetTerrainEngine({
       provider,
       quality: policy,
       material: this.material,
-      terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_ALLOCATION_BYTES,
+      terrainAllocationBytes: options.terrainAllocationBytes ?? DEFAULT_TERRAIN_GEOMETRY_BUDGET,
       workerPool: options.workerPool,
       ownsWorkerPool: options.ownsWorkerPool,
       now: options.now,
@@ -274,6 +282,7 @@ export class PlanetRenderer {
   }
 
   coverageReady(): boolean { return this.engine.coverageReady(); }
+  detailDemand(): readonly TerrainTileId[] { return this.engine.detailDemand(); }
 
   resourceGeometryBytes(): Readonly<{
     terrainGeometryBytes: number;
@@ -337,6 +346,8 @@ export class PlanetRenderer {
       selectionPasses: current.selectionPasses,
       selectionReused: current.selectionReused,
       geometryBytes: current.geometryBytes,
+      pending: current.queued + current.building + current.ready,
+      activeTransitions: current.activeTransitions,
     });
     void this.diagnostics;
     void this.diagnosticContext;

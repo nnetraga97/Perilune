@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
-import { createOceanCapMaterial, oceanCapAngle, oceanCapSegments } from './oceanMaterial';
+import {
+  createOceanCapMaterial,
+  oceanCapAngle,
+  oceanCapCoversHorizon,
+  oceanCapSegments,
+} from './oceanMaterial';
+import { updateTerrestrialAerialPerspective } from './aerialPerspective';
+import { resolveSurfaceClassTextures, type SurfaceClassTextureSet } from './surfaceClass';
 
 /**
  * Camera-anchored gnomonic ocean cap. Every generated vertex lies on the exact
@@ -15,11 +22,13 @@ export class TerrestrialOcean {
   private readonly east = new THREE.Vector3(1, 0, 0);
   private readonly north = new THREE.Vector3(0, 1, 0);
   private disposed = false;
+  private readonly surfaceClasses: SurfaceClassTextureSet;
 
   constructor(
     readonly body: Body,
     readonly quality: QualityTier,
     shoreMask: THREE.Texture | null,
+    classTextures: ReadonlyMap<string, THREE.Texture> | null = null,
   ) {
     if (body.def.surfaceKind !== 'solid' || body.def.terrain.oceanLevel <= 0 || !body.def.terrain.colorOcean) {
       throw new Error(`${body.id} has no solid ocean datum`);
@@ -27,7 +36,10 @@ export class TerrestrialOcean {
     this.datumRadius = body.radius;
     const segments = oceanCapSegments(quality);
     const geometry = new THREE.PlaneGeometry(2, 2, segments, segments);
-    const material = createOceanCapMaterial(quality, shoreMask, body.def.terrain.colorOcean, body.radius);
+    this.surfaceClasses = resolveSurfaceClassTextures(classTextures);
+    const material = createOceanCapMaterial(
+      quality, shoreMask, body.def.terrain.colorOcean, body.radius, this.surfaceClasses,
+    );
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.name = `terrestrial-ocean:${body.id}`;
     this.mesh.scale.setScalar(this.datumRadius);
@@ -39,13 +51,20 @@ export class TerrestrialOcean {
   get material(): THREE.ShaderMaterial { return this.mesh.material; }
 
   update(frame: Pick<BodyRenderFrame,
-    'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection' | 'time' | 'orientation'>): void {
+    'cameraRelativeOrigin' | 'cameraBodyFixed' | 'bodySunDirection' | 'time' | 'orientation'> &
+    { readonly solarVisibleFraction?: number },
+  aerialPerspectiveLut?: THREE.Texture): void {
     if (this.disposed) return;
     const { cameraRelativeOrigin: origin, cameraBodyFixed: camera, orientation } = frame;
     this.mesh.position.set(origin.x, origin.y, origin.z);
     this.mesh.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
 
     const cameraDistance = Math.hypot(camera.x, camera.y, camera.z) || 1;
+    const cameraAltitude = cameraDistance - this.datumRadius;
+    // This pass supplies meter-scale waves near the camera. Once its finite
+    // cap can no longer reach the true horizon, hiding it avoids exposing the
+    // square/circular cap boundary across the global ocean presentation.
+    this.mesh.visible = oceanCapCoversHorizon(this.datumRadius, cameraAltitude);
     this.anchor.set(camera.x / cameraDistance, camera.y / cameraDistance, camera.z / cameraDistance);
     this.east.set(-this.anchor.y, this.anchor.x, 0);
     if (this.east.lengthSq() < 1e-12) this.east.set(1, 0, 0);
@@ -56,14 +75,21 @@ export class TerrestrialOcean {
     (uniforms.uAnchorDirection.value as THREE.Vector3).copy(this.anchor);
     (uniforms.uEast.value as THREE.Vector3).copy(this.east);
     (uniforms.uNorth.value as THREE.Vector3).copy(this.north);
-    uniforms.uCapAngle.value = oceanCapAngle(this.datumRadius, cameraDistance - this.datumRadius);
+    uniforms.uCapAngle.value = oceanCapAngle(this.datumRadius, cameraAltitude);
     (uniforms.uCameraBodyFixed.value as THREE.Vector3).set(camera.x, camera.y, camera.z);
     (uniforms.uSunDirection.value as THREE.Vector3).set(
       frame.bodySunDirection.x,
       frame.bodySunDirection.y,
       frame.bodySunDirection.z,
     ).normalize();
+    uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
     uniforms.uTime.value = frame.time;
+    updateTerrestrialAerialPerspective(
+      this.material,
+      this.body,
+      { ...frame, solarVisibleFraction: frame.solarVisibleFraction ?? 1 },
+      aerialPerspectiveLut,
+    );
   }
 
   dispose(): void {
@@ -71,5 +97,6 @@ export class TerrestrialOcean {
     this.disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    for (const texture of this.surfaceClasses.owned) texture.dispose();
   }
 }

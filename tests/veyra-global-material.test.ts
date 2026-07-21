@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
@@ -15,7 +16,7 @@ import {
   updateTerrestrialCloudLighting,
 } from '../src/render/terrestrial/globalMaterial';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 const descriptor = bodyMaterialDescriptor(veyra);
 
 function texture(): THREE.DataTexture {
@@ -43,11 +44,11 @@ describe('Veyra global coordinates and material', () => {
   };
 
   it('uses north-at-row-zero coordinates and remains adjacent at the longitude seam', () => {
-    expect(bodyFixedUv({ x: 0, y: 0, z: 1 })).toEqual({ u: 0, v: 0 });
-    expect(bodyFixedUv({ x: 0, y: 0, z: -1 })).toEqual({ u: 0, v: 1 });
-    expect(bodyFixedUv({ x: 0, y: 1, z: 0 })).toEqual({ u: 0.25, v: 0.5 });
-    const above = bodyFixedUv({ x: 1, y: 1e-12, z: 0 });
-    const below = bodyFixedUv({ x: 1, y: -1e-12, z: 0 });
+    expect(bodyFixedUv({ x: 0, y: 0, z: 1 })).toEqual({ u: 0.5, v: 0 });
+    expect(bodyFixedUv({ x: 0, y: 0, z: -1 })).toEqual({ u: 0.5, v: 1 });
+    expect(bodyFixedUv({ x: 0, y: 1, z: 0 })).toEqual({ u: 0.75, v: 0.5 });
+    const above = bodyFixedUv({ x: -1, y: -1e-12, z: 0 });
+    const below = bodyFixedUv({ x: -1, y: 1e-12, z: 0 });
     expect(above.u + (1 - below.u)).toBeLessThan(1e-9);
   });
 
@@ -94,12 +95,16 @@ describe('Veyra global coordinates and material', () => {
     expect(shader.vertexShader).toContain('attribute vec3 bodyDirection');
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('decodeGlobalOctNormal');
-    expect(shader.fragmentShader).toContain('vec3 globalBodyNormal');
-    expect(shader.fragmentShader).toContain('diffuseColor.rgb *= authoredAlbedo.rgb;');
+    expect(shader.fragmentShader).not.toContain('vec3 globalBodyNormal =');
+    expect(shader.fragmentShader).toContain('#include <normal_fragment_maps>');
+    expect(shader.fragmentShader).toContain('mix(globalLandAlbedo, globalOceanColor, globalOceanOwnership)');
+    expect(shader.fragmentShader).toContain('samplePlanetDetail(vBodyDirection)');
+    expect(shader.fragmentShader).toContain('useGlobalSurfaceClassMap > 0.5');
     expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.fragmentShader).not.toContain('sRGBTransferEOTF(vec4(authoredAlbedo');
     expect(shader.uniforms.globalMaterialMap.value).toBe(packed);
     expect(shader.uniforms.globalCloudMap.value).toBe(clouds);
+    expect(shader.uniforms.useGlobalIceMap.value).toBe(0);
     expect((shader.uniforms.globalSunDirection.value as THREE.Vector3).toArray()).toEqual([0, 1, 0]);
     expect(shader.uniforms.globalCloudDriftAngle.value).toBe(0.4);
   });
@@ -127,7 +132,7 @@ describe('Veyra global coordinates and material', () => {
     expect(firstMaterial).not.toBe(material);
     expect(secondMaterial).not.toBe(firstMaterial);
     expect(firstMaterial.customProgramCacheKey()).toBe(secondMaterial.customProgramCacheKey());
-    expect(firstMaterial.customProgramCacheKey()).toContain('terrestrial-global-v2:palette');
+    expect(firstMaterial.customProgramCacheKey()).toContain('terrestrial-global-v4:palette');
     expect(firstMaterial.customProgramCacheKey()).toContain('terrain-lod-dither:color');
     expect(firstMaterial.vertexColors).toBe(material.vertexColors);
     expect(firstMaterial.userData.maps).toBe(material.userData.maps);

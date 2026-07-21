@@ -13,7 +13,8 @@ import {
   timeToTrueAnomaly,
 } from '../core/orbit';
 import { Body, Universe } from './universe';
-import { AUREN_SYSTEM, HOME_BODY_ID } from '../content/system';
+import { HOME_BODY_ID, SOL_SYSTEM } from '../content/system';
+import type { BodyDef } from './universe';
 import {
   ACTION_GROUP_IDS,
   ActionGroupId,
@@ -22,6 +23,7 @@ import {
   defOf,
   partitionActionGroups,
   projectStages,
+  removeSubtree,
 } from './vessel';
 import {
   createVesselRuntime,
@@ -41,11 +43,19 @@ import {
   inertialToBodyFixed,
   surfaceVelocity,
 } from './bodyOrientation';
-import { launchSiteDirection } from './launchSite';
+import { launchSiteDirection, nextLaunchSiteDaylightTime } from './launchSite';
 import { preferredOrbitAltitude } from './orbitPlacement';
 import { snapshotInterstageShrouds } from './interstage';
 import { createCampaign, type CampaignState, type GameMode } from './campaign';
 import type { LedgerEntry, ScienceKeyId } from './science';
+import {
+  installPlanetDataAuthority,
+  planetDataAuthorityForBody,
+  preparePlanetDataAuthority,
+  type FrozenPlanetDataAuthority,
+  type PlanetAuthorityRequest,
+} from './planetDataAuthority';
+import { recipeForBody } from './terrainRecipe';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -61,6 +71,8 @@ export {
 export const PHYSICS_DT = 0.02;
 export const PHYSICS_WARP_RATES = [1, 2, 4];
 export const RAILS_WARP_RATES = [1, 5, 25, 100, 1000, 10_000];
+/** Fleet-tab debug placement: far enough away to inspect a complete body disk. */
+const FLEET_FULL_DISK_ALTITUDE_RADII = 3.5;
 
 export interface RailsState {
   elements: OrbitalElements | null;
@@ -94,6 +106,11 @@ export interface GameAlarm {
   vesselId: string | null;
 }
 
+export interface GameStateOptions {
+  readonly bodies?: readonly BodyDef[];
+  readonly homeBodyId?: string;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _br = new Vec3();
@@ -101,7 +118,7 @@ const _bv = new Vec3();
 const _sun = new Vec3();
 
 export class GameState {
-  readonly universe = new Universe(AUREN_SYSTEM, HOME_BODY_ID);
+  readonly universe: Universe;
   time = 0;
   vessels: GameVessel[] = [];
   activeVesselId: string | null = null;
@@ -131,9 +148,35 @@ export class GameState {
   readonly alarms: GameAlarm[] = [];
   private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
+  private flightAuthority: FrozenPlanetDataAuthority;
 
-  constructor(mode: GameMode = 'sandbox') {
+  constructor(
+    mode: GameMode = 'sandbox',
+    options: Readonly<GameStateOptions> = {},
+  ) {
+    this.universe = new Universe([...(options.bodies ?? SOL_SYSTEM)], options.homeBodyId ?? HOME_BODY_ID);
     this.campaign = createCampaign(mode);
+    const home = this.universe.get(this.universe.homeBodyId);
+    this.flightAuthority = planetDataAuthorityForBody(home);
+    installPlanetDataAuthority(home, this.flightAuthority);
+  }
+
+  /** Prepare and freeze numeric terrain authority before any launch placement. */
+  async prepareFlightAuthority(
+    body: Body,
+    request: PlanetAuthorityRequest,
+  ): Promise<FrozenPlanetDataAuthority> {
+    if (this.vessels.length > 0) {
+      throw new Error('Terrain authority cannot change while a flight is active');
+    }
+    const authority = await preparePlanetDataAuthority(body, request);
+    installPlanetDataAuthority(body, authority);
+    this.flightAuthority = authority;
+    return authority;
+  }
+
+  frozenFlightAuthority(): Readonly<FrozenPlanetDataAuthority> {
+    return this.flightAuthority;
   }
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
@@ -161,6 +204,19 @@ export class GameState {
     this.lastDestruction = null;
     this.autoScienceSites.clear();
     this.setWarp(0, false);
+  }
+
+  /** Advance an empty preflight state to the next daylight launch window. */
+  warpToLaunchDaylight(body: Body): number {
+    if (this.vessels.length > 0) {
+      throw new Error('Launch daylight warp requires an empty preflight state');
+    }
+    const launchTime = nextLaunchSiteDaylightTime(this.universe, body, this.time);
+    this.time = launchTime;
+    this.accumulator = 0;
+    this.setWarp(0, false);
+    this.fireDueAlarms();
+    return launchTime;
   }
 
   get warpRate(): number {
@@ -231,14 +287,26 @@ export class GameState {
     return fired;
   }
 
-  /** Place a craft on Veyra's Cape Skyward launch pad. */
+  /** Place a craft on the selected system's home-body launch pad. */
   spawnOnPad(craft: Craft, name: string): GameVessel {
-    const veyra = this.universe.get('veyra');
-    const runtime = createVesselRuntime(this.newVesselId(), name, craft, 'veyra');
+    const home = this.universe.get(this.universe.homeBodyId);
+    if (!home.def.launchSite || home.def.surfaceKind !== 'solid') {
+      throw new Error(`${home.name} has no configured launch site`);
+    }
+    const installedAuthority = planetDataAuthorityForBody(home);
+    const recipe = recipeForBody(home, installedAuthority);
+    if (
+      installedAuthority.generation !== this.flightAuthority.generation
+      || recipe.authorityGeneration !== this.flightAuthority.generation
+      || recipe.terrainGeneration !== this.flightAuthority.terrainGeneration
+    ) {
+      throw new Error(`Launch terrain authority generation mismatch for ${home.name}`);
+    }
+    const runtime = createVesselRuntime(this.newVesselId(), name, craft, home.id);
 
     // Pad site: fixed longitude/latitude on the surface at current spin.
-    const dirI = launchSiteDirection(veyra, this.time, new Vec3());
-    const groundR = groundRadiusInertial(veyra, dirI, this.time);
+    const dirI = launchSiteDirection(home, this.time, new Vec3());
+    const groundR = groundRadiusInertial(home, dirI, this.time);
 
     // Height so the craft's lowest part rests on ground.
     let minY = Infinity;
@@ -250,13 +318,13 @@ export class GameState {
       minY = Math.min(minY, bottom);
     }
     const comY = runtime.massProps.com.y;
-    // groundRadiusInertial includes the pad's physical deck at Cape Skyward.
+    // groundRadiusInertial includes the pad's physical deck at LC-39B.
     const standHeight = comY - minY + 0.4;
 
     runtime.pos.copy(dirI).scale(groundR + standHeight);
-    runtime.landedBodyFixed = inertialToBodyFixed(veyra, this.time, runtime.pos, new Vec3());
+    runtime.landedBodyFixed = inertialToBodyFixed(home, this.time, runtime.pos, new Vec3());
     // Surface rotation velocity.
-    surfaceVelocity(veyra, runtime.pos, runtime.vel);
+    surfaceVelocity(home, runtime.pos, runtime.vel);
     // Point up.
     runtime.att.setLookRotation(
       new Vec3(-dirI.y, dirI.x, 0).normalize(), // forward: east-ish tangent
@@ -299,7 +367,7 @@ export class GameState {
     return gv;
   }
 
-  /** Move the currently controlled craft into a safe circular equatorial orbit. */
+  /** Move the active craft into a stable equatorial debug ellipse, starting at apoapsis. */
   placeActiveInOrbit(bodyId: string): boolean {
     const gv = this.active;
     if (!gv) return false;
@@ -313,23 +381,29 @@ export class GameState {
     const atmosphereTop = body.def.atmosphere?.height ?? 0;
     const terrainTop = body.def.surfaceKind === 'solid' ? body.def.terrain.amplitude : 0;
     const clearance = Math.max(atmosphereTop, terrainTop);
-    const preferredAltitude = preferredOrbitAltitude(body);
+    const periapsisAltitude = preferredOrbitAltitude(body);
+    const preferredApoapsisAltitude = Math.max(
+      periapsisAltitude,
+      body.radius * FLEET_FULL_DISK_ALTITUDE_RADII,
+    );
     const soiAltitudeLimit = Number.isFinite(body.soiRadius)
       ? body.soiRadius * 0.25 - body.radius
-      : preferredAltitude;
-    const altitude = Math.min(preferredAltitude, soiAltitudeLimit);
-    if (!(altitude > clearance)) return false;
+      : preferredApoapsisAltitude;
+    const apoapsisAltitude = Math.min(preferredApoapsisAltitude, soiAltitudeLimit);
+    if (!(periapsisAltitude > clearance) || !(apoapsisAltitude > periapsisAltitude)) return false;
 
-    const radius = body.radius + altitude;
-    const speed = Math.sqrt(body.mu / radius);
+    const periapsisRadius = body.radius + periapsisAltitude;
+    const apoapsisRadius = body.radius + apoapsisAltitude;
+    const semiMajorAxis = (periapsisRadius + apoapsisRadius) * 0.5;
+    const speedAtApoapsis = Math.sqrt(body.mu * (2 / apoapsisRadius - 1 / semiMajorAxis));
     const previousPhase = Math.atan2(v.pos.y, v.pos.x);
     const phase = Number.isFinite(previousPhase) ? previousPhase : 0;
     const cosPhase = Math.cos(phase);
     const sinPhase = Math.sin(phase);
 
     v.bodyId = body.id;
-    v.pos.set(radius * cosPhase, radius * sinPhase, 0);
-    v.vel.set(-speed * sinPhase, speed * cosPhase, 0);
+    v.pos.set(apoapsisRadius * cosPhase, apoapsisRadius * sinPhase, 0);
+    v.vel.set(-speedAtApoapsis * sinPhase, speedAtApoapsis * cosPhase, 0);
     v.att.setLookRotation(new Vec3(0, 0, 1), v.vel);
     v.angVel.set(0, 0, 0);
     v.landedBodyFixed = null;
@@ -353,7 +427,7 @@ export class GameState {
     gv.rails.landedAtt = null;
     gv.target = null;
     this.lastDestruction = null;
-    logEvent(v, this.time, `Placed in orbit around ${body.name}`);
+    logEvent(v, this.time, `Placed in high/low debug orbit around ${body.name}`);
     return true;
   }
 
@@ -963,17 +1037,32 @@ export class GameState {
         continue;
       }
       if (result.destroyedParts.length) {
+        const stagesBeforeDamage = v.craft.stages.map((stage) => ({
+          partKeys: [...stage.partKeys],
+        }));
+        const currentStageBeforeDamage = v.currentStage;
         for (const key of result.destroyedParts) {
           const p = v.craft.parts.find((q) => q.key === key);
           if (p) {
             logEvent(v, this.time, `${defOf(p).name} destroyed by overheating`, 'danger');
+            // A destroyed attachment cannot leave its descendants pointing at
+            // a parent that no longer exists. Remove the complete attached
+            // branch and clean its stage/action-group references together.
+            removeSubtree(v.craft, key);
           }
         }
-        v.craft.parts = v.craft.parts.filter((p) => !result.destroyedParts.includes(p.key));
         if (!v.craft.parts.length || !hasControlSource(v.craft)) {
           this.destroyVessel(gv, 'Vessel lost to overheating');
           continue;
         }
+        const retainedKeys = new Set(v.craft.parts.map((part) => part.key));
+        const stagePlan = projectStages(
+          stagesBeforeDamage,
+          currentStageBeforeDamage,
+          retainedKeys,
+        );
+        v.craft.stages = stagePlan.stages;
+        v.currentStage = stagePlan.currentStage;
         refreshDerived(v);
       }
 

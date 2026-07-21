@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { serializeGame } from '../src/save/persistence';
@@ -15,7 +16,7 @@ class MemoryCache implements CacheStore {
 }
 
 function record(revision = 1): CloudSaveRecord {
-  const payload = serializeGame(new GameState(), 'Cloud test');
+  const payload = serializeGame(createLegacyGameState(), 'Cloud test');
   return {
     slot: 'cloud-test', label: payload.label, saveVersion: payload.saveVersion,
     payloadHash: 'a'.repeat(64), revision,

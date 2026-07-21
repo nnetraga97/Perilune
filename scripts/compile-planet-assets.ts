@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { spawn } from 'node:child_process';
 import { dirname, relative, resolve } from 'node:path';
 import sharp from 'sharp';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from '../tests/fixtures/legacyAurenSystem';
+import { SOL_SYSTEM } from '../src/content/system';
 import { Vec3 } from '../src/core/vec3';
 import { recipeForBody } from '../src/sim/terrainRecipe';
 import { solidHeight } from '../src/sim/terrain';
@@ -12,6 +13,21 @@ import { generateVeyraCanonicalMaps, type VeyraCanonicalMaps } from './lib/veyra
 import { generateAirlessGlobalMaps, type AirlessGlobalMaps } from './lib/airless-global-maps';
 import { generateVeyraScatter } from './lib/veyra-scatter';
 import { expandLogicalRgToRgb, resizeLogicalRg } from './lib/rg-image';
+import {
+  generateEarthGlobalMaps,
+  generateMoonGlobalMaps,
+  type ScientificGlobalMaps,
+} from './lib/scientific-global-maps';
+import {
+  deriveScientificHeight,
+  HEIGHT_SOURCE_DEFINITIONS,
+} from './lib/scientific-height-derivation.mjs';
+import {
+  KSC_SURFACE_CLASS_BOUNDS,
+  KSC_SURFACE_CLASS_DIMENSIONS,
+  overlayNwiGeoJson,
+  rasterizeGshhg,
+} from './lib/surface-classification.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const assetsRoot = resolve(root, 'assets/planets');
@@ -28,7 +44,7 @@ const canonicalHeight = 4096;
 const fingerprintWidth = 64;
 const fingerprintHeight = 32;
 const quantizationMeters = 0.5;
-const compilerVersion = '2.3.0';
+const compilerVersion = '2.4.0';
 const sourceArchiveSha256 = '3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919';
 const write = process.argv.includes('--write');
 const fingerprintsOnly = process.argv.includes('--fingerprints-only');
@@ -38,7 +54,7 @@ const tierDimensions = {
   high: [4096, 2048],
 } as const;
 type CompiledTier = keyof typeof tierDimensions;
-type CompiledBody = 'veyra' | 'palla' | 'wisp';
+type CompiledBody = 'veyra' | 'palla' | 'wisp' | 'earth' | 'moon';
 
 function optionValues(name: string): string[] {
   const values: string[] = [];
@@ -54,7 +70,7 @@ function optionValues(name: string): string[] {
 const requestedBodies = optionValues('--body');
 const targetBodies = new Set<CompiledBody>(
   (requestedBodies.length > 0 ? requestedBodies : ['veyra']).map((bodyId) => {
-    if (!['veyra', 'palla', 'wisp'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
+    if (!['veyra', 'palla', 'wisp', 'earth', 'moon'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
     return bodyId as CompiledBody;
   }),
 );
@@ -69,19 +85,22 @@ const writeGlobal = write && !fingerprintsOnly && targetBodies.has('veyra');
 
 interface RecipeRecord { bodyId: string; version: number; hash: string }
 interface ChannelOutput {
-  name: 'albedo' | 'normal' | 'material' | 'clouds';
+  name: 'albedo' | 'normal' | 'material' | 'clouds' | 'heightMacro' | 'emissive' | 'localDetail' | 'surfaceClass' | 'surfaceClassRegional';
   colorSpace: 'sRGB' | 'linear';
-  logicalFormat: 'RGB8' | 'RG8' | 'RGBA8';
+  logicalFormat: 'R8' | 'RGB8' | 'RG8' | 'RGBA8';
   packagePath: string;
   fallbackPath: string;
   packageChecksumSha256: string;
   fallbackChecksumSha256: string;
-  gpuFormat: 'etc2-rgb' | 'bc5-rg' | 'bc3-rgba';
+  gpuFormat: 'etc2-rgb' | 'bc5-rg' | 'bc3-rgba' | 'r8' | 'rg8';
   gpuBytes: number;
   fallbackGpuBytes: number;
-  fallbackLayout: 'rgb' | 'rgb-rg' | 'rgba';
+  fallbackLayout: 'r' | 'rgb' | 'rgb-rg' | 'rgba';
   transcodeTargets: readonly string[];
-  mipmapped: true;
+  mipmapped: boolean;
+  width?: number;
+  height?: number;
+  bounds?: readonly [number, number, number, number];
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -128,20 +147,35 @@ function fullMipRgbaBytes(width: number, height: number): number {
   }
 }
 
+function fullMipRgBytes(width: number, height: number): number {
+  let total = 0;
+  for (;;) {
+    total += width * height * 2;
+    if (width === 1 && height === 1) return total;
+    width = Math.max(1, width >> 1);
+    height = Math.max(1, height >> 1);
+  }
+}
+
 function relativeAssetPath(path: string): string {
   return relative(assetsRoot, path).split('\\').join('/');
 }
 
-function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['name']): Promise<void> {
+function runKtx(inputPath: string, outputPath: string, channel: ChannelOutput['name'], mipmapped: boolean): Promise<void> {
   const executable = process.env.KTX_CLI ?? 'ktx';
-  const format = channel === 'albedo' ? 'R8G8B8_SRGB' :
-    channel === 'material' ? 'R8G8B8A8_UNORM' : 'R8G8_UNORM';
-  const encoding = channel === 'albedo'
+  const colorChannel = channel === 'albedo' || channel === 'emissive';
+  const classChannel = channel === 'surfaceClass' || channel === 'surfaceClassRegional';
+  const format = colorChannel ? 'R8G8B8_SRGB' :
+    classChannel ? 'R8_UNORM' : channel === 'material' || channel === 'localDetail' ? 'R8G8B8A8_UNORM' : 'R8G8_UNORM';
+  const encoding = channel === 'heightMacro' || classChannel
+    ? ['--zstd', '9']
+    : colorChannel
     ? ['--encode', 'basis-lz', '--qlevel', '180']
     : ['--encode', 'uastc', '--uastc-quality', '2', '--zstd', '9'];
   return new Promise((resolvePromise, reject) => {
     const child = spawn(executable, [
-      'create', '--format', format, '--generate-mipmap', '--mipmap-filter', 'lanczos3',
+      'create', '--format', format,
+      ...(mipmapped ? ['--generate-mipmap', '--mipmap-filter', 'lanczos3'] : []),
       '--threads', '1', '--testrun', '--assign-texcoord-origin', 'top-left',
       ...encoding, inputPath, outputPath,
     ], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -178,39 +212,71 @@ async function writeTier(
   height: number,
   sourceWidth: number,
   sourceHeight: number,
-  maps: AirlessGlobalMaps | VeyraCanonicalMaps,
+  maps: AirlessGlobalMaps | VeyraCanonicalMaps | ScientificGlobalMaps,
 ): Promise<{ pack: Record<string, unknown>; channels: ChannelOutput[] }> {
   const bodyGeneratedRoot = resolve(assetsRoot, `generated/${bodyId}`);
   const tierDir = resolve(bodyGeneratedRoot, tier);
   mkdirSync(tierDir, { recursive: true });
   const definitions = [
-    { name: 'albedo' as const, data: maps.albedo, channels: 3 as const, fallback: 'webp' as const },
-    { name: 'normal' as const, data: maps.normal, channels: 2 as const, fallback: 'png' as const },
-    { name: 'material' as const, data: maps.material, channels: 4 as const, fallback: 'png' as const },
-    ...('clouds' in maps
-      ? [{ name: 'clouds' as const, data: maps.clouds, channels: 2 as const, fallback: 'png' as const }]
+    { name: 'albedo' as const, data: maps.albedo, channels: 3 as const, fallback: 'webp' as const, width, height, mipmapped: true },
+    { name: 'normal' as const, data: maps.normal, channels: 2 as const, fallback: 'png' as const, width, height, mipmapped: true },
+    { name: 'material' as const, data: maps.material, channels: 4 as const, fallback: 'png' as const, width, height, mipmapped: true },
+    ...('clouds' in maps && maps.clouds
+      ? [{ name: 'clouds' as const, data: maps.clouds, channels: 2 as const, fallback: 'png' as const, width, height, mipmapped: true }]
+      : []),
+    ...('heightMacro' in maps
+      ? [{ name: 'heightMacro' as const, data: maps.heightMacro, channels: 2 as const, fallback: 'png' as const, width, height, mipmapped: true }]
+      : []),
+    ...('emissive' in maps && maps.emissive
+      ? [{ name: 'emissive' as const, data: maps.emissive, channels: 3 as const, fallback: 'webp' as const, width, height, mipmapped: true }]
+      : []),
+    ...('localDetail' in maps && maps.localDetail
+      ? [{ name: 'localDetail' as const, data: maps.localDetail, channels: 4 as const, fallback: 'png' as const, width, height, mipmapped: true }]
+      : []),
+    ...('surfaceClass' in maps && maps.surfaceClass
+      ? [{ name: 'surfaceClass' as const, data: maps.surfaceClass, channels: 1 as const, fallback: 'png' as const, width, height, mipmapped: false }]
+      : []),
+    ...('surfaceClassRegional' in maps && maps.surfaceClassRegional
+      ? [{
+        name: 'surfaceClassRegional' as const,
+        data: maps.surfaceClassRegional.data,
+        channels: 1 as const,
+        fallback: 'png' as const,
+        width: maps.surfaceClassRegional.width,
+        height: maps.surfaceClassRegional.height,
+        bounds: maps.surfaceClassRegional.bounds,
+        mipmapped: false,
+      }]
       : []),
   ];
   const channels: ChannelOutput[] = [];
   const prepared: Array<{ definition: (typeof definitions)[number]; fallbackPath: string; encoderInput: string; packagePath: string }> = [];
   for (const definition of definitions) {
-    const resized = sourceWidth === width && sourceHeight === height
+    const classChannel = definition.name === 'surfaceClass' || definition.name === 'surfaceClassRegional';
+    const definitionWidth = definition.width;
+    const definitionHeight = definition.height;
+    const resized = classChannel
+      ? Buffer.from(definition.data)
+      : sourceWidth === definitionWidth && sourceHeight === definitionHeight
       ? Buffer.from(definition.data)
       : definition.channels === 2
-      ? await resizeLogicalRg(definition.data, sourceWidth, sourceHeight, width, height)
+      ? await resizeLogicalRg(definition.data, sourceWidth, sourceHeight, definitionWidth, definitionHeight)
       : await sharp(Buffer.from(definition.data), {
         raw: { width: sourceWidth, height: sourceHeight, channels: definition.channels },
         sequentialRead: true,
-      }).resize(width, height, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
-    const image = sharp(resized, { raw: { width, height, channels: definition.channels } });
+      }).resize(definitionWidth, definitionHeight, { kernel: sharp.kernel.lanczos3 }).raw().toBuffer();
+    if (resized.length !== definitionWidth * definitionHeight * definition.channels) {
+      throw new Error(`${definition.name} byte length does not match its declared exact raster dimensions`);
+    }
+    const image = sharp(resized, { raw: { width: definitionWidth, height: definitionHeight, channels: definition.channels } });
     const fallbackPath = resolve(tierDir, `${definition.name}.${definition.fallback}`);
     const encoderInput = resolve(tierDir, `${definition.name}.encoder.png`);
     if (definition.fallback === 'webp') {
       await image.clone().webp({ quality: 92, effort: 6, smartSubsample: true }).toFile(fallbackPath);
       await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     } else if (definition.channels === 2) {
-      const rgb = expandLogicalRgToRgb(resized, width, height);
-      await sharp(rgb, { raw: { width, height, channels: 3 } })
+      const rgb = expandLogicalRgToRgb(resized, definitionWidth, definitionHeight);
+      await sharp(rgb, { raw: { width: definitionWidth, height: definitionHeight, channels: 3 } })
         .png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(fallbackPath);
       await image.clone().png({ palette: false, compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
     } else {
@@ -227,31 +293,45 @@ async function writeTier(
   // granted without changing the deterministic per-texture KTX settings.
   await mapWithConcurrency(prepared, 2, async ({ definition, encoderInput, packagePath }) => {
     try {
-      await runKtx(encoderInput, packagePath, definition.name);
+      await runKtx(encoderInput, packagePath, definition.name, definition.mipmapped);
     } finally {
       rmSync(encoderInput, { force: true });
     }
   });
   for (const { definition, fallbackPath, packagePath } of prepared) {
-    const blockBytes = definition.name === 'albedo' ? 8 : 16;
+    const definitionWidth = definition.width;
+    const definitionHeight = definition.height;
+    const colorChannel = definition.name === 'albedo' || definition.name === 'emissive';
+    const directHeight = definition.name === 'heightMacro';
+    const classChannel = definition.name === 'surfaceClass' || definition.name === 'surfaceClassRegional';
+    const blockBytes = colorChannel ? 8 : 16;
     channels.push({
       name: definition.name,
-      colorSpace: definition.name === 'albedo' ? 'sRGB' : 'linear',
-      logicalFormat: definition.name === 'albedo' ? 'RGB8' : definition.name === 'material' ? 'RGBA8' : 'RG8',
+      colorSpace: colorChannel ? 'sRGB' : 'linear',
+      logicalFormat: classChannel ? 'R8' : colorChannel ? 'RGB8'
+        : definition.name === 'material' || definition.name === 'localDetail' ? 'RGBA8' : 'RG8',
       packagePath: relativeAssetPath(packagePath),
       fallbackPath: relativeAssetPath(fallbackPath),
       packageChecksumSha256: sha256(readFileSync(packagePath)),
       fallbackChecksumSha256: sha256(readFileSync(fallbackPath)),
-      gpuFormat: definition.name === 'albedo' ? 'etc2-rgb' : definition.name === 'normal' || definition.name === 'clouds' ? 'bc5-rg' : 'bc3-rgba',
-      gpuBytes: fullMipBytes(width, height, blockBytes),
-      fallbackGpuBytes: fullMipRgbaBytes(width, height),
-      fallbackLayout: definition.name === 'albedo' ? 'rgb' : definition.name === 'material' ? 'rgba' : 'rgb-rg',
-      transcodeTargets: definition.name === 'albedo'
+      gpuFormat: classChannel ? 'r8' : directHeight ? 'rg8' : colorChannel ? 'etc2-rgb'
+        : definition.name === 'material' || definition.name === 'localDetail' ? 'bc3-rgba' : 'bc5-rg',
+      gpuBytes: classChannel ? definitionWidth * definitionHeight
+        : directHeight ? fullMipRgBytes(definitionWidth, definitionHeight) : fullMipBytes(definitionWidth, definitionHeight, blockBytes),
+      fallbackGpuBytes: classChannel ? definitionWidth * definitionHeight : fullMipRgbaBytes(definitionWidth, definitionHeight),
+      fallbackLayout: classChannel ? 'r' : colorChannel ? 'rgb'
+        : definition.name === 'material' || definition.name === 'localDetail' ? 'rgba' : 'rgb-rg',
+      transcodeTargets: classChannel ? ['r8'] : directHeight
+        ? ['rg8']
+        : colorChannel
         ? ['etc2-rgb', 'bc1-rgb']
-        : definition.name === 'material'
+        : definition.name === 'material' || definition.name === 'localDetail'
           ? ['etc2-rgba', 'bc3-rgba', 'astc-rgba']
           : ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
-      mipmapped: true,
+      mipmapped: definition.mipmapped,
+      ...(definitionWidth !== width ? { width: definitionWidth } : {}),
+      ...(definitionHeight !== height ? { height: definitionHeight } : {}),
+      ...('bounds' in definition && definition.bounds ? { bounds: definition.bounds } : {}),
     });
   }
   const compressedBytes = channels.reduce((sum, channel) => sum + statSync(resolve(assetsRoot, channel.packagePath)).size, 0);
@@ -259,8 +339,10 @@ async function writeTier(
     channels,
     pack: {
       bodyId, tier, width, height, compressedBytes,
-      transientBytes: width * height * ('clouds' in maps ? 22 : 18),
-      bootCritical: bodyId === 'veyra' && tier === 'medium',
+      transientBytes: width * height * channels.reduce((sum, channel) => (
+        sum + (channel.logicalFormat === 'RGBA8' ? 4 : channel.logicalFormat === 'RGB8' ? 3 : channel.logicalFormat === 'RG8' ? 2 : 1)
+      ), 0),
+      bootCritical: (bodyId === 'veyra' || bodyId === 'earth') && tier === 'medium',
       channels,
     },
   };
@@ -477,18 +559,7 @@ async function decodeAirlessAlbedo(
 }
 
 async function pallaHeights(width: number, height: number): Promise<Float32Array> {
-  const result = await sharp(airlessSources.palla.heightPath, { limitInputPixels: false, sequentialRead: true })
-    .toColourspace('grey16')
-    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
-    .raw({ depth: 'ushort' })
-    .toBuffer({ resolveWithObject: true });
-  if (result.info.channels !== 1 || result.data.length !== width * height * 2) {
-    throw new Error(`Palla LOLA decode must produce ${width}x${height} unsigned-16 elevations`);
-  }
-  const encoded = new Uint16Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 2);
-  const heights = new Float32Array(encoded.length);
-  for (let index = 0; index < encoded.length; index++) heights[index] = (encoded[index] - 20_000) * 0.5;
-  return heights;
+  return (await deriveScientificHeight(root, HEIGHT_SOURCE_DEFINITIONS.moon, width, height)).heights;
 }
 
 function proceduralHeights(body: ReturnType<Universe['get']>, width: number, height: number): Float32Array {
@@ -531,6 +602,373 @@ async function compileAirlessBody(
   return packs;
 }
 
+const scientificGrid = Object.freeze({
+  datum: 'WGS84 spherical presentation; source datum retained during authoring',
+  projection: 'EPSG:4326 plate-carree',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: -180,
+  uvOrigin: 'north-west',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+});
+
+const earthSourcePaths = Object.freeze({
+  albedo: resolve(assetsRoot, 'sources/nasa-bmng-earth/world.200407.3x21600x10800.jpg'),
+  clouds: resolve(assetsRoot, 'sources/nasa-blue-marble-clouds/cloud_combined_8192.tif'),
+  emissive: resolve(assetsRoot, 'sources/nasa-black-marble-2016/BlackMarble_2016_3km_geo.tif'),
+  surface: resolve(assetsRoot, 'sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif'),
+  bedrock: resolve(assetsRoot, 'sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_bed.tif'),
+});
+
+const localMaterialRoot = resolve(assetsRoot, 'sources/polyhaven-local');
+const earthLocalMaterials = ['dirt', 'rock_ground', 'sand_01', 'snow_02'] as const;
+
+async function decodeLocalMaterialTile(assetId: string, size: number): Promise<Uint8Array> {
+  const [diffuseResult, normalResult, roughnessResult] = await Promise.all([
+    sharp(resolve(localMaterialRoot, `${assetId}_diff_1k.jpg`))
+      .resize(size, size, { kernel: sharp.kernel.lanczos3 }).removeAlpha().toColourspace('srgb')
+      .raw().toBuffer({ resolveWithObject: true }),
+    sharp(resolve(localMaterialRoot, `${assetId}_nor_gl_1k.jpg`))
+      .resize(size, size, { kernel: sharp.kernel.lanczos3 }).removeAlpha().toColourspace('srgb')
+      .raw().toBuffer({ resolveWithObject: true }),
+    sharp(resolve(localMaterialRoot, `${assetId}_rough_1k.jpg`))
+      .resize(size, size, { kernel: sharp.kernel.lanczos3 }).toColourspace('b-w')
+      .raw().toBuffer({ resolveWithObject: true }),
+  ]);
+  const diffuse = diffuseResult.data;
+  const normal = normalResult.data;
+  const roughness = roughnessResult.data;
+  if (diffuseResult.info.channels !== 3 || normalResult.info.channels !== 3 || roughnessResult.info.channels !== 1) {
+    throw new Error(`Poly Haven ${assetId} channels did not decode as RGB/RGB/R`);
+  }
+  const tile = new Uint8Array(size * size * 4);
+  for (let index = 0; index < size * size; index++) {
+    const red = diffuse[index * 3];
+    const green = diffuse[index * 3 + 1];
+    const blue = diffuse[index * 3 + 2];
+    tile[index * 4] = Math.round(red * 0.2126 + green * 0.7152 + blue * 0.0722);
+    tile[index * 4 + 1] = normal[index * 3];
+    tile[index * 4 + 2] = normal[index * 3 + 1];
+    tile[index * 4 + 3] = roughness[index];
+  }
+  return tile;
+}
+
+async function earthLocalDetailAtlas(width: number, height: number): Promise<Uint8Array> {
+  const tileSize = height / 2;
+  if (!Number.isInteger(tileSize) || width !== height * 2) throw new Error('Earth local atlas requires 2:1 dimensions');
+  const tiles = await Promise.all(earthLocalMaterials.map((assetId) => decodeLocalMaterialTile(assetId, tileSize)));
+  const atlas = new Uint8Array(width * height * 4);
+  for (let tileIndex = 0; tileIndex < tiles.length; tileIndex++) {
+    const offsetX = (tileIndex % 2) * tileSize;
+    const offsetY = Math.floor(tileIndex / 2) * tileSize;
+    for (let y = 0; y < tileSize; y++) {
+      atlas.set(
+        tiles[tileIndex].subarray(y * tileSize * 4, (y + 1) * tileSize * 4),
+        ((offsetY + y) * width + offsetX) * 4,
+      );
+    }
+  }
+  return atlas;
+}
+
+async function moonLocalDetailAtlas(width: number, height: number): Promise<Uint8Array> {
+  if (width !== height * 2) throw new Error('Moon local atlas requires 2:1 dimensions');
+  const tile = await decodeLocalMaterialTile('moon_meteor_02', height);
+  const atlas = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const row = tile.subarray(y * height * 4, (y + 1) * height * 4);
+    atlas.set(row, y * width * 4);
+    atlas.set(row, (y * width + height) * 4);
+  }
+  return atlas;
+}
+
+async function decodeRgb(path: string, width: number, height: number): Promise<Uint8Array> {
+  const result = await sharp(path, { limitInputPixels: false, sequentialRead: true })
+    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
+    .removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
+  if (result.info.channels !== 3 || result.data.length !== width * height * 3) {
+    throw new Error(`${path} must decode to aligned RGB8`);
+  }
+  return new Uint8Array(result.data);
+}
+
+async function decodeLuminance(path: string, width: number, height: number): Promise<Uint8Array> {
+  const result = await sharp(path, { limitInputPixels: false, sequentialRead: true })
+    .resize(width, height, { kernel: sharp.kernel.lanczos3 })
+    .toColourspace('b-w').raw().toBuffer({ resolveWithObject: true });
+  if (result.info.channels !== 1 || result.data.length !== width * height) {
+    throw new Error(`${path} must decode to aligned luminance`);
+  }
+  return new Uint8Array(result.data);
+}
+
+async function compileEarth(
+  universe: Universe,
+  tiersToWrite: ReadonlySet<CompiledTier>,
+): Promise<unknown[]> {
+  const earth = universe.get('earth');
+  const packs: unknown[] = [];
+  const tiers = (Object.keys(tierDimensions) as CompiledTier[]).filter((tier) => tiersToWrite.has(tier));
+  const gshhgLock = JSON.parse(readFileSync(resolve(assetsRoot, 'classification/gshhg-2.3.7.lock.json'), 'utf8')) as {
+    levels: Array<{ path: string }>;
+  };
+  const nwiLock = JSON.parse(readFileSync(resolve(assetsRoot, 'classification/nwi-ksc.lock.json'), 'utf8')) as {
+    snapshotPath: string;
+  };
+  const classRasters = await rasterizeGshhg({
+    levelPaths: gshhgLock.levels.map((level) => resolve(root, level.path)),
+    targets: [
+      ...tiers.map((tier) => ({ width: tierDimensions[tier][0], height: tierDimensions[tier][1] })),
+      { width: KSC_SURFACE_CLASS_DIMENSIONS[0], height: KSC_SURFACE_CLASS_DIMENSIONS[1], bounds: KSC_SURFACE_CLASS_BOUNDS },
+    ],
+  });
+  const regionalClass = classRasters.at(-1)!;
+  overlayNwiGeoJson(regionalClass, JSON.parse(readFileSync(resolve(root, nwiLock.snapshotPath), 'utf8')));
+  const globalClasses = new Map(tiers.map((tier, index) => [tier, classRasters[index].pixels]));
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    console.log(`compiling earth/${tier} at ${width}x${height}`);
+    const [albedo, surfaceHeights, bedrockHeights, clouds, emissive, localDetail] = await Promise.all([
+      decodeRgb(earthSourcePaths.albedo, width, height),
+      deriveScientificHeight(root, HEIGHT_SOURCE_DEFINITIONS.earthSurface, width, height)
+        .then((result) => result.heights),
+      deriveScientificHeight(root, HEIGHT_SOURCE_DEFINITIONS.earthBedrock, width, height)
+        .then((result) => result.heights),
+      decodeLuminance(earthSourcePaths.clouds, width, height),
+      tier === 'low' ? Promise.resolve(undefined) : decodeRgb(earthSourcePaths.emissive, width, height),
+      earthLocalDetailAtlas(width, height),
+    ]);
+    const maps = { ...generateEarthGlobalMaps({
+      width,
+      height,
+      radius: earth.radius,
+      albedo,
+      surfaceHeights,
+      bedrockHeights,
+      cloudLuminance: clouds,
+      ...(emissive ? { nightColor: emissive } : {}),
+    }),
+      localDetail,
+      surfaceClass: globalClasses.get(tier)!,
+      surfaceClassRegional: {
+        data: regionalClass.pixels,
+        width: regionalClass.width,
+        height: regionalClass.height,
+        bounds: KSC_SURFACE_CLASS_BOUNDS,
+      },
+    };
+    packs.push((await writeTier('earth', tier, width, height, width, height, maps)).pack);
+  }
+  return packs;
+}
+
+async function compileMoon(
+  universe: Universe,
+  tiersToWrite: ReadonlySet<CompiledTier>,
+): Promise<unknown[]> {
+  const moon = universe.get('moon');
+  const packs: unknown[] = [];
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    console.log(`compiling moon/${tier} at ${width}x${height}`);
+    const [albedo, heights, localDetail] = await Promise.all([
+      decodeAirlessAlbedo(airlessSources.palla.albedoPath, width, height, false),
+      pallaHeights(width, height),
+      moonLocalDetailAtlas(width, height),
+    ]);
+    const maps = { ...generateMoonGlobalMaps({ width, height, radius: moon.radius, albedo, heights }), localDetail };
+    packs.push((await writeTier('moon', tier, width, height, width, height, maps)).pack);
+  }
+  return packs;
+}
+
+const earthSources = [
+  {
+    id: 'nasa-bmng-earth-2004-07',
+    url: 'https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/july/world.200407.3x21600x10800.jpg',
+    author: 'NASA Earth Observatory; Reto Stockli, Robert Simmon, and MODIS teams',
+    license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+    attribution: 'NASA Blue Marble Next Generation, July 2004 natural-color composite',
+    checksumSha256: 'dea8b4dc8a4f93f5f8bce0c8c85a508a178e7901e9ed8e6bf86e6ce7ef6d61e2',
+    localPath: 'sources/nasa-bmng-earth/world.200407.3x21600x10800.jpg', authoringOnly: true,
+    sourceDimensions: [21600, 10800], transformations: ['linear-light Lanczos3 tier resampling', 'BasisLZ KTX2 and WebP fallback encoding'],
+    bodies: ['earth'], channels: ['albedo'], review: nasaReview,
+    ...scientificGrid, verticalDatum: 'not-applicable', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [0, 255], observation: '2004-07 monthly composite', productKind: 'composited',
+    derivedRecipe: 'earth-source-pack-v1',
+  },
+  {
+    id: 'nasa-blue-marble-clouds-2002',
+    url: 'https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_8192.tif',
+    author: 'NASA Goddard Space Flight Center; Reto Stockli',
+    license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+    attribution: 'NASA Blue Marble separate cloud composite',
+    checksumSha256: 'd137775d8966ab8d443fd5126dc6e7ad72072bc1ed50555c5818d221735daf0f',
+    localPath: 'sources/nasa-blue-marble-clouds/cloud_combined_8192.tif', authoringOnly: true,
+    sourceDimensions: [8192, 4096], transformations: ['luminance extraction', 'coverage and optical-density derivation', 'area-aware tier resampling'],
+    bodies: ['earth'], channels: ['clouds'], review: nasaReview,
+    ...scientificGrid, verticalDatum: 'not-applicable', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [0, 255], observation: '2001 multi-day visible and thermal composite', productKind: 'composited',
+    derivedRecipe: 'earth-source-pack-v1',
+  },
+  {
+    id: 'nasa-black-marble-earth-2016',
+    url: 'https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km_geo.tif',
+    author: 'NASA Earth Observatory; Joshua Stevens; Suomi NPP VIIRS and Miguel Roman',
+    license: 'NASA', licenseUrl: nasaReview.termsSnapshot,
+    attribution: 'NASA Earth at Night Black Marble 2016 color map',
+    checksumSha256: 'e915ef2a20d84e2a59e1547d3ad564463ad4bcf22bfa02e0e0b8ed1cd722e9c0',
+    localPath: 'sources/nasa-black-marble-2016/BlackMarble_2016_3km_geo.tif', authoringOnly: true,
+    sourceDimensions: [13500, 6750], transformations: ['bounded dark-floor removal', 'linear-light tier resampling', 'night-side emissive packaging'],
+    bodies: ['earth'], channels: ['emissive'], review: nasaReview,
+    ...scientificGrid, verticalDatum: 'not-applicable', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [0, 255], observation: '2016 cloud-free annual composite', productKind: 'composited',
+    derivedRecipe: 'earth-source-pack-v1',
+  },
+  {
+    id: 'noaa-etopo-2022-earth-surface-60s',
+    url: 'https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif',
+    author: 'NOAA National Centers for Environmental Information',
+    license: 'Public-Domain', licenseUrl: 'https://www.ncei.noaa.gov/products/etopo-global-relief-model',
+    attribution: 'NOAA NCEI ETOPO 2022 ice-surface global relief model',
+    checksumSha256: '9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e',
+    localPath: 'sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif', authoringOnly: true,
+    sourceDimensions: [21600, 10800], transformations: ['Float32 metre decode', 'spherical macro-normal derivation', 'ocean mask derivation', 'signed height RG encoding'],
+    bodies: ['earth'], channels: ['normal', 'material', 'heightMacro'],
+    ...scientificGrid, verticalDatum: 'EGM2008 geoid', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [-11_000, 9_000], observation: 'ETOPO 2022 v1', productKind: 'modeled',
+    derivedRecipe: 'earth-source-pack-v1',
+  },
+  {
+    id: 'noaa-etopo-2022-earth-bedrock-60s',
+    url: 'https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_bed_elev_gtif/ETOPO_2022_v1_60s_N90W180_bed.tif',
+    author: 'NOAA National Centers for Environmental Information',
+    license: 'Public-Domain', licenseUrl: 'https://www.ncei.noaa.gov/products/etopo-global-relief-model',
+    attribution: 'NOAA NCEI ETOPO 2022 bedrock global relief model',
+    checksumSha256: 'a2cc72f8a4292dee928f439069457cdefc1fba319876807c626edce40258ba7a',
+    localPath: 'sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_bed.tif', authoringOnly: true,
+    sourceDimensions: [21600, 10800], transformations: ['Float32 metre decode', 'grounded-ice thickness and mask derivation'],
+    bodies: ['earth'], channels: ['material'],
+    ...scientificGrid, verticalDatum: 'EGM2008 geoid', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [-11_000, 9_000], observation: 'ETOPO 2022 v1', productKind: 'modeled',
+    derivedRecipe: 'earth-source-pack-v1',
+  },
+] as const;
+
+const gshhgClassLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'classification/gshhg-2.3.7.lock.json'), 'utf8'),
+) as { artifactUrl: string; artifactSha256: string };
+const nwiClassLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'classification/nwi-ksc.lock.json'), 'utf8'),
+) as { sourceUrl: string; snapshotPath: string; snapshotSha256: string; observedAt: string };
+const earthClassificationSources = [
+  {
+    id: 'noaa-gshhg-2-3-7-full', url: gshhgClassLock.artifactUrl,
+    author: 'Paul Wessel and Walter H. F. Smith; NOAA distribution',
+    license: 'LGPL-3.0', licenseUrl: 'https://www.soest.hawaii.edu/pwessel/gshhg/',
+    attribution: 'GSHHG 2.3.7 full-resolution shoreline hierarchy',
+    checksumSha256: gshhgClassLock.artifactSha256,
+    localPath: 'sources/noaa-gshhg-2.3.7/gshhg-shp-2.3.7.zip', authoringOnly: true,
+    sourceDimensions: [360, 180],
+    transformations: ['ESRI polygon decode', 'sample-center categorical rasterization', 'exact-code R8 packaging without mipmaps'],
+    bodies: ['earth'], channels: ['surfaceClass', 'surfaceClassRegional'],
+    ...scientificGrid, verticalDatum: 'not-applicable', valueScale: 1, valueOffset: 0,
+    noDataValue: null, validRange: [0, 6], observation: 'GSHHG release 2.3.7 (2017)', productKind: 'measured',
+    derivedRecipe: 'earth-surface-class-v1',
+  },
+  {
+    id: 'usfws-nwi-ksc-snapshot-2026-07-20', url: nwiClassLock.sourceUrl,
+    author: 'U.S. Fish and Wildlife Service National Wetlands Inventory',
+    license: 'Public-Domain', licenseUrl: 'https://www.fws.gov/program/national-wetlands-inventory/data-download',
+    attribution: 'USFWS NWI Cowardin classification, bounded KSC snapshot',
+    checksumSha256: nwiClassLock.snapshotSha256,
+    localPath: nwiClassLock.snapshotPath.replace(/^assets\/planets\//, ''), authoringOnly: true,
+    sourceDimensions: [...KSC_SURFACE_CLASS_DIMENSIONS],
+    transformations: ['bounded EPSG:4326 FeatureServer snapshot', 'Cowardin system class mapping', 'sample-center categorical rasterization', 'GSHHG parent fallback'],
+    bodies: ['earth'], channels: ['surfaceClassRegional'],
+    ...scientificGrid, verticalDatum: 'not-applicable', valueScale: 1, valueOffset: 0,
+    noDataValue: 0, validRange: [0, 6], observation: nwiClassLock.observedAt, productKind: 'measured',
+    derivedRecipe: 'earth-surface-class-v1',
+  },
+] as const;
+
+const moonSources = airlessSources.palla.sources.map((source) => ({
+  ...source,
+  id: source.id.replace('palla', 'moon'),
+  attribution: source.attribution.replace('fictional moon Palla', 'Earth\'s Moon'),
+  bodies: ['moon'],
+  channels: source.channels.map((channel) => channel === 'material' ? 'heightMacro' : channel),
+  datum: 'Moon mean-Earth/polar-axis body-fixed sphere',
+  verticalDatum: source.id.includes('height') ? 'LOLA reference sphere; 0.5 metre unsigned encoding with 10 km offset' : 'not-applicable',
+  projection: 'simple cylindrical equirectangular',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: -180,
+  uvOrigin: 'north-west',
+  valueScale: source.id.includes('height') ? 0.5 : 1,
+  valueOffset: source.id.includes('height') ? -10_000 : 0,
+  noDataValue: null,
+  validRange: source.id.includes('height') ? [-10_000, 10_000] : [0, 65_535],
+  observation: 'NASA SVS CGI Moon Kit release 4720',
+  productKind: source.id.includes('height') ? 'modeled' : 'composited',
+  derivedRecipe: 'moon-source-pack-v1',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+}));
+
+const localMaterialLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'local-material-source-lock.json'), 'utf8'),
+) as {
+  license: string;
+  licenseSnapshot: string;
+  assets: Array<{
+    id: string; body: 'earth' | 'moon'; role: string; author: string; page: string;
+    files: Record<string, [string, string]>;
+  }>;
+};
+const localMaterialSources = localMaterialLock.assets.flatMap((asset) => (
+  Object.entries(asset.files).map(([map, [checksumSha256, filename]]) => ({
+    id: `polyhaven-${asset.id}-${map}-1k`,
+    url: `https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/${asset.id}/${filename}`,
+    author: asset.author,
+    license: localMaterialLock.license,
+    licenseUrl: localMaterialLock.licenseSnapshot,
+    attribution: `Poly Haven ${asset.id} ${map}; ${asset.role} local PBR response`,
+    checksumSha256,
+    localPath: `sources/polyhaven-local/${filename}`,
+    authoringOnly: true,
+    sourceDimensions: [1024, 1024],
+    transformations: [
+      '1K source pin',
+      'diffuse luminance normalization without biome recoloring',
+      'OpenGL tangent normal preservation',
+      'roughness packing',
+      '2 metre body-fixed triplanar atlas sampling',
+      'displacement channel explicitly excluded',
+    ],
+    bodies: [asset.body],
+    channels: ['localDetail'],
+    datum: 'local photoscan tangent plane',
+    verticalDatum: 'not-applicable; displacement excluded',
+    projection: 'local tangent-plane tile',
+    axisOrder: 'longitude,latitude',
+    longitudeDirection: 'east-positive',
+    seamLongitudeDegrees: -180,
+    uvOrigin: 'north-west',
+    valueScale: 1,
+    valueOffset: 0,
+    noDataValue: null,
+    validRange: [0, 255],
+    observation: 'Poly Haven 1K photographic material release',
+    productKind: 'measured',
+    derivedRecipe: 'local-pbr-atlas-v1',
+    bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+  }))
+));
+
 const recipeFile = JSON.parse(readFileSync(recipesPath, 'utf8')) as { schemaVersion: number; recipes: RecipeRecord[] };
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>;
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> };
@@ -538,6 +976,7 @@ if (manifest.compiler.imageLibraryVersion !== `sharp@${packageJson.devDependenci
 if (manifest.compiler.compressionThreads !== 1) throw new Error('Planet compiler packaging must remain single-threaded');
 const declared = new Map(recipeFile.recipes.map((recipe) => [recipe.bodyId, recipe]));
 const universe = new Universe(AUREN_SYSTEM);
+const solUniverse = new Universe([...SOL_SYSTEM], 'earth');
 const bodies = [...universe.bodies.values()].map((body) => {
   const runtimeRecipe = recipeForBody(body);
   const record = declared.get(body.id);
@@ -656,6 +1095,17 @@ if (write && !fingerprintsOnly) {
     generatedPacks.push(...await compileAirlessBody(bodyId, universe, targetTiers) as Record<string, any>[]);
     generatedSources.push(...airlessSources[bodyId].sources as unknown as Record<string, any>[]);
   }
+  if (targetBodies.has('earth')) {
+    generatedPacks.push(...await compileEarth(solUniverse, targetTiers) as Record<string, any>[]);
+    generatedSources.push(...earthSources as unknown as Record<string, any>[]);
+    generatedSources.push(...earthClassificationSources as unknown as Record<string, any>[]);
+    generatedSources.push(...localMaterialSources.filter((source) => source.bodies.includes('earth')));
+  }
+  if (targetBodies.has('moon')) {
+    generatedPacks.push(...await compileMoon(solUniverse, targetTiers) as Record<string, any>[]);
+    generatedSources.push(...moonSources as unknown as Record<string, any>[]);
+    generatedSources.push(...localMaterialSources.filter((source) => source.bodies.includes('moon')));
+  }
 }
 
 if (write && generatedPacks.length > 0) {
@@ -666,6 +1116,9 @@ if (write && generatedPacks.length > 0) {
   ].sort((left: Record<string, any>, right: Record<string, any>) =>
     left.bodyId.localeCompare(right.bodyId) ||
     Object.keys(tierDimensions).indexOf(left.tier) - Object.keys(tierDimensions).indexOf(right.tier));
+  for (const pack of manifest.packs) {
+    pack.bootCritical = pack.bodyId === 'earth' && pack.tier === 'medium';
+  }
   const sourceIds = new Set(generatedSources.map((source) => source.id));
   manifest.sources = [
     ...manifest.sources.filter((source: Record<string, any>) => !sourceIds.has(source.id)),

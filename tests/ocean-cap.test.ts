@@ -1,14 +1,16 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { terrainPresentationBand } from '../src/render/terrainPresentation';
 import {
   oceanCapAngle,
+  oceanCapCoversHorizon,
   oceanCapDirection,
   oceanCapSegments,
 } from '../src/render/terrestrial/oceanMaterial';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 const RADIUS = veyra.radius;
 const ANCHOR = Object.freeze({ x: 0, y: 0, z: 1 });
 const EAST = Object.freeze({ x: 1, y: 0, z: 0 });
@@ -94,5 +96,10 @@ describe('ocean cap geometry', () => {
     expect(oceanCapSegments('low')).toBeLessThan(oceanCapSegments('medium'));
     expect(oceanCapSegments('medium')).toBeLessThan(oceanCapSegments('high'));
     expect(() => oceanCapAngle(0, 10)).toThrow(/radius/i);
+  });
+
+  it('hands high-orbit full-disk rendering back to the global ocean', () => {
+    expect(oceanCapCoversHorizon(RADIUS, RADIUS * 0.05)).toBe(true);
+    expect(oceanCapCoversHorizon(RADIUS, RADIUS * 3.5)).toBe(false);
   });
 });

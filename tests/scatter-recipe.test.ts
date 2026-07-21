@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { recipeForBody } from '../src/sim/terrainRecipe';
@@ -15,7 +16,7 @@ import {
 import { generateVeyraScatter } from '../scripts/lib/veyra-scatter';
 import artifact from '../src/generated/veyra-scatter.json';
 
-const game = new GameState();
+const game = createLegacyGameState();
 const veyra = game.universe.get('veyra');
 
 function clone<T>(value: T): T {

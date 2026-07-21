@@ -1,7 +1,8 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { describe, expect, test, vi } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Vec3 } from '../src/core/vec3';
 import { Quat } from '../src/core/quat';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
@@ -27,13 +28,16 @@ function authoredPack(tier: 'low' | 'medium' | 'high' = 'high'): RuntimeBodyAsse
   const texture = () => new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat);
   return {
     bodyId: 'veyra', tier, width: 4096, height: 2048, manifestDigest: 'map-test', gpuBytes: 12,
-    textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()], ['clouds', texture()]]),
+    textures: new Map([
+      ['albedo', texture()], ['normal', texture()], ['material', texture()],
+      ['clouds', texture()], ['heightMacro', texture()],
+    ]),
   };
 }
 
 describe('compact map body presentation', () => {
-  test('returns default map focus to the active vessel SOI body', () => {
-    const game = new GameState();
+  test('returns default map focus to the active vessel inside its SOI frame', () => {
+    const game = createLegacyGameState();
     const active = game.spawnInOrbit(createCraft('Map focus probe'), 'Map focus probe', 'palla', 10_000);
     game.activeVesselId = active.runtime.id;
 
@@ -47,10 +51,15 @@ describe('compact map body presentation', () => {
 
     map.focusActiveVessel(game);
 
+    const expectedFocus = new THREE.Vector3(
+      active.runtime.pos.x * 1e-5,
+      active.runtime.pos.y * 1e-5,
+      active.runtime.pos.z * 1e-5,
+    );
     expect((map as unknown as { focusBodyId: string }).focusBodyId).toBe('palla');
     expect((map as unknown as { followsActiveVessel: boolean }).followsActiveVessel).toBe(true);
-    expect((map as unknown as { desiredFocus: THREE.Vector3 }).desiredFocus).toEqual(new THREE.Vector3());
-    expect((map as unknown as { camFocus: THREE.Vector3 }).camFocus).toEqual(new THREE.Vector3());
+    expect((map as unknown as { desiredFocus: THREE.Vector3 }).desiredFocus).toEqual(expectedFocus);
+    expect((map as unknown as { camFocus: THREE.Vector3 }).camFocus).toEqual(expectedFocus);
   });
 
   test('selects solid, gas, and star materials from the shared descriptor identity', () => {
@@ -84,7 +93,8 @@ describe('compact map body presentation', () => {
 
   test('uses the borrowed authored pack and quality-tier sphere resolution for terrestrial bodies', () => {
     const pack = authoredPack('high');
-    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('veyra')), pack, 16, 'high');
+    const body = universe.get('veyra');
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(body), pack, 16, 'high', body.radius);
     const material = mesh.material as THREE.MeshStandardMaterial;
 
     expect(material.userData).toMatchObject({ terrestrialGlobal: true, authored: true, bodyId: 'veyra' });
@@ -92,6 +102,8 @@ describe('compact map body presentation', () => {
     expect(material.userData.maps.albedo.anisotropy).toBe(8);
     expect(mesh.geometry.parameters).toMatchObject({ widthSegments: 160, heightSegments: 96 });
     expect(mesh.userData.assetPack).toBe(pack);
+    expect((material.userData.terrestrialAerialPerspective as { bodyRadius: { value: number } }).bodyRadius.value)
+      .toBe(body.radius);
   });
 
   test('uses the authored airless material for a moon pack without requiring clouds', () => {
@@ -99,11 +111,14 @@ describe('compact map body presentation', () => {
     const pack: RuntimeBodyAssetPack = {
       bodyId: 'palla', tier: 'medium', width: 2048, height: 1024,
       manifestDigest: 'map-test', gpuBytes: 12,
-      textures: new Map([['albedo', texture()], ['normal', texture()], ['material', texture()]]),
+      textures: new Map([
+        ['albedo', texture()], ['normal', texture()], ['material', texture()], ['heightMacro', texture()],
+      ]),
     };
-    const mesh = compactBodyMesh(bodyMaterialDescriptor(universe.get('palla')), pack, 16, 'medium');
+    const body = universe.get('palla');
+    const mesh = compactBodyMesh(bodyMaterialDescriptor(body), pack, 16, 'medium', body.radius);
 
-    expect(mesh.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla' });
+    expect(mesh.material.userData).toMatchObject({ airlessGlobal: true, bodyId: 'palla', bodyRadius: body.radius });
     expect(pack.textures.get('albedo')!.anisotropy).toBe(8);
   });
 

@@ -12,6 +12,12 @@ import * as THREE from 'three';
 import type { QualityTier, QuaternionCoordinates, VectorCoordinates } from '../bodyRenderer';
 import { mulberry32 } from '../../sim/scatterRecipe';
 import { instancedResourceBytes } from '../resourceAccounting';
+import { evaluateRecipeHeight, type BodyFeatureRecipe } from '../../sim/terrainRecipe';
+import {
+  bindFlightAerialPerspective,
+  type FlightAerialPerspectiveController,
+} from '../flightAerialPerspective';
+import { surfaceClassPermitsEarthScatter } from './surfaceClass';
 
 /** Terrain query in body-fixed space: raw height (m) and unit surface normal. */
 export type SurfaceSampler = (
@@ -19,6 +25,7 @@ export type SurfaceSampler = (
   dirY: number,
   dirZ: number,
 ) => { height: number; normalX: number; normalY: number; normalZ: number };
+export type SurfaceClassSampler = (dirX: number, dirY: number, dirZ: number) => number;
 
 /** Body-fixed sphere whose overlapping visual instances are suppressed. */
 export interface SuppressionSphere {
@@ -29,7 +36,100 @@ export interface SuppressionSphere {
 }
 
 export type ScatterClass = 'grass' | 'shrub' | 'rock';
-const SCATTER_CLASSES: readonly ScatterClass[] = ['grass', 'shrub', 'rock'];
+
+export type ScatterProfileName = 'veyra' | 'earth-geology' | 'moon-regolith';
+
+export interface ScatterClassDef {
+  /** Stable profile-local identifier used for instance pools and diagnostics. */
+  readonly id: string;
+  /** Existing low-cost geometry archetype reused by this visual class. */
+  readonly archetype: ScatterClass;
+  /** Integer share of the deterministic class roll. */
+  readonly rollWeight: number;
+  readonly color: THREE.ColorRepresentation;
+  readonly scaleBase: number;
+  readonly scaleSpread: number;
+  readonly roughness: number;
+}
+
+export interface ScatterProfile {
+  readonly name: ScatterProfileName;
+  /** `dry-land` preserves the ocean exclusion; `solid` includes below-datum basins. */
+  readonly placement: 'dry-land' | 'solid';
+  /** Body-specific fraction of the tier population and fixed pool reservation. */
+  readonly densityScale: number;
+  readonly capacityScale: number;
+  readonly classes: readonly ScatterClassDef[];
+}
+
+function freezeProfile(profile: ScatterProfile): ScatterProfile {
+  if (profile.classes.length === 0) throw new Error(`${profile.name} scatter profile has no classes`);
+  if (!(profile.densityScale > 0) || profile.densityScale > 1
+    || !(profile.capacityScale > 0) || profile.capacityScale > 1) {
+    throw new Error(`${profile.name} has invalid density or capacity scaling`);
+  }
+  const ids = new Set<string>();
+  for (const cls of profile.classes) {
+    if (!cls.id || ids.has(cls.id)) throw new Error(`${profile.name} has an invalid or duplicate class id`);
+    if (!Number.isInteger(cls.rollWeight) || cls.rollWeight <= 0) {
+      throw new Error(`${profile.name}/${cls.id} has invalid roll weight`);
+    }
+    if (!Number.isFinite(cls.scaleBase) || cls.scaleBase <= 0
+      || !Number.isFinite(cls.scaleSpread) || cls.scaleSpread < 0
+      || !Number.isFinite(cls.roughness) || cls.roughness < 0 || cls.roughness > 1) {
+      throw new Error(`${profile.name}/${cls.id} has invalid material or scale parameters`);
+    }
+    ids.add(cls.id);
+  }
+  return Object.freeze({
+    ...profile,
+    classes: Object.freeze(profile.classes.map((cls) => Object.freeze({ ...cls }))),
+  });
+}
+
+export const VEYRA_SCATTER_PROFILE = freezeProfile({
+  name: 'veyra',
+  placement: 'dry-land',
+  densityScale: 1,
+  capacityScale: 1,
+  classes: [
+    { id: 'grass', archetype: 'grass', rollWeight: 70, color: 0x5f7a3a, scaleBase: 0.5, scaleSpread: 0.8, roughness: 1 },
+    { id: 'shrub', archetype: 'shrub', rollWeight: 20, color: 0x4c6330, scaleBase: 1, scaleSpread: 1.4, roughness: 1 },
+    { id: 'rock', archetype: 'rock', rollWeight: 10, color: 0x6f6a63, scaleBase: 0.6, scaleSpread: 1.2, roughness: 1 },
+  ],
+});
+
+export const EARTH_GEOLOGY_SCATTER_PROFILE = freezeProfile({
+  name: 'earth-geology',
+  placement: 'dry-land',
+  densityScale: 0.03,
+  capacityScale: 0.1,
+  classes: [
+    { id: 'stone', archetype: 'rock', rollWeight: 64, color: 0x9b9488, scaleBase: 0.12, scaleSpread: 0.33, roughness: 1 },
+    { id: 'clast', archetype: 'shrub', rollWeight: 36, color: 0x827d74, scaleBase: 0.07, scaleSpread: 0.13, roughness: 1 },
+  ],
+});
+
+export const MOON_REGOLITH_SCATTER_PROFILE = freezeProfile({
+  name: 'moon-regolith',
+  placement: 'solid',
+  densityScale: 0.16,
+  capacityScale: 0.2,
+  classes: [
+    { id: 'boulder', archetype: 'rock', rollWeight: 72, color: 0xa09d97, scaleBase: 0.25, scaleSpread: 0.65, roughness: 1 },
+    { id: 'clast', archetype: 'shrub', rollWeight: 28, color: 0x8d8984, scaleBase: 0.1, scaleSpread: 0.25, roughness: 1 },
+  ],
+});
+
+const SCATTER_PROFILES: Readonly<Record<ScatterProfileName, ScatterProfile>> = Object.freeze({
+  veyra: VEYRA_SCATTER_PROFILE,
+  'earth-geology': EARTH_GEOLOGY_SCATTER_PROFILE,
+  'moon-regolith': MOON_REGOLITH_SCATTER_PROFILE,
+});
+
+export function scatterProfileByName(name: ScatterProfileName): ScatterProfile {
+  return SCATTER_PROFILES[name];
+}
 
 export interface ScatterTierParams {
   /** Body-fixed streaming radius around the camera surface point (m). */
@@ -50,8 +150,89 @@ export const SCATTER_TIERS: Record<QualityTier, ScatterTierParams> = {
   high: { streamRadius: 120, cellSize: 16, perCell: 24, density: 1.0, capacity: 24576 },
 };
 
+/** Altitude above which a local scatter pool cannot contribute useful pixels. */
+export function scatterStreamCeiling(tier: QualityTier): number {
+  return SCATTER_TIERS[tier].streamRadius * 25;
+}
+
+export function scatterPoolCapacity(
+  tier: QualityTier,
+  profile: Pick<ScatterProfile, 'capacityScale'>,
+): number {
+  return Math.max(1, Math.floor(SCATTER_TIERS[tier].capacity * profile.capacityScale));
+}
+
+function normalizedDirection(x: number, y: number, z: number): readonly [number, number, number] {
+  const length = Math.hypot(x, y, z);
+  if (!(length > 0) || !Number.isFinite(length)) return [1, 0, 0];
+  return [x / length, y / length, z / length];
+}
+
+/**
+ * Finite-difference sampler over the canonical terrain recipe. All offset
+ * directions are renormalized before evaluation so source-map latitude and
+ * launch-site distance logic receive unit vectors even at the poles.
+ */
+export function createRecipeSurfaceSampler(
+  recipe: BodyFeatureRecipe,
+  stepMeters = 2,
+): SurfaceSampler {
+  if (!(recipe.radiusMeters > 0) || !Number.isFinite(recipe.radiusMeters)) {
+    throw new Error(`Invalid scatter recipe radius ${recipe.radiusMeters}`);
+  }
+  if (!(stepMeters > 0) || !Number.isFinite(stepMeters)) {
+    throw new Error(`Invalid scatter normal step ${stepMeters}`);
+  }
+  const angularStep = stepMeters / recipe.radiusMeters;
+  return (inputX, inputY, inputZ) => {
+    const [dirX, dirY, dirZ] = normalizedDirection(inputX, inputY, inputZ);
+    let eastX = -dirY;
+    let eastY = dirX;
+    let eastZ = 0;
+    if (eastX * eastX + eastY * eastY < 1e-12) {
+      eastX = 1;
+      eastY = 0;
+      eastZ = 0;
+    }
+    [eastX, eastY, eastZ] = normalizedDirection(eastX, eastY, eastZ);
+    const northX = dirY * eastZ - dirZ * eastY;
+    const northY = dirZ * eastX - dirX * eastZ;
+    const northZ = dirX * eastY - dirY * eastX;
+    const [eastSampleX, eastSampleY, eastSampleZ] = normalizedDirection(
+      dirX + eastX * angularStep,
+      dirY + eastY * angularStep,
+      dirZ + eastZ * angularStep,
+    );
+    const [northSampleX, northSampleY, northSampleZ] = normalizedDirection(
+      dirX + northX * angularStep,
+      dirY + northY * angularStep,
+      dirZ + northZ * angularStep,
+    );
+    const height = evaluateRecipeHeight(recipe, { x: dirX, y: dirY, z: dirZ });
+    const eastHeight = evaluateRecipeHeight(recipe, {
+      x: eastSampleX, y: eastSampleY, z: eastSampleZ,
+    });
+    const northHeight = evaluateRecipeHeight(recipe, {
+      x: northSampleX, y: northSampleY, z: northSampleZ,
+    });
+    const eastSlope = (eastHeight - height) / stepMeters;
+    const northSlope = (northHeight - height) / stepMeters;
+    const [normalX, normalY, normalZ] = normalizedDirection(
+      dirX - eastX * eastSlope - northX * northSlope,
+      dirY - eastY * eastSlope - northY * northSlope,
+      dirZ - eastZ * eastSlope - northZ * northSlope,
+    );
+    return {
+      height,
+      normalX,
+      normalY,
+      normalZ,
+    };
+  };
+}
+
 interface ScatterInstanceData {
-  readonly cls: ScatterClass;
+  readonly cls: string;
   /** Body-fixed position (m). */
   readonly px: number;
   readonly py: number;
@@ -87,17 +268,23 @@ export function generateScatterCell(
   radius: number,
   tier: Readonly<ScatterTierParams>,
   sampler: SurfaceSampler,
+  profile: Readonly<ScatterProfile> = VEYRA_SCATTER_PROFILE,
+  surfaceClassSampler?: SurfaceClassSampler,
 ): ScatterInstanceData[] {
   const random = mulberry32(hashCellSeed(seed, cx, cy, cz));
   const instances: ScatterInstanceData[] = [];
-  const keep = Math.max(0, Math.min(tier.perCell, Math.round(tier.perCell * tier.density)));
+  const keep = Math.max(0, Math.min(
+    tier.perCell,
+    Math.round(tier.perCell * tier.density * profile.densityScale),
+  ));
+  const totalRollWeight = profile.classes.reduce((sum, cls) => sum + cls.rollWeight, 0);
   for (let index = 0; index < tier.perCell; index++) {
     // Draw the full stream so culling only removes the tail: density is a strict
     // subset ordering across tiers for the same cell.
     const ox = ((random() / 0xffffffff) - 0.5) * tier.cellSize;
     const oy = ((random() / 0xffffffff) - 0.5) * tier.cellSize;
     const oz = ((random() / 0xffffffff) - 0.5) * tier.cellSize;
-    const classRoll = random() % 100;
+    const classRoll = random() % totalRollWeight;
     const scaleRoll = random() / 0xffffffff;
     const yawRoll = random() / 0xffffffff;
     if (index >= keep) continue;
@@ -109,14 +296,24 @@ export function generateScatterCell(
     const dy = by / length;
     const dz = bz / length;
     const surface = sampler(dx, dy, dz);
-    if (surface.height < 0) continue; // never grow visual scatter underwater
+    const earthClassRejected = profile.name === 'earth-geology' && surfaceClassSampler
+      ? !surfaceClassPermitsEarthScatter(surfaceClassSampler(dx, dy, dz))
+      : false;
+    if (!Number.isFinite(surface.height)
+      || !Number.isFinite(surface.normalX)
+      || !Number.isFinite(surface.normalY)
+      || !Number.isFinite(surface.normalZ)
+      || earthClassRejected
+      || (profile.placement === 'dry-land' && !surfaceClassSampler && surface.height < 0)) continue;
     const surfaceRadius = radius + surface.height;
-    const cls: ScatterClass = classRoll < 70 ? 'grass' : classRoll < 90 ? 'shrub' : 'rock';
-    const scale = cls === 'grass' ? 0.5 + scaleRoll * 0.8
-      : cls === 'shrub' ? 1.0 + scaleRoll * 1.4
-        : 0.6 + scaleRoll * 1.2;
+    let cursor = 0;
+    const classDef = profile.classes.find((candidate) => {
+      cursor += candidate.rollWeight;
+      return classRoll < cursor;
+    }) ?? profile.classes[profile.classes.length - 1];
+    const scale = classDef.scaleBase + scaleRoll * classDef.scaleSpread;
     instances.push({
-      cls,
+      cls: classDef.id,
       px: dx * surfaceRadius,
       py: dy * surfaceRadius,
       pz: dz * surfaceRadius,
@@ -130,8 +327,8 @@ export function generateScatterCell(
   return instances;
 }
 
-function classGeometry(cls: ScatterClass): THREE.BufferGeometry {
-  switch (cls) {
+function classGeometry(archetype: ScatterClass): THREE.BufferGeometry {
+  switch (archetype) {
     case 'grass': {
       const geo = new THREE.PlaneGeometry(0.6, 1.0);
       geo.translate(0, 0.5, 0);
@@ -144,14 +341,8 @@ function classGeometry(cls: ScatterClass): THREE.BufferGeometry {
   }
 }
 
-const CLASS_COLOR: Record<ScatterClass, number> = {
-  grass: 0x5f7a3a,
-  shrub: 0x4c6330,
-  rock: 0x6f6a63,
-};
-
 interface ScatterPool {
-  readonly cls: ScatterClass;
+  readonly cls: string;
   readonly mesh: THREE.InstancedMesh;
   count: number;
 }
@@ -167,6 +358,8 @@ export interface TerrestrialScatterStats {
   readonly grass: number;
   readonly shrub: number;
   readonly rock: number;
+  readonly total: number;
+  readonly byClass: Readonly<Record<string, number>>;
   readonly activeCells: number;
   readonly bufferBytes: number;
   readonly droppedCells: number;
@@ -198,12 +391,16 @@ export class TerrestrialScatter {
   private tier: QualityTier;
   private disposed = false;
   private droppedCells = 0;
+  private shadowsEnabled = false;
 
   constructor(
     private readonly radius: number,
     private readonly seed: number,
     private readonly sampler: SurfaceSampler,
     tier: QualityTier,
+    private readonly profile: Readonly<ScatterProfile> = VEYRA_SCATTER_PROFILE,
+    private readonly aerialController?: FlightAerialPerspectiveController,
+    private readonly surfaceClassSampler?: SurfaceClassSampler,
   ) {
     this.tier = tier;
     this.group.name = 'terrestrial-scatter';
@@ -211,23 +408,35 @@ export class TerrestrialScatter {
   }
 
   private buildPools(): void {
-    const capacity = SCATTER_TIERS[this.tier].capacity;
-    this.pools = SCATTER_CLASSES.map((cls) => {
-      const geometry = classGeometry(cls);
+    const capacity = scatterPoolCapacity(this.tier, this.profile);
+    this.pools = this.profile.classes.map((cls) => {
+      const geometry = classGeometry(cls.archetype);
       const material = new THREE.MeshStandardMaterial({
-        color: CLASS_COLOR[cls],
-        roughness: 1,
+        color: cls.color,
+        roughness: cls.roughness,
         metalness: 0,
-        side: cls === 'grass' ? THREE.DoubleSide : THREE.FrontSide,
+        side: cls.archetype === 'grass' ? THREE.DoubleSide : THREE.FrontSide,
       });
+      if (this.aerialController) bindFlightAerialPerspective(material, this.aerialController);
       const mesh = new THREE.InstancedMesh(geometry, material, capacity);
-      mesh.name = `terrestrial-scatter:${cls}`;
+      mesh.name = `terrestrial-scatter:${cls.id}`;
       mesh.frustumCulled = false;
+      mesh.castShadow = this.shadowsEnabled;
+      mesh.receiveShadow = this.shadowsEnabled;
       mesh.count = 0;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.group.add(mesh);
-      return { cls, mesh, count: 0 };
+      return { cls: cls.id, mesh, count: 0 };
     });
+  }
+
+  setShadows(enabled: boolean): void {
+    if (this.disposed || enabled === this.shadowsEnabled) return;
+    this.shadowsEnabled = enabled;
+    for (const pool of this.pools) {
+      pool.mesh.castShadow = enabled;
+      pool.mesh.receiveShadow = enabled;
+    }
   }
 
   setQuality(tier: QualityTier): void {
@@ -256,7 +465,10 @@ export class TerrestrialScatter {
     const dirY = cam.y / camLength;
     const dirZ = cam.z / camLength;
     const surface = this.sampler(dirX, dirY, dirZ);
-    const originRadius = this.radius + Math.max(0, surface.height);
+    const originHeight = this.profile.placement === 'solid'
+      ? surface.height
+      : Math.max(0, surface.height);
+    const originRadius = this.radius + originHeight;
     const localOrigin = { x: dirX * originRadius, y: dirY * originRadius, z: dirZ * originRadius };
 
     // Tangent basis for the streaming neighborhood.
@@ -296,7 +508,10 @@ export class TerrestrialScatter {
           // later update rather than failing the whole frame.
           let instances: readonly ScatterInstanceData[];
           try {
-            instances = generateScatterCell(this.seed, cx, cy, cz, this.radius, tier, this.sampler);
+            instances = generateScatterCell(
+              this.seed, cx, cy, cz, this.radius, tier, this.sampler, this.profile,
+              this.surfaceClassSampler,
+            );
           } catch {
             this.failedRetryAt.set(key, this.frameIndex + FAILED_CELL_RETRY_FRAMES);
             continue;
@@ -319,7 +534,7 @@ export class TerrestrialScatter {
       if (Math.hypot(centerX, centerY, centerZ) > retireRadius) this.cells.delete(key);
     }
 
-    this.writeInstances(frame, localOrigin, tier.capacity);
+    this.writeInstances(frame, localOrigin, scatterPoolCapacity(this.tier, this.profile));
 
     // Place the group so body-fixed-relative instance matrices map to world.
     _quaternion.set(frame.orientation.x, frame.orientation.y, frame.orientation.z, frame.orientation.w);
@@ -337,7 +552,7 @@ export class TerrestrialScatter {
     localOrigin: VectorCoordinates,
     capacity: number,
   ): void {
-    const counts: Record<ScatterClass, number> = { grass: 0, shrub: 0, rock: 0 };
+    const counts: Record<string, number> = Object.fromEntries(this.pools.map((pool) => [pool.cls, 0]));
     const suppression = frame.suppression ?? [];
     const overflowed = new Set<string>();
     for (const cell of this.cells.values()) {
@@ -345,7 +560,7 @@ export class TerrestrialScatter {
       for (const instance of cell.instances) {
         if (isSuppressed(instance, suppression)) continue;
         const pool = this.pools.find((candidate) => candidate.cls === instance.cls)!;
-        if (counts[instance.cls] >= capacity) { overflowed.add(cell.key); continue; }
+        if ((counts[instance.cls] ?? 0) >= capacity) { overflowed.add(cell.key); continue; }
         _normal.set(instance.nx, instance.ny, instance.nz);
         if (_normal.lengthSq() < 1e-9) _normal.set(instance.px, instance.py, instance.pz).normalize();
         _quaternion.setFromUnitVectors(_up, _normal.normalize());
@@ -373,16 +588,18 @@ export class TerrestrialScatter {
   stats(): Readonly<TerrestrialScatterStats> {
     let activeCells = 0;
     for (const cell of this.cells.values()) if (cell.lastSeen === this.frameIndex) activeCells++;
-    const counts: Record<ScatterClass, number> = { grass: 0, shrub: 0, rock: 0 };
+    const counts: Record<string, number> = {};
     let bytes = 0;
     for (const pool of this.pools) {
       counts[pool.cls] = pool.count;
       bytes += instancedResourceBytes(pool.mesh);
     }
     return Object.freeze({
-      grass: counts.grass,
-      shrub: counts.shrub,
-      rock: counts.rock,
+      grass: counts.grass ?? 0,
+      shrub: counts.shrub ?? 0,
+      rock: counts.rock ?? 0,
+      total: Object.values(counts).reduce((sum, count) => sum + count, 0),
+      byClass: Object.freeze({ ...counts }),
       activeCells,
       bufferBytes: bytes,
       droppedCells: this.droppedCells,

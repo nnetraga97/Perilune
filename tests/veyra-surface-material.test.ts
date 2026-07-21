@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
@@ -17,7 +18,7 @@ import {
   type TerrestrialSurfaceSample,
 } from '../src/render/terrestrial/surfaceMaterial';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 const descriptor = bodyMaterialDescriptor(veyra);
 
 function texture(bytes = [128, 128, 128, 255]): THREE.DataTexture {
@@ -237,10 +238,14 @@ describe('createTerrestrialSurfaceMaterial', () => {
     expect(shader.fragmentShader).toContain('bodyFixedUv(vBodyDirection)');
     expect(shader.fragmentShader).toContain('classifyTerrestrialSurface');
     expect(shader.fragmentShader).toContain('triplanarSurfaceDetail');
-    expect(shader.fragmentShader).toContain('mix(surfBodyNormal, globalBodyNormal');
+    expect(shader.fragmentShader).toContain('surfMacroDelta = globalBodyNormal - surfRadialNormal');
+    expect(shader.fragmentShader).not.toContain('mix(surfBodyNormal, globalBodyNormal, 0.68');
     expect(shader.fragmentShader).toContain('cloudShadowCoverage');
     expect(shader.uniforms.globalCloudMap.value).toBe(authoredPack.textures.get('clouds'));
+    expect(shader.uniforms.useGlobalIceMap.value).toBe(0);
+    expect(shader.fragmentShader).toContain('authoredMaterial.a * useGlobalIceMap');
     expect(shader.uniforms.surfaceDetailMaxOctave.value).toBe(surfaceDetailTier('medium').maxOctave);
+    expect(shader.uniforms.useLocalDetailMap.value).toBe(0);
     expect(material.userData.authored).toBe(true);
     material.dispose();
   });

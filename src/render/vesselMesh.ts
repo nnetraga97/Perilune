@@ -17,6 +17,10 @@ import type { PartEffectAnchor } from './partModelManifest';
 import { buildEnginePlumeLayers, updateEngineEffectMaterials } from './engineEffects';
 import { deriveInterstageShroud, sanitizeInterstageShroudSpec } from '../sim/interstage';
 import { buildInterstageShroud } from './interstageShroud';
+import {
+  createFlightAerialMaterialVariant,
+  type FlightAerialPerspectiveController,
+} from './flightAerialPerspective';
 
 export type VesselVisualSource = 'model' | 'procedural';
 
@@ -80,6 +84,8 @@ export interface VesselVisual {
   plumes: Map<number, THREE.Group>;
   /** Geometries created for this visual rather than borrowed from shared caches. */
   ownedGeometries: Set<THREE.BufferGeometry>;
+  /** Flight-only material variants; their geometry and textures remain borrowed. */
+  ownedMaterials: Set<THREE.Material>;
   craftVersionSeen: number;
 }
 
@@ -99,6 +105,9 @@ function buildPartMesh(
   part: PartInstance,
   ownedGeometries: Set<THREE.BufferGeometry>,
   models?: PartModelLibrary,
+  aerialController?: FlightAerialPerspectiveController,
+  materialVariants?: Map<THREE.Material, THREE.Material>,
+  ownedMaterials?: Set<THREE.Material>,
 ): BuiltPartMesh {
   const def = defOf(part);
   const holder = new THREE.Group();
@@ -106,10 +115,17 @@ function buildPartMesh(
   if (imported) {
     // Imported geometry/materials are shared library resources; never own them here.
     holder.add(imported.object);
+    imported.object.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+      }
+    });
     holder.userData.visualSource = 'model' satisfies VesselVisualSource;
   } else {
     const body = new THREE.Mesh(geometryFor(def), materialFor(def.color ?? '#c8cdd2'));
-    body.castShadow = false;
+    body.castShadow = true;
+    body.receiveShadow = true;
     holder.add(body);
     // Accent band for visual identity (cheap, no textures). Procedural bodies only.
     const isStraightStack =
@@ -123,6 +139,8 @@ function buildPartMesh(
         bandGeometry,
         materialFor(def.accent, 0.2, 0.6),
       );
+      band.castShadow = true;
+      band.receiveShadow = true;
       band.position.y = def.shape.height * 0.28;
       holder.add(band);
     }
@@ -132,6 +150,24 @@ function buildPartMesh(
   const liveShroud = part.activated ? null : deriveInterstageShroud(craft, part);
   const shroud = liveShroud ?? latchedShroud;
   if (shroud) holder.add(buildInterstageShroud(shroud));
+  if (aerialController && materialVariants && ownedMaterials) {
+    holder.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const replace = (base: THREE.Material): THREE.Material => {
+        if (!(base instanceof THREE.MeshStandardMaterial)) return base;
+        let variant = materialVariants.get(base);
+        if (!variant) {
+          variant = createFlightAerialMaterialVariant(base, aerialController);
+          materialVariants.set(base, variant);
+          ownedMaterials.add(variant);
+        }
+        return variant;
+      };
+      object.material = Array.isArray(object.material)
+        ? object.material.map(replace)
+        : replace(object.material);
+    });
+  }
   holder.position.set(part.position.x, part.position.y, part.position.z);
   holder.quaternion.set(part.rotation.x, part.rotation.y, part.rotation.z, part.rotation.w);
   holder.userData.partKey = part.key;
@@ -151,13 +187,27 @@ function buildPlumeHolder(baseScale: number, solid: boolean): THREE.Group {
   return holder;
 }
 
-export function buildVesselVisual(craft: Craft, models?: PartModelLibrary): VesselVisual {
+export function buildVesselVisual(
+  craft: Craft,
+  models?: PartModelLibrary,
+  aerialController?: FlightAerialPerspectiveController,
+): VesselVisual {
   const group = new THREE.Group();
   const partMeshes = new Map<number, THREE.Object3D>();
   const plumes = new Map<number, THREE.Group>();
   const ownedGeometries = new Set<THREE.BufferGeometry>();
+  const ownedMaterials = new Set<THREE.Material>();
+  const materialVariants = new Map<THREE.Material, THREE.Material>();
   for (const part of craft.parts) {
-    const { holder, plumeAnchors } = buildPartMesh(craft, part, ownedGeometries, models);
+    const { holder, plumeAnchors } = buildPartMesh(
+      craft,
+      part,
+      ownedGeometries,
+      models,
+      aerialController,
+      materialVariants,
+      ownedMaterials,
+    );
     partMeshes.set(part.key, holder);
     group.add(holder);
     const def = defOf(part);
@@ -180,7 +230,14 @@ export function buildVesselVisual(craft: Craft, models?: PartModelLibrary): Vess
       plumes.set(part.key, plumeGroup);
     }
   }
-  return { group, partMeshes, plumes, ownedGeometries, craftVersionSeen: craft.parts.length };
+  return {
+    group,
+    partMeshes,
+    plumes,
+    ownedGeometries,
+    ownedMaterials,
+    craftVersionSeen: craft.parts.length,
+  };
 }
 
 function disposeOwnedGeometries(visual: VesselVisual, object: THREE.Object3D): void {
@@ -194,6 +251,8 @@ function disposeOwnedGeometries(visual: VesselVisual, object: THREE.Object3D): v
 /** Releases per-vessel geometry while intentionally preserving shared geometry/material caches. */
 export function disposeVesselVisual(visual: VesselVisual): void {
   disposeOwnedGeometries(visual, visual.group);
+  for (const material of visual.ownedMaterials) material.dispose();
+  visual.ownedMaterials.clear();
   visual.group.clear();
   visual.partMeshes.clear();
   visual.plumes.clear();

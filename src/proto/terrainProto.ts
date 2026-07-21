@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import { Universe } from '../sim/universe';
-import { AUREN_SYSTEM } from '../content/system';
+import { HOME_BODY_ID, SOL_SYSTEM } from '../content/system';
 import { surfaceHeight } from '../sim/terrain';
 import { PlanetRenderer, PLANET_QUALITY } from '../render/planet';
 import { createRenderContext } from '../render/context';
@@ -25,8 +25,8 @@ export async function runTerrainProto(): Promise<void> {
   const ctx = await createRenderContext(canvas);
   const { renderer } = ctx;
 
-  const universe = new Universe(AUREN_SYSTEM);
-  const veyra = universe.get('veyra');
+  const universe = new Universe([...SOL_SYSTEM], HOME_BODY_ID);
+  const veyra = universe.get(HOME_BODY_ID);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#04070a');

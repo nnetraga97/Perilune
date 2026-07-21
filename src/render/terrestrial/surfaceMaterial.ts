@@ -4,6 +4,7 @@ import type { QualityTier, RuntimeBodyAssetPack } from '../bodyRenderer';
 import {
   GLOBAL_ALBEDO_APPLY,
   GLOBAL_FRAGMENT_HEADER,
+  GLOBAL_EMISSIVE_APPLY,
   GLOBAL_NORMAL_APPLY,
   GLOBAL_ROUGHNESS_APPLY,
   GLOBAL_VERTEX_BEGIN,
@@ -12,9 +13,25 @@ import {
   createTerrestrialCloudLightingState,
   resolveTerrestrialAuthoredTextures,
 } from './globalMaterial';
+import {
+  attachTerrestrialAerialPerspective,
+  bindTerrestrialAerialPerspectiveUniforms,
+  createTerrestrialAerialPerspectiveState,
+  TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
+} from './aerialPerspective';
+import { bindPlanetDetailUniforms, createPlanetDetailMaterialState } from '../planetDetail/detailMaterial';
+import {
+  bindTerrainDetailUniforms,
+  createTerrainDetailMaterialState,
+  TERRAIN_DETAIL_GLSL,
+} from '../planetDetail/terrainDetailMaterial';
 
 /** Body-fixed period over which local surface detail repeats exactly (meters). */
 export const SURFACE_DETAIL_PERIOD_METERS = 8192;
+/** Local material is fully visible below this camera altitude. */
+export const SURFACE_DETAIL_FULL_ALTITUDE_METERS = 12_000;
+/** Local material is fully removed above this camera altitude. */
+export const SURFACE_DETAIL_FADE_OUT_ALTITUDE_METERS = 48_000;
 
 /**
  * Regional-classification thresholds shared verbatim by the CPU classifier and
@@ -211,11 +228,46 @@ const T = SURFACE_THRESHOLDS;
 /** GLSL classification + detail, generated from the shared numeric thresholds. */
 const SURFACE_FRAGMENT_FUNCTIONS = /* glsl */ `
 uniform float surfaceDetailMaxOctave;
+uniform sampler2D localDetailMap;
+uniform float useLocalDetailMap;
 varying vec3 vDetailAnchor;
 varying float vSurfaceAltitude;
 varying vec3 vBodyFixedNormal;
 
 struct SurfaceWeights { float soil; float rock; float sand; float vegetation; };
+
+vec4 sampleLocalDetailCell(vec2 uv, vec2 cell) {
+  vec2 atlasUv = (fract(uv) + cell) * 0.5;
+  // fract() breaks implicit derivatives at every atlas-tile wrap. Preserve
+  // the unwrapped footprint explicitly so grazing views select stable mips.
+  return textureGrad(localDetailMap, atlasUv, dFdx(uv) * 0.5, dFdy(uv) * 0.5);
+}
+
+vec4 sampleLocalDetailTriplanar(vec3 anchor, vec3 bodyNormal, vec2 cell) {
+  vec3 axes = pow(abs(bodyNormal), vec3(4.0));
+  vec3 blend = axes / max(0.0001, axes.x + axes.y + axes.z);
+  vec4 x = sampleLocalDetailCell(anchor.yz / 24.0, cell);
+  vec4 y = sampleLocalDetailCell(anchor.xz / 24.0, cell);
+  vec4 z = sampleLocalDetailCell(anchor.xy / 24.0, cell);
+  return x * blend.x + y * blend.y + z * blend.z;
+}
+
+vec3 decodeLocalTangentNormal(vec2 encoded) {
+  vec2 xy = encoded * 2.0 - 1.0;
+  return normalize(vec3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy)))));
+}
+
+vec3 sampleLocalDetailNormal(vec3 anchor, vec3 bodyNormal, vec2 cell) {
+  vec3 axes = pow(abs(bodyNormal), vec3(4.0));
+  vec3 blend = axes / max(0.0001, axes.x + axes.y + axes.z);
+  vec3 nx = decodeLocalTangentNormal(sampleLocalDetailCell(anchor.yz / 24.0, cell).gb);
+  vec3 ny = decodeLocalTangentNormal(sampleLocalDetailCell(anchor.xz / 24.0, cell).gb);
+  vec3 nz = decodeLocalTangentNormal(sampleLocalDetailCell(anchor.xy / 24.0, cell).gb);
+  vec3 worldX = vec3(nx.z * sign(bodyNormal.x), nx.x, nx.y);
+  vec3 worldY = vec3(ny.x, ny.z * sign(bodyNormal.y), ny.y);
+  vec3 worldZ = vec3(nz.x, nz.y, nz.z * sign(bodyNormal.z));
+  return normalize(worldX * blend.x + worldY * blend.y + worldZ * blend.z);
+}
 
 SurfaceWeights classifyTerrestrialSurface(
   float biomeClass, float shore, float ocean, float altitude,
@@ -316,35 +368,82 @@ float deterministicMoisture(vec3 rawDir) {
 
 const SURFACE_ALBEDO_APPLY = /* glsl */ `
 vec3 surfBodyNormal = normalize(vBodyFixedNormal);
-float surfSlope = 1.0 - clamp(dot(surfBodyNormal, normalize(vBodyDirection)), 0.0, 1.0);
+vec3 surfRadialProjection = normalize(vBodyDirection);
+vec3 surfClassificationNormal = useAuthoredGlobalMaps > 0.5
+  ? decodeGlobalOctNormal(texture2D(globalNormalMap, globalUv).rg)
+  : surfBodyNormal;
+float surfSlope = 1.0 - clamp(dot(surfClassificationNormal, surfRadialProjection), 0.0, 1.0);
 float surfLatitude = asin(clamp(abs(normalize(vBodyDirection).z), 0.0, 1.0)) * 0.6366197723675814;
-float surfBiome = mix(0.5, authoredMaterial.b, step(0.5, useAuthoredGlobalMaps));
-float surfShore = useAuthoredGlobalMaps > 0.5 ? (1.0 - abs(authoredMaterial.a * 2.0 - 1.0)) : 0.0;
-float surfOcean = useAuthoredGlobalMaps > 0.5 ? step(authoredMaterial.a, 0.5) : 0.0;
+float surfBiome = 0.5;
+float surfShore = 0.0;
+float surfOcean = useGlobalSurfaceClassMap > 0.5
+  ? surfaceClassOcean(authoredSurfaceClass)
+  : (useAuthoredGlobalMaps > 0.5 ? authoredMaterial.b : 0.0);
+float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a * useGlobalIceMap : 0.0;
 float surfMoisture = deterministicMoisture(vBodyDirection);
 SurfaceWeights surfWeights = classifyTerrestrialSurface(
   surfBiome, surfShore, surfOcean, vSurfaceAltitude, surfSlope, surfLatitude, surfMoisture);
+float surfCameraAltitude = max(0.0,
+  length(terrestrialAerialCameraBodyFixed) - terrestrialAerialBodyRadius);
+float surfNearGroundFade = 1.0 - smoothstep(
+  ${SURFACE_DETAIL_FULL_ALTITUDE_METERS.toFixed(1)},
+  ${SURFACE_DETAIL_FADE_OUT_ALTITUDE_METERS.toFixed(1)},
+  surfCameraAltitude);
 vec3 surfDetailGradient;
 float surfDetail = triplanarSurfaceDetail(vDetailAnchor, surfBodyNormal, surfaceDetailMaxOctave, surfDetailGradient);
+// Material identity must not depend on streamed mesh LOD. Macro altitude and
+// authored ice are continuous across chunks; per-LOD geometric slope is not.
+vec2 surfLocalCell = vSurfaceAltitude > 2600.0 ? vec2(1.0, 0.0) : vec2(0.0, 0.0);
+if (surfIce > 0.35) surfLocalCell = vec2(1.0, 1.0);
+// Reconstruct the atlas anchor from the continuous body direction. Chunk-local
+// origins are ideal for vertex precision but differ across LODs; using them as
+// texture coordinates makes the quadtree visible at handoff boundaries.
+vec3 surfStableAnchor = surfRadialProjection * (terrestrialAerialBodyRadius + vSurfaceAltitude);
+float surfLocalFootprint = max(max(length(fwidth(surfStableAnchor.yz / 24.0)), length(fwidth(surfStableAnchor.xz / 24.0))), length(fwidth(surfStableAnchor.xy / 24.0)));
+// textureGrad is the frequency gate. A derivative-based amplitude gate would
+// switch on per terrain tile because adjacent LODs interpolate different
+// footprints, exposing the quadtree as bright rectangles.
+vec3 surfViewDirectionBody = normalize(terrestrialAerialCameraBodyFixed - surfStableAnchor);
+float surfLocalGrazingFade = smoothstep(0.08, 0.32, abs(dot(surfRadialProjection, surfViewDirectionBody)));
+float surfLocalFade = useLocalDetailMap * surfLocalGrazingFade * surfNearGroundFade;
+vec4 surfLocalDetail = sampleLocalDetailTriplanar(surfStableAnchor, surfRadialProjection, surfLocalCell);
 vec3 surfTint = surfWeights.soil * vec3(1.0, 0.98, 0.95)
   + surfWeights.rock * vec3(0.86, 0.84, 0.82)
   + surfWeights.sand * vec3(1.12, 1.06, 0.92)
   + surfWeights.vegetation * vec3(0.9, 1.02, 0.86);
 diffuseColor.rgb *= surfTint;
-diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock);
+vec4 surfTerrainDetail = sampleTerrainDetail(vBodyDirection);
+diffuseColor.rgb = mix(diffuseColor.rgb, surfTerrainDetail.rgb * surfTint, surfTerrainDetail.a * (1.0 - surfOcean));
+diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.94, 0.98, 1.03), surfIce * 0.32);
+diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock) * surfNearGroundFade;
+diffuseColor.rgb *= mix(1.0, mix(0.9, 1.1, surfLocalDetail.r), surfLocalFade * 0.5);
 `;
 
 const SURFACE_ROUGHNESS_APPLY = /* glsl */ `
 float surfClassRough = surfWeights.soil * 0.9 + surfWeights.rock * 1.0
   + surfWeights.sand * 0.8 + surfWeights.vegetation * 0.85;
-roughnessFactor = clamp(roughnessFactor * surfClassRough + surfDetail * 0.05 * surfWeights.rock, 0.05, 1.0);
+roughnessFactor = clamp(roughnessFactor * surfClassRough
+  + surfDetail * 0.05 * surfWeights.rock * surfNearGroundFade, 0.05, 1.0);
+roughnessFactor = mix(roughnessFactor, surfLocalDetail.a, surfLocalFade * 0.45);
+// The streamed land deck must not inherit the compact packed map's very low
+// orbital roughness. At grazing reentry angles that produced a broad white
+// sheen across terrain and amplified every procedural normal band.
+roughnessFactor = max(roughnessFactor, mix(0.72, 0.48, surfOcean));
 `;
 
 const SURFACE_NORMAL_APPLY = /* glsl */ `
-vec3 surfMacroNormal = normalize(mix(surfBodyNormal, globalBodyNormal, 0.68 * useAuthoredGlobalMaps));
+vec3 surfRadialNormal = normalize(vBodyDirection);
+vec3 surfMacroDelta = globalBodyNormal - surfRadialNormal * dot(globalBodyNormal, surfRadialNormal);
+vec3 surfMacroNormal = normalize(surfBodyNormal + surfMacroDelta * 0.36 * useAuthoredGlobalMaps);
 vec3 surfTangentGradient = surfDetailGradient - surfMacroNormal * dot(surfDetailGradient, surfMacroNormal);
 float surfBump = mix(80.0, 240.0, surfWeights.rock);
-vec3 surfPerturbed = normalize(surfMacroNormal - surfTangentGradient * surfBump);
+vec3 surfPerturbed = normalize(surfMacroNormal
+  - surfTangentGradient * surfBump * surfNearGroundFade);
+vec3 surfLocalNormal = sampleLocalDetailNormal(surfStableAnchor, surfRadialProjection, surfLocalCell);
+surfPerturbed = normalize(mix(surfPerturbed, surfLocalNormal, surfLocalFade * 0.12));
+vec4 surfSourceNormal = sampleTerrainDetailNormal(vBodyDirection);
+vec3 surfSourceDelta = surfSourceNormal.rgb - surfRadialNormal * dot(surfSourceNormal.rgb, surfRadialNormal);
+surfPerturbed = normalize(surfPerturbed + surfSourceDelta * surfSourceNormal.a * terrainDetailNormalStrength);
 normal = normalize(normalMatrix * surfPerturbed);
 `;
 
@@ -362,7 +461,20 @@ export function createTerrestrialSurfaceMaterial(
 ): TerrestrialSurfaceMaterial {
   const textures = resolveTerrestrialAuthoredTextures(pack, descriptor.bodyId, maxAnisotropy);
   const cloudLighting = createTerrestrialCloudLightingState();
+  const aerialPerspective = createTerrestrialAerialPerspectiveState('streamed-land');
+  const detail = createPlanetDetailMaterialState();
+  const terrainDetail = createTerrainDetailMaterialState();
   const maxOctave = SURFACE_DETAIL_TIERS[tier].maxOctave;
+  const localDetail = pack?.textures.get('localDetail') ?? null;
+  if (localDetail) {
+    localDetail.colorSpace = THREE.NoColorSpace;
+    localDetail.wrapS = THREE.RepeatWrapping;
+    localDetail.wrapT = THREE.RepeatWrapping;
+    localDetail.minFilter = THREE.LinearMipmapLinearFilter;
+    localDetail.magFilter = THREE.LinearFilter;
+    localDetail.anisotropy = Math.max(1, Math.min(maxAnisotropy, tier === 'high' ? 8 : tier === 'medium' ? 4 : 2));
+    localDetail.needsUpdate = true;
+  }
 
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -376,11 +488,19 @@ export function createTerrestrialSurfaceMaterial(
     authored: pack !== null,
     tier,
     terrestrialCloudLighting: cloudLighting,
+    planetDetail: detail,
+    terrainDetail,
   });
-  material.customProgramCacheKey = () => `terrestrial-surface-v2:${pack ? 'authored' : 'palette'}:${tier}`;
+  attachTerrestrialAerialPerspective(material, aerialPerspective);
+  material.customProgramCacheKey = () => `terrestrial-surface-v4:${pack ? 'authored' : 'palette'}:${tier}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
+    bindPlanetDetailUniforms(shader, detail);
+    bindTerrainDetailUniforms(shader, terrainDetail);
+    bindTerrestrialAerialPerspectiveUniforms(shader, aerialPerspective);
     shader.uniforms.surfaceDetailMaxOctave = { value: maxOctave };
+    shader.uniforms.localDetailMap = { value: localDetail };
+    shader.uniforms.useLocalDetailMap = { value: localDetail ? 1 : 0 };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -396,16 +516,20 @@ export function createTerrestrialSurfaceMaterial(
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>\n${GLOBAL_VERTEX_BEGIN}\n`
-          + 'vDetailAnchor = bodyFixedDetailAnchor;\nvSurfaceAltitude = surfaceAltitude;',
+          + 'vDetailAnchor = bodyFixedDetailAnchor;\nvSurfaceAltitude = surfaceAltitude;\n'
+          + 'vGlobalSurfaceAltitude = surfaceAltitude;',
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
+      .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRAIN_DETAIL_GLSL}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
       .replace('#include <map_fragment>', `${GLOBAL_ALBEDO_APPLY}\n${SURFACE_ALBEDO_APPLY}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}\n${SURFACE_ROUGHNESS_APPLY}`,
       )
       .replace('#include <normal_fragment_maps>', `${GLOBAL_NORMAL_APPLY}\n${SURFACE_NORMAL_APPLY}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <opaque_fragment>', `outgoingLight = applyTerrestrialAerialPerspective(\n  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude),\n  outgoingLight\n);\n#include <opaque_fragment>`);
   };
 
   let released = false;

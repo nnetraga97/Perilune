@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createWayfarerDemonstrator } from '../src/content/crafts';
@@ -37,7 +38,7 @@ describe('detachable interstage shroud', () => {
   });
 
   it('latches the shroud before separation and preserves it on one debris component and save round-trip', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createWayfarerDemonstrator();
     const launched = game.spawnOnPad(craft, craft.name);
     expect(game.fireStage(launched)).toBe(true);
@@ -54,7 +55,7 @@ describe('detachable interstage shroud', () => {
     expect(ringVisual.partMeshes.get(ring.key)!.getObjectByName('SM_Runtime_InterstageShroud')).toBeDefined();
     disposeVesselVisual(ringVisual);
 
-    const restored = restoreGame(serializeGame(game, 'interstage round trip'));
+    const restored = restoreLegacyGame(serializeGame(game, 'interstage round trip'));
     const restoredRing = restored.vessels
       .flatMap((vessel) => vessel.runtime.craft.parts)
       .find((part) => part.defId === 'dec-interstage-ms')!;

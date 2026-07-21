@@ -3,6 +3,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256Bytes, sha256File } from './lib/canonical-json.mjs';
 import { validateCheckedPartManifest, validatePartAssetInputs } from './lib/part-asset-schema.mjs';
+import { validatePlanetSourceLock } from './lib/planet-source-registry.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = resolve(
@@ -44,11 +45,23 @@ const recipeFile = loadJson(recipesPath, 'Terrain recipes');
 const compilerLock = loadJson(compilerLockPath, 'Planet compiler lock');
 const packageJson = loadJson(packagePath, 'package.json');
 const compilerOutput = loadJson(compilerOutputPath, 'Planet compiler output');
+const detailSourceLock = loadJson(
+  resolve(root, 'assets/planets/sol-detail-source-lock.json'),
+  'Sol detail source lock',
+);
 
-const expectedBodies = new Set([
+if (detailSourceLock) {
+  for (const error of validatePlanetSourceLock(detailSourceLock)) {
+    errors.push(`Sol detail source lock: ${error}`);
+  }
+}
+
+const expectedRecipeBodies = new Set([
   'auren', 'ashen', 'vess', 'veyra', 'palla', 'wisp',
   'rusk', 'tyran', 'brimm', 'glacia', 'mote', 'farfall',
 ]);
+const solBodies = new Set(['sun', 'earth', 'moon']);
+const expectedBodies = new Set([...expectedRecipeBodies, ...solBodies]);
 
 if (recipeFile) {
   if (recipeFile.schemaVersion !== 1) errors.push('Terrain recipes schemaVersion must be 1');
@@ -58,7 +71,7 @@ if (recipeFile) {
     const seen = new Set();
     for (const recipe of recipeFile.recipes) {
       requireString(recipe.bodyId, 'Recipe bodyId');
-      if (!expectedBodies.has(recipe.bodyId)) errors.push(`Unknown recipe body ${recipe.bodyId}`);
+      if (!expectedRecipeBodies.has(recipe.bodyId)) errors.push(`Unknown recipe body ${recipe.bodyId}`);
       if (seen.has(recipe.bodyId)) errors.push(`Duplicate recipe body ${recipe.bodyId}`);
       seen.add(recipe.bodyId);
       if (!Number.isInteger(recipe.version) || recipe.version < 1) {
@@ -68,14 +81,14 @@ if (recipeFile) {
         errors.push(`Recipe ${recipe.bodyId} hash must be 32 lowercase hex characters`);
       }
     }
-    for (const bodyId of expectedBodies) {
+    for (const bodyId of expectedRecipeBodies) {
       if (!seen.has(bodyId)) errors.push(`Missing recipe for ${bodyId}`);
     }
   }
 }
 
-const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL']);
-const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds']);
+const allowedLicenses = new Set(['CC0-1.0', 'Public-Domain', 'CC-BY-4.0', 'NASA', 'JPL', 'LGPL-3.0']);
+const allowedChannels = new Set(['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'emissive', 'localDetail', 'surfaceClass', 'surfaceClassRegional']);
 const channelContracts = {
   albedo: {
     colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
@@ -93,6 +106,26 @@ const channelContracts = {
     colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png', fallbackLayout: 'rgb-rg',
     transcodeTargets: ['etc2-rgba', 'bc5-rg', 'astc-rgba'],
   },
+  heightMacro: {
+    colorSpace: 'linear', logicalFormat: 'RG8', fallback: '.png', fallbackLayout: 'rgb-rg',
+    transcodeTargets: ['rg8'],
+  },
+  emissive: {
+    colorSpace: 'sRGB', logicalFormat: 'RGB8', fallback: '.webp', fallbackLayout: 'rgb',
+    transcodeTargets: ['etc2-rgb', 'bc1-rgb'],
+  },
+  localDetail: {
+    colorSpace: 'linear', logicalFormat: 'RGBA8', fallback: '.png', fallbackLayout: 'rgba',
+    transcodeTargets: ['etc2-rgba', 'bc3-rgba', 'astc-rgba'],
+  },
+  surfaceClass: {
+    colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
+    transcodeTargets: ['r8'], mipmapped: false,
+  },
+  surfaceClassRegional: {
+    colorSpace: 'linear', logicalFormat: 'R8', fallback: '.png', fallbackLayout: 'r',
+    transcodeTargets: ['r8'], mipmapped: false,
+  },
 };
 const tierDimensions = {
   low: [1024, 512],
@@ -109,6 +142,7 @@ const gpuFormats = {
   rgba8: { blockWidth: 1, blockHeight: 1, blockBytes: 4 },
   rgb8: { blockWidth: 1, blockHeight: 1, blockBytes: 3 },
   rg8: { blockWidth: 1, blockHeight: 1, blockBytes: 2 },
+  r8: { blockWidth: 1, blockHeight: 1, blockBytes: 1 },
 };
 
 function fullMipChainBytes(width, height, format) {
@@ -183,13 +217,19 @@ function validateKtx2(packageFile, pack, channel) {
   const faceCount = packageFile.readUInt32LE(36);
   const levelCount = packageFile.readUInt32LE(40);
   const supercompressionScheme = packageFile.readUInt32LE(44);
-  const expectedLevels = fullMipLevelCount(pack.width, pack.height);
+  const channelWidth = channel.width ?? pack.width;
+  const channelHeight = channel.height ?? pack.height;
+  const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
+  const expectedLevels = classChannel ? 1 : fullMipLevelCount(channelWidth, channelHeight);
 
-  if (pixelWidth !== pack.width || pixelHeight !== pack.height) {
-    errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${pack.width}x${pack.height}`);
+  if (pixelWidth !== channelWidth || pixelHeight !== channelHeight) {
+    errors.push(`${label} dimensions ${pixelWidth}x${pixelHeight} do not match ${channelWidth}x${channelHeight}`);
   }
-  if (vkFormat !== 0 || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
-    errors.push(`${label} must be a 2D transcodable texture with vkFormat 0, typeSize 1, and one face`);
+  const directHeight = channel.name === 'heightMacro';
+  const expectedVkFormat = classChannel ? 9 : directHeight ? 16 : 0; // VK_FORMAT_R8_UNORM / R8G8_UNORM
+  if (vkFormat !== expectedVkFormat || typeSize !== 1 || pixelDepth !== 0 || layerCount !== 0 || faceCount !== 1) {
+    errors.push(`${label} must be a 2D ${classChannel ? 'lossless R8' : directHeight ? 'lossless RG8' : 'transcodable'} texture ` +
+      `with vkFormat ${expectedVkFormat}, typeSize 1, and one face`);
   }
   if (levelCount !== expectedLevels) {
     errors.push(`${label} must contain exactly ${expectedLevels} mip levels, got ${levelCount}`);
@@ -226,11 +266,20 @@ function validateKtx2(packageFile, pack, channel) {
       descriptorBlockSize < 40 || descriptorBlockSize > dfdLength - 4) {
       errors.push(`${label} DFD descriptor is malformed`);
     }
-    const expectedEncoding = channel.name === 'albedo'
+    const expectedEncoding = classChannel
+      ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 1, blockWidth: 0, blockHeight: 0,
+        name: 'lossless R8 with Zstd' }
+      : directHeight
+      ? { scheme: 2, model: 1, transfer: 1, bytesPlane: 2, blockWidth: 0, blockHeight: 0,
+        name: 'lossless RG8 with Zstd' }
+      : channel.name === 'albedo' || channel.name === 'emissive'
       ? { scheme: 1, model: 163, transfer: 2, bytesPlane: 8, name: 'BasisLZ with ETC1S' }
-      : { scheme: 2, model: 166, transfer: 1, bytesPlane: 16, name: 'UASTC with Zstd' };
+      : { scheme: 2, model: 166, transfer: 1, bytesPlane: 16, blockWidth: 3, blockHeight: 3,
+        name: 'UASTC with Zstd' };
     if (supercompressionScheme !== expectedEncoding.scheme || colorModel !== expectedEncoding.model ||
-      transferFunction !== expectedEncoding.transfer || blockWidth !== 3 || blockHeight !== 3 ||
+      transferFunction !== expectedEncoding.transfer ||
+      blockWidth !== (expectedEncoding.blockWidth ?? 3) ||
+      blockHeight !== (expectedEncoding.blockHeight ?? 3) ||
       bytesPlane0 !== expectedEncoding.bytesPlane) {
       errors.push(`${label} ${channel.name} must use ${expectedEncoding.name} and its matching DFD`);
     }
@@ -285,13 +334,17 @@ function validateKtx2(packageFile, pack, channel) {
       errors.push(`${label} BasisLZ mip ${level} must use zero uncompressedByteLength`);
     }
     if (supercompressionScheme === 2) {
-      const mipWidth = Math.max(1, pack.width >> level);
-      const mipHeight = Math.max(1, pack.height >> level);
-      const expectedUastcBytes = Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
-      if (uncompressedByteLength !== expectedUastcBytes) {
+      const mipWidth = Math.max(1, channelWidth >> level);
+      const mipHeight = Math.max(1, channelHeight >> level);
+      const expectedUncompressedBytes = classChannel
+        ? mipWidth * mipHeight
+        : directHeight
+        ? mipWidth * mipHeight * 2
+        : Math.ceil(mipWidth / 4) * Math.ceil(mipHeight / 4) * 16;
+      if (uncompressedByteLength !== expectedUncompressedBytes) {
         errors.push(
-          `${label} UASTC mip ${level} uncompressed size ${uncompressedByteLength} ` +
-          `does not match ${expectedUastcBytes}`,
+          `${label} mip ${level} uncompressed size ${uncompressedByteLength} ` +
+          `does not match ${expectedUncompressedBytes}`,
         );
       }
     }
@@ -420,6 +473,34 @@ if (manifest) {
         if (!Array.isArray(source.sourceDimensions) || source.sourceDimensions.length !== 2 ||
           source.sourceDimensions.some((dimension) => !Number.isInteger(dimension) || dimension <= 0)) {
           errors.push(`Source ${source.id} authoring-only dimensions are required`);
+        }
+      }
+      const scientificSource = Array.isArray(source.bodies) &&
+        source.bodies.some((bodyId) => bodyId === 'earth' || bodyId === 'moon');
+      if (scientificSource) {
+        for (const field of [
+          'datum', 'verticalDatum', 'projection', 'axisOrder', 'longitudeDirection',
+          'uvOrigin', 'observation', 'productKind', 'derivedRecipe', 'bodyReferenceFrameVersion',
+        ]) requireString(source[field], `Source ${source.id} ${field}`);
+        if (!Number.isFinite(source.seamLongitudeDegrees) || source.seamLongitudeDegrees < -180 ||
+          source.seamLongitudeDegrees > 180) {
+          errors.push(`Source ${source.id} seamLongitudeDegrees must be within [-180, 180]`);
+        }
+        if (!Number.isFinite(source.valueScale) || !Number.isFinite(source.valueOffset)) {
+          errors.push(`Source ${source.id} value scale and offset must be finite`);
+        }
+        if (source.noDataValue !== null && !Number.isFinite(source.noDataValue)) {
+          errors.push(`Source ${source.id} noDataValue must be null or finite`);
+        }
+        if (!Array.isArray(source.validRange) || source.validRange.length !== 2 ||
+          !source.validRange.every(Number.isFinite) || source.validRange[0] >= source.validRange[1]) {
+          errors.push(`Source ${source.id} validRange must be increasing and finite`);
+        }
+        if (!['measured', 'modeled', 'composited'].includes(source.productKind)) {
+          errors.push(`Source ${source.id} productKind is invalid`);
+        }
+        if (source.longitudeDirection !== 'east-positive' || source.axisOrder !== 'longitude,latitude') {
+          errors.push(`Source ${source.id} must map explicitly into east-positive longitude/latitude order`);
         }
       }
     }
@@ -665,11 +746,17 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
   if (!Array.isArray(manifest.packs)) {
     errors.push('Manifest packs must be an array');
   } else {
+    const hasSolContent = manifest.packs.some((pack) => pack.bodyId === 'earth' || pack.bodyId === 'moon') ||
+      (Array.isArray(manifest.sources) && manifest.sources.some((source) =>
+        Array.isArray(source.bodies) && source.bodies.some((bodyId) => bodyId === 'earth' || bodyId === 'moon')));
     for (const tier of ['low', 'medium', 'high']) {
-      const count = manifest.packs.filter((pack) => pack.bodyId === 'veyra' && pack.tier === tier).length;
-      if (count !== 1) errors.push(`Manifest must contain exactly one Veyra ${tier} pack, got ${count}`);
+      for (const bodyId of ['veyra', ...(hasSolContent ? ['earth', 'moon'] : [])]) {
+        const count = manifest.packs.filter((pack) => pack.bodyId === bodyId && pack.tier === tier).length;
+        if (count !== 1) errors.push(`Manifest must contain exactly one ${bodyId} ${tier} pack, got ${count}`);
+      }
     }
     let mediumBootBytes = 0;
+    const worstCaseByTierAndBody = new Map();
     for (const pack of manifest.packs) {
       if (!expectedBodies.has(pack.bodyId)) errors.push(`Pack has unknown body ${pack.bodyId}`);
       const dimensions = tierDimensions[pack.tier];
@@ -685,7 +772,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (pack.bootCritical) mediumBootBytes += pack.compressedBytes;
       }
       if (pack.bodyId === 'veyra') {
-        const exactChannels = [...allowedChannels];
+        const exactChannels = ['albedo', 'normal', 'material', 'clouds'];
         const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
         if (presentChannels.length !== exactChannels.length ||
           exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
@@ -693,6 +780,24 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
             `Pack ${pack.bodyId}/${pack.tier} must have exact channels ` +
             'albedo, normal, material, clouds',
           );
+        }
+      }
+      if (pack.bodyId === 'earth') {
+        const exactChannels = ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail',
+          'surfaceClass', 'surfaceClassRegional',
+          ...(pack.tier === 'low' ? [] : ['emissive'])];
+        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
+        if (presentChannels.length !== exactChannels.length ||
+          exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
+          errors.push(`Pack earth/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
+        }
+      }
+      if (pack.bodyId === 'moon') {
+        const exactChannels = ['albedo', 'normal', 'material', 'heightMacro', 'localDetail'];
+        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
+        if (presentChannels.length !== exactChannels.length ||
+          exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
+          errors.push(`Pack moon/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
         }
       }
       if (!Array.isArray(pack.channels) || pack.channels.length === 0) {
@@ -720,8 +825,11 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (!channel.fallbackPath?.endsWith(contract.fallback)) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} fallback has wrong format`);
         }
+        const channelWidth = channel.width ?? pack.width;
+        const channelHeight = channel.height ?? pack.height;
+        const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
         const derivedFallbackGpuBytes = dimensions
-          ? fullMipRgbaBytes(pack.width, pack.height)
+          ? classChannel ? channelWidth * channelHeight : fullMipRgbaBytes(channelWidth, channelHeight)
           : null;
         if (channel.fallbackGpuBytes !== derivedFallbackGpuBytes) {
           errors.push(
@@ -740,15 +848,17 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         if (!arraysEqual(channel.transcodeTargets, contract.transcodeTargets)) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has incorrect transcode targets`);
         }
-        if (channel.mipmapped !== true) {
-          errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} requires mipmaps`);
+        if (channel.mipmapped !== (contract.mipmapped ?? true)) {
+          errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has incorrect mip policy`);
         }
         requirePositiveInteger(channel.gpuBytes, `Pack ${pack.bodyId}/${pack.tier} ${channel.name} gpuBytes`);
         const gpuFormat = gpuFormats[channel.gpuFormat];
         if (!gpuFormat) {
           errors.push(`Pack ${pack.bodyId}/${pack.tier} ${channel.name} has unknown GPU format`);
         } else if (dimensions) {
-          const derivedGpuBytes = fullMipChainBytes(pack.width, pack.height, gpuFormat);
+          const derivedGpuBytes = classChannel
+            ? channelWidth * channelHeight * gpuFormat.blockBytes
+            : fullMipChainBytes(channelWidth, channelHeight, gpuFormat);
           if (channel.gpuBytes !== derivedGpuBytes) {
             errors.push(
               `Pack ${pack.bodyId}/${pack.tier} ${channel.name} memory mismatch: ` +
@@ -793,6 +903,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
       }
       const gpuBudget = budgets?.activeBodyGpuBytes?.[pack.tier];
       const worstCaseGpuBytes = Math.max(gpuBytes, fallbackGpuBytes);
+      worstCaseByTierAndBody.set(`${pack.tier}/${pack.bodyId}`, worstCaseGpuBytes);
       if (Number.isInteger(gpuBudget) && worstCaseGpuBytes > gpuBudget) {
         errors.push(`Pack ${pack.bodyId}/${pack.tier} fallback/compressed path exceeds active-body GPU budget`);
       }
@@ -818,6 +929,17 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
     }
     if (mediumBootBytes > budgets.mediumBootTransferBytes) {
       errors.push('Medium boot-critical packs exceed transfer budget');
+    }
+    for (const tier of hasSolContent ? ['low', 'medium', 'high'] : []) {
+      const combinedSolPackBytes = ['earth', 'moon'].reduce(
+        (sum, bodyId) => sum + (worstCaseByTierAndBody.get(`${tier}/${bodyId}`) ?? 0),
+        0,
+      );
+      const combinedSolBytes = combinedSolPackBytes + (budgets.rendererBaseGpuBytes?.[tier] ?? 0);
+      if (Number.isInteger(budgets.totalRendererGpuBytes?.[tier]) &&
+        combinedSolBytes > budgets.totalRendererGpuBytes[tier]) {
+        errors.push(`Combined Sol ${tier} renderer assets exceed total renderer GPU budget`);
+      }
     }
   }
 }

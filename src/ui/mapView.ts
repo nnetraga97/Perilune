@@ -12,6 +12,7 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   OrbitalElements,
   elementsAtTime,
@@ -59,6 +60,51 @@ import { pickOrbitSegment, type OrbitPick, type ScreenOrbitPoint } from './orbit
 const SCALE = 1e-5;
 const _mapOrientation = new Quat();
 
+export interface MapBodyBounds {
+  readonly position: Readonly<{ x: number; y: number; z: number }>;
+  readonly radius: number;
+}
+
+export interface MapFitBounds {
+  readonly center: THREE.Vector3;
+  readonly radius: number;
+}
+
+/** Stable scene-space envelope around a set of physical body spheres. */
+export function mapFitBounds(bodies: readonly MapBodyBounds[]): MapFitBounds {
+  if (bodies.length === 0) return { center: new THREE.Vector3(), radius: 1 };
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (const body of bodies) {
+    const radius = Math.max(0, body.radius);
+    min.x = Math.min(min.x, body.position.x - radius);
+    min.y = Math.min(min.y, body.position.y - radius);
+    min.z = Math.min(min.z, body.position.z - radius);
+    max.x = Math.max(max.x, body.position.x + radius);
+    max.y = Math.max(max.y, body.position.y + radius);
+    max.z = Math.max(max.z, body.position.z + radius);
+  }
+  const center = min.add(max).multiplyScalar(0.5);
+  let radius = 1;
+  for (const body of bodies) {
+    const distance = Math.hypot(
+      center.x - body.position.x,
+      center.y - body.position.y,
+      center.z - body.position.z,
+    );
+    radius = Math.max(
+      radius,
+      distance + Math.max(0, body.radius),
+    );
+  }
+  return { center, radius };
+}
+
+/** Preserve physical size when visible and use only a small picking floor when distant. */
+export function mapBodyPresentationRadius(radiusMeters: number, cameraDistance: number): number {
+  return Math.max(radiusMeters * SCALE, cameraDistance * 0.0045);
+}
+
 function predictionOrbitSignature(bodyId: string, elements: OrbitalElements): string {
   let phaseAtZero = elements.meanAnomaly0 - meanMotionOf(elements) * elements.epoch;
   if (elements.e < 1) phaseAtZero = ((phaseAtZero % TWO_PI) + TWO_PI) % TWO_PI;
@@ -99,6 +145,7 @@ export function compactBodyMesh(
   pack: Readonly<RuntimeBodyAssetPack> | null = null,
   maxAnisotropy = 1,
   quality: QualityTier = pack?.tier ?? 'medium',
+  bodyRadius = 1,
 ): THREE.Mesh<THREE.SphereGeometry, THREE.Material> {
   const geometry = descriptor.identity === 'solid'
     ? createGlobalSphereGeometry(quality)
@@ -120,8 +167,8 @@ export function compactBodyMesh(
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
       : pack && descriptor.renderer !== 'terrestrial'
-        ? createAirlessGlobalMaterial(pack, maxAnisotropy)
-        : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy);
+        ? createAirlessGlobalMaterial(pack, maxAnisotropy, bodyRadius)
+        : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy, bodyRadius);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = `compact-body:${descriptor.bodyId}`;
   mesh.userData.bodyMaterial = {
@@ -332,6 +379,7 @@ export class MapView {
   private camPitch = 0.9;
   private camDist = 400; // scene units
   private camFocus = new THREE.Vector3();
+  private cameraFocusMode: 'selected' | 'free' | 'fit-local' | 'fit-system' = 'selected';
 
   private prediction: TrajectoryPrediction | null = null;
   private predictionDirty = true;
@@ -780,6 +828,7 @@ export class MapView {
   focusBody(bodyId: string): void {
     this.followsActiveVessel = false;
     this.focusBodyId = bodyId;
+    this.cameraFocusMode = 'selected';
     const mesh = this.bodyMeshes.get(bodyId);
     if (mesh) this.desiredFocus.copy(mesh.position);
   }
@@ -787,20 +836,22 @@ export class MapView {
   /** Return map focus to the celestial body currently carrying the active vessel. */
   focusActiveVessel(game: GameState): void {
     this.followsActiveVessel = true;
+    this.cameraFocusMode = 'selected';
     const active = game.active;
     if (!active) return;
     this.focusBodyId = game.bodyOf(active).id;
-    // The map coordinate frame is centered on the active vessel's SOI body.
-    // Reset immediately so stale mesh positions from the previous vessel cannot
-    // leave the newly opened map drifting across interplanetary distances.
-    this.desiredFocus.set(0, 0, 0);
-    this.camFocus.set(0, 0, 0);
+    // Vessel state is already relative to its SOI body, which is also the map
+    // coordinate anchor. Snap immediately so opening the map or switching the
+    // active craft cannot spend a frame focused on the body's center.
+    const position = active.runtime.pos;
+    this.desiredFocus.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+    this.camFocus.copy(this.desiredFocus);
   }
 
   /** Pointer controls (called by game shell). */
   orbitCamera(dx: number, dy: number): void {
     this.camYaw -= dx * 0.005;
-    this.camPitch = Math.max(-1.48, Math.min(1.48, this.camPitch + dy * 0.005));
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.005);
   }
 
   panCamera(dx: number, dy: number): void {
@@ -808,57 +859,65 @@ export class MapView {
     const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
     const scale = this.camDist * 0.0015;
     this.camFocus.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
+    this.cameraFocusMode = 'free';
   }
 
-  zoomCamera(factor: number, clientX?: number, clientY?: number): void {
-    if (factor < 1 && clientX !== undefined && clientY !== undefined) {
-      const pointer = new THREE.Vector2(
-        (clientX / window.innerWidth) * 2 - 1,
-        -(clientY / window.innerHeight) * 2 + 1,
-      );
-      this.raycaster.setFromCamera(pointer, this.camera);
-      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        this.camera.getWorldDirection(new THREE.Vector3()),
-        this.camFocus,
-      );
-      const point = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
-      if (point) this.camFocus.lerp(point, 0.12);
-    }
+  zoomCamera(factor: number): void {
+    // Zoom is a distance-only operation around the current camera target.
+    // Panning is the explicit operation that enters free-focus mode. Moving the
+    // target toward the mouse ray made an off-center wheel event permanently
+    // detach the camera from the selected craft/body.
     this.camDist = Math.max(1, Math.min(3e6, this.camDist * factor));
     this.predictionDirty = true;
   }
 
   recenterCamera(): void {
+    this.cameraFocusMode = 'selected';
+    const active = this.gameRef?.active;
+    if (this.followsActiveVessel && active) {
+      const position = active.runtime.pos;
+      this.desiredFocus.set(position.x * SCALE, position.y * SCALE, position.z * SCALE);
+    } else {
+      const mesh = this.bodyMeshes.get(this.focusBodyId);
+      if (mesh?.visible) this.desiredFocus.copy(mesh.position);
+    }
     this.camFocus.copy(this.desiredFocus);
     this.predictionDirty = true;
   }
 
   fitCamera(scope: 'local' | 'system'): void {
-    if (!this.gameRef) return;
-    const active = this.gameRef.active;
-    if (!active) return;
-    const anchor = this.gameRef.bodyOf(active);
+    const bounds = this.currentFitBounds(scope);
+    if (!bounds) return;
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
+    this.camDist = Math.max(8, Math.min(3e6, bounds.radius / Math.tan(halfFov) * 1.18));
+    this.cameraFocusMode = scope === 'local' ? 'fit-local' : 'fit-system';
+    this.desiredFocus.copy(bounds.center);
+    this.camFocus.copy(bounds.center);
+    this.predictionDirty = true;
+  }
+
+  private currentFitBounds(scope: 'local' | 'system'): MapFitBounds | null {
+    if (!this.gameRef?.active) return null;
+    const anchor = this.gameRef.bodyOf(this.gameRef.active);
     const focus = this.gameRef.universe.get(this.focusBodyId);
     const bodies = scope === 'system'
       ? [...this.gameRef.universe.bodies.values()]
       : [focus, ...focus.children];
     const position = new Vec3();
-    let radius = Math.max(focus.radius * SCALE * 2.5, 18);
-    for (const body of bodies) {
-      this.gameRef.universe.relativePosition(body, anchor, this.gameRef.time, position);
-      const scenePosition = new THREE.Vector3(position.x * SCALE, position.y * SCALE, position.z * SCALE);
-      radius = Math.max(radius, scenePosition.distanceTo(this.desiredFocus) + body.radius * SCALE);
-    }
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
-    this.camDist = Math.max(8, Math.min(3e6, radius / Math.tan(halfFov) * 1.18));
-    this.camFocus.copy(this.desiredFocus);
-    this.predictionDirty = true;
+    return mapFitBounds(bodies.map((body) => {
+      this.gameRef!.universe.relativePosition(body, anchor, this.gameRef!.time, position);
+      return {
+        position: { x: position.x * SCALE, y: position.y * SCALE, z: position.z * SCALE },
+        radius: body.radius * SCALE,
+      };
+    }));
   }
 
   resetCamera(): void {
     this.camYaw = 0.8;
     this.camPitch = 0.65;
     this.camDist = 400;
+    this.cameraFocusMode = 'selected';
     this.camFocus.copy(this.desiredFocus);
     this.predictionDirty = true;
   }
@@ -1391,11 +1450,15 @@ export class MapView {
     this.sun.target.position.set(0, 0, 0);
 
     // Camera around focus body origin.
-    const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch);
-    const cy = Math.sin(this.camYaw) * Math.cos(this.camPitch);
-    const cz = Math.sin(this.camPitch);
+    const yawCos = Math.cos(this.camYaw);
+    const yawSin = Math.sin(this.camYaw);
+    const pitchCos = Math.cos(this.camPitch);
+    const pitchSin = Math.sin(this.camPitch);
+    const cx = yawCos * pitchCos;
+    const cy = yawSin * pitchCos;
+    const cz = pitchSin;
     this.camera.position.set(cx * this.camDist, cy * this.camDist, cz * this.camDist).add(this.camFocus);
-    this.camera.up.set(0, 0, 1);
+    this.camera.up.set(-yawCos * pitchSin, -yawSin * pitchSin, pitchCos);
     this.camera.lookAt(this.camFocus);
 
     // Bodies in the active body's frame; camera focus may move among them.
@@ -1412,11 +1475,11 @@ export class MapView {
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
           for (const material of materials) material.dispose();
         }
-        mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality);
+        mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality, b.radius);
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }
-      mesh.scale.setScalar(Math.max(b.radius * SCALE, this.camDist * 0.008));
+      mesh.scale.setScalar(mapBodyPresentationRadius(b.radius, this.camDist));
       mesh.position.copy(pos);
       updateCompactBodyOrientation(mesh, b, t);
       const bodyMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -1473,9 +1536,24 @@ export class MapView {
       soi.visible = shown.has(id);
     }
     const focusMesh = this.bodyMeshes.get(this.focusBodyId);
-    if (focusMesh?.visible) this.desiredFocus.copy(focusMesh.position);
-    else this.desiredFocus.set(0, 0, 0);
-    this.camFocus.lerp(this.desiredFocus, 0.12);
+    if (this.cameraFocusMode === 'fit-local' || this.cameraFocusMode === 'fit-system') {
+      const bounds = this.currentFitBounds(this.cameraFocusMode === 'fit-local' ? 'local' : 'system');
+      if (bounds) this.desiredFocus.copy(bounds.center);
+    } else if (this.cameraFocusMode === 'selected') {
+      if (this.followsActiveVessel) {
+        this.desiredFocus.set(v.pos.x * SCALE, v.pos.y * SCALE, v.pos.z * SCALE);
+      } else if (focusMesh?.visible) this.desiredFocus.copy(focusMesh.position);
+      else this.desiredFocus.set(0, 0, 0);
+    } else {
+      this.desiredFocus.copy(this.camFocus);
+    }
+    if (this.cameraFocusMode === 'selected' && this.followsActiveVessel) {
+      // Following means the craft remains the exact projection center even at
+      // high time warp; smoothing here creates a visible trailing zoom target.
+      this.camFocus.copy(this.desiredFocus);
+    } else if (this.cameraFocusMode !== 'free') {
+      this.camFocus.lerp(this.desiredFocus, 0.12);
+    }
 
     // Ore deposit markers on the focus body (after an orbital survey).
     if (game.scannedBodies.has(body.id)) {

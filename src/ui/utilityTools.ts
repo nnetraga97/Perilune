@@ -14,7 +14,7 @@ import type { ProfileStore } from './profileStore';
 import type { WindowManager } from './window';
 import {
   acceptContract,
-  CONTRACTS,
+  contractsForBodies,
   PROGRAM_RESERVE_FLOOR,
   PROGRAM_RESERVE_REPUTATION_COST,
   PROGRAM_RESERVE_THRESHOLD,
@@ -418,7 +418,7 @@ export class UtilityTools {
     el('strong', '', heading, 'Contract Operations');
     el('span', '', heading, `${game.campaign.activeContracts.length}/3 active assignments`);
     const board = el('div', 'contract-operation-grid', parent);
-    for (const contract of CONTRACTS) {
+    for (const contract of contractsForBodies(game.universe.bodies.keys())) {
       const completed = game.campaign.completedContracts.includes(contract.id);
       const active = game.campaign.activeContracts.includes(contract.id);
       const prerequisiteMet = !contract.requiresTech || game.campaign.unlockedTech.includes(contract.requiresTech);

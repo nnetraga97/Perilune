@@ -1,0 +1,1666 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "58b222ce1a150b43af3f00bbe59eb78bc5b9b145",
+  "generatedAt": "2026-07-20",
+  "interpolation": {
+    "sourceControlPoint": "nearest source pixel center",
+    "generatedVisual": "nearest decoded PNG pixel center",
+    "cpuAuthority": "runtime bilinear seam-wrapped 512x256 Int16 half-metre grid"
+  },
+  "launchEnvelope": {
+    "flatRadiusMeters": 80,
+    "blendRadiusMeters": 450
+  },
+  "controls": [
+    {
+      "id": "earth-ksc-diagnostic",
+      "bodyId": "earth",
+      "latitude": 28.5728722,
+      "longitude": -80.6489808,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          5961,
+          3685
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": 1.5487953424453735
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -8.239871824216607,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -2.746623941406142,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": 0.5493247882805008,
+          "legacyOceanByte": 0
+        }
+      },
+      "cpuMacroHeightMeters": -11.167249815339414,
+      "recipeContactHeightMeters": -11.167249815339414,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-lc39b",
+      "bodyId": "earth",
+      "latitude": 28.6272,
+      "longitude": -80.6209,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          5962,
+          3682
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": 1.1637319326400757
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -8.239871824216607,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -2.746623941406142,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": 0.5493247882805008,
+          "legacyOceanByte": 0
+        }
+      },
+      "cpuMacroHeightMeters": -13.748325549510785,
+      "recipeContactHeightMeters": 3,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-atlantic",
+      "bodyId": "earth",
+      "latitude": 28.6272,
+      "longitude": -80.25,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          5985,
+          3682
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": -37.28127670288086
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -12.268253604943311,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -34.97367818722887,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": -30.945296406500347,
+          "legacyOceanByte": 255
+        }
+      },
+      "cpuMacroHeightMeters": -231.82251200000468,
+      "recipeContactHeightMeters": -231.82251200000468,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-antimeridian-west",
+      "bodyId": "earth",
+      "latitude": 0,
+      "longitude": -179.999,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          0,
+          5400
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": -5283.779296875
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -5295.674067292286,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -5310.322728313115,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": -5281.757839322499,
+          "legacyOceanByte": 255
+        }
+      },
+      "cpuMacroHeightMeters": -5256.555866666666,
+      "recipeContactHeightMeters": -5256.555866666666,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-antimeridian-east",
+      "bodyId": "earth",
+      "latitude": 0,
+      "longitude": 179.999,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          21599,
+          5400
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": -5233.6533203125
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -5286.518654154269,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -5175.555046921492,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": -5182.5131609063865,
+          "legacyOceanByte": 255
+        }
+      },
+      "cpuMacroHeightMeters": -5256.944133333334,
+      "recipeContactHeightMeters": -5256.944133333334,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-north-pole",
+      "bodyId": "earth",
+      "latitude": 90,
+      "longitude": 0,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          10800,
+          0
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": -4185.6875
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -4193.362325474936,
+          "legacyOceanByte": 255
+        },
+        "medium": {
+          "heightMeters": -4220.8285648889905,
+          "legacyOceanByte": 255
+        },
+        "high": {
+          "heightMeters": -4212.405584802013,
+          "legacyOceanByte": 255
+        }
+      },
+      "cpuMacroHeightMeters": -4139.5,
+      "recipeContactHeightMeters": -4139.5,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "earth-south-pole",
+      "bodyId": "earth",
+      "latitude": -90,
+      "longitude": 0,
+      "source": {
+        "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "datum": "EGM2008 geoid",
+        "pixel": [
+          10800,
+          10799
+        ],
+        "dimensions": [
+          21600,
+          10800
+        ],
+        "heightMeters": 2833.853271484375
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": 2804.303044174869,
+          "legacyOceanByte": 0
+        },
+        "medium": {
+          "heightMeters": 2814.9233234149706,
+          "legacyOceanByte": 0
+        },
+        "high": {
+          "heightMeters": 2821.149004348821,
+          "legacyOceanByte": 0
+        }
+      },
+      "cpuMacroHeightMeters": 2795.75,
+      "recipeContactHeightMeters": 2779.746496848274,
+      "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+    },
+    {
+      "id": "moon-equator-origin",
+      "bodyId": "moon",
+      "latitude": 0,
+      "longitude": 0,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          2880,
+          1440
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": -718.5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -716.1364156557574
+        },
+        "medium": {
+          "heightMeters": -721.6296635385679
+        },
+        "high": {
+          "heightMeters": -717.6012817578394
+        }
+      },
+      "cpuMacroHeightMeters": -775.75,
+      "recipeContactHeightMeters": -793.8032310505239,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    },
+    {
+      "id": "moon-south-polar-reference",
+      "bodyId": "moon",
+      "latitude": -87.5,
+      "longitude": 45,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          3600,
+          2840
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": -2522.5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -1291.096360723277
+        },
+        "medium": {
+          "heightMeters": -2004.1199359121074
+        },
+        "high": {
+          "heightMeters": -2309.178301670863
+        }
+      },
+      "cpuMacroHeightMeters": -3036.375000000245,
+      "recipeContactHeightMeters": -3068.4250978419313,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    },
+    {
+      "id": "moon-antimeridian-west",
+      "bodyId": "moon",
+      "latitude": 0,
+      "longitude": -179.999,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          0,
+          1440
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": 2770.5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": 2833.9665827420467
+        },
+        "medium": {
+          "heightMeters": 2833.9665827420467
+        },
+        "high": {
+          "heightMeters": 2816.0219729915316
+        }
+      },
+      "cpuMacroHeightMeters": 2807.3995333333332,
+      "recipeContactHeightMeters": 2819.3416665180366,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    },
+    {
+      "id": "moon-antimeridian-east",
+      "bodyId": "moon",
+      "latitude": 0,
+      "longitude": 179.999,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          5759,
+          1440
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": 2605.5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": 2984.8477912565813
+        },
+        "medium": {
+          "heightMeters": 2796.6124971389345
+        },
+        "high": {
+          "heightMeters": 2622.6596475165934
+        }
+      },
+      "cpuMacroHeightMeters": 2807.3504666666668,
+      "recipeContactHeightMeters": 2821.737376348318,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    },
+    {
+      "id": "moon-north-pole",
+      "bodyId": "moon",
+      "latitude": 90,
+      "longitude": 0,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          2880,
+          0
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": 5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": -208.5603112840472
+        },
+        "medium": {
+          "heightMeters": -37.90341039139457
+        },
+        "high": {
+          "heightMeters": -14.465552758068952
+        }
+      },
+      "cpuMacroHeightMeters": -1019.25,
+      "recipeContactHeightMeters": -1016.9518312220073,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    },
+    {
+      "id": "moon-south-pole",
+      "bodyId": "moon",
+      "latitude": -90,
+      "longitude": 0,
+      "source": {
+        "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+        "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "datum": "1737400 m LOLA reference sphere",
+        "pixel": [
+          2880,
+          2879
+        ],
+        "dimensions": [
+          5760,
+          2880
+        ],
+        "heightMeters": 1020.5
+      },
+      "tiers": {
+        "low": {
+          "heightMeters": 246.64682993819952
+        },
+        "medium": {
+          "heightMeters": 663.4012359807748
+        },
+        "high": {
+          "heightMeters": 939.5284962233909
+        }
+      },
+      "cpuMacroHeightMeters": -204.75,
+      "recipeContactHeightMeters": -223.82531803351355,
+      "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+    }
+  ],
+  "transects": [
+    {
+      "id": "earth-ksc-coast",
+      "bodyId": "earth",
+      "points": [
+        {
+          "latitude": 28.6272,
+          "longitude": -80.95,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-0",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5943,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 1.0248039960861206
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 8.606088349737547,
+              "legacyOceanByte": 0
+            },
+            "medium": {
+              "heightMeters": 4.943923094529964,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": 3.112840466925263,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": 5.274635022222579,
+          "recipeContactHeightMeters": 3.4050869562303285,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.9,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-1",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5945,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 3.291654348373413
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 8.606088349737547,
+              "legacyOceanByte": 0
+            },
+            "medium": {
+              "heightMeters": 4.943923094529964,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": 3.8452735179671436,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": 2.384486044445347,
+          "recipeContactHeightMeters": -1.2919186743559545,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.85000000000001,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-2",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5948,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 8.485265731811523
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": 2.0141908903642616,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": 3.112840466925263,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": -0.5056629333328837,
+          "recipeContactHeightMeters": -0.5056629333328837,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.8,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-3",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5952,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -1.233432650566101
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": 2.0141908903642616,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": 3.112840466925263,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": -3.3958119111111147,
+          "recipeContactHeightMeters": -3.3958119111111147,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.75,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-4",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5955,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 0.44372281432151794
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": 2.0141908903642616,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": -0.1831082627595606,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -6.285960888889175,
+          "recipeContactHeightMeters": -6.285960888889175,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.7,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-5",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5958,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 1.6141878366470337
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": 2.0141908903642616,
+              "legacyOceanByte": 0
+            },
+            "high": {
+              "heightMeters": -0.1831082627595606,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -9.176109866667403,
+          "recipeContactHeightMeters": -9.176109866667403,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.65,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-6",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5960,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": 1.6926580667495728
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -2.746623941406142,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": 0.5493247882805008,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": -12.066258844444475,
+          "recipeContactHeightMeters": -12.066258844444475,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.60000000000001,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-7",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5963,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -2.9255447387695312
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -2.746623941406142,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": 0.5493247882805008,
+              "legacyOceanByte": 0
+            }
+          },
+          "cpuMacroHeightMeters": -14.956407822221726,
+          "recipeContactHeightMeters": -14.956407822221726,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.55,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-8",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5967,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -14.471431732177734
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -8.239871824216607,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -2.746623941406142,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -9.704737926298549,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -17.846556799999775,
+          "recipeContactHeightMeters": -17.846556799999775,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.5,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-9",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5970,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -16.734846115112305
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -17.395284962234655,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -13.733119707027072,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -26.695344000005157,
+          "recipeContactHeightMeters": -26.695344000005157,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.45,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-10",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5973,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -13.837301254272461
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -17.395284962234655,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -13.733119707027072,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -67.72077760001122,
+          "recipeContactHeightMeters": -67.72077760001122,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.4,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-11",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5975,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -10.058821678161621
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -17.395284962234655,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -17.761501487753776,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -108.74621120000168,
+          "recipeContactHeightMeters": -108.74621120000168,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.35000000000001,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-12",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5978,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -21.60044288635254
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -17.395284962234655,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -17.761501487753776,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -149.77164479999098,
+          "recipeContactHeightMeters": -149.77164479999098,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.3,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-13",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5982,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -31.981304168701172
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -34.97367818722887,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -30.945296406500347,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -190.79707839999725,
+          "recipeContactHeightMeters": -190.79707839999725,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        },
+        {
+          "latitude": 28.6272,
+          "longitude": -80.25,
+          "bodyId": "earth",
+          "id": "earth-ksc-coast-14",
+          "source": {
+            "path": "assets/planets/sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+            "sha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+            "datum": "EGM2008 geoid",
+            "pixel": [
+              5985,
+              3682
+            ],
+            "dimensions": [
+              21600,
+              10800
+            ],
+            "heightMeters": -37.28127670288086
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -12.268253604943311,
+              "legacyOceanByte": 255
+            },
+            "medium": {
+              "heightMeters": -34.97367818722887,
+              "legacyOceanByte": 255
+            },
+            "high": {
+              "heightMeters": -30.945296406500347,
+              "legacyOceanByte": 255
+            }
+          },
+          "cpuMacroHeightMeters": -231.82251200000468,
+          "recipeContactHeightMeters": -231.82251200000468,
+          "recipeHash": "73fa4328034643eff7650b6e307c05e2"
+        }
+      ]
+    },
+    {
+      "id": "moon-equatorial-relief",
+      "bodyId": "moon",
+      "points": [
+        {
+          "latitude": 0,
+          "longitude": -10,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-0",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2720,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -1101.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -1100.6637674525064
+            },
+            "medium": {
+              "heightMeters": -1092.6070038910511
+            },
+            "high": {
+              "heightMeters": -1102.1286335545901
+            }
+          },
+          "cpuMacroHeightMeters": -1104.7083333333335,
+          "recipeContactHeightMeters": -1051.079488861775,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": -8,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-1",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2752,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -1069
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -1092.6070038910511
+            },
+            "medium": {
+              "heightMeters": -1114.946211947814
+            },
+            "high": {
+              "heightMeters": -1132.1583886472872
+            }
+          },
+          "cpuMacroHeightMeters": -964.1638888888899,
+          "recipeContactHeightMeters": -935.6784453534298,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": -6,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-2",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2784,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -979.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -734.0810254062708
+            },
+            "medium": {
+              "heightMeters": -943.5568780041212
+            },
+            "high": {
+              "heightMeters": -968.4596017395288
+            }
+          },
+          "cpuMacroHeightMeters": -1528.6333333333346,
+          "recipeContactHeightMeters": -1528.5802730013677,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": -4,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-3",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2816,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -941
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -864.0878919661245
+            },
+            "medium": {
+              "heightMeters": -902.5406271457996
+            },
+            "high": {
+              "heightMeters": -945.0217441062032
+            }
+          },
+          "cpuMacroHeightMeters": -916.600000000001,
+          "recipeContactHeightMeters": -885.1728060470782,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": -2,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-4",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2848,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -805.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -817.5783932249942
+            },
+            "medium": {
+              "heightMeters": -827.1000228885332
+            },
+            "high": {
+              "heightMeters": -808.0567635614552
+            }
+          },
+          "cpuMacroHeightMeters": -769.1444444444451,
+          "recipeContactHeightMeters": -746.1390902487124,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 0,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-5",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2880,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -718.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -716.1364156557574
+            },
+            "medium": {
+              "heightMeters": -721.6296635385679
+            },
+            "high": {
+              "heightMeters": -717.6012817578394
+            }
+          },
+          "cpuMacroHeightMeters": -775.75,
+          "recipeContactHeightMeters": -793.8032310505239,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 2,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-6",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2912,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -601
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -574.4106202792409
+            },
+            "medium": {
+              "heightMeters": -581.0025177386142
+            },
+            "high": {
+              "heightMeters": -578.4390020599694
+            }
+          },
+          "cpuMacroHeightMeters": -623.0444444444436,
+          "recipeContactHeightMeters": -650.8286887763028,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 4,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-7",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2944,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 161.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 85.87777523460682
+            },
+            "medium": {
+              "heightMeters": -126.52780956740571
+            },
+            "high": {
+              "heightMeters": 87.34264133669058
+            }
+          },
+          "cpuMacroHeightMeters": 34.89722222221758,
+          "recipeContactHeightMeters": 7.933729926758808,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 6,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-8",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              2976,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 586.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 304.5090409704735
+            },
+            "medium": {
+              "heightMeters": 585.3971160448618
+            },
+            "high": {
+              "heightMeters": 575.8754863813228
+            }
+          },
+          "cpuMacroHeightMeters": 468.0083333333431,
+          "recipeContactHeightMeters": 476.2701035496505,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 8,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-9",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3008,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 416
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 77.08857862210971
+            },
+            "medium": {
+              "heightMeters": 293.1563286793298
+            },
+            "high": {
+              "heightMeters": 438.1780727855348
+            }
+          },
+          "cpuMacroHeightMeters": 1047.0694444444553,
+          "recipeContactHeightMeters": 1062.494949311525,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": 0,
+          "longitude": 10,
+          "bodyId": "moon",
+          "id": "moon-equatorial-relief-10",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3040,
+              1440
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 1131.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 1472.0073243305105
+            },
+            "medium": {
+              "heightMeters": 1138.3840695811414
+            },
+            "high": {
+              "heightMeters": 1127.3975738155204
+            }
+          },
+          "cpuMacroHeightMeters": 962.0694444444422,
+          "recipeContactHeightMeters": 1017.7608689184026,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        }
+      ]
+    },
+    {
+      "id": "moon-south-pole-relief",
+      "bodyId": "moon",
+      "points": [
+        {
+          "latitude": -89.5,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-0",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2872
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -202.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -456.4888990615691
+            },
+            "medium": {
+              "heightMeters": -59.51018539711549
+            },
+            "high": {
+              "heightMeters": -299.382009613184
+            }
+          },
+          "cpuMacroHeightMeters": 565.0361111114613,
+          "recipeContactHeightMeters": 558.9554791968674,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -89,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-1",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2864
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -791
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -864.4541084916455
+            },
+            "medium": {
+              "heightMeters": -804.3945983062476
+            },
+            "high": {
+              "heightMeters": -805.4932478828105
+            }
+          },
+          "cpuMacroHeightMeters": -671.052777777522,
+          "recipeContactHeightMeters": -667.6033209633125,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -88.5,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-2",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2856
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -3761.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -3946.8986037994973
+            },
+            "medium": {
+              "heightMeters": -3849.4850080109863
+            },
+            "high": {
+              "heightMeters": -3946.1661707484554
+            }
+          },
+          "cpuMacroHeightMeters": -2793.175000000155,
+          "recipeContactHeightMeters": -2808.2068289126832,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -88,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-3",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2848
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -3936
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -3952.025635156787
+            },
+            "medium": {
+              "heightMeters": -3920.164797436484
+            },
+            "high": {
+              "heightMeters": -3934.4472419317917
+            }
+          },
+          "cpuMacroHeightMeters": -3698.5138888885726,
+          "recipeContactHeightMeters": -3691.5883639712983,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -87.5,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-4",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2840
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": -2522.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": -1291.096360723277
+            },
+            "medium": {
+              "heightMeters": -2004.1199359121074
+            },
+            "high": {
+              "heightMeters": -2309.178301670863
+            }
+          },
+          "cpuMacroHeightMeters": -3036.375000000245,
+          "recipeContactHeightMeters": -3068.4250978419313,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -87,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-5",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2832
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 30
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 253.97116044861468
+            },
+            "medium": {
+              "heightMeters": 318.42526894026014
+            },
+            "high": {
+              "heightMeters": 190.61570153353023
+            }
+          },
+          "cpuMacroHeightMeters": -529.1749999985504,
+          "recipeContactHeightMeters": -522.8485612118893,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        },
+        {
+          "latitude": -86.5,
+          "longitude": 45,
+          "bodyId": "moon",
+          "id": "moon-south-pole-relief-6",
+          "source": {
+            "path": "assets/planets/sources/nasa-lro-palla/ldem_16_uint.tif",
+            "sha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+            "datum": "1737400 m LOLA reference sphere",
+            "pixel": [
+              3600,
+              2824
+            ],
+            "dimensions": [
+              5760,
+              2880
+            ],
+            "heightMeters": 2055.5
+          },
+          "tiers": {
+            "low": {
+              "heightMeters": 1309.4071869993131
+            },
+            "medium": {
+              "heightMeters": 1908.171206225683
+            },
+            "high": {
+              "heightMeters": 2027.9240100709558
+            }
+          },
+          "cpuMacroHeightMeters": 1166.6388888890124,
+          "recipeContactHeightMeters": 1148.187712703855,
+          "recipeHash": "d10ffdafdf48fa267139c2c6060fbed3"
+        }
+      ]
+    }
+  ]
+}

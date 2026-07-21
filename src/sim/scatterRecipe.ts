@@ -267,9 +267,10 @@ function emptyScatterRecipe(bodyId: string, terrainRecipeHash: string): Physical
  * recipe whose hash is still distinct from its terrain hash.
  */
 export function scatterRecipeForBody(body: Body): PhysicalScatterRecipe {
-  const cached = recipeCache.get(body.id);
-  if (cached) return cached;
   const terrainRecipeHash = recipeForBody(body).hash;
+  const cacheKey = `${body.id}:${terrainRecipeHash}`;
+  const cached = recipeCache.get(cacheKey);
+  if (cached) return cached;
   let recipe: PhysicalScatterRecipe;
   if (body.id === 'veyra') {
     recipe = parseScatterRecipe(veyraScatterArtifact);
@@ -280,6 +281,6 @@ export function scatterRecipeForBody(body: Body): PhysicalScatterRecipe {
   } else {
     recipe = emptyScatterRecipe(body.id, terrainRecipeHash);
   }
-  recipeCache.set(body.id, recipe);
+  recipeCache.set(cacheKey, recipe);
   return recipe;
 }

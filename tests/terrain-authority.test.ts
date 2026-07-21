@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Vec3 } from '../src/core/vec3';
 import { GameState } from '../src/sim/state';
@@ -12,6 +13,8 @@ import {
 import {
   LAUNCH_PAD_CONTACT_RADIUS,
   LAUNCH_PAD_DECK_HEIGHT,
+  LAUNCH_SITE_LAT,
+  LAUNCH_SITE_LON,
   launchSiteBodyFixedDirection,
 } from '../src/sim/launchSite';
 import { evaluateRecipeHeight, recipeForBody } from '../src/sim/terrainRecipe';
@@ -39,8 +42,13 @@ function findDirection(predicate: (direction: Vec3) => boolean): Vec3 {
 }
 
 describe('planet surface authority', () => {
+  it('places the selected-system launch site at Kennedy Space Center LC-39B', () => {
+    expect(LAUNCH_SITE_LAT * 180 / Math.PI).toBeCloseTo(28.6272, 6);
+    expect(LAUNCH_SITE_LON * 180 / Math.PI).toBeCloseTo(-80.6209, 6);
+  });
+
   it('places a flat physical launchpad deck on natural Veyra terrain only inside its footprint', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const site = launchSiteBodyFixedDirection(new Vec3());
     const east = new Vec3(-site.y, site.x, 0).normalize();
     const directionAtDistance = (distance: number): Vec3 => {
@@ -67,7 +75,7 @@ describe('planet surface authority', () => {
   });
 
   it('derives deterministic Veyra masks and normals from the shared height evaluator', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const source = new Uint8Array(32 * 16 * 3);
     for (let index = 0; index < source.length; index++) source[index] = (index * 17) & 0xff;
     const generate = () => generateVeyraCanonicalMaps({
@@ -96,7 +104,7 @@ describe('planet surface authority', () => {
         const result = solidHeight(veyra, direction);
         if (result.kind !== 'solid') throw new Error('expected solid Veyra terrain');
         if (Math.abs(result.height) > first.texelHeightRange) {
-          expect(first.material[pixel * 4 + 3] === 255).toBe(result.height < 0);
+          expect(first.material[pixel * 4 + 2] >= 128).toBe(result.height < 0);
         }
         const normal = decodeOctNormal(first.normal[pixel * 2], first.normal[pixel * 2 + 1]);
         expect(normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
@@ -114,7 +122,7 @@ describe('planet surface authority', () => {
   it('matches authoritative shoreline signs and finite-difference normals across 10,000 seeded samples', () => {
     const width = 144;
     const height = 72;
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const source = new Uint8Array(width * height * 3);
     for (let index = 0; index < source.length; index++) source[index] = (index * 29 + 17) & 0xff;
     const heightAt = (direction: Readonly<Vec3>): number => {
@@ -147,7 +155,7 @@ describe('planet surface authority', () => {
         const direction = directionFromEquirectUv((x + 0.5) / width, (y + 0.5) / height);
         const authoritativeHeight = heightAt(direction);
         if (Math.abs(authoritativeHeight) > maps.texelHeightRange) {
-          expect(maps.material[pixel * 4 + 3] === 255).toBe(authoritativeHeight < 0);
+          expect(maps.material[pixel * 4 + 2] >= 128).toBe(authoritativeHeight < 0);
         }
 
         const eastDirection = directionFromEquirectUv((x + 1.5) / width, (y + 0.5) / height);
@@ -170,7 +178,7 @@ describe('planet surface authority', () => {
   });
 
   it('returns raw seafloor separately from water contact', () => {
-    const veyra = new GameState().universe.get('veyra');
+    const veyra = createLegacyGameState().universe.get('veyra');
     const ocean = findDirection((direction) => {
       const surface = solidHeight(veyra, direction);
       return surface.kind === 'solid' && surface.height < 0;
@@ -186,7 +194,7 @@ describe('planet surface authority', () => {
   });
 
   it('uses the same versioned recipe evaluator as the public solid query', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     for (const body of game.universe.bodies.values()) {
       const recipe = recipeForBody(body);
       expect(recipe.version).toBeGreaterThanOrEqual(1);
@@ -202,7 +210,7 @@ describe('planet surface authority', () => {
   });
 
   it('returns a typed no-surface result for Tyran and Auren', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     for (const id of ['tyran', 'auren']) {
       const body = game.universe.get(id);
       expect(solidHeight(body, new Vec3(1, 0, 0))).toEqual({ kind: 'none' });

@@ -51,3 +51,35 @@ test('loads the integrated Wayfarer from its own VAB section', async ({ page }) 
   await page.getByRole('button', { name: 'Launch this craft' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
 });
+
+test('loads the shared Odyssey orbital vehicle with its flight systems staged', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sandbox — just build and fly' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');
+
+  const library = page.locator('[data-section="built-in-crafts"]');
+  await expect(library.locator('[data-craft-id="odyssey-orbital-vehicle"]'))
+    .toContainText('Odyssey Orbital Vehicle');
+  await page.getByRole('button', { name: 'Load built-in craft Odyssey Orbital Vehicle' }).click();
+
+  await expect(page.locator('input.ed-name')).toHaveValue('Odyssey Orbital Vehicle');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(37);
+  await expect.poll(() => page.evaluate(() => window.__TEST__.stageCount())).toBe(4);
+  const counts = await page.evaluate(() => {
+    const result: Record<string, number> = {};
+    for (const part of window.__TEST__.parts()) result[part.defId] = (result[part.defId] ?? 0) + 1;
+    return result;
+  });
+  expect(counts).toMatchObject({
+    'solar-flat': 4,
+    'batt-m': 1,
+    'rcs-quad': 4,
+    'eng-aspen': 1,
+    'dec-m': 1,
+    'dec-interstage-ms': 1,
+  });
+  await expect(page.locator('.ed-unstaged .ed-stage-part')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Launch this craft' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
+});

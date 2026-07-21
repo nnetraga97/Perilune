@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestSha256": "248ae7eb433a85c055d71ee6e3e763fb215d646b50b1589d57b87b4128e5d383",
+  "manifestSha256": "d3d8bb832a6eca3448e2e6cebd29016db0e50b66ea5a1b8ce323b0d64be4d278",
   "manifest": {
     "schemaVersion": 1,
     "compiler": {
@@ -22,7 +22,7 @@
       "activeBodyGpuBytes": {
         "low": 67108864,
         "medium": 134217728,
-        "high": 268435456
+        "high": 335544320
       },
       "totalRendererGpuBytes": {
         "low": 268435456,
@@ -41,6 +41,210 @@
       }
     },
     "sources": [
+      {
+        "id": "nasa-black-marble-earth-2016",
+        "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km_geo.tif",
+        "author": "NASA Earth Observatory; Joshua Stevens; Suomi NPP VIIRS and Miguel Roman",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA Earth at Night Black Marble 2016 color map",
+        "checksumSha256": "e915ef2a20d84e2a59e1547d3ad564463ad4bcf22bfa02e0e0b8ed1cd722e9c0",
+        "localPath": "sources/nasa-black-marble-2016/BlackMarble_2016_3km_geo.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          13500,
+          6750
+        ],
+        "transformations": [
+          "bounded dark-floor removal",
+          "linear-light tier resampling",
+          "night-side emissive packaging"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "emissive"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "not-applicable",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "2016 cloud-free annual composite",
+        "productKind": "composited",
+        "derivedRecipe": "earth-source-pack-v1"
+      },
+      {
+        "id": "nasa-blue-marble-clouds-2002",
+        "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_8192.tif",
+        "author": "NASA Goddard Space Flight Center; Reto Stockli",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA Blue Marble separate cloud composite",
+        "checksumSha256": "d137775d8966ab8d443fd5126dc6e7ad72072bc1ed50555c5818d221735daf0f",
+        "localPath": "sources/nasa-blue-marble-clouds/cloud_combined_8192.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          8192,
+          4096
+        ],
+        "transformations": [
+          "luminance extraction",
+          "coverage and optical-density derivation",
+          "area-aware tier resampling"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "clouds"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "not-applicable",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "2001 multi-day visible and thermal composite",
+        "productKind": "composited",
+        "derivedRecipe": "earth-source-pack-v1"
+      },
+      {
+        "id": "nasa-bmng-earth-2004-07",
+        "url": "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/july/world.200407.3x21600x10800.jpg",
+        "author": "NASA Earth Observatory; Reto Stockli, Robert Simmon, and MODIS teams",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA Blue Marble Next Generation, July 2004 natural-color composite",
+        "checksumSha256": "dea8b4dc8a4f93f5f8bce0c8c85a508a178e7901e9ed8e6bf86e6ce7ef6d61e2",
+        "localPath": "sources/nasa-bmng-earth/world.200407.3x21600x10800.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          21600,
+          10800
+        ],
+        "transformations": [
+          "linear-light Lanczos3 tier resampling",
+          "BasisLZ KTX2 and WebP fallback encoding"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "albedo"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "not-applicable",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "2004-07 monthly composite",
+        "productKind": "composited",
+        "derivedRecipe": "earth-source-pack-v1"
+      },
+      {
+        "id": "nasa-lola-moon-height",
+        "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
+        "author": "NASA Scientific Visualization Studio and LOLA",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA LOLA; used to derive Earth's Moon normals and material response",
+        "checksumSha256": "45a2b32d56e81ed30db07fead8abc842b249b6511219d9ca2c53f81bc2dc5d62",
+        "localPath": "sources/nasa-lro-palla/ldem_16_uint.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          5760,
+          2880
+        ],
+        "transformations": [
+          "0.5 meter unsigned LOLA elevation decode",
+          "body-space oct normal derivation",
+          "UASTC KTX2 encoding"
+        ],
+        "bodies": [
+          "moon"
+        ],
+        "channels": [
+          "normal",
+          "heightMacro"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "Moon mean-Earth/polar-axis body-fixed sphere",
+        "verticalDatum": "LOLA reference sphere; 0.5 metre unsigned encoding with 10 km offset",
+        "projection": "simple cylindrical equirectangular",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 0.5,
+        "valueOffset": -10000,
+        "noDataValue": null,
+        "validRange": [
+          -10000,
+          10000
+        ],
+        "observation": "NASA SVS CGI Moon Kit release 4720",
+        "productKind": "modeled",
+        "derivedRecipe": "moon-source-pack-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
       {
         "id": "nasa-lola-palla-height",
         "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
@@ -74,6 +278,56 @@
           "endorsementSafe": true,
           "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
         }
+      },
+      {
+        "id": "nasa-lro-moon-color-8k",
+        "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_16bit_srgb_8k.tif",
+        "author": "NASA Scientific Visualization Studio and LRO",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA LRO/LOLA; used for Earth's Moon without recoloring",
+        "checksumSha256": "db7808e878b6a55eb409bb231eab8deb477f84b5c9d7396d76ff73e5d54992d9",
+        "localPath": "sources/nasa-lro-palla/lroc_color_16bit_srgb_8k.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          8192,
+          4096
+        ],
+        "transformations": [
+          "Lanczos3 tier resampling",
+          "RGB8 fallback and BasisLZ KTX2 encoding"
+        ],
+        "bodies": [
+          "moon"
+        ],
+        "channels": [
+          "albedo"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "Moon mean-Earth/polar-axis body-fixed sphere",
+        "verticalDatum": "not-applicable",
+        "projection": "simple cylindrical equirectangular",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          65535
+        ],
+        "observation": "NASA SVS CGI Moon Kit release 4720",
+        "productKind": "composited",
+        "derivedRecipe": "moon-source-pack-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
       },
       {
         "id": "nasa-lro-palla-color-8k",
@@ -172,9 +426,1731 @@
         "channels": [
           "albedo"
         ]
+      },
+      {
+        "id": "noaa-etopo-2022-earth-bedrock-60s",
+        "url": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_bed_elev_gtif/ETOPO_2022_v1_60s_N90W180_bed.tif",
+        "author": "NOAA National Centers for Environmental Information",
+        "license": "Public-Domain",
+        "licenseUrl": "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
+        "attribution": "NOAA NCEI ETOPO 2022 bedrock global relief model",
+        "checksumSha256": "a2cc72f8a4292dee928f439069457cdefc1fba319876807c626edce40258ba7a",
+        "localPath": "sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_bed.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          21600,
+          10800
+        ],
+        "transformations": [
+          "Float32 metre decode",
+          "grounded-ice thickness and mask derivation"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "material"
+        ],
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "EGM2008 geoid",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          -11000,
+          9000
+        ],
+        "observation": "ETOPO 2022 v1",
+        "productKind": "modeled",
+        "derivedRecipe": "earth-source-pack-v1"
+      },
+      {
+        "id": "noaa-etopo-2022-earth-surface-60s",
+        "url": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "author": "NOAA National Centers for Environmental Information",
+        "license": "Public-Domain",
+        "licenseUrl": "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
+        "attribution": "NOAA NCEI ETOPO 2022 ice-surface global relief model",
+        "checksumSha256": "9d27d4b8ea8e76977e2988bca667d7c8fa68b927355feffcddd6b4875a7fd08e",
+        "localPath": "sources/noaa-etopo-2022/ETOPO_2022_v1_60s_N90W180_surface.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          21600,
+          10800
+        ],
+        "transformations": [
+          "Float32 metre decode",
+          "spherical macro-normal derivation",
+          "ocean mask derivation",
+          "signed height RG encoding"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "normal",
+          "material",
+          "heightMacro"
+        ],
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "EGM2008 geoid",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          -11000,
+          9000
+        ],
+        "observation": "ETOPO 2022 v1",
+        "productKind": "modeled",
+        "derivedRecipe": "earth-source-pack-v1"
+      },
+      {
+        "id": "noaa-gshhg-2-3-7-full",
+        "url": "https://www.soest.hawaii.edu/pwessel/gshhg/gshhg-shp-2.3.7.zip",
+        "author": "Paul Wessel and Walter H. F. Smith; NOAA distribution",
+        "license": "LGPL-3.0",
+        "licenseUrl": "https://www.soest.hawaii.edu/pwessel/gshhg/",
+        "attribution": "GSHHG 2.3.7 full-resolution shoreline hierarchy",
+        "checksumSha256": "8dbbe7e071e77e9e75f2d639239099ebca8d5c16d6a07df8169729d49f15cf41",
+        "localPath": "sources/noaa-gshhg-2.3.7/gshhg-shp-2.3.7.zip",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          360,
+          180
+        ],
+        "transformations": [
+          "ESRI polygon decode",
+          "sample-center categorical rasterization",
+          "exact-code R8 packaging without mipmaps"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "surfaceClass",
+          "surfaceClassRegional"
+        ],
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "not-applicable",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          6
+        ],
+        "observation": "GSHHG release 2.3.7 (2017)",
+        "productKind": "measured",
+        "derivedRecipe": "earth-surface-class-v1"
+      },
+      {
+        "id": "polyhaven-dirt-diff-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt/dirt_diff_1k.jpg",
+        "author": "Charlotte Baglioni",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven dirt diff; soil local PBR response",
+        "checksumSha256": "6ce6ca7e28ed046f7f93fa60dcb29f8cf42cd5a539adc5676675acccfa34efd3",
+        "localPath": "sources/polyhaven-local/dirt_diff_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-dirt-nor_gl-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt/dirt_nor_gl_1k.jpg",
+        "author": "Charlotte Baglioni",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven dirt nor_gl; soil local PBR response",
+        "checksumSha256": "5a5f97d920fdcdf352b350b95558bf48bb306be1fe61a47418aadc60b7deb0ce",
+        "localPath": "sources/polyhaven-local/dirt_nor_gl_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-dirt-rough-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt/dirt_rough_1k.jpg",
+        "author": "Charlotte Baglioni",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven dirt rough; soil local PBR response",
+        "checksumSha256": "eff62d5ae7bf0c46b84173bc46f07528dd164aa39f5d550c93a805b36f54b704",
+        "localPath": "sources/polyhaven-local/dirt_rough_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-moon_meteor_02-diff-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/moon_meteor_02/moon_meteor_02_diff_1k.jpg",
+        "author": "Greg Zaal, Jenelle van Heerden, Rico Cilliers",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven moon_meteor_02 diff; regolith local PBR response",
+        "checksumSha256": "e8a82991f96aacc0f1f705cedebf35a50282856f2640627444ba499097a7aaee",
+        "localPath": "sources/polyhaven-local/moon_meteor_02_diff_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "moon"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-moon_meteor_02-nor_gl-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/moon_meteor_02/moon_meteor_02_nor_gl_1k.jpg",
+        "author": "Greg Zaal, Jenelle van Heerden, Rico Cilliers",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven moon_meteor_02 nor_gl; regolith local PBR response",
+        "checksumSha256": "78314fac2bcf14d9e09e4b93d423b6e57701a7cdbebc7a565f426fb9522c1443",
+        "localPath": "sources/polyhaven-local/moon_meteor_02_nor_gl_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "moon"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-moon_meteor_02-rough-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/moon_meteor_02/moon_meteor_02_rough_1k.jpg",
+        "author": "Greg Zaal, Jenelle van Heerden, Rico Cilliers",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven moon_meteor_02 rough; regolith local PBR response",
+        "checksumSha256": "6404cf10063b7b82326fa93bc638767c23a176e8baa6bd6bd52e519e2f441265",
+        "localPath": "sources/polyhaven-local/moon_meteor_02_rough_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "moon"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-rock_ground-diff-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_ground/rock_ground_diff_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven rock_ground diff; rock local PBR response",
+        "checksumSha256": "bec2573bc8aa9c714b690df753730e41f2077a1f0bbca83b13e055c86b4d5626",
+        "localPath": "sources/polyhaven-local/rock_ground_diff_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-rock_ground-nor_gl-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_ground/rock_ground_nor_gl_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven rock_ground nor_gl; rock local PBR response",
+        "checksumSha256": "eea3e980653ff19938326fe6416c717f69c1493d16caec54ce2797460157efbf",
+        "localPath": "sources/polyhaven-local/rock_ground_nor_gl_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-rock_ground-rough-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_ground/rock_ground_rough_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven rock_ground rough; rock local PBR response",
+        "checksumSha256": "2585e6eda380d10b081448fd98bc4e8c37b3e8947a26ec7d95d361920d36b2e7",
+        "localPath": "sources/polyhaven-local/rock_ground_rough_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-sand_01-diff-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sand_01/sand_01_diff_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven sand_01 diff; sand local PBR response",
+        "checksumSha256": "a73b90eaa6d675ef57e7d48a8cf23e1f412e353ab2e29cf73930b8ecd4e76875",
+        "localPath": "sources/polyhaven-local/sand_01_diff_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-sand_01-nor_gl-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sand_01/sand_01_nor_gl_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven sand_01 nor_gl; sand local PBR response",
+        "checksumSha256": "73984aecdc35b1ffbc322d64b7f8d8165b06970d11f37dd47010609fcb532704",
+        "localPath": "sources/polyhaven-local/sand_01_nor_gl_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-sand_01-rough-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sand_01/sand_01_rough_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven sand_01 rough; sand local PBR response",
+        "checksumSha256": "ccb179b12c56a9032d60e4f4e2da690b3612a58e1784eb14576372690cdcd1cb",
+        "localPath": "sources/polyhaven-local/sand_01_rough_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-snow_02-diff-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_02/snow_02_diff_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven snow_02 diff; snow-and-grounded-ice local PBR response",
+        "checksumSha256": "523a4e69c90b96d787dd69b897f29a2b3761a017024405c60aa630d1e8e9009a",
+        "localPath": "sources/polyhaven-local/snow_02_diff_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-snow_02-nor_gl-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_02/snow_02_nor_gl_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven snow_02 nor_gl; snow-and-grounded-ice local PBR response",
+        "checksumSha256": "9495ec680616b8340e2cbecbd151bff84c690cfad4209e90cc98d2d0ba81f810",
+        "localPath": "sources/polyhaven-local/snow_02_nor_gl_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "polyhaven-snow_02-rough-1k",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_02/snow_02_rough_1k.jpg",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.polyhaven.com/en/faq",
+        "attribution": "Poly Haven snow_02 rough; snow-and-grounded-ice local PBR response",
+        "checksumSha256": "b6dea8039ac2a5beaed6fd41834fb55540cc76b492edd1d48ba2da2f30f1cb75",
+        "localPath": "sources/polyhaven-local/snow_02_rough_1k.jpg",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1024,
+          1024
+        ],
+        "transformations": [
+          "1K source pin",
+          "diffuse luminance normalization without biome recoloring",
+          "OpenGL tangent normal preservation",
+          "roughness packing",
+          "2 metre body-fixed triplanar atlas sampling",
+          "displacement channel explicitly excluded"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "localDetail"
+        ],
+        "datum": "local photoscan tangent plane",
+        "verticalDatum": "not-applicable; displacement excluded",
+        "projection": "local tangent-plane tile",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Poly Haven 1K photographic material release",
+        "productKind": "measured",
+        "derivedRecipe": "local-pbr-atlas-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "usfws-nwi-ksc-snapshot-2026-07-20",
+        "url": "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query",
+        "author": "U.S. Fish and Wildlife Service National Wetlands Inventory",
+        "license": "Public-Domain",
+        "licenseUrl": "https://www.fws.gov/program/national-wetlands-inventory/data-download",
+        "attribution": "USFWS NWI Cowardin classification, bounded KSC snapshot",
+        "checksumSha256": "fba4859b81c6bbde032bb6168cca6f9b314d3c07ed24546de6f6eb8e3fb34e8d",
+        "localPath": "sources/usfws-nwi-ksc/nwi-ksc-2026-07-20.geojson",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          3840,
+          2160
+        ],
+        "transformations": [
+          "bounded EPSG:4326 FeatureServer snapshot",
+          "Cowardin system class mapping",
+          "sample-center categorical rasterization",
+          "GSHHG parent fallback"
+        ],
+        "bodies": [
+          "earth"
+        ],
+        "channels": [
+          "surfaceClassRegional"
+        ],
+        "datum": "WGS84 spherical presentation; source datum retained during authoring",
+        "projection": "EPSG:4326 plate-carree",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1",
+        "verticalDatum": "not-applicable",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": 0,
+        "validRange": [
+          0,
+          6
+        ],
+        "observation": "2026-07-20",
+        "productKind": "measured",
+        "derivedRecipe": "earth-surface-class-v1"
       }
     ],
     "packs": [
+      {
+        "bodyId": "earth",
+        "tier": "low",
+        "width": 1024,
+        "height": 512,
+        "compressedBytes": 1479762,
+        "transientBytes": 9961472,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/earth/low/albedo.ktx2",
+            "fallbackPath": "generated/earth/low/albedo.webp",
+            "packageChecksumSha256": "94d8edac6f41688ff0a63aac94109e20818889df143d2cd9d07f08d411b0477b",
+            "fallbackChecksumSha256": "52469aa5c56d52ed9cf25c3769f94ff4d19ea9169927ad911a3ebff63838068f",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 349544,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/low/normal.ktx2",
+            "fallbackPath": "generated/earth/low/normal.png",
+            "packageChecksumSha256": "d2363a9368752296cfcffc7e59ee8c3519b9f8074dad98a8dd212ca86837a9fd",
+            "fallbackChecksumSha256": "4b9c7fde174e545c9e285589c398589b890ffc67f7033461bd05ab292e4da769",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/low/material.ktx2",
+            "fallbackPath": "generated/earth/low/material.png",
+            "packageChecksumSha256": "fd821556b32bd331128d2b7bb31dc3f0644557c21f52b0213aa80dc2e8b031fe",
+            "fallbackChecksumSha256": "93577f23287dea5931ea63a98b03f891e9ab1812e3441509d898e834a75714e6",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "clouds",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/low/clouds.ktx2",
+            "fallbackPath": "generated/earth/low/clouds.png",
+            "packageChecksumSha256": "60764808b90fca4d45a91801b75cb1c4d8c2dac3ae141211b363974ed825fedb",
+            "fallbackChecksumSha256": "71e02482bc9df294bfd01e7ce92e191448c8ebc40d06e8bf720dfbe9204059cf",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/low/heightMacro.ktx2",
+            "fallbackPath": "generated/earth/low/heightMacro.png",
+            "packageChecksumSha256": "181f00b80933911d356d66d51175aaab44e894abd242f3857af9500a14ac2876",
+            "fallbackChecksumSha256": "05d085029ad8b822d794da658824ce4b696498dfc047ad4c889225bd227ffcd8",
+            "gpuFormat": "rg8",
+            "gpuBytes": 1398102,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/low/localDetail.ktx2",
+            "fallbackPath": "generated/earth/low/localDetail.png",
+            "packageChecksumSha256": "31b7e7b5a1d35c2e6d466b2a1ce8aef238db5ba98c1bd97ecda5033c8d92158a",
+            "fallbackChecksumSha256": "9bfa814f28d855f1df84c530cd43bc2a600e918ec02d572e8fad290512f4b8ab",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "surfaceClass",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/low/surfaceClass.ktx2",
+            "fallbackPath": "generated/earth/low/surfaceClass.png",
+            "packageChecksumSha256": "5e568c3496ca4ee18054c685f1c6bc4061f795ac7338674c0541fb9158891d9e",
+            "fallbackChecksumSha256": "01f8ff86346185aea8e7f4c12dea468582fb664952ba6fab7f05d82a3539a59d",
+            "gpuFormat": "r8",
+            "gpuBytes": 524288,
+            "fallbackGpuBytes": 524288,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false
+          },
+          {
+            "name": "surfaceClassRegional",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/low/surfaceClassRegional.ktx2",
+            "fallbackPath": "generated/earth/low/surfaceClassRegional.png",
+            "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+            "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+            "gpuFormat": "r8",
+            "gpuBytes": 8294400,
+            "fallbackGpuBytes": 8294400,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false,
+            "width": 3840,
+            "height": 2160,
+            "bounds": [
+              -80.8,
+              28.45,
+              -80.2,
+              28.75
+            ]
+          }
+        ]
+      },
+      {
+        "bodyId": "earth",
+        "tier": "medium",
+        "width": 2048,
+        "height": 1024,
+        "compressedBytes": 5481911,
+        "transientBytes": 46137344,
+        "bootCritical": true,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/earth/medium/albedo.ktx2",
+            "fallbackPath": "generated/earth/medium/albedo.webp",
+            "packageChecksumSha256": "cd5847570cd8c1e660fd2985b9ba47bf323967a5b63aa052790e089542322b5a",
+            "fallbackChecksumSha256": "bf8a0e85c221d42afad3df3ea691ef6392fea1c7740809b0482aa223a23e46b8",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/medium/normal.ktx2",
+            "fallbackPath": "generated/earth/medium/normal.png",
+            "packageChecksumSha256": "2e5b3b9eed039510e6f29b8c4dbfa57a29ab017e11d54eead7f285f967f3271a",
+            "fallbackChecksumSha256": "a528ff30e31893c570cd3dd35822190ed80f3d2c92d4b6402b25589e78b8002c",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/medium/material.ktx2",
+            "fallbackPath": "generated/earth/medium/material.png",
+            "packageChecksumSha256": "29362e90ec65f3c7850b1e9aa02c8f75ab51caf130b5206f4cafcf07a2dc71ea",
+            "fallbackChecksumSha256": "3194cbff05f1b5d9db93b6c5a399602e2c807598c8ab3a9dd34b270d852ded9a",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "clouds",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/medium/clouds.ktx2",
+            "fallbackPath": "generated/earth/medium/clouds.png",
+            "packageChecksumSha256": "50cd4100995ba171d01c0ea1a2630afd8af322ca6c258c742190c54462c76fa0",
+            "fallbackChecksumSha256": "d37392c815b2341d25c47e106abe0b4a5db4f6d5f24619b37a6fc7508fd6499f",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/medium/heightMacro.ktx2",
+            "fallbackPath": "generated/earth/medium/heightMacro.png",
+            "packageChecksumSha256": "2afac02f4acf37148c0d8d7a99e907ba61f6f7d9bf4e401a65a48daebe2517f5",
+            "fallbackChecksumSha256": "df203631caf12ddd00857bf2a2fa8a0dda6e47510b195b3aa2b331a48fdf4837",
+            "gpuFormat": "rg8",
+            "gpuBytes": 5592406,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "emissive",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/earth/medium/emissive.ktx2",
+            "fallbackPath": "generated/earth/medium/emissive.webp",
+            "packageChecksumSha256": "36340f076574e144bd731c43f61848596182437770b0007d98ab84454cd5995c",
+            "fallbackChecksumSha256": "5eaba9b4be8601a1733ef65c721916ad79597223db1ce85a805fabb8756f9b6f",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/medium/localDetail.ktx2",
+            "fallbackPath": "generated/earth/medium/localDetail.png",
+            "packageChecksumSha256": "004ee77286de8a9372d11b3d4d54fb7ed369c5499583ac4471b0c20413af91e9",
+            "fallbackChecksumSha256": "1516fa2e46cea6e9a937ef9090f9ba2169fc109332ec3fdf949a4ccdec34a07e",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "surfaceClass",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/medium/surfaceClass.ktx2",
+            "fallbackPath": "generated/earth/medium/surfaceClass.png",
+            "packageChecksumSha256": "0b4c868e85ac880cf225037a6fa227cf8f474b6dba97ad6135d68144812f279f",
+            "fallbackChecksumSha256": "852764845b0a05dee28f21fea1e0b11545adcbe74c18a4813f928acc83e16cf3",
+            "gpuFormat": "r8",
+            "gpuBytes": 2097152,
+            "fallbackGpuBytes": 2097152,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false
+          },
+          {
+            "name": "surfaceClassRegional",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/medium/surfaceClassRegional.ktx2",
+            "fallbackPath": "generated/earth/medium/surfaceClassRegional.png",
+            "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+            "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+            "gpuFormat": "r8",
+            "gpuBytes": 8294400,
+            "fallbackGpuBytes": 8294400,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false,
+            "width": 3840,
+            "height": 2160,
+            "bounds": [
+              -80.8,
+              28.45,
+              -80.2,
+              28.75
+            ]
+          }
+        ]
+      },
+      {
+        "bodyId": "earth",
+        "tier": "high",
+        "width": 4096,
+        "height": 2048,
+        "compressedBytes": 20710897,
+        "transientBytes": 184549376,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/earth/high/albedo.ktx2",
+            "fallbackPath": "generated/earth/high/albedo.webp",
+            "packageChecksumSha256": "e6573379ea449cda4cefe84a752ecc384217e997e88ccbe6c276cec7b41be68d",
+            "fallbackChecksumSha256": "5b82b5a4653220099e39c9edab77de20452b1f7d6bffdb813e72ff662a892d47",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/high/normal.ktx2",
+            "fallbackPath": "generated/earth/high/normal.png",
+            "packageChecksumSha256": "b4383ce4fc5bb78058a6de3d71cab38083142bdea1937a3accde336d622c98ef",
+            "fallbackChecksumSha256": "67d4b7d3cfba6ff0c1c97a6eaee1d56cef556370758a55bf4123f7121b61a8d3",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/high/material.ktx2",
+            "fallbackPath": "generated/earth/high/material.png",
+            "packageChecksumSha256": "0ac88ee2a9a3b11e68ab12710323657675d458f96c1292b091d4a18fe1ee749f",
+            "fallbackChecksumSha256": "bf6b532d15659e027d500c565218fbcf9fd76b860d3667cb33a8520defef78b1",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "clouds",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/high/clouds.ktx2",
+            "fallbackPath": "generated/earth/high/clouds.png",
+            "packageChecksumSha256": "3217de241f6fbbbfd656aecc53045f93c091260e2fd487e170cc3d9927dc8151",
+            "fallbackChecksumSha256": "8639701e5c032c1633bce208550b3d72bacd2281f89bff88ae5c58e7d333c74b",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/earth/high/heightMacro.ktx2",
+            "fallbackPath": "generated/earth/high/heightMacro.png",
+            "packageChecksumSha256": "3f4a71e0c7cede7e20c6e1394e37127fc9e8ef5b1f434f604236974a43c18239",
+            "fallbackChecksumSha256": "a024bd26de071184bb3a1b68222d1a5049c0e424b2260a4f9f7563ecc4d96cde",
+            "gpuFormat": "rg8",
+            "gpuBytes": 22369622,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "emissive",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/earth/high/emissive.ktx2",
+            "fallbackPath": "generated/earth/high/emissive.webp",
+            "packageChecksumSha256": "4232ea6b26d492ba4a663c614a89c45fa6af04785785e8d12d89a5277e4de899",
+            "fallbackChecksumSha256": "54a978e3cefba5e1b4a72327ca54d02a27530d03bb22f573977aedf3b5c66105",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/earth/high/localDetail.ktx2",
+            "fallbackPath": "generated/earth/high/localDetail.png",
+            "packageChecksumSha256": "398693ab07b79ef63d0bb5c3ad82461554033fda55d2ccf3ed425049e95ecd3b",
+            "fallbackChecksumSha256": "e0911c2fc841b6a9a89ad2bbe83ab7a5b6bab8886416faa2c53375a68d8de2b2",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "surfaceClass",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/high/surfaceClass.ktx2",
+            "fallbackPath": "generated/earth/high/surfaceClass.png",
+            "packageChecksumSha256": "95297b32c77b1dbab0afde04a8b19c8f4896977699d1404c62ad098a4ca0886d",
+            "fallbackChecksumSha256": "925af64375126c50ee3623dffd932d05c96c99686bbb28c4cdb4092f6cc8f1b4",
+            "gpuFormat": "r8",
+            "gpuBytes": 8388608,
+            "fallbackGpuBytes": 8388608,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false
+          },
+          {
+            "name": "surfaceClassRegional",
+            "colorSpace": "linear",
+            "logicalFormat": "R8",
+            "packagePath": "generated/earth/high/surfaceClassRegional.ktx2",
+            "fallbackPath": "generated/earth/high/surfaceClassRegional.png",
+            "packageChecksumSha256": "518d5f7f243c7e1174a899a5a5b957563afd4971b496207aa0a930a9b5012ce5",
+            "fallbackChecksumSha256": "450388eb816f9a93c524757640e4f3cf44605be31a054b3707f46e382810c227",
+            "gpuFormat": "r8",
+            "gpuBytes": 8294400,
+            "fallbackGpuBytes": 8294400,
+            "fallbackLayout": "r",
+            "transcodeTargets": [
+              "r8"
+            ],
+            "mipmapped": false,
+            "width": 3840,
+            "height": 2160,
+            "bounds": [
+              -80.8,
+              28.45,
+              -80.2,
+              28.75
+            ]
+          }
+        ]
+      },
+      {
+        "bodyId": "moon",
+        "tier": "low",
+        "width": 1024,
+        "height": 512,
+        "compressedBytes": 1650830,
+        "transientBytes": 7864320,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/moon/low/albedo.ktx2",
+            "fallbackPath": "generated/moon/low/albedo.webp",
+            "packageChecksumSha256": "79650b291872e2a3dcd504c42d3ba94ee28f8a58ec2dd358d0c27ec680346aa3",
+            "fallbackChecksumSha256": "d7ccf10db4e15186234079f99d0a5ec01e22f959a92077e9323ceac8969e2a1c",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 349544,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/low/normal.ktx2",
+            "fallbackPath": "generated/moon/low/normal.png",
+            "packageChecksumSha256": "04c3fcf00c60392b630538340b6075eb6052b9e0fab60cbee8a927dbe296e3f1",
+            "fallbackChecksumSha256": "95b63ea49155fc8d18dd907da88f370cdf3c8527dc33ebdd131632ea8ce82f05",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/low/material.ktx2",
+            "fallbackPath": "generated/moon/low/material.png",
+            "packageChecksumSha256": "c32fd438af8785706b065ae0d60b11166e6f360022e3218a338004441b0a538f",
+            "fallbackChecksumSha256": "5b5fd1bdd784dae278639da411c68dd94c2628ad8a5dd3b474274bceaa730b9c",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/low/heightMacro.ktx2",
+            "fallbackPath": "generated/moon/low/heightMacro.png",
+            "packageChecksumSha256": "ab40670e73a57612797f4aaa97588aef49de9cee3d45e73ddc99110654f4d642",
+            "fallbackChecksumSha256": "e078c1ebf3316341fa641cc191f1ce4323f7fdec2bb92e5bfd4a29207c89d8c4",
+            "gpuFormat": "rg8",
+            "gpuBytes": 1398102,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/low/localDetail.ktx2",
+            "fallbackPath": "generated/moon/low/localDetail.png",
+            "packageChecksumSha256": "f204ed30f74cf93c84ac4f183dddd518b87f4f6458dd66a61e55817fa7648ccc",
+            "fallbackChecksumSha256": "5db11855a7044a7caecdaa8f2f91e9b92e3a413a02bcdf6cf8b844daae50465a",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 699088,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "moon",
+        "tier": "medium",
+        "width": 2048,
+        "height": 1024,
+        "compressedBytes": 6266932,
+        "transientBytes": 31457280,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/moon/medium/albedo.ktx2",
+            "fallbackPath": "generated/moon/medium/albedo.webp",
+            "packageChecksumSha256": "cab52206a0f2eda7decf598c2c8af56123a4e74d8a43dc1221757ed602383db9",
+            "fallbackChecksumSha256": "cdb0f9cc790fd52d9f51666d1bbb8fbe69922f10408c0e751600b371682251d9",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/medium/normal.ktx2",
+            "fallbackPath": "generated/moon/medium/normal.png",
+            "packageChecksumSha256": "0fb4c8ae7b9d1499d4a53246276dae89285494e0d2aec9cfbc5734c339f740f7",
+            "fallbackChecksumSha256": "b2b9238990f82fe72a3ca6cebf38110dcd85ad73f06dc92322f703f781b95b0d",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/medium/material.ktx2",
+            "fallbackPath": "generated/moon/medium/material.png",
+            "packageChecksumSha256": "1dcbf47aaf9dc980b8f6aade6978a8d23eb912aa319e3bc222e0f091cfddd98f",
+            "fallbackChecksumSha256": "2070fe3289915094e4ec081172542b80c43bb88bea98270142ef4cc03901f0b7",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/medium/heightMacro.ktx2",
+            "fallbackPath": "generated/moon/medium/heightMacro.png",
+            "packageChecksumSha256": "795e8c907ab6cc274dc52759a6730014fc054a4b2383654845ca05c1f63aa40d",
+            "fallbackChecksumSha256": "718dfb868a18678417b579d36ac28b2f340159ddaaac1a7fae438f8633b7ba64",
+            "gpuFormat": "rg8",
+            "gpuBytes": 5592406,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/medium/localDetail.ktx2",
+            "fallbackPath": "generated/moon/medium/localDetail.png",
+            "packageChecksumSha256": "18df6603d5654607283daf4be178888178a6c2e15a8b7cb836719187539fb7b9",
+            "fallbackChecksumSha256": "5d4e2e86d4cde8b561832d6b26da55d6a3d02aba22cf1f7570e71e2121c757a3",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 2796240,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "moon",
+        "tier": "high",
+        "width": 4096,
+        "height": 2048,
+        "compressedBytes": 23297808,
+        "transientBytes": 125829120,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/moon/high/albedo.ktx2",
+            "fallbackPath": "generated/moon/high/albedo.webp",
+            "packageChecksumSha256": "222cc4e35037ab0f3c7621e2a9cd831ece0ebac787305a265eb82475ac9fe412",
+            "fallbackChecksumSha256": "3964a0b9eb2d5b32da7eff2ff919156608053e40711b8b1989515f98abf5013b",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "normal",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/high/normal.ktx2",
+            "fallbackPath": "generated/moon/high/normal.png",
+            "packageChecksumSha256": "50e2df42b1509d97e8ec7a978c99879f9b38c57d284db5a48de6857581dcf786",
+            "fallbackChecksumSha256": "389936e4a6b2a248df9921d730fcbb88d6722464d11134f5ace6b63da53c98e8",
+            "gpuFormat": "bc5-rg",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc5-rg",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "material",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/high/material.ktx2",
+            "fallbackPath": "generated/moon/high/material.png",
+            "packageChecksumSha256": "53adc4d58632b96c2d328d3bd57338fd0321dc85b1732fe78b17fdc12e5312c9",
+            "fallbackChecksumSha256": "71ad2cf2086c99db862273d67484e471588112ba3b1314960d203ceb60f35e97",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "heightMacro",
+            "colorSpace": "linear",
+            "logicalFormat": "RG8",
+            "packagePath": "generated/moon/high/heightMacro.ktx2",
+            "fallbackPath": "generated/moon/high/heightMacro.png",
+            "packageChecksumSha256": "d7741242034fe33ce166785b63575997370f8d827885bd7d7b33a6e65c5fd884",
+            "fallbackChecksumSha256": "0d234d53a7fbdc9f048ee344b4713fd108076f9672e3c9f2dd76565aac568a93",
+            "gpuFormat": "rg8",
+            "gpuBytes": 22369622,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb-rg",
+            "transcodeTargets": [
+              "rg8"
+            ],
+            "mipmapped": true
+          },
+          {
+            "name": "localDetail",
+            "colorSpace": "linear",
+            "logicalFormat": "RGBA8",
+            "packagePath": "generated/moon/high/localDetail.ktx2",
+            "fallbackPath": "generated/moon/high/localDetail.png",
+            "packageChecksumSha256": "34370788dead0eb8f9596fce0182eef4d1e4061548398a97313d61e915348be3",
+            "fallbackChecksumSha256": "6992b40e001621c44ce72e463b84dcdcb9bd8d9b2434e7cd70a4bd740391ac5f",
+            "gpuFormat": "bc3-rgba",
+            "gpuBytes": 11184848,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgba",
+            "transcodeTargets": [
+              "etc2-rgba",
+              "bc3-rgba",
+              "astc-rgba"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
       {
         "bodyId": "palla",
         "tier": "medium",
@@ -247,8 +2223,8 @@
         "tier": "low",
         "width": 1024,
         "height": 512,
-        "compressedBytes": 923885,
-        "transientBytes": 11534336,
+        "compressedBytes": 1101634,
+        "transientBytes": 5767168,
         "bootCritical": false,
         "channels": [
           {
@@ -294,8 +2270,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/low/material.ktx2",
             "fallbackPath": "generated/veyra/low/material.png",
-            "packageChecksumSha256": "4a1283d97d894a6915ce7d06d4ce8cd40f00c4407671665ffe5e10b41fb9b6e9",
-            "fallbackChecksumSha256": "640ed71f5c00993d5e2fdd2c2b6b8d6adf2e7d822171a4a4ecb3616faa8899a8",
+            "packageChecksumSha256": "c5ccb5ca27d74497f7173dd4d5926526a99e28c63379e02a84a8160be1d26133",
+            "fallbackChecksumSha256": "313ed0b3020e4c3edafa60d749604fb59ac4367f5f21398a1ba9f029d9ad87f0",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 699088,
             "fallbackGpuBytes": 2796204,
@@ -333,9 +2309,9 @@
         "tier": "medium",
         "width": 2048,
         "height": 1024,
-        "compressedBytes": 3015914,
-        "transientBytes": 46137344,
-        "bootCritical": true,
+        "compressedBytes": 3766576,
+        "transientBytes": 23068672,
+        "bootCritical": false,
         "channels": [
           {
             "name": "albedo",
@@ -380,8 +2356,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/medium/material.ktx2",
             "fallbackPath": "generated/veyra/medium/material.png",
-            "packageChecksumSha256": "3337a2ad2017b1bc41dcf22c291f75d6704ac66a8c2a2892e31c6b92452a5fcf",
-            "fallbackChecksumSha256": "215e24eeb0e35d72853cd27899ef96ec7f01e333f00ad3b646f63d197bff4d5e",
+            "packageChecksumSha256": "30df3d58eca60410e658c1c80eaf847baf4934bb6b2b6fb5026da17076cc68a5",
+            "fallbackChecksumSha256": "677f0622a9aaf1b9f0b1a351d5d012a209f0896e7888c216d3ff8588eb2ca81c",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 2796240,
             "fallbackGpuBytes": 11184812,
@@ -419,8 +2395,8 @@
         "tier": "high",
         "width": 4096,
         "height": 2048,
-        "compressedBytes": 9714243,
-        "transientBytes": 184549376,
+        "compressedBytes": 12865654,
+        "transientBytes": 92274688,
         "bootCritical": false,
         "channels": [
           {
@@ -466,8 +2442,8 @@
             "logicalFormat": "RGBA8",
             "packagePath": "generated/veyra/high/material.ktx2",
             "fallbackPath": "generated/veyra/high/material.png",
-            "packageChecksumSha256": "64d057c0f7bc2f4b1a27cf8425c8035b3b6f3ec0e1809fb4a7cabcd505dd0224",
-            "fallbackChecksumSha256": "c6c64ec87bb70d5c41affe3eb1c98e38dea808f1da2bc81063ace16267b77c28",
+            "packageChecksumSha256": "e4caa9297430f65a38bd68d71a98668bafb323178595f5949164b68a751f40bf",
+            "fallbackChecksumSha256": "53cacf794f3c4d0ef6e5bb50398281644d8a94450635e48c6ceb87942e391d06",
             "gpuFormat": "bc3-rgba",
             "gpuBytes": 11184848,
             "fallbackGpuBytes": 44739244,
@@ -578,11 +2554,11 @@
         "quantizationMeters": 0.5,
         "offsetMeters": 0,
         "byteOrder": "little-endian",
-        "checksumSha256": "682dd15caead1154458581d2b40f23f9d79697cf401bf723a9adfba063b821e5",
-        "identitySha256": "77819597807ed9a62917b6c1592348c23496ebe301091e8350d183f45a2af7f3",
+        "checksumSha256": "9984a1b82c0b5323bf6c590e0924538a7a2f308e3e8b2fa2633069bf10842aed",
+        "identitySha256": "8c83eea416ce8321d983a7c339c471bbf1a56539cbfc4c25eefd080e394613c0",
         "recipeHash": "44abd8aeafa906052576df19f768536e",
         "sourceChecksumSha256": "3506ed32f53020eb8822a8c694dc80df7327e21c9a4df0df8f4630756ed4c919",
-        "compilerVersion": "2.3.0",
+        "compilerVersion": "2.4.0",
         "containerImage": "node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf"
       },
       {

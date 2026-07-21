@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Quat } from '../src/core/quat';
 import { Vec3 } from '../src/core/vec3';
@@ -25,7 +26,7 @@ function quaternionDistance(a: Readonly<Quat>, b: Readonly<Quat>): number {
 
 describe('body orientation', () => {
   it('keeps authored tidally locked moons synchronized with their orbital periods', () => {
-    const universe = new GameState().universe;
+    const universe = createLegacyGameState().universe;
     for (const id of ['palla', 'brimm', 'glacia']) {
       const moon = universe.get(id);
       expect(moon.def.rotationPeriod).toBeCloseTo(moon.orbitalPeriod, 2);
@@ -33,7 +34,7 @@ describe('body orientation', () => {
   });
 
   it('round-trips vectors and attitudes through tilt and spin', () => {
-    const body = new GameState().universe.get('veyra');
+    const body = createLegacyGameState().universe.get('veyra');
     const bf = new Vec3(0.2, -0.7, 0.68).normalize();
     const inertial = bodyFixedToInertial(body, 12_345, bf, new Vec3());
 
@@ -54,7 +55,7 @@ describe('body orientation', () => {
   });
 
   it('tilts the local north pole and computes tangent surface velocity', () => {
-    const body = new GameState().universe.get('veyra');
+    const body = createLegacyGameState().universe.get('veyra');
     const north = bodyFixedToInertial(body, 0, new Vec3(0, 0, 1), new Vec3());
 
     expect(north.x).toBeCloseTo(0, 12);
@@ -68,7 +69,7 @@ describe('body orientation', () => {
   });
 
   it('keeps a landed rails pose fixed in body coordinates as the tilted body spins', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildLander(), 'Rails lander');
     const body = game.bodyOf(gv);
     const directionBF = inertialToBodyFixed(body, game.time, gv.runtime.pos, new Vec3()).normalize();

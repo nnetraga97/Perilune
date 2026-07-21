@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Body } from '../src/sim/universe';
 import { PlanetTerrainEngine, type PlanetTerrainFrame } from '../src/render/terrain/planetTerrainEngine';
 import { TERRAIN_QUALITY_POLICY, type TerrainQualityPolicy } from '../src/render/terrain/terrainPolicy';

@@ -12,7 +12,7 @@ import {
   trueToMean,
 } from '../src/core/orbit';
 import { Universe } from '../src/sim/universe';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 
 const MU_VEYRA = 9.42e12;
 
@@ -234,6 +234,21 @@ describe('universe hierarchy', () => {
       const d = r.length();
       expect(d).toBeGreaterThan(palla.orbit!.a * 0.99);
       expect(d).toBeLessThan(palla.orbit!.a * 1.01);
+    }
+  });
+
+  it('computes a child position relative to its parent without anchor scratch aliasing', () => {
+    const parent = universe.get('veyra');
+    const child = universe.get('palla');
+    const relative = new Vec3();
+    const local = new Vec3();
+
+    for (const time of [0, 123_456, 9_876_543]) {
+      universe.relativePosition(child, parent, time, relative);
+      universe.localPosition(child, time, local);
+      expect(relative.x).toBeCloseTo(local.x, 4);
+      expect(relative.y).toBeCloseTo(local.y, 4);
+      expect(relative.z).toBeCloseTo(local.z, 4);
     }
   });
 

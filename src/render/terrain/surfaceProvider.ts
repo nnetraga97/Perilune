@@ -64,6 +64,8 @@ export interface BodySurfaceProviderOptions {
   readonly generation: number;
   readonly gridResolution: number;
   readonly maximumDepth?: number;
+  /** Frozen flight recipe. Providers must never discover/promote authority. */
+  readonly recipe?: Readonly<BodyFeatureRecipe>;
 }
 
 const MAX_DESCRIPTOR_CACHE_ENTRIES = 50_000;
@@ -71,6 +73,15 @@ const MAX_DESCRIPTOR_CACHE_ENTRIES = 50_000;
 function freezeRecipe(recipe: Readonly<BodyFeatureRecipe>): BodyFeatureRecipe {
   return Object.freeze({
     ...recipe,
+    ...(recipe.sourceHeightRegion ? {
+      sourceHeightRegion: Object.freeze({
+        ...recipe.sourceHeightRegion,
+        coverage: Object.freeze([...recipe.sourceHeightRegion.coverage]) as unknown as readonly [number, number, number, number],
+        // This immutable-by-contract array is shared with contact authority and
+        // copied once into each worker, rather than cloned for every tile job.
+        samples: recipe.sourceHeightRegion.samples,
+      }),
+    } : {}),
     terrain: Object.freeze({ ...recipe.terrain }),
     craters: Object.freeze(recipe.craters.map((crater) => Object.freeze({
       ...crater,
@@ -139,7 +150,11 @@ export function createBodySurfaceProvider(
     throw new Error(`Invalid terrain maximum depth ${maximumDepth}`);
   }
 
-  const recipe = freezeRecipe(recipeForBody(body));
+  const recipe = freezeRecipe(options.recipe ?? recipeForBody(body));
+  if (recipe.bodyId !== body.id) throw new Error(`Terrain recipe body mismatch for ${body.id}`);
+  if (options.recipe && recipe.terrainGeneration !== options.generation) {
+    throw new Error(`Terrain provider generation mismatch for ${body.id}`);
+  }
   const displacementBounds = terrainRecipeBounds(recipe);
   const palette = paletteForBody(body);
   const buildSnapshot: TerrainBuildSnapshot = Object.freeze({

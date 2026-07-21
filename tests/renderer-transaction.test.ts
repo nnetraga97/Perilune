@@ -225,6 +225,31 @@ describe('transactional body renderer replacement', () => {
     ]);
   });
 
+  test('cycles Earth and Moon plus tier rebuilds without accumulating renderer roots or assets', async () => {
+    const loadedAssets: LoadedRendererAssets[] = [];
+    const { manager, made, scene } = managerHarness({
+      loadAssets: async () => {
+        const loaded = assets({ dispose: vi.fn() });
+        loadedAssets.push(loaded);
+        return loaded;
+      },
+    });
+
+    await manager.ensure(body('earth'));
+    await manager.ensure(body('moon'));
+    await manager.ensure(body('earth'));
+    await manager.replaceQuality('high');
+    await manager.rebuildCommitted();
+
+    expect(scene.children).toEqual([made.at(-1)!.root]);
+    for (const renderer of made.slice(0, -1)) expect(renderer.dispose).toHaveBeenCalledOnce();
+    for (const loaded of loadedAssets.slice(0, -1)) expect(loaded.dispose).toHaveBeenCalledOnce();
+    manager.dispose();
+    expect(made.at(-1)!.dispose).toHaveBeenCalledOnce();
+    expect(loadedAssets.at(-1)!.dispose).toHaveBeenCalledOnce();
+    expect(scene.children).toHaveLength(0);
+  });
+
   test('reports truthful committed, transaction, failure, and resident resource state', async () => {
     const load = deferred<LoadedRendererAssets>();
     let now = 100;
@@ -583,6 +608,8 @@ describe('planet asset loading boundary', () => {
     expect(loaded.gpuBytes).toBe(120);
     expect(loaded.textures.get('albedo')?.colorSpace).toBe(THREE.SRGBColorSpace);
     expect(loaded.textures.get('normal')?.colorSpace).toBe(THREE.NoColorSpace);
+    expect(loaded.textures.get('albedo')?.flipY).toBe(false);
+    expect(loaded.textures.get('normal')?.flipY).toBe(false);
     expect(diagnostics.snapshot().entries
       .filter((entry) => entry.event === 'asset-channel-selected')
       .map((entry) => entry.data)).toEqual([
@@ -604,6 +631,29 @@ describe('planet asset loading boundary', () => {
     expect(() => checkPlanetManifest(artifactFor(remote))).toThrow(/local manifest entry/i);
   });
 
+  test('does not dispose an application-owned shared KTX2 decoder', () => {
+    const ktx2 = {
+      setTranscoderPath: vi.fn().mockReturnThis(),
+      detectSupport: vi.fn().mockReturnThis(),
+      loadAsync: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const loader = new PlanetAssetLoader({
+      renderer: {} as never,
+      manifest: checkedManifest,
+      ktx2,
+      ownsKtx2: false,
+      compressedSupported: false,
+      transcoderPath: '/perilune/basis/',
+      resolveAssetUrl: (path) => `./planets/${path}`,
+      loadConventional: vi.fn(),
+    });
+
+    loader.dispose();
+
+    expect(ktx2.dispose).not.toHaveBeenCalled();
+  });
+
   test('checked artifacts expose authored pack lookup and preserve the real empty baseline', () => {
     const emptyManifest = { schemaVersion: 1, budgets: manifestBudgets, packs: [] };
     const empty = checkPlanetManifest(artifactFor(emptyManifest));
@@ -613,7 +663,13 @@ describe('planet asset loading boundary', () => {
     expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
     const production = checkPlanetManifest(checkedPlanetArtifact);
-    expect(production.packs).toHaveLength(5);
+    expect(production.packs).toHaveLength(11);
+    expect(production.hasPack('earth', 'low')).toBe(true);
+    expect(production.hasPack('earth', 'medium')).toBe(true);
+    expect(production.hasPack('earth', 'high')).toBe(true);
+    expect(production.hasPack('moon', 'low')).toBe(true);
+    expect(production.hasPack('moon', 'medium')).toBe(true);
+    expect(production.hasPack('moon', 'high')).toBe(true);
     expect(production.hasPack('palla', 'medium')).toBe(true);
     expect(production.hasPack('wisp', 'medium')).toBe(true);
   });
@@ -643,9 +699,11 @@ describe('planet asset loading boundary', () => {
 describe('shader compile boundary and failure accounting', () => {
   test('compiles in an isolated staging scene and restores the debug callback after a shader failure', async () => {
     const previous = vi.fn();
+    const finish = vi.fn();
     const renderer = {
       debug: { onShaderError: previous as (...args: unknown[]) => void },
-      compileAsync: vi.fn(async (scene: THREE.Scene) => {
+      getContext: () => ({ finish }),
+      compile: vi.fn((scene: THREE.Scene) => {
         expect(scene.parent).toBeNull();
         expect(scene.children).toHaveLength(1);
         expect(root.visible).toBe(true);
@@ -679,38 +737,33 @@ describe('shader compile boundary and failure accounting', () => {
     expect(hiddenChild.visible).toBe(false);
     expect(root.parent).toBe(originalParent);
     expect(originalParent.children).toEqual([before, root]);
+    expect(finish).toHaveBeenCalledOnce();
   });
 
   test('serializes callback ownership for overlapping compiles on one renderer', async () => {
-    const first = deferred<void>();
-    const second = deferred<void>();
     const callbacks: Array<(...args: never[]) => void> = [];
     const previous = vi.fn();
     const renderer = {
       debug: { onShaderError: previous as ((...args: never[]) => void) | null },
-      compileAsync: vi.fn(async () => {
+      compile: vi.fn(() => {
         callbacks.push(renderer.debug.onShaderError!);
-        await (callbacks.length === 1 ? first.promise : second.promise);
+        if (callbacks.length === 1) callbacks[0]();
       }),
     };
     const a = compileRendererCandidate({ renderer: renderer as never, camera: new THREE.Camera(), root: new THREE.Group(), body: 'veyra', tier: 'medium', channel: 'albedo' });
     const b = compileRendererCandidate({ renderer: renderer as never, camera: new THREE.Camera(), root: new THREE.Group(), body: 'auren', tier: 'high', channel: 'clouds' });
-    await vi.waitFor(() => expect(renderer.compileAsync).toHaveBeenCalledTimes(1));
-    callbacks[0]();
-    first.resolve();
     await expect(a).rejects.toThrow(/veyra.*albedo.*shader/i);
-    await vi.waitFor(() => expect(renderer.compileAsync).toHaveBeenCalledTimes(2));
-    expect(callbacks[1]).not.toBe(callbacks[0]);
-    second.resolve();
     await expect(b).resolves.toBeUndefined();
+    expect(renderer.compile).toHaveBeenCalledTimes(2);
+    expect(callbacks[1]).not.toBe(callbacks[0]);
     expect(renderer.debug.onShaderError).toBe(previous);
   });
 
-  test('scopes compileAsync rejection and restores the debug callback in finally', async () => {
+  test('scopes compile rejection and restores the debug callback in finally', async () => {
     const previous = vi.fn();
     const renderer = {
       debug: { onShaderError: previous },
-      compileAsync: vi.fn(async () => { throw new Error('driver rejected'); }),
+      compile: vi.fn(() => { throw new Error('driver rejected'); }),
     };
     await expect(compileRendererCandidate({
       renderer: renderer as never,

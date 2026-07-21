@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUREN_SYSTEM } from '../src/content/system';
+import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
 import { Body } from '../src/sim/universe';
 import {
   createBodySurfaceProvider,

@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState } from '../src/sim/state';
 import { recipeForBody } from '../src/sim/terrainRecipe';
@@ -10,7 +11,7 @@ import {
   type TerrainSchedulerExecutor,
 } from '../src/render/terrain/terrainScheduler';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 
 function geometryRequest(jobKey: string, generation = 1): TerrainChunkGeometryRequest {
   return {

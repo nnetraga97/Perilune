@@ -6,7 +6,7 @@
  */
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
-import { GameState, GameVessel } from '../sim/state';
+import { GameState, GameVessel, type GameStateOptions } from '../sim/state';
 import { createVesselRuntime, refreshDerived } from '../sim/flight';
 import {
   ACTION_GROUP_IDS,
@@ -160,9 +160,10 @@ export function serializeGame(game: GameState, label: string): SaveGame {
   };
 }
 
-export function restoreGame(save: SaveGame): GameState {
-  const migrated = migrateSave(save);
-  const game = new GameState();
+export function restoreGame(save: SaveGame, options: Readonly<GameStateOptions> = {}): GameState {
+  const bodies = options.bodies;
+  const migrated = migrateSave(save, bodies);
+  const game = new GameState('sandbox', options);
   game.time = migrated.time;
   game.activeVesselId = migrated.activeVesselId;
   game.sciencePoints = migrated.science?.points ?? 0;

@@ -138,7 +138,11 @@ export function evaluateStructure(
 
   for (const n of order) {
     if (n.part.parentKey === null) continue;
-    const parent = byKey.get(n.part.parentKey)!;
+    const parent = byKey.get(n.part.parentKey);
+    // Runtime mutation and imported/legacy craft data must never be able to
+    // crash the physics loop. A missing parent has no joint we can evaluate;
+    // the mutation path is responsible for removing or re-rooting the branch.
+    if (!parent) continue;
     const r = n.jointRadius;
     const area = Math.PI * r * r;
     const isSurface = n.part.attach === 'surface';

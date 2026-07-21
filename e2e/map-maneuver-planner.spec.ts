@@ -11,6 +11,47 @@ test('map orbit has a forgiving click target and a compact six-direction planner
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight');
   await page.getByRole('button', { name: 'Map' }).click();
 
+  // Wheel zoom must remain centered on the followed craft even when the mouse
+  // is far from screen center. Previously zoom-in moved the camera target to an
+  // arbitrary ray/plane point and permanently detached it from the craft.
+  const expectCraftCentered = async () => {
+    await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+      mapMarkerSamples(): Record<'craft', { visible: boolean }>;
+    }).mapMarkerSamples().craft.visible)).toBe(true);
+    await expect.poll(() => page.evaluate(() => {
+      const marker = (window.__TEST__ as unknown as {
+        mapMarkerSamples(): Record<'craft', { x: number; y: number; visible: boolean }>;
+      }).mapMarkerSamples().craft;
+      return Math.hypot(marker.x - innerWidth / 2, marker.y - innerHeight / 2);
+    })).toBeLessThan(2);
+  };
+  await expectCraftCentered();
+  const centeredDistance = await page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState().distance);
+  const wheelPoint = await page.evaluate(() => {
+    const candidates = [
+      [0.78, 0.72], [0.72, 0.28], [0.62, 0.18], [0.85, 0.55],
+    ];
+    for (const [xFraction, yFraction] of candidates) {
+      const x = innerWidth * xFraction;
+      const y = innerHeight * yFraction;
+      if (document.elementFromPoint(x, y)?.id === 'game-canvas') return { x, y };
+    }
+    throw new Error('No off-center canvas point available for wheel zoom');
+  });
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
+  await page.mouse.wheel(0, 900);
+  await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState().distance)).toBeGreaterThan(centeredDistance);
+  await expectCraftCentered();
+  await page.mouse.wheel(0, -900);
+  await expect.poll(() => page.evaluate(() => (window.__TEST__ as unknown as {
+    mapCameraState(): { distance: number };
+  }).mapCameraState().distance)).toBeLessThan(centeredDistance * 1.01);
+  await expectCraftCentered();
+
   await page.waitForFunction(() => {
     const samples = (window.__TEST__ as unknown as {
       mapOrbitSamples(): Array<{ x: number; y: number; visible: boolean }>;

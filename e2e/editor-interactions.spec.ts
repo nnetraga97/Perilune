@@ -131,6 +131,23 @@ test('desktop selection, hover, movement history, and launch remain coherent', a
   await expect(page.locator('.map-readout').filter({ hasText: 'Δv' })).toContainText('1.0 m/s');
 });
 
+test('launch keeps the VAB visible until Earth visuals are ready', async ({ page }) => {
+  await openEditor(page);
+  await page.locator('.ed-part', { hasText: 'Voyager Pod' }).dragTo(page.locator('#game-canvas'), {
+    targetPosition: { x: 640, y: 400 },
+  });
+  await expect.poll(() => page.evaluate(() => window.__TEST__.partCount())).toBe(1);
+
+  const launchButton = page.locator('.ed-launch');
+  const launchStartedAt = Date.now();
+  await launchButton.click();
+  await expect(launchButton).toHaveText('PREPARING EARTH…');
+  await expect(launchButton).toHaveAttribute('aria-busy', 'true');
+  expect(await page.evaluate(() => window.__TEST__.screen())).toBe('editor');
+  await page.waitForFunction(() => window.__TEST__.screen() === 'flight');
+  expect(Date.now() - launchStartedAt).toBeGreaterThanOrEqual(500);
+});
+
 test('two selected branches move together and undo as one action', async ({ page }) => {
   await openEditor(page);
   await loadWayfarer(page);
@@ -192,6 +209,25 @@ test('secondary click exposes Make root while secondary drag remains camera orbi
   const yawAfter = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraYaw);
   expect(yawAfter).not.toBeCloseTo(yawBefore, 3);
   await expect(page.locator('.ed-part-context')).toHaveCount(0);
+});
+
+test('vertical camera orbit passes through the poles instead of hitting a pitch clamp', async ({ page }) => {
+  await openEditor(page);
+  const initialPitch = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+
+  await page.mouse.move(640, 650);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(640, 100, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  const pitchPastPole = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+  expect(pitchPastPole).toBeLessThan(-Math.PI / 2);
+
+  await page.mouse.move(640, 100);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(640, 650, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+  const restoredPitch = await page.evaluate(() => (window as any).__TEST__.debug().editorCameraPitch);
+  expect(restoredPitch).toBeCloseTo(initialPitch, 3);
 });
 
 test('narrow touch layout supports dock sheets, tap placement, long press, pinch, and multi-select', async ({ page }) => {
@@ -268,15 +304,20 @@ test('narrow flight view exposes throttle, touch steering, collapsible data, and
   const throttle = page.getByRole('slider', { name: 'Throttle percentage' });
   await expect(throttle).toBeVisible();
   await expect(throttle.locator('xpath=..')).toHaveClass(/hud-navwrap/);
-  const throttleBox = await throttle.boundingBox();
-  expect(throttleBox).not.toBeNull();
-  await page.mouse.click(throttleBox!.x + throttleBox!.width / 2, throttleBox!.y + 5);
+  await throttle.fill('100');
   await expect.poll(() => page.evaluate(() => window.__TEST__.throttle())).toBeGreaterThan(0.95);
-  await page.mouse.click(throttleBox!.x + throttleBox!.width / 2, throttleBox!.y + throttleBox!.height - 5);
+  await throttle.fill('0');
   await expect.poll(() => page.evaluate(() => window.__TEST__.throttle())).toBeLessThan(0.05);
   await throttle.fill('60');
   await expect.poll(() => page.evaluate(() => window.__TEST__.throttle())).toBeCloseTo(0.6, 2);
   await expect(throttle).toHaveAttribute('aria-valuetext', '60 percent throttle');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.down('Shift');
+  await expect.poll(() => page.evaluate(() => window.__TEST__.throttle())).toBeGreaterThan(0.65);
+  await throttle.fill('0');
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__TEST__.throttle())).toBeLessThan(0.01);
+  await page.keyboard.up('Shift');
 
   for (const resource of ['Fuel', 'Charge', 'Monopropellant']) {
     const meter = page.getByRole('meter', { name: resource });

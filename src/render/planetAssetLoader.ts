@@ -3,6 +3,7 @@ import type { QualityTier } from './bodyRenderer';
 import { RenderBoundaryError } from './renderFailures';
 import { canonicalJson, sha256Utf8 } from './checkedManifestDigest';
 import { normalizeDiagnosticError, type RenderDiagnosticsPort } from './renderDiagnostics';
+import { configureSurfaceClassTexture } from './terrestrial/surfaceClass';
 
 export interface PlanetAssetChannel {
   readonly name: string;
@@ -154,7 +155,11 @@ export interface PlanetAssetLoaderOptions {
   readonly transcoderPath: string;
   readonly resolveAssetUrl: (manifestPath: string) => string;
   readonly loadConventional: (path: string) => Promise<THREE.Texture>;
+  /** Exact R8 fallback decoder for categorical PNGs. */
+  readonly loadSurfaceClassConventional?: (path: string) => Promise<THREE.Texture>;
   readonly diagnostics?: RenderDiagnosticsPort;
+  /** Defaults to true for standalone loaders; false when the application shares the decoder. */
+  readonly ownsKtx2?: boolean;
 }
 
 export interface LoadedPlanetPack {
@@ -210,10 +215,24 @@ export class PlanetAssetLoader {
               selectedGpuBytes: compressed ? channel.gpuBytes : channel.fallbackGpuBytes,
             },
           }, { bodyId });
+          const classChannel = channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional';
           const texture = compressed
             ? await this.options.ktx2.loadAsync(this.options.resolveAssetUrl(channel.packagePath))
-            : await this.options.loadConventional(this.options.resolveAssetUrl(channel.fallbackPath));
-          texture.colorSpace = channel.name === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+            : classChannel && this.options.loadSurfaceClassConventional
+              ? await this.options.loadSurfaceClassConventional(this.options.resolveAssetUrl(channel.fallbackPath))
+              : await this.options.loadConventional(this.options.resolveAssetUrl(channel.fallbackPath));
+          // Every generated pack declares a top-left texture origin and the
+          // body-fixed sampler maps north to v=0. TextureLoader defaults to a
+          // bottom-left WebGL convention, so conventional fallbacks must opt
+          // out of its vertical upload flip. KTX2 carries this orientation in
+          // container metadata and is normalized by KTX2Loader.
+          if (!compressed) texture.flipY = false;
+          texture.colorSpace = channel.name === 'albedo' || channel.name === 'emissive'
+            ? THREE.SRGBColorSpace
+            : THREE.NoColorSpace;
+          if (channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional') {
+            configureSurfaceClassTexture(texture);
+          }
           textures.set(channel.name, texture);
           selectedGpuBytes += compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
           this.options.diagnostics?.record({
@@ -267,6 +286,6 @@ export class PlanetAssetLoader {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.options.ktx2.dispose();
+    if (this.options.ownsKtx2 ?? true) this.options.ktx2.dispose();
   }
 }

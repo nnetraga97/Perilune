@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { PARTS, partById } from '../src/content/parts';
 import {
@@ -86,7 +87,7 @@ describe('campaign progression', () => {
   });
 
   it('persists repeatable upgrade levels and charges the authored growth curve', () => {
-    const game = new GameState('exploration');
+    const game = createLegacyGameState('exploration');
     game.campaign.unlockedTech.push('orbital-engineering', 'exploration-instruments', 'precision-science');
     game.sciencePoints = 500;
     const upgrade = REPEATABLE_UPGRADES.find((candidate) => candidate.id === 'field-methods')!;
@@ -96,7 +97,7 @@ describe('campaign progression', () => {
     const first = purchaseUpgrade(game.campaign, game.sciencePoints, upgrade.id);
     expect(first).toEqual({ ok: true, sciencePoints: 440 });
     game.sciencePoints = first.sciencePoints;
-    const restored = restoreGame(JSON.parse(JSON.stringify(serializeGame(game, 'upgrade'))));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(serializeGame(game, 'upgrade'))));
     expect(restored.campaign.upgradeLevels['field-methods']).toBe(1);
     expect(restored.sciencePoints).toBe(440);
   });
@@ -118,13 +119,13 @@ describe('space program contracts', () => {
   });
 
   it('persists mode, technology, funds, reputation, and contract state', () => {
-    const game = new GameState('program');
+    const game = createLegacyGameState('program');
     game.campaign.funds = 12_345;
     game.campaign.reputation = 7;
     game.campaign.unlockedTech.push('orbital-engineering');
     game.campaign.activeContracts.push('veyra-orbit');
 
-    const restored = restoreGame(JSON.parse(JSON.stringify(serializeGame(game, 'program'))));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(serializeGame(game, 'program'))));
     expect(restored.campaign).toEqual(game.campaign);
   });
 

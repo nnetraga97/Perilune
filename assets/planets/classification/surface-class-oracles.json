@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-07-20",
+  "codes": {
+    "unknown": 0,
+    "land": 1,
+    "openOcean": 2,
+    "estuarineDeepwater": 3,
+    "intertidal": 4,
+    "inlandWater": 5,
+    "wetland": 6
+  },
+  "points": [
+    {
+      "id": "lc39b-pad",
+      "latitude": 28.6272,
+      "longitude": -80.6209,
+      "expectedCode": 1,
+      "source": "NWI no-feature over GSHHG land"
+    },
+    {
+      "id": "banana-river-estuarine-deepwater",
+      "latitude": 28.454838709677418,
+      "longitude": -80.7516129032258,
+      "expectedCode": 3,
+      "source": "NWI OBJECTID 17615186 E1UBL stable 15 m interior"
+    },
+    {
+      "id": "nwi-intertidal",
+      "latitude": 28.72488472580645,
+      "longitude": -80.7749145,
+      "expectedCode": 4,
+      "source": "NWI OBJECTID 9456703 E2USM stable 15 m interior"
+    },
+    {
+      "id": "marine-deepwater",
+      "latitude": 28.454838709677418,
+      "longitude": -80.51935483870967,
+      "expectedCode": 2,
+      "source": "NWI OBJECTID 10952118 M1UBL stable 15 m interior"
+    },
+    {
+      "id": "marine-intertidal",
+      "latitude": 28.641834677419357,
+      "longitude": -80.62211890322581,
+      "expectedCode": 4,
+      "source": "NWI OBJECTID 10278886 M2USP stable 15 m interior"
+    },
+    {
+      "id": "inland-lake",
+      "latitude": 28.527865951612903,
+      "longitude": -80.70877424193549,
+      "expectedCode": 5,
+      "source": "NWI OBJECTID 9457087 L1UBVh stable 15 m interior"
+    },
+    {
+      "id": "freshwater-wetland",
+      "latitude": 28.49334079032258,
+      "longitude": -80.69876404838709,
+      "expectedCode": 6,
+      "source": "NWI OBJECTID 9466171 PSS1C stable 15 m interior"
+    },
+    {
+      "id": "atlantic-open-ocean",
+      "latitude": 28.6272,
+      "longitude": -80.25,
+      "expectedCode": 2,
+      "source": "GSHHG level 1 ocean"
+    },
+    {
+      "id": "unknown-fallback-fixture",
+      "latitude": 28.75,
+      "longitude": -80.2,
+      "expectedCode": 0,
+      "source": "synthetic no-data child fixture only"
+    }
+  ]
+}

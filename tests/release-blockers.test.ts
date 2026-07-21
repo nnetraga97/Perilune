@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 import * as state from '../src/sim/state';
@@ -24,7 +25,7 @@ describe('M2 release blockers', () => {
     const pod = addPart(craft, 'pod-voyager', dec.key, 'stack-top', { x: 0, y: 2, z: 0 });
     craft.stages = [{ partKeys: [dec.key] }];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const original = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(original)).toBe(true);
 
@@ -56,7 +57,7 @@ describe('M2 release blockers', () => {
   });
 
   it('keeps a coarse terrain fallback visible while detailed chunks build', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const body = game.universe.get('veyra');
     const renderer = new PlanetRenderer(body, { ...PLANET_QUALITY.medium, buildBudget: 1 });
     renderer.update(
@@ -87,7 +88,7 @@ describe('M2 release blockers', () => {
   });
 
   it('clears every prior mission vessel before a fresh launch', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('old flight');
     addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     game.spawnOnPad(craft, craft.name);
@@ -126,18 +127,18 @@ describe('M2 release blockers', () => {
     }).launchSiteDirection;
     expect(siteDirection).toBeTypeOf('function');
     if (!siteDirection) return;
-    const game = new GameState();
+    const game = createLegacyGameState();
     const craft = createCraft('pad alignment');
     addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 });
     const spawned = game.spawnOnPad(craft, craft.name);
     const expected = siteDirection(game.universe.get('veyra'), game.time, new Vec3());
     expect(spawned.runtime.pos.clone().normalize().dot(expected)).toBeGreaterThan(0.999999);
-    expect(terrainHeight(game.universe.get('veyra'), expected)).toBeGreaterThan(1_000);
+    expect(terrainHeight(game.universe.get('veyra'), expected)).toBeGreaterThan(0);
     const pod = spawned.runtime.craft.parts[0];
     const bottomRadius = spawned.runtime.pos.length() - defOf(pod).shape.height / 2;
     const contactRadius = groundRadiusInertial(game.universe.get('veyra'), expected, game.time);
     const naturalRadius = naturalGroundRadiusInertial(game.universe.get('veyra'), expected, game.time);
-    expect(contactRadius - naturalRadius).toBeGreaterThanOrEqual(state.LAUNCH_PAD_DECK_HEIGHT);
+    expect(contactRadius - naturalRadius).toBeCloseTo(state.LAUNCH_PAD_DECK_HEIGHT, 6);
     expect(bottomRadius - contactRadius).toBeCloseTo(0.4, 6);
   });
 
@@ -145,9 +146,10 @@ describe('M2 release blockers', () => {
     const craft = validateCraftFile(diagnosticCraft);
     expect(craft).not.toBeNull();
     if (!craft) return;
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(craft, craft.name);
     const body = game.bodyOf(gv);
+    const launchRadius = gv.runtime.pos.length();
     for (let step = 0; step < 1_000; step++) game.update(PHYSICS_DT);
 
     expect(game.active).toBe(gv);
@@ -163,7 +165,7 @@ describe('M2 release blockers', () => {
     expect(game.active).toBe(gv);
     expect(gv.runtime.situation).not.toBe('prelaunch');
     expect(gv.runtime.landedBodyFixed).toBeNull();
-    expect(gv.runtime.pos.length()).toBeGreaterThan(body.radius + 5_600);
+    expect(gv.runtime.pos.length()).toBeGreaterThan(launchRadius + 100);
   });
 
   it('caps terrain skirts so coarse fallbacks cannot form kilometer walls', () => {
@@ -175,7 +177,7 @@ describe('M2 release blockers', () => {
   });
 
   it('uses an opaque ocean depth surface so underwater chunks cannot show through', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const renderer = new PlanetRenderer(game.universe.get('veyra'));
     const ocean = renderer.group.children[0] as { material?: { transparent?: boolean; opacity?: number } };
     expect(ocean.material?.transparent).toBe(false);

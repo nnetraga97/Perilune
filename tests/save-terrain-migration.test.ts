@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { Quat } from '../src/core/quat';
 import { Vec3 } from '../src/core/vec3';
@@ -25,7 +26,7 @@ function quaternionDistance(a: Readonly<Quat>, b: Readonly<Quat>): number {
 
 describe('terrain-aware save migration', () => {
   it('stores and restores a landed pose in the body-fixed frame', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.time = 4_321;
     const gv = game.spawnOnPad(buildLander(), 'Lander');
     const body = game.bodyOf(gv);
@@ -48,7 +49,7 @@ describe('terrain-aware save migration', () => {
     expect(save.vessels[0].surfacePose!.scatterRecipeHash)
       .not.toBe(save.vessels[0].surfacePose!.recipeHash);
 
-    const restored = restoreGame(JSON.parse(JSON.stringify(save)));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(save)));
     const restoredBody = restored.bodyOf(restored.active!);
     const directionAfter = inertialToBodyFixed(
       restoredBody,
@@ -67,7 +68,7 @@ describe('terrain-aware save migration', () => {
   });
 
   it('migrates a version 3 landed pose through the legacy Z-spin frame', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.time = 4_321;
     const gv = game.spawnOnPad(buildLander(), 'Legacy lander');
     const body = game.bodyOf(gv);
@@ -86,7 +87,7 @@ describe('terrain-aware save migration', () => {
     save.vessels[0].att = { ...legacyAtt };
     delete (save.vessels[0] as unknown as { surfacePose?: unknown }).surfacePose;
 
-    const restored = restoreGame(JSON.parse(JSON.stringify(save)));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(save)));
     const restoredDirection = inertialToBodyFixed(
       body,
       restored.time,
@@ -98,25 +99,25 @@ describe('terrain-aware save migration', () => {
   });
 
   it('rejects an unavailable terrain recipe before restoring vessels', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnOnPad(buildLander(), 'Unknown recipe');
     const save = serializeGame(game, 'unknown');
     save.vessels[0].surfacePose!.recipeHash = '0'.repeat(32);
 
-    expect(() => restoreGame(save)).toThrow(/terrain recipe/i);
+    expect(() => restoreLegacyGame(save)).toThrow(/terrain recipe/i);
   });
 
   it('rejects an unavailable physical-scatter recipe', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.spawnOnPad(buildLander(), 'Unknown scatter');
     const save = serializeGame(game, 'unknown scatter');
     save.vessels[0].surfacePose!.scatterRecipeHash = 'f'.repeat(32);
 
-    expect(() => restoreGame(save)).toThrow(/scatter recipe/i);
+    expect(() => restoreLegacyGame(save)).toThrow(/scatter recipe/i);
   });
 
   it('migrates a version 4 save whose scatter hash aliased the terrain hash', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     game.time = 4_321;
     const gv = game.spawnOnPad(buildLander(), 'V4 alias lander');
     const directionBefore = inertialToBodyFixed(game.bodyOf(gv), game.time, gv.runtime.pos, new Vec3()).normalize();
@@ -125,7 +126,7 @@ describe('terrain-aware save migration', () => {
     save.saveVersion = 4;
     save.vessels[0].surfacePose!.scatterRecipeHash = save.vessels[0].surfacePose!.recipeHash;
 
-    const restored = restoreGame(JSON.parse(JSON.stringify(save)));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(save)));
     const directionAfter = inertialToBodyFixed(
       restored.bodyOf(restored.active!),
       restored.time,

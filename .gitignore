@@ -11,7 +11,11 @@ artifacts/performance/
 *.local
 assets/planets/sources/**/*.zip
 assets/planets/sources/**/*.tif
+assets/planets/sources/**/*.jpg
 assets/planets/sources/**/*.partial
+assets/planets/sources/noaa-gshhg-2.3.7/extracted/
+assets/planets/sources/usfws-nwi-ksc/*.geojson
+assets/planets/sources/usfws-nwi-ksc/batches-*/
 assets/parts/sources/**
 .DS_Store
 .vercel

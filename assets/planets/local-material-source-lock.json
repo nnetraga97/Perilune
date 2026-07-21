@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "license": "CC0-1.0",
+  "licenseSnapshot": "https://docs.polyhaven.com/en/faq",
+  "resolution": "1k",
+  "tangentConvention": "OpenGL",
+  "assets": [
+    {
+      "id": "dirt",
+      "body": "earth",
+      "role": "soil",
+      "author": "Charlotte Baglioni",
+      "page": "https://polyhaven.com/a/dirt",
+      "files": {
+        "diff": ["6ce6ca7e28ed046f7f93fa60dcb29f8cf42cd5a539adc5676675acccfa34efd3", "dirt_diff_1k.jpg"],
+        "nor_gl": ["5a5f97d920fdcdf352b350b95558bf48bb306be1fe61a47418aadc60b7deb0ce", "dirt_nor_gl_1k.jpg"],
+        "rough": ["eff62d5ae7bf0c46b84173bc46f07528dd164aa39f5d550c93a805b36f54b704", "dirt_rough_1k.jpg"]
+      }
+    },
+    {
+      "id": "rock_ground",
+      "body": "earth",
+      "role": "rock",
+      "author": "Rob Tuytel",
+      "page": "https://polyhaven.com/a/rock_ground",
+      "files": {
+        "diff": ["bec2573bc8aa9c714b690df753730e41f2077a1f0bbca83b13e055c86b4d5626", "rock_ground_diff_1k.jpg"],
+        "nor_gl": ["eea3e980653ff19938326fe6416c717f69c1493d16caec54ce2797460157efbf", "rock_ground_nor_gl_1k.jpg"],
+        "rough": ["2585e6eda380d10b081448fd98bc4e8c37b3e8947a26ec7d95d361920d36b2e7", "rock_ground_rough_1k.jpg"]
+      }
+    },
+    {
+      "id": "sand_01",
+      "body": "earth",
+      "role": "sand",
+      "author": "Rob Tuytel",
+      "page": "https://polyhaven.com/a/sand_01",
+      "files": {
+        "diff": ["a73b90eaa6d675ef57e7d48a8cf23e1f412e353ab2e29cf73930b8ecd4e76875", "sand_01_diff_1k.jpg"],
+        "nor_gl": ["73984aecdc35b1ffbc322d64b7f8d8165b06970d11f37dd47010609fcb532704", "sand_01_nor_gl_1k.jpg"],
+        "rough": ["ccb179b12c56a9032d60e4f4e2da690b3612a58e1784eb14576372690cdcd1cb", "sand_01_rough_1k.jpg"]
+      }
+    },
+    {
+      "id": "snow_02",
+      "body": "earth",
+      "role": "snow-and-grounded-ice",
+      "author": "Rob Tuytel",
+      "page": "https://polyhaven.com/a/snow_02",
+      "files": {
+        "diff": ["523a4e69c90b96d787dd69b897f29a2b3761a017024405c60aa630d1e8e9009a", "snow_02_diff_1k.jpg"],
+        "nor_gl": ["9495ec680616b8340e2cbecbd151bff84c690cfad4209e90cc98d2d0ba81f810", "snow_02_nor_gl_1k.jpg"],
+        "rough": ["b6dea8039ac2a5beaed6fd41834fb55540cc76b492edd1d48ba2da2f30f1cb75", "snow_02_rough_1k.jpg"]
+      }
+    },
+    {
+      "id": "moon_meteor_02",
+      "body": "moon",
+      "role": "regolith",
+      "author": "Greg Zaal, Jenelle van Heerden, Rico Cilliers",
+      "page": "https://polyhaven.com/a/moon_meteor_02",
+      "files": {
+        "diff": ["e8a82991f96aacc0f1f705cedebf35a50282856f2640627444ba499097a7aaee", "moon_meteor_02_diff_1k.jpg"],
+        "nor_gl": ["78314fac2bcf14d9e09e4b93d423b6e57701a7cdbebc7a565f426fb9522c1443", "moon_meteor_02_nor_gl_1k.jpg"],
+        "rough": ["6404cf10063b7b82326fa93bc638767c23a176e8baa6bd6bd52e519e2f441265", "moon_meteor_02_rough_1k.jpg"]
+      }
+    }
+  ]
+}

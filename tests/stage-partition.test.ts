@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame } from './fixtures/legacyGameState';
 import { describe, expect, it } from 'vitest';
 import { restoreGame, serializeGame } from '../src/save/persistence';
 import { GameState } from '../src/sim/state';
@@ -19,7 +20,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [retainedEngine.key, chute.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(retained)).toBe(true);
 
@@ -48,7 +49,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [upperEngine.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const original = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(original)).toBe(true);
     expect(game.fireStage(original)).toBe(true);
@@ -74,7 +75,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [chute.key, engine.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(retained)).toBe(true);
 
@@ -102,7 +103,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [chute.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(retained)).toBe(true);
     expect(game.fireStage(retained)).toBe(true);
@@ -130,7 +131,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [decoupler.key] },
       { partKeys: [engine.key, chute.key] },
     ];
-    const game = new GameState();
+    const game = createLegacyGameState();
     const original = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     expect(game.fireStage(original)).toBe(true);
 
@@ -141,7 +142,7 @@ describe('stage plans after vessel splits', () => {
         currentStage: gv.runtime.currentStage,
       }))
       .sort((a, b) => a.partKeys[0] - b.partKeys[0]);
-    const restored = restoreGame(serializeGame(game, 'mid-separation'));
+    const restored = restoreLegacyGame(serializeGame(game, 'mid-separation'));
     const after = restored.vessels
       .map((gv) => ({
         partKeys: gv.runtime.craft.parts.map((part) => part.key).sort((a, b) => a - b),
@@ -164,7 +165,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [chute.key, engine.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     retained.runtime.currentStage = 1;
     game.detachSubtree(retained, tank, 0);
@@ -189,7 +190,7 @@ describe('stage plans after vessel splits', () => {
       { partKeys: [engineA.key, chuteB.key] },
     ];
 
-    const game = new GameState();
+    const game = createLegacyGameState();
     const retained = game.spawnInOrbit(craft, craft.name, 'veyra', 120_000);
     retained.runtime.currentStage = 1;
     expect(game.undock(retained, childPort.key)).toBe(true);

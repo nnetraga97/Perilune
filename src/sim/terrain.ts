@@ -16,6 +16,8 @@ import {
   launchSiteBodyFixedDirection,
 } from './launchSite';
 import { evaluateRecipeHeight, recipeForBody } from './terrainRecipe';
+import { sampleEarthSurfaceClass } from '../render/terrestrial/surfaceClassAuthority';
+import { surfaceClassOwnsOcean } from '../render/terrestrial/surfaceClass';
 
 export type SurfaceHeightResult =
   | { kind: 'solid' | 'water'; height: number }
@@ -30,10 +32,13 @@ export function solidHeight(body: Body, dir: Readonly<Vec3>): SurfaceHeightResul
 /** Water datum where the raw solid surface lies below an ocean. */
 export function waterSurfaceHeight(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
   const solid = solidHeight(body, dir);
+  const oceanOwned = body.id === 'earth'
+    ? surfaceClassOwnsOcean(sampleEarthSurfaceClass(dir.x, dir.y, dir.z))
+    : solid.kind === 'solid' && solid.height < 0;
   if (
     solid.kind === 'solid' &&
     body.def.terrain.oceanLevel > 0 &&
-    solid.height < 0
+    oceanOwned
   ) {
     return { kind: 'water', height: 0 };
   }
@@ -47,7 +52,7 @@ export function naturalContactSurface(body: Body, dir: Readonly<Vec3>): SurfaceH
 }
 
 const _launchSiteDirection = new Vec3();
-const launchPadEnvelopeCache = new WeakMap<Body, LaunchPadTerrainEnvelope>();
+const launchPadEnvelopeCache = new WeakMap<Body, Map<string, LaunchPadTerrainEnvelope>>();
 
 export interface LaunchPadTerrainEnvelope {
   readonly centerHeight: number;
@@ -57,15 +62,17 @@ export interface LaunchPadTerrainEnvelope {
 }
 
 /**
- * Natural terrain range under Cape Skyward's complete footprint. This is
+ * Natural terrain range under LC-39B's complete footprint. This is
  * cached per immutable body recipe; contact queries must not resample it every
  * physics tick.
  */
 export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
-  const cached = launchPadEnvelopeCache.get(body);
+  const recipeHash = recipeForBody(body).hash;
+  let generations = launchPadEnvelopeCache.get(body);
+  const cached = generations?.get(recipeHash);
   if (cached) return cached;
-  if (body.id !== 'veyra' || body.def.surfaceKind !== 'solid') {
-    throw new Error(`${body.name} has no Cape Skyward launchpad`);
+  if (!body.def.launchSite || body.def.surfaceKind !== 'solid') {
+    throw new Error(`${body.name} has no LC-39B launchpad`);
   }
   const site = launchSiteBodyFixedDirection(new Vec3());
   const east = new Vec3(-site.y, site.x, 0).normalize();
@@ -101,7 +108,11 @@ export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
     maximumHeight + LAUNCH_PAD_TERRAIN_CLEARANCE,
   );
   const envelope = Object.freeze({ centerHeight, minimumHeight, maximumHeight, deckHeight });
-  launchPadEnvelopeCache.set(body, envelope);
+  if (!generations) {
+    generations = new Map();
+    launchPadEnvelopeCache.set(body, generations);
+  }
+  generations.set(recipeHash, envelope);
   return envelope;
 }
 
@@ -110,7 +121,7 @@ export function launchPadTerrainEnvelope(body: Body): LaunchPadTerrainEnvelope {
  * remains based on natural terrain while physics contacts its top face.
  */
 export function launchPadContactSurface(body: Body, dir: Readonly<Vec3>): SurfaceHeightResult {
-  if (body.id !== 'veyra' || body.def.surfaceKind !== 'solid') return { kind: 'none' };
+  if (!body.def.launchSite || body.def.surfaceKind !== 'solid') return { kind: 'none' };
   const length = Math.hypot(dir.x, dir.y, dir.z);
   if (!(length > 0)) return { kind: 'none' };
   const site = launchSiteBodyFixedDirection(_launchSiteDirection);

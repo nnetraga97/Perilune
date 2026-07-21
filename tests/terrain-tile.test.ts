@@ -7,6 +7,7 @@ import {
   edgeNeighbor,
   parseTerrainTileKey,
   terrainRootIds,
+  terrainTileAtDirection,
   terrainTileChildren,
   terrainTileKey,
   terrainTileParent,
@@ -47,6 +48,11 @@ function opposite(edge: TerrainTileEdge): TerrainTileEdge {
 }
 
 describe('integer terrain tile identity', () => {
+  it('maps body-fixed directions to the containing virtual cube tile', () => {
+    expect(terrainTileAtDirection({ x: 1, y: 0, z: 0 }, 4)).toEqual(createTerrainTileId(0, 4, 8, 8));
+    expect(terrainTileAtDirection({ x: 0, y: -1, z: 0 }, 3)).toEqual(createTerrainTileId(3, 3, 4, 4));
+    expect(() => terrainTileAtDirection({ x: 0, y: 0, z: 0 }, 2)).toThrow(/nonzero/);
+  });
   it('creates six canonical roots and round-trips stable keys', () => {
     const roots = terrainRootIds();
     expect(roots.map(terrainTileKey)).toEqual([

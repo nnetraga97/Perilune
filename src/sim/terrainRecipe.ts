@@ -12,7 +12,20 @@ import {
   LAUNCH_PAD_TERRAIN_FLAT_RADIUS,
   LAUNCH_SITE_LAT,
   LAUNCH_SITE_LON,
+  LAUNCH_SITE_MINIMUM_GROUND_HEIGHT,
 } from './launchSite';
+import {
+  CHECKED_HEIGHT_AUTHORITY_VERSION,
+  sampleCanonicalLocalRelief,
+  samplePromotedHeightRegion,
+  sampleSourceMacroHeight,
+  sourceHeightGrid,
+  type FrozenSourceHeightRegion,
+} from './sourceHeightAuthority';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from './planetDataAuthority';
 
 export interface CraterFeature {
   readonly center: { readonly x: number; readonly y: number; readonly z: number };
@@ -26,6 +39,9 @@ export interface BodyFeatureRecipe {
   readonly radiusMeters: number;
   readonly version: number;
   readonly hash: string;
+  readonly authorityGeneration: string;
+  readonly terrainGeneration: number;
+  readonly sourceHeightRegion?: FrozenSourceHeightRegion;
   readonly terrain: Readonly<TerrainDef>;
   readonly craters: readonly CraterFeature[];
 }
@@ -37,14 +53,14 @@ export interface TerrainRecipeBounds {
   readonly maximumAngularSlopeMeters: number;
 }
 
-const recipes = new WeakMap<Body, BodyFeatureRecipe>();
+const recipes = new WeakMap<Body, Map<string, BodyFeatureRecipe>>();
 const MASK_64 = (1n << 64n) - 1n;
-const CAPE_SKYWARD = Object.freeze({
+const LAUNCH_SITE = Object.freeze({
   x: Math.cos(LAUNCH_SITE_LAT) * Math.cos(LAUNCH_SITE_LON),
   y: Math.cos(LAUNCH_SITE_LAT) * Math.sin(LAUNCH_SITE_LON),
   z: Math.sin(LAUNCH_SITE_LAT),
 });
-const capeSkywardHeight = new Map<string, number>();
+const launchSiteHeight = new Map<string, number>();
 
 function fnv1a64(text: string, offset: bigint): string {
   let hash = offset;
@@ -55,7 +71,11 @@ function fnv1a64(text: string, offset: bigint): string {
   return hash.toString(16).padStart(16, '0');
 }
 
-function recipeContent(body: Body, craters: readonly CraterFeature[]): string {
+function recipeContent(
+  body: Body,
+  craters: readonly CraterFeature[],
+  authority: Readonly<FrozenPlanetDataAuthority>,
+): string {
   const terrain = body.def.terrain;
   return JSON.stringify([
     body.id,
@@ -69,6 +89,9 @@ function recipeContent(body: Body, craters: readonly CraterFeature[]): string {
     terrain.colorMid,
     terrain.colorHigh,
     terrain.colorOcean ?? null,
+    ...(body.id === 'earth' || body.id === 'moon' ? [CHECKED_HEIGHT_AUTHORITY_VERSION] : []),
+    authority.generation,
+    authority.region?.digest ?? null,
     craters,
   ]);
 }
@@ -81,8 +104,17 @@ function contentHash(content: string): string {
 }
 
 /** Immutable recipe assigned to a runtime body. */
-export function recipeForBody(body: Body): BodyFeatureRecipe {
-  const cached = recipes.get(body);
+export function recipeForBody(
+  body: Body,
+  authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
+): BodyFeatureRecipe {
+  if (authority.bodyId !== body.id) throw new Error(`Terrain authority body mismatch for ${body.id}`);
+  let byGeneration = recipes.get(body);
+  if (!byGeneration) {
+    byGeneration = new Map();
+    recipes.set(body, byGeneration);
+  }
+  const cached = byGeneration.get(authority.generation);
   if (cached) return cached;
   const craters: readonly CraterFeature[] = Object.freeze([]);
   const terrain = Object.freeze({ ...body.def.terrain });
@@ -90,11 +122,14 @@ export function recipeForBody(body: Body): BodyFeatureRecipe {
     bodyId: body.id,
     radiusMeters: body.radius,
     version: body.def.terrainRecipeVersion,
-    hash: contentHash(recipeContent(body, craters)),
+    hash: contentHash(recipeContent(body, craters, authority)),
+    authorityGeneration: authority.generation,
+    terrainGeneration: authority.terrainGeneration,
+    ...(authority.region ? { sourceHeightRegion: authority.region } : {}),
     terrain,
     craters,
   });
-  recipes.set(body, recipe);
+  byGeneration.set(authority.generation, recipe);
   return recipe;
 }
 
@@ -130,6 +165,36 @@ export function terrainRecipeBounds(recipe: Readonly<BodyFeatureRecipe>): Terrai
   }
   if (!Number.isFinite(terrain.oceanLevel)) {
     throw new Error(`Invalid terrain ocean level ${terrain.oceanLevel}`);
+  }
+  const sourceGrid = sourceHeightGrid(recipe.bodyId);
+  if (sourceGrid) {
+    const localReliefBound = recipe.bodyId === 'earth' ? 80 : 150;
+    const region = recipe.sourceHeightRegion;
+    const regionCellRadians = region
+      ? Math.max(
+        Math.abs(region.coverage[2] - region.coverage[0]) * Math.PI / 180 / Math.max(1, region.width - 1),
+        Math.abs(region.coverage[3] - region.coverage[1]) * Math.PI / 180 / Math.max(1, region.height - 1),
+      )
+      : Number.POSITIVE_INFINITY;
+    const regionSlope = region
+      ? (region.maximumHeightMeters - region.minimumHeightMeters) / Math.max(1e-12, regionCellRadians)
+      : 0;
+    return Object.freeze({
+      minimumHeightMeters: Math.min(
+        sourceGrid.minimumHeightMeters - localReliefBound,
+        region?.minimumHeightMeters ?? Number.POSITIVE_INFINITY,
+      ),
+      maximumHeightMeters: Math.max(
+        sourceGrid.maximumHeightMeters + localReliefBound,
+        region?.maximumHeightMeters ?? Number.NEGATIVE_INFINITY,
+      ),
+      // Bilinear source slopes are conservatively bounded by the complete
+      // source range per grid cell plus the local relief bands.
+      maximumAngularSlopeMeters:
+        (sourceGrid.maximumHeightMeters - sourceGrid.minimumHeightMeters) * sourceGrid.width
+        + localReliefBound * recipe.radiusMeters / 125
+        + regionSlope,
+    });
   }
   // The evaluator returns before ocean/crater work for a flat recipe.
   if (terrain.amplitude === 0) {
@@ -198,21 +263,24 @@ export function evaluateRecipeHeight(
   direction: Readonly<{ x: number; y: number; z: number }>,
 ): number {
   const naturalHeight = evaluateNaturalRecipeHeight(recipe, direction);
-  if (recipe.bodyId !== 'veyra') return naturalHeight;
+  if (recipe.bodyId !== 'veyra' && recipe.bodyId !== 'earth') return naturalHeight;
 
-  // Cape Skyward is authored into the same immutable terrain recipe consumed
+  // The launch site is authored into the same immutable terrain recipe consumed
   // by physics, workers, and baked assets. A flat center plus a wide smooth
   // grade ensures nearby LOD vertices cannot bridge a steep hillside over the
   // small physical deck footprint.
   const dot = Math.max(-1, Math.min(1,
-    direction.x * CAPE_SKYWARD.x + direction.y * CAPE_SKYWARD.y + direction.z * CAPE_SKYWARD.z,
+    direction.x * LAUNCH_SITE.x + direction.y * LAUNCH_SITE.y + direction.z * LAUNCH_SITE.z,
   ));
   const distanceMeters = Math.acos(dot) * recipe.radiusMeters;
   if (distanceMeters >= LAUNCH_PAD_TERRAIN_BLEND_RADIUS) return naturalHeight;
-  let plateauHeight = capeSkywardHeight.get(recipe.hash);
+  let plateauHeight = launchSiteHeight.get(recipe.hash);
   if (plateauHeight === undefined) {
-    plateauHeight = evaluateNaturalRecipeHeight(recipe, CAPE_SKYWARD);
-    capeSkywardHeight.set(recipe.hash, plateauHeight);
+    const sourceHeight = evaluateNaturalRecipeHeight(recipe, LAUNCH_SITE);
+    plateauHeight = recipe.bodyId === 'earth'
+      ? Math.max(LAUNCH_SITE_MINIMUM_GROUND_HEIGHT, sourceHeight)
+      : sourceHeight;
+    launchSiteHeight.set(recipe.hash, plateauHeight);
   }
   if (distanceMeters <= LAUNCH_PAD_TERRAIN_FLAT_RADIUS) return plateauHeight;
   const t = (distanceMeters - LAUNCH_PAD_TERRAIN_FLAT_RADIUS)
@@ -225,6 +293,20 @@ function evaluateNaturalRecipeHeight(
   recipe: BodyFeatureRecipe,
   direction: Readonly<{ x: number; y: number; z: number }>,
 ): number {
+  const sourceHeight = sampleSourceMacroHeight(recipe.bodyId, direction);
+  if (sourceHeight !== null) {
+    const parentHeight = sourceHeight + sampleCanonicalLocalRelief(
+      recipe.bodyId,
+      recipe.radiusMeters,
+      direction,
+    );
+    const promoted = recipe.sourceHeightRegion
+      ? samplePromotedHeightRegion(recipe.sourceHeightRegion, direction)
+      : null;
+    return promoted
+      ? parentHeight + (promoted.heightMeters - parentHeight) * promoted.sourceWeight
+      : parentHeight;
+  }
   const terrain = recipe.terrain;
   if (terrain.amplitude === 0) return 0;
   const frequency = terrain.frequency;

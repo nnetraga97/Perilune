@@ -1,3 +1,4 @@
+import { createLegacyGameState } from './fixtures/legacyGameState';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { GameState } from '../src/sim/state';
@@ -26,7 +27,7 @@ import {
 } from '../src/render/terrain/tile';
 import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo } from '../src/render/planet';
 
-const veyra = new GameState().universe.get('veyra');
+const veyra = createLegacyGameState().universe.get('veyra');
 
 describe('terrain chunk diagnostic keys', () => {
   it('derives stable parent and four immediate-child keys for roots and deeper chunks', () => {

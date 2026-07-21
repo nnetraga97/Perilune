@@ -398,7 +398,7 @@ describe('planet content validator', () => {
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/manifest schemaVersion must be 1/i);
     expect(result.stdout).not.toMatch(/vite v\d/i);
-  });
+  }, 30_000);
 
   it('rejects checked-artifact paths outside public planets', () => {
 

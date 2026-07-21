@@ -103,6 +103,11 @@ export async function createRenderContext(canvas: HTMLCanvasElement): Promise<Re
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
+  // WorldScene enables this only for Medium/High after fitting the active-body
+  // camera. Keeping it disabled here prevents editor/map passes from paying for
+  // a flight shadow map they do not own.
+  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const caps = probeRenderCaps(gl, renderer);
   const lifecycle = new RenderContextLifecycle(canvas);

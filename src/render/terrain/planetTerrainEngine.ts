@@ -27,6 +27,7 @@ import {
 import { screenSpaceErrorPixels } from './terrainPolicy';
 import type { PlanetSurfaceProvider, TerrainTileDescriptor } from './surfaceProvider';
 import { terrainTileParent } from './tile';
+import type { TerrainTileId } from './tile';
 
 export interface PlanetTerrainFrame extends TerrainSelectionFrame {
   readonly cameraRelativeOrigin: VectorCoordinates;
@@ -571,9 +572,16 @@ export class PlanetTerrainEngine {
 
   coverageReady(): boolean { return this.stats.coverageReady; }
 
+  detailDemand(): readonly TerrainTileId[] {
+    return Object.freeze((this.cachedSelection?.balanced ?? []).map((tile) => tile.id));
+  }
+
   setShadowReceiver(enabled: boolean): void {
     this.shadowReceiver = enabled;
-    for (const chunk of this.chunks.values()) chunk.mesh.receiveShadow = enabled;
+    for (const chunk of this.chunks.values()) {
+      chunk.mesh.receiveShadow = enabled;
+      chunk.mesh.castShadow = enabled;
+    }
   }
 
   private queue(
@@ -678,6 +686,7 @@ export class PlanetTerrainEngine {
     mesh.userData.terrainTileId = tile.id;
     mesh.visible = false;
     mesh.receiveShadow = this.shadowReceiver;
+    mesh.castShadow = this.shadowReceiver;
     this.dither.bindMesh(mesh);
     this.group.add(mesh);
     this.chunks.set(tile.key, { tile, mesh, origin: result.origin });

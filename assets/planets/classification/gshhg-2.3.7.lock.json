@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "noaa-gshhg-2-3-7-full",
+  "version": "2.3.7",
+  "artifactUrl": "https://www.soest.hawaii.edu/pwessel/gshhg/gshhg-shp-2.3.7.zip",
+  "artifactBytes": 149157845,
+  "artifactSha256": "8dbbe7e071e77e9e75f2d639239099ebca8d5c16d6a07df8169729d49f15cf41",
+  "projection": "WGS84 geographic",
+  "levels": [
+    {
+      "level": 1,
+      "path": "assets/planets/sources/noaa-gshhg-2.3.7/extracted/GSHHS_shp/f/GSHHS_f_L1.shp",
+      "bytes": 161320396
+    },
+    {
+      "level": 2,
+      "path": "assets/planets/sources/noaa-gshhg-2.3.7/extracted/GSHHS_shp/f/GSHHS_f_L2.shp",
+      "bytes": 13733812
+    },
+    {
+      "level": 3,
+      "path": "assets/planets/sources/noaa-gshhg-2.3.7/extracted/GSHHS_shp/f/GSHHS_f_L3.shp",
+      "bytes": 973708
+    },
+    {
+      "level": 4,
+      "path": "assets/planets/sources/noaa-gshhg-2.3.7/extracted/GSHHS_shp/f/GSHHS_f_L4.shp",
+      "bytes": 9820
+    },
+    {
+      "level": 5,
+      "path": "assets/planets/sources/noaa-gshhg-2.3.7/extracted/GSHHS_shp/f/GSHHS_f_L5.shp",
+      "bytes": 3912196
+    }
+  ]
+}

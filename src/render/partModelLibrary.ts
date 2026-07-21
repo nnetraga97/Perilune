@@ -159,6 +159,8 @@ class SharedPartModelLibrary implements PartModelLibrary {
 export interface BrowserPartModelLibraryOptions {
   readonly transcoderPath: string;
   readonly resolveAssetUrl: (outputPath: string, sha256: string) => string;
+  /** Application-owned decoder shared with other KTX2 asset boundaries. */
+  readonly ktx2?: KTX2Loader;
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -177,7 +179,10 @@ export function createBrowserPartModelLibrary(
   if (!options.transcoderPath.endsWith('/')) {
     throw new Error('KTX2 transcoder path must end with /');
   }
-  const ktx2 = new KTX2Loader().setTranscoderPath(options.transcoderPath).detectSupport(renderer);
+  const ownsKtx2 = options.ktx2 === undefined;
+  const ktx2 = (options.ktx2 ?? new KTX2Loader())
+    .setTranscoderPath(options.transcoderPath)
+    .detectSupport(renderer);
   const loader = new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
   const backend: PartModelBackend = {
     async fetchBytes(url: string): Promise<Uint8Array> {
@@ -190,7 +195,7 @@ export function createBrowserPartModelLibrary(
       return gltf.scene;
     },
     dispose(): void {
-      ktx2.dispose();
+      if (ownsKtx2) ktx2.dispose();
     },
   };
   return new SharedPartModelLibrary({ manifest, backend, resolveAssetUrl: options.resolveAssetUrl });

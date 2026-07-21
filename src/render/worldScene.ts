@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   GameState,
   GameVessel,
@@ -18,6 +19,10 @@ import {
 } from '../sim/state';
 import { groundRadiusInertial, launchPadTerrainEnvelope } from '../sim/terrain';
 import type { Body } from '../sim/universe';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from '../sim/planetDataAuthority';
 import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import type { PartModelLibrary } from './partModelLibrary';
@@ -39,6 +44,19 @@ import { bodyFixedFrustumPlanes, type BodyFixedFrustumPlane } from './terrain/te
 import { ActiveReentryEffect, type ReentryEffectStats } from './reentryEffects';
 import { craftReentryFingerprint } from './reentryGeometry';
 import { signalFromAero, type ReentrySignal } from './reentrySignal';
+import { computeCelestialProjection, type CelestialProjection } from './celestialProjection';
+import { celestialOcclusion } from './celestialOcclusion';
+import {
+  adaptExposure,
+  createEnvironmentLightingState,
+  environmentLighting,
+  localShadowPolicy,
+  snapShadowCenter,
+} from './lightingPolicy';
+import {
+  bindFlightAerialPerspective,
+  FlightAerialPerspectiveController,
+} from './flightAerialPerspective';
 
 const _camAbs = new Vec3();
 const _bodyAbs = new Vec3();
@@ -55,14 +73,43 @@ const _drawingBufferSize = new THREE.Vector2();
 const _east = new Vec3();
 const _north = new Vec3();
 const _camOffset = new Vec3();
+const _cameraOrbitUp = new Vec3();
 const _craftRight = new Vec3();
 const _craftNose = new Vec3();
 const _craftUp = new Vec3();
+
+async function loadSurfaceClassTexture(path: string): Promise<THREE.DataTexture> {
+  const response = await fetch(path, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`Surface-class PNG failed: HTTP ${response.status}`);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Surface-class PNG requires a 2D decode context');
+    context.drawImage(bitmap, 0, 0);
+    const rgba = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const codes = new Uint8Array(bitmap.width * bitmap.height);
+    for (let index = 0; index < codes.length; index++) {
+      const offset = index * 4;
+      const code = rgba[offset];
+      if (code > 6 || rgba[offset + 1] !== code || rgba[offset + 2] !== code) {
+        throw new Error(`Surface-class PNG contains invalid code ${code}`);
+      }
+      codes[index] = code;
+    }
+    const texture = new THREE.DataTexture(codes, bitmap.width, bitmap.height, THREE.RedFormat, THREE.UnsignedByteType);
+    texture.flipY = false;
+    return texture;
+  } finally {
+    bitmap.close();
+  }
+}
 const _chaseForward = new Vec3();
 const _chaseRight = new Vec3();
 const _cameraFromBody = new Vec3();
 const _cameraBodyRelative = new Vec3();
-const _freeUp = new Vec3(0, 0, 1);
 const _cameraVelocity = new Vec3();
 const _cameraViewDirectionBF = new Vec3();
 const _cameraForwardThree = new THREE.Vector3();
@@ -79,6 +126,10 @@ const _smokeQuaternion = new THREE.Quaternion();
 const _reentryAtmosphereVelocity = new Vec3();
 const _reentryVelocityOS = new THREE.Vector3(0, 1, 0);
 const _reentryInverseAttitude = new THREE.Quaternion();
+const _occluderAbs = new Vec3();
+const _occluderDirection = new Vec3();
+const _shadowCenter = new THREE.Vector3();
+const _shadowDirection = new THREE.Vector3();
 interface MutableVectorCoordinates { x: number; y: number; z: number }
 interface MutableQuaternionCoordinates extends MutableVectorCoordinates { w: number }
 interface MutableBodyRenderFrame {
@@ -90,9 +141,15 @@ interface MutableBodyRenderFrame {
   cameraBodyFixedVelocity: MutableVectorCoordinates;
   verticalFovRadians: number;
   drawingBufferHeight: number;
+  projection: CelestialProjection;
   orientation: MutableQuaternionCoordinates;
   cameraSunDirection: MutableVectorCoordinates;
   bodySunDirection: MutableVectorCoordinates;
+  solarVisibleFraction: number;
+  solarOccluder?: {
+    direction: MutableVectorCoordinates;
+    angularRadius: number;
+  };
   time: number;
   deltaSeconds: number;
   framePressure: boolean;
@@ -134,6 +191,8 @@ export interface WorldSceneOptions {
   readonly quality: 'medium' | 'high';
   readonly diagnostics: RenderDiagnosticsPort;
   readonly reentryEffectsEnabled?: boolean;
+  /** Application-owned decoder shared with part models. */
+  readonly ktx2Loader?: KTX2Loader;
 }
 
 export const FLIGHT_CAMERA_MODES = ['orbit', 'chase', 'locked', 'free'] as const;
@@ -178,10 +237,14 @@ function rendererGeometryBytes(renderer: BodyRenderer): number {
 export class WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
-  private readonly ambient: THREE.AmbientLight;
+  private readonly environment: THREE.HemisphereLight;
+  private readonly environmentState = createEnvironmentLightingState();
   private readonly starfield: THREE.Points;
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
+  private bodyRendererLoads = new Map<string, Promise<void>>();
+  /** Explicit authority selected only at the launch boundary. */
+  private bodyAuthorities = new Map<string, Readonly<FrozenPlanetDataAuthority>>();
   private lastBodyFrames = new Map<string, BodyRenderFrame>();
   private readonly rendererLedger: RendererResourceLedger;
   private readonly checkedPlanetManifest: CheckedPlanetManifest;
@@ -189,6 +252,7 @@ export class WorldScene {
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly srbSmoke: SrbSmokePool;
   private readonly launchSite: THREE.Group;
+  private readonly flightAerial = new FlightAerialPerspectiveController();
   private quality: QualityTier;
   private readonly diagnostics: RenderDiagnosticsPort;
   private readonly resizeHandler: () => void;
@@ -237,6 +301,11 @@ export class WorldScene {
     this.camDist = 18;
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
+  }
+
+  orbitCamera(dx: number, dy: number): void {
+    this.camYaw -= dx * 0.005;
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.005);
   }
 
   zoomFov(delta: number): void {
@@ -290,11 +359,13 @@ export class WorldScene {
     this.planetAssetLoader = new PlanetAssetLoader({
       renderer: context.renderer,
       manifest: this.checkedPlanetManifest,
-      ktx2: new KTX2Loader(),
+      ktx2: options.ktx2Loader ?? new KTX2Loader(),
+      ownsKtx2: options.ktx2Loader === undefined,
       compressedSupported: Object.values(context.caps.compressedTextures).some(Boolean),
       transcoderPath: `${baseUrl}basis/`,
       resolveAssetUrl: (path) => `${baseUrl}planets/${path}`,
       loadConventional: (path) => textureLoader.loadAsync(path),
+      loadSurfaceClassConventional: (path) => loadSurfaceClassTexture(path),
       diagnostics: this.diagnostics,
     });
     this.camera = new THREE.PerspectiveCamera(
@@ -303,6 +374,7 @@ export class WorldScene {
       0.3,
       6e8,
     );
+    this.camera.userData.physicalDepthEnvelope = 'earth-moon-certified';
     this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -317,23 +389,30 @@ export class WorldScene {
     this.launchSite = this.buildLaunchSite();
     this.scene.add(this.launchSite);
     this.scene.add(this.srbSmoke.points);
-    this.ambient = new THREE.AmbientLight('#2a3844', 0.55);
-    this.scene.add(this.ambient);
+    this.environment = new THREE.HemisphereLight('#0b1016', '#020304', 0.045);
+    this.scene.add(this.environment);
+    this.configureShadowRenderer();
   }
 
   private buildLaunchSite(): THREE.Group {
     const group = new THREE.Group();
     const concrete = new THREE.MeshStandardMaterial({ color: '#68717a', roughness: 0.92, metalness: 0.05 });
     const structure = new THREE.MeshStandardMaterial({ color: '#c7d0d5', roughness: 0.65, metalness: 0.35 });
+    bindFlightAerialPerspective(concrete, this.flightAerial);
+    bindFlightAerialPerspective(structure, this.flightAerial);
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(LAUNCH_PAD_CONTACT_RADIUS, LAUNCH_PAD_FOOTPRINT_RADIUS, 1, 32),
       concrete,
     );
+    pad.castShadow = true;
+    pad.receiveShadow = true;
     pad.name = 'launch-pad-foundation';
     // The final depth is set from the complete terrain footprint each frame.
     pad.position.y = -0.5;
     group.add(pad);
     const deck = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.12, 32), structure);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
     deck.position.y = 0.06;
     group.add(deck);
     group.visible = false;
@@ -346,6 +425,7 @@ export class WorldScene {
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
     const qualityChanged = this.quality !== tier;
     this.quality = tier;
+    this.configureShadowRenderer();
     this.srbSmoke?.setQuality(tier);
     if (qualityChanged) this.clearReentryEffect();
     for (const [bodyId, manager] of this.bodyRendererManagers) {
@@ -359,6 +439,42 @@ export class WorldScene {
         if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
       }).catch((error) => this.noteRendererFailure(bodyId, error));
     }
+  }
+
+  private configureShadowRenderer(): void {
+    // Some policy-only unit probes construct a prototype shell without a WebGL
+    // context; the live scene always has one.
+    if (!this.context?.renderer?.shadowMap) return;
+    this.context.renderer.shadowMap.enabled = this.quality !== 'low';
+    this.context.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.context.renderer.shadowMap.needsUpdate = true;
+  }
+
+  private updateLocalSolarShadow(altitude: number): void {
+    const light = this.bodyRenderers.get('sun')?.shadowLight;
+    if (!light) return;
+    const policy = localShadowPolicy(this.quality, this.camDist, altitude);
+    light.castShadow = policy.enabled;
+    if (!policy.enabled) return;
+    light.shadow.mapSize.set(policy.mapSize, policy.mapSize);
+    const camera = light.shadow.camera;
+    camera.left = -policy.extent;
+    camera.right = policy.extent;
+    camera.top = policy.extent;
+    camera.bottom = -policy.extent;
+    camera.near = policy.near;
+    camera.far = policy.far;
+    light.shadow.bias = policy.bias;
+    light.shadow.normalBias = policy.normalBias;
+    const activeCenter = this.activeVesselId
+      ? this.vesselVisuals.get(this.activeVesselId)?.group.position ?? _shadowCenter.set(0, 0, 0)
+      : _shadowCenter.set(0, 0, 0);
+    _shadowDirection.copy(light.position).sub(light.target.position).normalize();
+    snapShadowCenter(activeCenter, _shadowDirection, policy.extent, policy.mapSize, _shadowCenter);
+    light.target.position.copy(_shadowCenter);
+    light.position.copy(_shadowCenter).addScaledVector(_shadowDirection, policy.lightDistance);
+    light.target.updateMatrixWorld(true);
+    light.shadow.camera.updateProjectionMatrix();
   }
 
   planetStats(): { chunks: number; visible: number } {
@@ -375,6 +491,55 @@ export class WorldScene {
   /** Borrow the committed pack for secondary views; ownership remains with this scene. */
   bodyAssetPack(bodyId: string): Readonly<RuntimeBodyAssetPack> | null {
     return this.bodyRendererManagers.get(bodyId)?.currentAssetPack() ?? null;
+  }
+
+  /**
+   * Load, stage, compile, and promote the active body's authored visuals before
+   * the VAB hands control to flight. This is real readiness, not a timer-only
+   * loading screen; callers can add a minimum presentation delay separately.
+   */
+  async prepareFlightBody(
+    body: Body,
+    authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
+  ): Promise<void> {
+    if (this.disposed) throw new Error('World scene is disposed');
+    const installed = planetDataAuthorityForBody(body);
+    if (authority.bodyId !== body.id || installed.generation !== authority.generation) {
+      throw new Error(`Flight authority is not installed for ${body.id}`);
+    }
+    this.bodyAuthorities.set(body.id, authority);
+    this.setFlightTerrainOwner(body.id);
+    this.rendererFor(body);
+    const manager = this.bodyRendererManagers.get(body.id);
+    if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
+
+    const pending = this.bodyRendererLoads.get(body.id);
+    if (pending) await pending;
+    const currentAuthorityMismatch = () => (
+      manager.current()?.terrainAuthorityGeneration !== authority.generation
+      || manager.current()?.stats().terrainAuthorityFallbackReason !== authority.fallbackReason
+    );
+    if (currentAuthorityMismatch()) {
+      await manager.rebuildCommitted();
+      const replacement = manager.current();
+      if (replacement) this.bodyRenderers.set(body.id, replacement);
+    }
+    if (currentAuthorityMismatch()) {
+      throw new Error(`Renderer authority generation mismatch for ${body.id}`);
+    }
+    if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
+    if (manager.currentAssetPack() && manager.claimFlightResidency()) {
+      this.flightPromotedBodyId = body.id;
+      return;
+    }
+
+    // A compact pack may have completed just before the body became the flight
+    // owner. Rebuild once with the active-body budget and flight-scale channels.
+    await this.loadAuthoredRenderer(body.id, manager);
+    if (!manager.currentAssetPack() || !manager.claimFlightResidency()) {
+      throw new Error(`Flight-scale visual pack unavailable for ${body.id}`);
+    }
+    this.flightPromotedBodyId = body.id;
   }
 
   qualityTier(): QualityTier { return this.quality; }
@@ -435,6 +600,8 @@ export class WorldScene {
         quality: tier,
         diagnostics: this.diagnostics,
         activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(tier),
+        flightAerial: this.flightAerial,
+        authority: this.bodyAuthorities.get(candidate.id) ?? planetDataAuthorityForBody(candidate),
       }),
       loadAssets: async (candidateBody, tier) => {
         if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
@@ -481,6 +648,11 @@ export class WorldScene {
       },
       ledger: this.rendererLedger,
       diagnostics: this.diagnostics,
+      authorityGenerationForBody: (candidate) => {
+        const kind = BODY_VISUALS[candidate.id as BodyId]?.renderer;
+        if (kind !== 'terrestrial' && kind !== 'airless') return undefined;
+        return (this.bodyAuthorities.get(candidate.id) ?? planetDataAuthorityForBody(candidate)).generation;
+      },
     });
     this.bodyRendererManagers.set(body.id, manager);
     const renderer = createBodyRendererCandidate({
@@ -489,6 +661,8 @@ export class WorldScene {
       quality: this.quality,
       diagnostics: this.diagnostics,
       activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(this.quality),
+      flightAerial: this.flightAerial,
+      authority: this.bodyAuthorities.get(body.id) ?? planetDataAuthorityForBody(body),
     });
     const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
@@ -499,19 +673,35 @@ export class WorldScene {
       dispose: () => undefined,
     });
     this.bodyRenderers.set(body.id, renderer);
-    if (hasAuthoredPack) {
-      void manager.rebuildCommitted().then(() => {
-        const replacement = manager.current();
-        if (!this.disposed && this.bodyRendererManagers.get(body.id) === manager) {
-          if (replacement) this.bodyRenderers.set(body.id, replacement);
-          if (body.id === this.flightTerrainBodyId) this.flightPromotedBodyId = body.id;
-          if (this.renderFailureState?.bodyId === body.id) this.renderFailureState = null;
-        } else {
-          manager.dispose();
-        }
-      }).catch((error) => this.noteRendererFailure(body.id, error));
-    }
+    if (hasAuthoredPack) void this.loadAuthoredRenderer(body.id, manager).catch(() => undefined);
     return renderer;
+  }
+
+  private loadAuthoredRenderer(bodyId: string, manager: BodyRendererManager): Promise<void> {
+    // A few policy tests intentionally exercise a prototype-only WorldScene
+    // shell without running its constructor.
+    const loads = this.bodyRendererLoads ?? (this.bodyRendererLoads = new Map<string, Promise<void>>());
+    const active = loads.get(bodyId);
+    if (active) return active;
+    const load = manager.rebuildCommitted().then(() => {
+      const replacement = manager.current();
+      if (!this.disposed && this.bodyRendererManagers.get(bodyId) === manager) {
+        if (replacement) this.bodyRenderers.set(bodyId, replacement);
+        if (bodyId === this.flightTerrainBodyId && manager.claimFlightResidency()) {
+          this.flightPromotedBodyId = bodyId;
+        }
+        if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
+      } else {
+        manager.dispose();
+      }
+    }).catch((error) => {
+      this.noteRendererFailure(bodyId, error);
+      throw error;
+    }).finally(() => {
+      if (loads.get(bodyId) === load) loads.delete(bodyId);
+    });
+    loads.set(bodyId, load);
+    return load;
   }
 
   private setFlightTerrainOwner(bodyId: string | null): void {
@@ -542,15 +732,14 @@ export class WorldScene {
       return;
     }
     this.flightPromotionPending.add(bodyId);
-    void manager.rebuildCommitted().then(() => {
+    void this.loadAuthoredRenderer(bodyId, manager).then(() => {
       if (this.disposed || this.flightTerrainBodyId !== bodyId || this.bodyRendererManagers.get(bodyId) !== manager) return;
       const renderer = manager.current();
       if (renderer) this.bodyRenderers.set(bodyId, renderer);
-      this.flightPromotedBodyId = bodyId;
+      if (manager.claimFlightResidency()) this.flightPromotedBodyId = bodyId;
       if (this.renderFailureState?.bodyId === bodyId) this.renderFailureState = null;
-    }).catch((error) => {
+    }).catch(() => {
       if (this.flightTerrainBodyId === bodyId) this.flightPromotionFailed.add(bodyId);
-      this.noteRendererFailure(bodyId, error);
     }).finally(() => {
       this.flightPromotionPending.delete(bodyId);
     });
@@ -600,7 +789,7 @@ export class WorldScene {
   visualFor(gv: GameVessel): VesselVisual {
     let vis = this.vesselVisuals.get(gv.runtime.id);
     if (!vis) {
-      vis = buildVesselVisual(gv.runtime.craft, this.partModels);
+      vis = buildVesselVisual(gv.runtime.craft, this.partModels, this.flightAerial);
       this.vesselVisuals.set(gv.runtime.id, vis);
       this.scene.add(vis.group);
     }
@@ -811,12 +1000,17 @@ export class WorldScene {
     const craftRight = v.att.rotate(_craftRight.set(1, 0, 0), _craftRight);
     const craftNose = v.att.rotate(_craftNose.set(0, 1, 0), _craftNose);
     const craftUp = v.att.rotate(_craftUp.set(0, 0, 1), _craftUp);
-    let cameraUp = up;
+    const cameraUp = _cameraOrbitUp;
     if (this.cameraMode === 'orbit') {
       camOffset
         .addScaled(east, cy * cp * this.camDist)
         .addScaled(north, sy * cp * this.camDist)
         .addScaled(up, sp * this.camDist);
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(east, -cy * sp)
+        .addScaled(north, -sy * sp)
+        .addScaled(up, cp);
     } else if (this.cameraMode === 'chase') {
       const chaseForward = _chaseForward.copy(craftNose).addScaled(up, -craftNose.dot(up));
       if (chaseForward.lengthSq() < 1e-8) chaseForward.copy(north);
@@ -826,15 +1020,24 @@ export class WorldScene {
         .addScaled(chaseForward, -cy * cp * this.camDist)
         .addScaled(chaseRight, sy * cp * this.camDist)
         .addScaled(up, sp * this.camDist);
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(chaseForward, cy * sp)
+        .addScaled(chaseRight, -sy * sp)
+        .addScaled(up, cp);
     } else if (this.cameraMode === 'locked') {
       camOffset
         .addScaled(craftNose, -cy * cp * this.camDist)
         .addScaled(craftRight, sy * cp * this.camDist)
         .addScaled(craftUp, sp * this.camDist);
-      cameraUp = craftUp;
+      cameraUp
+        .set(0, 0, 0)
+        .addScaled(craftNose, cy * sp)
+        .addScaled(craftRight, -sy * sp)
+        .addScaled(craftUp, cp);
     } else {
       camOffset.set(cy * cp * this.camDist, sy * cp * this.camDist, sp * this.camDist);
-      cameraUp = _freeUp;
+      cameraUp.set(-cy * sp, -sy * sp, cp);
     }
 
     // Keep the camera above authoritative terrain on solid bodies.
@@ -911,7 +1114,11 @@ export class WorldScene {
         : undefined;
       bodyOrientation(b, t, _bodyQ);
       _bodySunDir.copy(_starAbs).sub(_bodyAbs);
-      if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
+      if (_bodySunDir.lengthSq() > 0) {
+        // Terrestrial shaders sample body-fixed directions. Keep their solar
+        // vector in that same frame so the day side rotates with the globe.
+        inertialToBodyFixed(b, t, _bodySunDir, _bodySunDir).normalize();
+      }
       const renderer = this.rendererFor(b);
       if (!renderer) continue;
       renderer.root.visible = true;
@@ -927,9 +1134,22 @@ export class WorldScene {
           cameraBodyFixedVelocity: { x: 0, y: 0, z: 0 },
           verticalFovRadians: 0,
           drawingBufferHeight: 0,
+          projection: computeCelestialProjection({
+            centerRelative: { x: 1, y: 0, z: 0 },
+            bodyRadius: 1,
+            verticalFovRadians: Math.PI / 3,
+            drawingBufferHeight: 1,
+            physicalFarMeters: this.camera.far,
+            farField: false,
+          }),
           orientation: { x: 0, y: 0, z: 0, w: 1 },
           cameraSunDirection: { x: 0, y: 0, z: 0 },
           bodySunDirection: { x: 0, y: 0, z: 0 },
+          solarVisibleFraction: 1,
+          solarOccluder: {
+            direction: { x: 0, y: 0, z: 0 },
+            angularRadius: 0,
+          },
           time: 0,
           deltaSeconds: 0,
           framePressure: false,
@@ -952,8 +1172,52 @@ export class WorldScene {
       stableFrame.orientation.w = _bodyQ.w;
       copyCoordinates(stableFrame.cameraSunDirection, _sunDir);
       copyCoordinates(stableFrame.bodySunDirection, _bodySunDir);
+      let solarVisibleFraction = 1;
+      stableFrame.solarOccluder ??= {
+        direction: { x: 0, y: 0, z: 0 },
+        angularRadius: 0,
+      };
+      stableFrame.solarOccluder.angularRadius = 0;
+      const solarAngularRadius = game.universe.root.radius > 0
+        ? Math.asin(Math.min(1, game.universe.root.radius / Math.max(game.universe.root.radius, _starAbs.distanceTo(_camAbs))))
+        : 0;
+      if (solarAngularRadius > 0) {
+        for (const occluder of game.universe.bodies.values()) {
+          if (occluder.def.isStar) continue;
+          game.universe.absolutePosition(occluder, t, _occluderAbs);
+          _occluderDirection.copy(_occluderAbs).sub(_camAbs);
+          const occluderDistance = _occluderDirection.length();
+          if (!(occluderDistance > 0)) continue;
+          const occlusion = celestialOcclusion(
+            { direction: _sunDir, angularRadius: solarAngularRadius },
+            {
+              direction: _occluderDirection,
+              angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
+            },
+          );
+          if (occlusion.intersects && occlusion.sourceVisibleFraction < solarVisibleFraction) {
+            solarVisibleFraction = occlusion.sourceVisibleFraction;
+            copyCoordinates(stableFrame.solarOccluder.direction, _occluderDirection);
+            stableFrame.solarOccluder.angularRadius = Math.asin(
+              Math.min(1, occluder.radius / occluderDistance),
+            );
+          }
+        }
+      }
+      stableFrame.solarVisibleFraction = solarVisibleFraction;
       stableFrame.verticalFovRadians = verticalFovRadians;
       stableFrame.drawingBufferHeight = drawingBufferHeight;
+      stableFrame.projection = computeCelestialProjection({
+        centerRelative: stableFrame.cameraRelativeOrigin,
+        bodyRadius: b.radius,
+        verticalFovRadians,
+        drawingBufferHeight,
+        physicalFarMeters: this.camera.far,
+        // Keep the solar proxy behind lunar apogee while remaining inside the
+        // projection authority's 0.75-far-plane safety cap.
+        preferredProxyDepth: this.camera.far * 0.74,
+        farField: b.def.surfaceKind === 'star',
+      });
       stableFrame.time = t;
       stableFrame.deltaSeconds = dt;
       stableFrame.framePressure = dt > 1 / 30;
@@ -969,9 +1233,9 @@ export class WorldScene {
     }
     pruneBodyFrameSamples(this.lastBodyFrames, sampledBodyIds);
 
-    // Cape Skyward is a single persistent world object, positioned from the
+    // LC-39B is a single persistent world object, positioned from the
     // same transform used by spawnOnPad. It never accumulates across launches.
-    if (body.id === 'veyra') {
+    if (body.def.launchSite) {
       const siteDir = launchSiteDirection(body, t, _tmp);
       const padEnvelope = launchPadTerrainEnvelope(body);
       // Model origin and physics both own the deck top. The foundation extends
@@ -1047,24 +1311,35 @@ export class WorldScene {
     }
     this.srbSmoke.endFrame();
 
-    // ---- atmosphere tint: fade background + fog by altitude.
+    // ---- shared local illumination: the atmosphere supplies hemispherical
+    // fill while airless/deep-space scenes remain almost black. Direct solar
+    // light is still owned by SolarBodyRenderer.
     const alt = v.pos.length() - body.radius;
     const atmo = body.def.atmosphere;
-    const legacyAtmosphereTint = usesLegacyAtmosphereTint(this.bodyRenderers.get(body.id)?.kind);
-    if (atmo && legacyAtmosphereTint && alt < atmo.height) {
-      const f = Math.max(0, 1 - alt / atmo.height);
-      const dayness = Math.max(0, Vec3.dot(up, _sunDir));
-      const sky = _skyColor.setRGB(
-        0.05 + 0.35 * f * dayness,
-        0.07 + 0.5 * f * dayness,
-        0.1 + 0.72 * f * dayness,
-      );
-      (this.scene.background as THREE.Color).copy(sky);
-      this.ambient.intensity = 0.55 + 0.5 * f * dayness;
-    } else {
-      (this.scene.background as THREE.Color).set('#04070a');
-      this.ambient.intensity = 0.55;
-    }
+    const rendererKind = this.bodyRenderers.get(body.id)?.kind;
+    const solarVisibleFraction = this.lastBodyFrames.get(body.id)?.solarVisibleFraction ?? 1;
+    const dayness = Math.max(0, Vec3.dot(up, _sunDir));
+    const sunInFrame = Vec3.dot(_cameraForwardWorld, _sunDir)
+      > Math.cos(verticalFovRadians * 0.65);
+    const environment = environmentLighting(
+      rendererKind,
+      atmo?.height ?? 0,
+      alt,
+      dayness,
+      solarVisibleFraction,
+      sunInFrame,
+      this.environmentState,
+    );
+    this.environment.color.set(environment.sky);
+    this.environment.groundColor.set(environment.ground);
+    this.environment.intensity = environment.intensity;
+    (this.scene.background as THREE.Color).set(environment.background);
+    this.context.renderer.toneMappingExposure = adaptExposure(
+      this.context.renderer.toneMappingExposure,
+      environment.exposure,
+      smokeDt,
+    );
+    this.updateLocalSolarShadow(alt);
   }
 
   private bodyOf(game: GameState, gv: GameVessel): Body {
@@ -1121,6 +1396,7 @@ export class WorldScene {
     window.removeEventListener('resize', this.resizeHandler);
     for (const manager of this.bodyRendererManagers.values()) manager.dispose();
     this.bodyRendererManagers.clear();
+    this.bodyRendererLoads?.clear();
     for (const renderer of this.bodyRenderers.values()) {
       if (renderer.root.parent === this.scene) this.scene.remove(renderer.root);
     }
@@ -1139,6 +1415,7 @@ export class WorldScene {
     this.vesselVisuals.clear();
     this.scene.remove(this.srbSmoke.points);
     this.srbSmoke.dispose();
+    this.flightAerial.dispose();
     disposeOwnedGroup(this.launchSite);
     this.starfield.geometry.dispose();
     const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];

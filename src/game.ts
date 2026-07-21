@@ -4,6 +4,7 @@
  * quicksave/load, maneuver execution, time warp).
  */
 import * as THREE from 'three';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { Vec3 } from './core/vec3';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
 import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
@@ -80,6 +81,7 @@ class PeriluneGame {
   private game = new GameState();
   private world!: WorldScene;
   private partModels!: PartModelLibrary;
+  private ktx2Loader: KTX2Loader | null = null;
   private editor!: Editor;
   private hud!: FlightHud;
   private map!: MapView;
@@ -119,6 +121,7 @@ class PeriluneGame {
   private precisionControl = false;
   private paused = false;
   private uiHidden = false;
+  private uiHideHeld = false;
   private lastAutosave = 0;
   private autosaveScheduled = false;
   private comms: CommsStatus = { connected: true, path: [], strength: 1 };
@@ -172,6 +175,8 @@ class PeriluneGame {
     // Remove vessel visuals first, then release shared model resources once.
     this.world.dispose();
     this.partModels.dispose();
+    this.ktx2Loader?.dispose();
+    this.ktx2Loader = null;
     if (window.__RENDER_DIAGNOSTICS__) delete window.__RENDER_DIAGNOSTICS__;
   };
 
@@ -209,8 +214,12 @@ class PeriluneGame {
     const configuredBaseUrl = import.meta.env.BASE_URL;
     const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
     const checkedParts = checkPartModelManifest(checkedPartArtifact);
+    this.ktx2Loader = new KTX2Loader()
+      .setTranscoderPath(`${baseUrl}basis/`)
+      .detectSupport(this.ctx.renderer);
     this.partModels = createBrowserPartModelLibrary(this.ctx.renderer, checkedParts, {
       transcoderPath: `${baseUrl}basis/`,
+      ktx2: this.ktx2Loader,
       // Content-address the request so a regenerated GLB cannot be confused with
       // an older browser-cached response at the same public path.
       resolveAssetUrl: (path, sha256) => `${baseUrl}parts/${path}?v=${sha256}`,
@@ -220,6 +229,7 @@ class PeriluneGame {
       quality: this.renderOptions.quality,
       diagnostics: this.diagnostics,
       reentryEffectsEnabled: this.renderOptions.reentryVfx,
+      ktx2Loader: this.ktx2Loader,
     });
     injectUiStyles();
     this.rendererFailureEl = el('div', 'k-render-failure', this.uiRoot);
@@ -257,7 +267,10 @@ class PeriluneGame {
       },
       onSetThrottle: (value) => {
         const gv = this.game.active;
-        if (gv && !this.controlBlocked) gv.runtime.controls.throttle = Math.max(0, Math.min(1, value));
+        if (gv && !this.controlBlocked) {
+          this.clearHeldThrottleInput();
+          gv.runtime.controls.throttle = Math.max(0, Math.min(1, value));
+        }
       },
       onSetFlightControl: (axis, value) => {
         this.touchFlightControl[axis] = Math.max(-1, Math.min(1, value));
@@ -534,6 +547,7 @@ class PeriluneGame {
         mobilePanel: this.editor.activeMobilePanel,
         editorCameraDistance: this.editor.cameraDistance,
         editorCameraYaw: this.editor.cameraYaw,
+        editorCameraPitch: this.editor.cameraPitch,
         editorUndoDepth: this.editor.undoDepth,
       }),
     };
@@ -609,7 +623,7 @@ class PeriluneGame {
     this.hud.setMissionStart(this.missionStart);
   }
 
-  private launch(craft: Craft): string | null {
+  private async launch(craft: Craft): Promise<string | null> {
     const locked = lockedCraftParts(this.game.campaign, craft);
     if (locked.length) {
       return `Unlock required technology for ${locked.map((part) => part.name).join(', ')}.`;
@@ -619,10 +633,36 @@ class PeriluneGame {
       if (cost > this.game.campaign.funds) {
         return `Launch requires ${cost.toLocaleString()} funds; ${this.game.campaign.funds.toLocaleString()} available.`;
       }
-      this.game.campaign.funds -= cost;
     }
-    this.launchedCraft = structuredClone(craft);
+    const home = this.game.universe.get(this.game.universe.homeBodyId);
+    // The VAB-to-flight boundary owns authority promotion. Retire the previous
+    // flight before fetching so no live contact query can observe a generation
+    // change, then prepare render state from the exact frozen authority.
     this.game.clearFlightVessels();
+    try {
+      this.game.warpToLaunchDaylight(home);
+      await Promise.all([
+        this.game.prepareFlightAuthority(home, 'ksc-launch').then((authority) => {
+          if (authority.fallbackReason) {
+            clientLog.warn('terrain.authority.fallback', {
+              bodyId: home.id,
+              generation: authority.generation,
+              reason: authority.fallbackReason,
+            });
+          }
+          return this.world.prepareFlightBody(home, authority);
+        }),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
+      ]);
+    } catch (error) {
+      clientLog.error('sim.boundary.error', error, {
+        boundary: `launch-authority-preload:${home.id}`,
+        errorType: 'FlightAuthorityPreparationFailure',
+      });
+      return `Could not prepare ${home.name} terrain. Retry launch.`;
+    }
+    if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
+    this.launchedCraft = structuredClone(craft);
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
     telemetry.track('launch');
@@ -710,6 +750,8 @@ class PeriluneGame {
   private revert(): void {
     if (!this.launchedCraft) return;
     this.game.clearFlightVessels();
+    const home = this.game.universe.get(this.game.universe.homeBodyId);
+    this.game.warpToLaunchDaylight(home);
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.game.setWarp(0, false);
     this.toFlight();
@@ -874,7 +916,17 @@ class PeriluneGame {
 
   private toggleUi(): void {
     this.uiHidden = !this.uiHidden;
-    this.uiRoot.classList.toggle('k-ui-hidden', this.uiHidden);
+    this.syncUiHidden();
+  }
+
+  private setUiHideHeld(held: boolean): void {
+    if (this.uiHideHeld === held) return;
+    this.uiHideHeld = held;
+    this.syncUiHidden();
+  }
+
+  private syncUiHidden(): void {
+    this.uiRoot.classList.toggle('k-ui-hidden', this.uiHidden || this.uiHideHeld);
   }
 
   private showDialog(title: string, text: string, actions: Array<{ label: string; fn: () => void }>): void {
@@ -1064,7 +1116,22 @@ class PeriluneGame {
         this.input.dispatch(e, this.screen as BindingScreen);
       }
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'KeyH') this.setUiHideHeld(false);
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.setUiHideHeld(false);
+      this.resetTouchFlightControls();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.keys.clear();
+        this.setUiHideHeld(false);
+        this.resetTouchFlightControls();
+      }
+    });
     canvas.addEventListener('pointerdown', (e) => {
       if (this.screen === 'editor') {
         this.editorPointerDown(canvas, e);
@@ -1144,7 +1211,7 @@ class PeriluneGame {
             y: (pointers[0].y + pointers[1].y) / 2,
           };
           if (distance > 0 && this.mapPinchDistance > 0) {
-            this.map.zoomCamera(this.mapPinchDistance / distance, midpoint.x, midpoint.y);
+            this.map.zoomCamera(this.mapPinchDistance / distance);
             this.map.panCamera(this.mapPinchMidpoint.x - midpoint.x, this.mapPinchMidpoint.y - midpoint.y);
           }
           this.mapPinchDistance = distance;
@@ -1173,8 +1240,7 @@ class PeriluneGame {
         else this.map.orbitCamera(dx, dy);
       }
       else if (this.screen === 'flight') {
-        this.world.camYaw -= dx * 0.005;
-        this.world.camPitch = Math.max(-1.4, Math.min(1.4, this.world.camPitch + dy * 0.005));
+        this.world.orbitCamera(dx, dy);
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -1210,7 +1276,7 @@ class PeriluneGame {
     canvas.addEventListener('wheel', (e) => {
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
       if (this.screen === 'editor') this.editor.zoomCamera(factor);
-      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor, e.clientX, e.clientY);
+      else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
         this.world.camDist = Math.max(4, Math.min(2000, this.world.camDist * factor));
@@ -1247,8 +1313,14 @@ class PeriluneGame {
       // ---- flight: control
       { code: 'KeyT', screen: flight, group: 'Control', label: 'Toggle SAS', handler: vessel((v) => (v.sas = v.sas === 'off' ? 'stability' : 'off')) },
       { code: 'KeyR', screen: flight, group: 'Control', label: 'Toggle RCS', handler: vessel((v) => (v.controls.rcs = !v.controls.rcs)) },
-      { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => (v.controls.throttle = 1)) },
-      { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => (v.controls.throttle = 0)) },
+      { code: 'KeyZ', screen: flight, group: 'Control', label: 'Full throttle', handler: vessel((v) => {
+        this.clearHeldThrottleInput();
+        v.controls.throttle = 1;
+      }) },
+      { code: 'KeyX', screen: flight, group: 'Control', label: 'Cut throttle', handler: vessel((v) => {
+        this.clearHeldThrottleInput();
+        v.controls.throttle = 0;
+      }) },
       { code: 'CapsLock', screen: flight, group: 'Control', label: 'Precision control', keyLabel: 'CapsLock', handler: (e) => {
         this.precisionControl = e.getModifierState('CapsLock');
       } },
@@ -1258,6 +1330,7 @@ class PeriluneGame {
         else this.world.resetCamera();
       }) },
       { code: 'F2', screen: flight, group: 'Camera', label: 'Hide screenshot UI', preventDefault: true, handler: () => this.toggleUi() },
+      { code: 'KeyH', screen: flight, group: 'Camera', label: 'Hold to hide all HUD', handler: () => this.setUiHideHeld(true) },
       // ---- flight: held keys (polled in the frame loop; listed for the cheat sheet)
       { code: '', screen: flight, group: 'Control', label: 'Pitch', keyLabel: 'W / S' },
       { code: '', screen: flight, group: 'Control', label: 'Yaw', keyLabel: 'A / D' },
@@ -1384,6 +1457,13 @@ class PeriluneGame {
       clampControl((this.keys.has('KeyI') ? 1 : 0) - (this.keys.has('KeyK') ? 1 : 0) + this.touchFlightControl['translate-y']),
       clampControl((this.keys.has('KeyO') ? 1 : 0) - (this.keys.has('KeyU') ? 1 : 0) + this.touchFlightControl['translate-z']),
     );
+  }
+
+  private clearHeldThrottleInput(): void {
+    this.keys.delete('ShiftLeft');
+    this.keys.delete('ShiftRight');
+    this.keys.delete('ControlLeft');
+    this.keys.delete('ControlRight');
   }
 
   private resetTouchFlightControls(): void {

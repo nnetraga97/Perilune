@@ -33,6 +33,21 @@ async function boot(): Promise<void> {
     await runFeasibilityProto();
     return;
   }
+  if (proto === 'sol-visual-reference') {
+    const { runSolVisualReferenceProto } = await import('./proto/solVisualReferenceProto');
+    await runSolVisualReferenceProto();
+    return;
+  }
+  if (proto === 'local-cloud-composite') {
+    const { runLocalCloudCompositeProto } = await import('./proto/localCloudCompositeProto');
+    await runLocalCloudCompositeProto();
+    return;
+  }
+  if (proto === 'planet-detail') {
+    const { runPlanetDetailProto } = await import('./proto/planetDetailProto');
+    await runPlanetDetailProto();
+    return;
+  }
   setBoot('starting game', 0.6);
   const { startGame } = await import('./game');
   await startGame(renderStartupOptions);

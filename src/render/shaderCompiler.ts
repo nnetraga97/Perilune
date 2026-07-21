@@ -6,7 +6,8 @@ type ShaderErrorCallback = NonNullable<THREE.WebGLRenderer['debug']['onShaderErr
 
 interface CompileRenderer {
   readonly debug: { onShaderError: ShaderErrorCallback | null };
-  compileAsync(scene: THREE.Scene, camera: THREE.Camera): Promise<unknown>;
+  compile(scene: THREE.Scene, camera: THREE.Camera): unknown;
+  getContext?(): { finish(): void };
 }
 
 export interface CompileRendererCandidateOptions {
@@ -37,7 +38,16 @@ async function compileIsolated(options: CompileRendererCandidateOptions): Promis
   options.renderer.debug.onShaderError = (...args: Parameters<ShaderErrorCallback>) => { shaderFailures.push(args); };
   try {
     try {
-      await options.renderer.compileAsync(stagingScene, options.camera);
+      // compileAsync polls materialProperties.currentProgram until every program
+      // reports ready. Asset rejection or renderer disposal can invalidate that
+      // program between polls, producing an uncaught `isReady` exception inside
+      // Three. The synchronous boundary reports shader errors through the same
+      // callback without retaining program references across asset lifecycles.
+      options.renderer.compile(stagingScene, options.camera);
+      // KHR_parallel_shader_compile may defer driver work even for compile().
+      // Promotion is rare and transactional, so finish the submitted work here
+      // instead of retaining Three's unsafe polling loop across asset disposal.
+      options.renderer.getContext?.().finish();
     } catch (error) {
       throw new RenderBoundaryError(
         { body: options.body, tier: options.tier, channel: options.channel, phase: 'compile' },

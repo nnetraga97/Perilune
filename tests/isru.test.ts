@@ -1,3 +1,4 @@
+import { createLegacyGameState, restoreLegacyGame, migrateLegacySave } from './fixtures/legacyGameState';
 /**
  * ISRU chain: orbital resource scan → surface drilling → ore-to-propellant
  * conversion, including background processing under rails warp and save
@@ -40,7 +41,7 @@ function findPart(gv: GameVessel, defId: string) {
 
 describe('ore field', () => {
   it('is deterministic, bounded, and varies over the surface', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const samples: number[] = [];
     for (let i = 0; i < 200; i++) {
@@ -66,7 +67,7 @@ describe('ore field', () => {
   });
 
   it('finds distinct rich deposit sites', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const veyra = game.universe.get('veyra');
     const sites = depositSites(veyra, 6);
     expect(sites.length).toBeGreaterThan(2);
@@ -85,7 +86,7 @@ describe('ore field', () => {
 
 describe('orbital scanning', () => {
   it('scans from orbit with a scanner; refuses without one or when landed', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildScanner(), 'Surveyor', 'veyra', 120_000);
     expect(game.scannedBodies.has('veyra')).toBe(false);
     const res = game.performScan(gv);
@@ -93,12 +94,12 @@ describe('orbital scanning', () => {
     expect(game.scannedBodies.has('veyra')).toBe(true);
 
     // No scanner aboard → refuse.
-    const game2 = new GameState();
+    const game2 = createLegacyGameState();
     const bare = game2.spawnInOrbit(buildMiner(), 'Miner', 'veyra', 120_000);
     expect(game2.performScan(bare).ok).toBe(false);
 
     // Landed → refuse.
-    const game3 = new GameState();
+    const game3 = createLegacyGameState();
     const grounded = game3.spawnOnPad(buildScanner(), 'Grounded');
     expect(game3.performScan(grounded).ok).toBe(false);
   });
@@ -106,7 +107,7 @@ describe('orbital scanning', () => {
 
 describe('drilling', () => {
   it('extracts ore while landed, fills bins toward capacity, and needs charge', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildMiner(), 'Miner');
     const drill = findPart(gv, 'drill-auger');
     const bin = findPart(gv, 'bin-ore');
@@ -133,7 +134,7 @@ describe('drilling', () => {
   });
 
   it('keeps mining in the background under rails warp and stops at capacity', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildMiner(), 'Miner');
     const drill = findPart(gv, 'bin-ore');
     void drill;
@@ -157,7 +158,7 @@ describe('drilling', () => {
 
 describe('conversion', () => {
   it('refines ore into propellant with the documented yield and stops when done', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnOnPad(buildMiner(), 'Miner');
     const bin = findPart(gv, 'bin-ore');
     const tank = findPart(gv, 'tank-s1');
@@ -189,20 +190,20 @@ describe('conversion', () => {
 
 describe('ISRU persistence', () => {
   it('round-trips scan state and migrates v1 saves', () => {
-    const game = new GameState();
+    const game = createLegacyGameState();
     const gv = game.spawnInOrbit(buildScanner(), 'Surveyor', 'veyra', 120_000);
     expect(game.performScan(gv).ok).toBe(true);
 
     const save = serializeGame(game, 'isru-test');
     expect(save.saveVersion).toBe(SAVE_VERSION);
-    const restored = restoreGame(JSON.parse(JSON.stringify(save)));
+    const restored = restoreLegacyGame(JSON.parse(JSON.stringify(save)));
     expect(restored.scannedBodies.has('veyra')).toBe(true);
 
     // A v1 save (no isru block) must migrate cleanly with empty scan state.
     const v1 = JSON.parse(JSON.stringify(save));
     v1.saveVersion = 1;
     delete v1.isru;
-    const migrated = migrateSave(v1);
+    const migrated = migrateLegacySave(v1);
     expect(migrated.saveVersion).toBe(SAVE_VERSION);
     expect(migrated.isru?.scanned ?? []).toEqual([]);
   });

@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
+import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   ACTION_GROUP_IDS,
   addPart,
@@ -61,6 +62,22 @@ const CATEGORIES: Array<{ id: PartDef['category']; label: string }> = [
 
 const SNAP_ANGLES = [0, 5, 15, 45, 90] as const;
 
+const NEW_CRAFT_NAMES = Object.freeze([
+  'Orion',
+  'Columbia',
+  'Odyssey',
+  'Kitty Hawk',
+  'Endeavour',
+  'Discovery',
+]);
+let nextCraftNameIndex = 0;
+
+function nextCraftName(): string {
+  const name = NEW_CRAFT_NAMES[nextCraftNameIndex];
+  nextCraftNameIndex = (nextCraftNameIndex + 1) % NEW_CRAFT_NAMES.length;
+  return name;
+}
+
 /** Remove selected descendants whose ancestor is already selected. */
 export function normalizedBranchRoots(craft: Readonly<Craft>, keys: Iterable<number>): number[] {
   const selected = new Set(keys);
@@ -94,8 +111,83 @@ export function expandedBranchKeys(craft: Readonly<Craft>, roots: Iterable<numbe
   return expanded;
 }
 
+export interface SurfaceSymmetryPlacement {
+  parentKey: number;
+  position: Vec3;
+  yaw: number;
+}
+
+/**
+ * Plan surface copies, propagating them across an existing parent symmetry
+ * group when its size matches the active placement symmetry.
+ */
+export function surfaceSymmetryPlacements(
+  craft: Readonly<Craft>,
+  parentKey: number,
+  position: Readonly<{ x: number; y: number; z: number }>,
+  symmetry: number,
+  mode: 'radial' | 'mirror',
+): SurfaceSymmetryPlacement[] {
+  const parent = craft.parts.find((part) => part.key === parentKey);
+  if (!parent) return [];
+  const count = Math.max(1, Math.trunc(symmetry));
+  const relX = position.x - parent.position.x;
+  const relY = position.y - parent.position.y;
+  const relZ = position.z - parent.position.z;
+  const baseAngle = Math.atan2(relX, relZ);
+  const radius = Math.hypot(relX, relZ);
+
+  const parentPeers = parent.symmetry === 0 ? [] : craft.parts.filter((part) => (
+    part.symmetry === parent.symmetry
+    && part.defId === parent.defId
+    && part.attach === parent.attach
+  ));
+  if (count > 1 && parentPeers.length === count) {
+    const centerX = parentPeers.reduce((sum, part) => sum + part.position.x, 0) / count;
+    const centerZ = parentPeers.reduce((sum, part) => sum + part.position.z, 0) / count;
+    const sourceX = parent.position.x - centerX;
+    const sourceZ = parent.position.z - centerZ;
+    if (Math.hypot(sourceX, sourceZ) > 1e-6 && parentPeers.every((peer) => (
+      Math.hypot(peer.position.x - centerX, peer.position.z - centerZ) > 1e-6
+    ))) {
+      const sourceAngle = Math.atan2(sourceX, sourceZ);
+      return [parent, ...parentPeers.filter((peer) => peer.key !== parent.key)].map((peer) => {
+        const peerAngle = Math.atan2(peer.position.x - centerX, peer.position.z - centerZ);
+        const delta = peerAngle - sourceAngle;
+        const cos = Math.cos(delta);
+        const sin = Math.sin(delta);
+        return {
+          parentKey: peer.key,
+          position: new Vec3(
+            peer.position.x + relX * cos + relZ * sin,
+            peer.position.y + relY,
+            peer.position.z - relX * sin + relZ * cos,
+          ),
+          yaw: baseAngle + delta,
+        };
+      });
+    }
+  }
+
+  return Array.from({ length: count }, (_, index) => {
+    const radialAngle = baseAngle + (index / count) * Math.PI * 2;
+    const yaw = mode === 'mirror' && index % 2 === 1
+      ? -baseAngle + (Math.floor(index / 2) / Math.max(1, Math.ceil(count / 2))) * Math.PI * 2
+      : radialAngle;
+    return {
+      parentKey,
+      position: new Vec3(
+        parent.position.x + Math.sin(yaw) * radius,
+        position.y,
+        parent.position.z + Math.cos(yaw) * radius,
+      ),
+      yaw,
+    };
+  });
+}
+
 export interface EditorCallbacks {
-  onLaunch(craft: Craft): string | null;
+  onLaunch(craft: Craft): Promise<string | null>;
   onExit(): void;
   campaign(): CampaignState;
 }
@@ -105,7 +197,7 @@ export class Editor {
   readonly camera: THREE.PerspectiveCamera;
   readonly root: HTMLElement;
   readonly utilityHost: HTMLElement;
-  craft: Craft = createCraft('Untitled Craft');
+  craft: Craft = createCraft(nextCraftName());
 
   private visual: VesselVisual | null = null;
   private ghost: THREE.Object3D | null = null;
@@ -144,6 +236,7 @@ export class Editor {
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
   private launchBtn!: HTMLButtonElement;
+  private launchPending = false;
   private campaignEl!: HTMLElement;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
@@ -252,13 +345,25 @@ export class Editor {
     this.nameInput = el('input', 'ed-name', topPrimary) as HTMLInputElement;
     this.nameInput.value = this.craft.name;
     this.nameInput.onchange = () => {
-      this.craft.name = this.nameInput.value || 'Untitled Craft';
+      const name = this.nameInput.value.trim();
+      if (name) this.craft.name = name;
+      this.nameInput.value = this.craft.name;
     };
     this.campaignEl = el('div', 'ed-campaign-balance', topPrimary);
     this.launchBtn = el('button', 'hud-btn ed-launch', topPrimary, '▲ LAUNCH') as HTMLButtonElement;
-    this.launchBtn.onclick = () => {
-      const error = this.cb.onLaunch(structuredClone(this.craft));
-      if (error) this.showNotice(error, true);
+    this.launchBtn.onclick = async () => {
+      if (this.launchPending) return;
+      this.launchPending = true;
+      this.syncLaunchAvailability();
+      try {
+        const error = await this.cb.onLaunch(structuredClone(this.craft));
+        if (error) this.showNotice(error, true);
+      } catch (error) {
+        this.showNotice(error instanceof Error ? error.message : 'Launch preparation failed.', true);
+      } finally {
+        this.launchPending = false;
+        this.syncLaunchAvailability();
+      }
     };
     const topScroll = el('div', 'ed-topbar-scroll', top);
     this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
@@ -274,7 +379,7 @@ export class Editor {
     const clear = el('button', 'hud-btn', topScroll, 'New');
     clear.onclick = () => {
       this.pushHistory();
-      this.craft = createCraft('Untitled Craft');
+      this.craft = createCraft(nextCraftName());
       this.nameInput.value = this.craft.name;
       this.setSelection([], null);
       this.statsDirty = true;
@@ -594,6 +699,10 @@ export class Editor {
 
   get cameraYaw(): number {
     return this.camYaw;
+  }
+
+  get cameraPitch(): number {
+    return this.camPitch;
   }
 
   get undoDepth(): number {
@@ -1366,27 +1475,23 @@ export class Editor {
       // Surface with symmetry around the stack (Y) axis.
       const symGroup = this.symmetry > 1 ? Date.now() % 1_000_000 : 0;
       const { pos, parentKey } = this.candidate;
-      const parent = craftPart(this.craft, parentKey)!;
-      const cx = parent.position.x;
-      const cz = parent.position.z;
-      const relX = pos.x - cx;
-      const relZ = pos.z - cz;
-      const baseAngle = Math.atan2(relX, relZ);
-      const radius = Math.hypot(relX, relZ);
-      for (let i = 0; i < this.symmetry; i++) {
-        const radialAngle = baseAngle + (i / this.symmetry) * Math.PI * 2;
-        const a = this.symmetryMode === 'mirror' && i % 2 === 1
-          ? -baseAngle + (Math.floor(i / 2) / Math.max(1, Math.ceil(this.symmetry / 2))) * Math.PI * 2
-          : radialAngle;
-        const rotQuat = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), a);
+      const placements = surfaceSymmetryPlacements(
+        this.craft,
+        parentKey,
+        pos,
+        this.symmetry,
+        this.symmetryMode,
+      );
+      for (const placement of placements) {
+        const rotQuat = new Quat().setFromAxisAngle(new Vec3(0, 1, 0), placement.yaw);
         rotQuat.multiply(this.holdingRotation).normalize();
         const rot = { x: rotQuat.x, y: rotQuat.y, z: rotQuat.z, w: rotQuat.w };
         addPart(
           this.craft,
           def.id,
-          parentKey,
+          placement.parentKey,
           'surface',
-          { x: cx + Math.sin(a) * radius, y: pos.y, z: cz + Math.cos(a) * radius },
+          placement.position,
           rot,
           symGroup,
         );
@@ -1435,20 +1540,7 @@ export class Editor {
     }
     this.visual = buildVesselVisual(this.craft, this.partModels);
     this.scene.add(this.visual.group);
-    const campaign = this.cb.campaign();
-    const locked = lockedCraftParts(campaign, this.craft);
-    const cost = craftCost(this.craft);
-    const canAfford = campaign.mode !== 'program' || campaign.funds >= cost;
-    const canLaunch = this.craft.parts.length > 0 && locked.length === 0 && canAfford;
-    this.launchBtn.disabled = !canLaunch;
-    this.launchBtn.title = canLaunch
-      ? campaign.mode === 'program' ? `Commit ${cost.toLocaleString()} funds and launch` : 'Launch this craft'
-      : this.craft.parts.length === 0
-        ? 'Add at least one part before launch'
-        : locked.length
-          ? `Craft contains locked technology: ${locked.map((part) => part.name).join(', ')}`
-          : `Insufficient funds: ${cost.toLocaleString()} required`;
-    this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
+    this.syncLaunchAvailability();
     this.selectedKeys = new Set([...this.selectedKeys].filter((key) => Boolean(craftPart(this.craft, key))));
     if (this.primarySelectedKey !== null && !this.selectedKeys.has(this.primarySelectedKey)) {
       this.primarySelectedKey = this.selectedKeys.values().next().value ?? null;
@@ -1456,9 +1548,30 @@ export class Editor {
     this.syncHighlights();
   }
 
+  private syncLaunchAvailability(): void {
+    const campaign = this.cb.campaign();
+    const locked = lockedCraftParts(campaign, this.craft);
+    const cost = craftCost(this.craft);
+    const canAfford = campaign.mode !== 'program' || campaign.funds >= cost;
+    const canLaunch = !this.launchPending && this.craft.parts.length > 0 && locked.length === 0 && canAfford;
+    this.launchBtn.disabled = !canLaunch;
+    this.launchBtn.textContent = this.launchPending ? 'PREPARING EARTH…' : '▲ LAUNCH';
+    this.launchBtn.setAttribute('aria-busy', this.launchPending ? 'true' : 'false');
+    this.launchBtn.title = this.launchPending
+      ? 'Loading and compiling Earth visuals'
+      : canLaunch
+      ? campaign.mode === 'program' ? `Commit ${cost.toLocaleString()} funds and launch` : 'Launch this craft'
+      : this.craft.parts.length === 0
+        ? 'Add at least one part before launch'
+        : locked.length
+          ? `Craft contains locked technology: ${locked.map((part) => part.name).join(', ')}`
+          : `Insufficient funds: ${cost.toLocaleString()} required`;
+    this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
+  }
+
   orbitCamera(dx: number, dy: number): void {
     this.camYaw -= dx * 0.006;
-    this.camPitch = Math.max(-0.5, Math.min(1.35, this.camPitch + dy * 0.006));
+    this.camPitch = wrapOrbitAngle(this.camPitch + dy * 0.006);
   }
 
   zoomCamera(factor: number): void {
@@ -1487,10 +1600,16 @@ export class Editor {
       midY = (lo + hi) / 2;
     }
     this.camHeight = midY + this.camFocusOffset.y;
-    const cx = Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cz = Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cy = this.camHeight + Math.sin(this.camPitch) * this.camDist;
+    const yawCos = Math.cos(this.camYaw);
+    const yawSin = Math.sin(this.camYaw);
+    const pitchCos = Math.cos(this.camPitch);
+    const pitchSin = Math.sin(this.camPitch);
+    const cx = yawCos * pitchCos * this.camDist;
+    const cz = yawSin * pitchCos * this.camDist;
+    const cy = this.camHeight + pitchSin * this.camDist;
     this.camera.position.set(cx + this.camFocusOffset.x, cy, cz + this.camFocusOffset.z);
+    // Follow the pitch tangent through the poles so lookAt never loses its up axis.
+    this.camera.up.set(-yawCos * pitchSin, pitchCos, -yawSin * pitchSin);
     this.camera.lookAt(this.camFocusOffset.x, this.camHeight, this.camFocusOffset.z);
 
     if (this.statsDirty) {
