@@ -1,76 +1,71 @@
 # Perilune
 
-An original browser-based orbital engineering game by the Skyward
-Cooperative: build spacecraft, fly them with credible physics, reach orbit,
-land on moons, and bring your crew home.
+**Design a spacecraft. Learn why an orbit works. Fly it from Earth to the Moon.**
 
-**Status: Milestone 2 sandbox plus a playable Milestone 3 progression slice.** Build a rocket in the
-Workshop, launch from Veyra, reach orbit, plan a transfer to the moon Palla
-with maneuver nodes, land, return, and recover. Docking and undocking, vessel
-switching, alarms, transfer planning, entry prediction, communications,
-rovers, resource surveying, and ISRU are also playable. The star system, parts,
-simulation, and writing are original. Veyra's authored global albedo uses a
-public-domain Natural Earth II source through Perilune's deterministic asset
-compiler; its provenance and modifications are recorded in
-`ATTRIBUTIONS.md` and `LICENSES.md`.
+Perilune is a browser-based orbital engineering game. It makes the ideas behind
+spaceflight playable: build a vehicle in the Workshop, launch from Earth,
+shape an orbit, plan a maneuver, and attempt a Moon transfer. The current
+experience is built around **First Light**, a guided mission that explains each
+step while the player flies it.
 
-Exploration mode turns recovered science into technology unlocks. Space
-Program mode adds a 25,000-fund starting budget, launch costs, hardware
-recovery refunds, accepted contracts, rewards, and reputation. Sandbox remains
-fully unrestricted.
+> **OpenAI Build Week** — Perilune's suggested track is **Apps for Your Life**:
+> hands-on way to learn orbital flight. Start with [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the
+> project story, the GPT-5.6/Codex implementation, and the submission checklist.
 
-## Play (development)
+## Start here
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev
 ```
 
-## Commands
+Open the local address Vite prints, then choose **First Light**. It starts with
+a prepared vehicle and leads from launch to a Moon orbit. No account is needed
+for local play.
 
-| Command | Purpose |
+## What you can do
+
+| Try | What it teaches |
 |---|---|
-| `npm run dev` | Development server with hot reload |
-| `npm run build` | Production build (static, `dist/`) |
-| `npm run serve` | Serve the production build locally |
-| `npm test` | Unit / property / integration tests (vitest) |
-| `npm run test:e2e` | Browser end-to-end tests (Playwright) |
-| `npm run bench` | Performance benchmarks with CI budgets |
-| `npm run typecheck` | Strict TypeScript check |
-| `npm run validate:content` | Validate planet assets, provenance, checksums, and budgets |
-| `npm run compile:planet-assets:container` | Regenerate authoritative planet packs in the pinned container |
+| First Light | Launch, achieve Earth orbit, execute a Moon transfer, and capture |
+| Workshop | Assemble and stage a spacecraft; inspect Δv and thrust-to-weight ratio |
+| Map | Read an orbit, create a maneuver, and use the flight computer to execute it |
+| Pip | Ask the optional GPT-5.6 flight companion for an evidence-backed next step |
+| Exploration / Space Program | Turn recovered science into technology, contracts, funding, and reputation |
 
-The production build deploys to any HTTPS static host.
+The complete project story and Build Week submission context are in
+[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
 
-## Controls
+## Controls worth knowing
 
 | Input | Action |
 |---|---|
-| Shift / Ctrl | Throttle up / down · Z full · X cut |
-| W S A D Q E | Pitch / yaw / roll |
-| Space | Fire next stage |
-| T | Toggle SAS · navball buttons pick hold modes |
-| R | RCS toggle · IJKL/UO translate |
-| M | Map view (maneuver planning) |
-| [ / ] | Previous / next controllable vessel |
-| 1–0 | Execute action groups 1–10 |
-| , . | Time warp down / up |
-| / | Cancel time warp |
-| F5 / F9 | Quicksave / quickload |
-| F3 | Performance overlay |
-| Mouse drag / wheel | Camera orbit / zoom |
+| `Space` | Fire the next stage |
+| `Shift` / `Ctrl` | Increase / decrease throttle |
+| `M` | Open the map and maneuver planner |
+| `,` / `.` | Decrease / increase time warp |
+| `F5` / `F9` | Quicksave / quickload |
+| Mouse drag / wheel | Orbit / zoom the camera |
 
-Docking captures automatically when compatible ports meet slowly and face one
-another. Undocking, ISRU, resource scans, alarms, and transfer tools are exposed
-through the flight HUD windows.
+## Run and check it
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Run locally with hot reload |
+| `npm run build` | Type-check, validate content, and build the app |
+| `npm test` | Run deterministic unit and integration tests |
+| `npm run test:e2e` | Run browser journeys |
+| `npm run validate:content` | Check asset provenance and content budgets |
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — decisions + measurements (ADRs)
-- [PHYSICS.md](PHYSICS.md) — simulation model
-- [RENDERING.md](RENDERING.md) — planet/vessel rendering pipeline
-- [PERFORMANCE.md](PERFORMANCE.md) — budgets and benchmark history
-- [FEATURES.md](FEATURES.md) — feature traceability matrix
-- [QA.md](QA.md) — test strategy and gates
-- [LICENSES.md](LICENSES.md) / [ATTRIBUTIONS.md](ATTRIBUTIONS.md)
-- [CHANGELOG.md](CHANGELOG.md)
+[docs/README.md](docs/README.md) is the organized reference: architecture,
+quality, content, legal attribution, and dated design history. Historical
+planning and review notes are retained for traceability but kept out of the
+project's main path.
+
+## Credits and license information
+
+Perilune's game systems, writing, and presentation are original. Some visual
+source material is used under documented terms; see
+[legal and attribution](docs/LEGAL.md).
