@@ -21,6 +21,7 @@
 - Low remains source-streaming disabled. Medium and High use explicit CPU/GPU/cache/request ceilings.
 - Reference stations for KSC at 1 km and ground level, source-detail diagnostics in renderer stats, and a harness that waits for detail requests/reprojection/crossfade to settle before capture.
 - Atmosphere/ocean behavior remains on the approved low-altitude presentation. The broad blue orbital shell was not restored.
+- Milestone 3 freezes a content-addressed KSC 3DEP height region at launch. Its corrected EGM2008 samples drive contact, launch-pad placement, terrain vertices/normals, and scatter from one recipe generation; renderer transactions and terrain workers assert that generation. Invalid or unavailable regional data reports the reason and falls back atomically to the checked global parent.
 
 ## Live delivery evidence
 
@@ -31,10 +32,10 @@
 
 ## Deliberately not claimed
 
-- Source imagery does not change terrain vertices, compact silhouette, collision, or contact height.
+- Streamed visual imagery still does not change compact silhouette or contact. Only the explicitly preloaded and frozen KSC numeric authority can change terrain vertices and contact for a new flight.
 - Global shoreline authority remains lower resolution outside the bounded KSC regional classification. At broad low-orbit Florida views, the exact categorical boundary can therefore remain visibly stepped even while land imagery is sharper.
 - Final post-integration visual and performance validation remains for the user. The partial full-matrix run exposed and led to fixes for the 16-sampler overflow and the High fallback-reference terrain allocation; it was intentionally not restarted after the user asked to stop testing.
-- Milestone 3 (`PlanetDataAuthority` and regional contact/silhouette promotion) was not implemented. The plan explicitly requires a separate review before that deterministic simulation change.
+- Lunar and arbitrary-location geometric promotion are not implemented. The Moon remains source-informed shading over the checked parent geometry until a bounded landing/reference region is explicitly selected and gated.
 
 ## Operational configuration
 

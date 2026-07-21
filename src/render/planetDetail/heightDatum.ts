@@ -3,8 +3,9 @@
  * KSC 3DEP coverage. Values are target EGM2008 height for a zero-metre NAVD88
  * input. Runtime height is therefore `navd88 + correction`.
  *
- * This is deliberately a spatial grid rather than a constant offset. It is
- * shading-only in Milestone 2; it is not the flight contact authority.
+ * This is deliberately a spatial grid rather than a constant offset. Visual
+ * delivery uses it in Milestone 2; Milestone 3 also applies the same pinned
+ * correction before a bounded KSC raster can become frozen contact authority.
  */
 export const KSC_NAVD88_TO_EGM2008 = Object.freeze({
   source: 'NOAA VDatum 4.8 Full API',

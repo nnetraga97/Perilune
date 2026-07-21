@@ -51,6 +51,10 @@ import {
   type SuppressionSphere,
 } from './terrestrial/scatter';
 import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from '../sim/planetDataAuthority';
 
 /** Visual-only exclusion volume covering an authored launch-pad foundation. */
 export function launchPadScatterSuppressionSphere(body: Body): SuppressionSphere {
@@ -71,6 +75,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
   readonly kind = 'terrestrial' as const;
   readonly root = new THREE.Group();
+  readonly terrainAuthorityGeneration: string;
+  readonly terrainGeneration: number;
   private readonly transition = new CoverageTransition();
   private compact!: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
   private terrain!: PlanetRenderer;
@@ -111,8 +117,15 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
     private readonly diagnostics?: RenderDiagnosticsPort,
     private readonly activeBodyBudgetBytes = DEFAULT_ACTIVE_BODY_BUDGET[quality],
     private readonly flightAerial?: FlightAerialPerspectiveController,
+    private readonly authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
   ) {
     this.bodyId = body.id;
+    const frozenAuthority = this.authority;
+    if (frozenAuthority.bodyId !== body.id) {
+      throw new Error(`${body.id} terrestrial renderer requires its frozen terrain authority`);
+    }
+    this.terrainAuthorityGeneration = frozenAuthority.generation;
+    this.terrainGeneration = frozenAuthority.terrainGeneration;
     this.compactRadius = body.radius;
     if (body.def.surfaceKind !== 'solid') throw new Error(`${body.id} is not a solid terrestrial body`);
     if (!BODY_VISUALS[body.id as BodyId]?.atmosphereVisual || !body.def.atmosphere) {
@@ -142,6 +155,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
   }
 
   private buildStack(pack: Readonly<RuntimeBodyAssetPack> | null): void {
+    const terrainRecipe = recipeForBody(this.body, this.authority);
     this.stagedAssetBytes = pack?.gpuBytes ?? 0;
     const compactMaterial = createTerrestrialGlobalMaterial(pack, this.descriptor, this.caps.maxAnisotropy);
     const compactGeometry = createGlobalSphereGeometry(this.quality);
@@ -182,7 +196,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       ? new TerrestrialScatter(
         this.body.radius,
         this.body.def.terrain.seed,
-        createRecipeSurfaceSampler(recipeForBody(this.body)),
+        createRecipeSurfaceSampler(terrainRecipe),
         this.quality,
         scatterProfileByName(scatterProfileName),
         this.flightAerial,
@@ -234,6 +248,7 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       terrainAllocationBytes: allocation.allocationBytes,
       diagnostics: this.diagnostics,
       diagnosticSource: this.root.uuid,
+      recipe: terrainRecipe,
     });
     this.terrainDetail = pack ? new TerrainDetailController(
       this.bodyId,
@@ -481,7 +496,8 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       assetBytes: this.stagedAssetBytes,
       lutBytes: this.atmosphere.lookupBytes,
       cloudHistoryBytes: 0,
-      heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
+      heightCacheBytes: sourceHeightCacheBytes(this.bodyId)
+        + (this.authority.region?.samples?.byteLength ?? 0),
       shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
       detailGpuBytes: detailStats?.gpuBytes ?? 0,
       detailPages: detailStats?.pages ?? 0,
@@ -516,6 +532,13 @@ export class TerrestrialBodyRenderer implements BodyRenderer {
       surfaceClassCode: this.lastSurfaceClassCode,
       surfaceClassSource: this.lastSurfaceClassCode === undefined ? 'not-applicable' : 'regional-or-global-exact',
       aerialConsumers: Object.freeze(['compact-land', 'streamed-land', 'ocean']),
+      terrainAuthorityGeneration: this.authority.generation,
+      terrainAuthorityDatasetId: this.authority.datasetId,
+      terrainAuthorityVersion: this.authority.version,
+      terrainAuthorityCoverage: this.authority.coverage,
+      terrainAuthorityDatum: this.authority.datum,
+      terrainAuthorityMode: this.authority.mode,
+      terrainAuthorityFallbackReason: this.authority.fallbackReason,
     });
   }
 

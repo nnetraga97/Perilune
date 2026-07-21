@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-20
 
-**Status:** Milestones 0–2 implemented in the `fable-test` worktree. Final visual/performance validation is left to the user by request. Milestone 3 remains an unapproved conditional gate. See `docs/performance/reference/sol-source-backed-visual-fidelity-implementation-2026-07.md` for delivered evidence and remaining limitations.
+**Status:** Milestones 0–3 implemented in the `fable-test` worktree. Final visual/performance validation is left to the user by request. Milestone 3 promotes only the bounded KSC launch region and falls back atomically to the checked global parent; lunar geometric promotion remains a separately selected future region. See `docs/performance/reference/sol-source-backed-visual-fidelity-implementation-2026-07.md` for delivered evidence and remaining limitations.
 
 **Scope:** Sun, Earth, and Moon visuals and physical presentation scale. Artemis IV mission presentation, mission gameplay, progression, vehicle balance, save migration, and unrelated worktrees remain deferred.
 
@@ -561,6 +561,8 @@ Do not raise the existing active-body budget silently. Detail allocations are ch
 ---
 
 ## Milestone 3 — Gated source-height promotion for true geometric relief
+
+**Implementation note (2026-07-20):** The launch boundary now freezes a content-addressed KSC 3DEP raster after the pinned NAVD88/GEOID18 → EGM2008 correction. Contact, launch-pad envelopes, scatter recipes, terrain providers, and worker geometry share that recipe generation. Renderer transactions can rebuild only the already selected generation; incomplete or invalid regional data reports a fallback and constructs the flight entirely from the checked parent authority.
 
 This milestone is required before claiming source-accurate terrain silhouette at the surface. It is not required to ship Milestones 1–2. It changes deterministic contact values and therefore must be reviewed as a separate implementation gate even though saves are disposable.
 

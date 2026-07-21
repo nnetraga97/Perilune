@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { Vec3 } from '../core/vec3';
 import type { Body } from '../sim/universe';
+import { recipeForBody, type BodyFeatureRecipe } from '../sim/terrainRecipe';
 import type { QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 import { geometryByteLength } from './resourceAccounting';
 import type { RenderDiagnosticContext, RenderDiagnosticsPort } from './renderDiagnostics';
@@ -70,6 +71,8 @@ export interface PlanetRendererOptions {
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly now?: () => number;
   readonly diagnosticSource?: string;
+  /** Exact frozen recipe shared by simulation contact and terrain workers. */
+  readonly recipe?: Readonly<BodyFeatureRecipe>;
 }
 
 export interface PlanetDiagnosticContext extends RenderDiagnosticContext {
@@ -222,9 +225,11 @@ export class PlanetRenderer {
     this.material = options.material ?? new THREE.MeshLambertMaterial({ vertexColors: true });
     this.diagnostics = options.diagnostics;
     const policy = enginePolicy(quality);
+    const recipe = options.recipe ?? recipeForBody(body);
     const provider = createBodySurfaceProvider(body, {
-      generation: 1,
+      generation: recipe.terrainGeneration,
       gridResolution: policy.gridResolution,
+      recipe,
     });
     this.engine = new PlanetTerrainEngine({
       provider,

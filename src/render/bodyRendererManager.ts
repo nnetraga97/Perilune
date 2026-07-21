@@ -108,6 +108,8 @@ export interface BodyRendererManagerOptions extends TransactionBoundaries {
   readonly failures?: RenderFailureTracker;
   readonly now?: () => number;
   readonly diagnostics?: RenderDiagnosticsPort;
+  /** Current frozen authority. Transactions may rebuild it but never change it. */
+  readonly authorityGenerationForBody?: (body: Body) => string | undefined;
 }
 
 interface CommittedRenderer {
@@ -161,6 +163,7 @@ export class BodyRendererManager {
   adoptInitial(body: Body, renderer: BodyRenderer, assets: LoadedRendererAssets): void {
     if (this.disposed) throw new Error('Body renderer manager is disposed');
     if (this.committed || this.candidate) throw new Error('Body renderer manager already has visual state');
+    this.assertAuthority(body, renderer);
     this.options.ledger.assertCanStage(renderer.quality, assets);
     const replaced = this.options.ledger.commit(this.ledgerOwner, body.id, renderer.quality, assets);
     renderer.root.visible = true;
@@ -258,6 +261,7 @@ export class BodyRendererManager {
       if (this.disposed || generation !== this.generation) throw new Error('Renderer transaction is stale after disposal');
     };
     const renderer = this.options.createCandidate(body, tier);
+    this.assertAuthority(body, renderer);
     renderer.root.visible = false;
     this.candidate = renderer;
     this.transactionStartedAt = this.now();
@@ -350,6 +354,14 @@ export class BodyRendererManager {
       throw error;
     } finally {
       this.finishTransition();
+    }
+  }
+
+  private assertAuthority(body: Body, renderer: BodyRenderer): void {
+    const expected = this.options.authorityGenerationForBody?.(body);
+    if (expected !== undefined && renderer.terrainAuthorityGeneration !== expected) {
+      renderer.dispose();
+      throw new Error(`Renderer authority generation mismatch for ${body.id}`);
     }
   }
 

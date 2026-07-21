@@ -43,11 +43,19 @@ import {
   inertialToBodyFixed,
   surfaceVelocity,
 } from './bodyOrientation';
-import { launchSiteDirection } from './launchSite';
+import { launchSiteDirection, nextLaunchSiteDaylightTime } from './launchSite';
 import { preferredOrbitAltitude } from './orbitPlacement';
 import { snapshotInterstageShrouds } from './interstage';
 import { createCampaign, type CampaignState, type GameMode } from './campaign';
 import type { LedgerEntry, ScienceKeyId } from './science';
+import {
+  installPlanetDataAuthority,
+  planetDataAuthorityForBody,
+  preparePlanetDataAuthority,
+  type FrozenPlanetDataAuthority,
+  type PlanetAuthorityRequest,
+} from './planetDataAuthority';
+import { recipeForBody } from './terrainRecipe';
 
 export {
   LAUNCH_PAD_CONTACT_RADIUS,
@@ -135,6 +143,7 @@ export class GameState {
   readonly alarms: GameAlarm[] = [];
   private readonly firedAlarms: GameAlarm[] = [];
   private nextAlarmSerial = 1;
+  private flightAuthority: FrozenPlanetDataAuthority;
 
   constructor(
     mode: GameMode = 'sandbox',
@@ -142,6 +151,27 @@ export class GameState {
   ) {
     this.universe = new Universe([...(options.bodies ?? SOL_SYSTEM)], options.homeBodyId ?? HOME_BODY_ID);
     this.campaign = createCampaign(mode);
+    const home = this.universe.get(this.universe.homeBodyId);
+    this.flightAuthority = planetDataAuthorityForBody(home);
+    installPlanetDataAuthority(home, this.flightAuthority);
+  }
+
+  /** Prepare and freeze numeric terrain authority before any launch placement. */
+  async prepareFlightAuthority(
+    body: Body,
+    request: PlanetAuthorityRequest,
+  ): Promise<FrozenPlanetDataAuthority> {
+    if (this.vessels.length > 0) {
+      throw new Error('Terrain authority cannot change while a flight is active');
+    }
+    const authority = await preparePlanetDataAuthority(body, request);
+    installPlanetDataAuthority(body, authority);
+    this.flightAuthority = authority;
+    return authority;
+  }
+
+  frozenFlightAuthority(): Readonly<FrozenPlanetDataAuthority> {
+    return this.flightAuthority;
   }
 
   /** Keep the vessel id serial ahead of restored ids after loading a save. */
@@ -168,6 +198,19 @@ export class GameState {
     this.activeVesselId = null;
     this.lastDestruction = null;
     this.setWarp(0, false);
+  }
+
+  /** Advance an empty preflight state to the next daylight launch window. */
+  warpToLaunchDaylight(body: Body): number {
+    if (this.vessels.length > 0) {
+      throw new Error('Launch daylight warp requires an empty preflight state');
+    }
+    const launchTime = nextLaunchSiteDaylightTime(this.universe, body, this.time);
+    this.time = launchTime;
+    this.accumulator = 0;
+    this.setWarp(0, false);
+    this.fireDueAlarms();
+    return launchTime;
   }
 
   get warpRate(): number {
@@ -243,6 +286,15 @@ export class GameState {
     const home = this.universe.get(this.universe.homeBodyId);
     if (!home.def.launchSite || home.def.surfaceKind !== 'solid') {
       throw new Error(`${home.name} has no configured launch site`);
+    }
+    const installedAuthority = planetDataAuthorityForBody(home);
+    const recipe = recipeForBody(home, installedAuthority);
+    if (
+      installedAuthority.generation !== this.flightAuthority.generation
+      || recipe.authorityGeneration !== this.flightAuthority.generation
+      || recipe.terrainGeneration !== this.flightAuthority.terrainGeneration
+    ) {
+      throw new Error(`Launch terrain authority generation mismatch for ${home.name}`);
     }
     const runtime = createVesselRuntime(this.newVesselId(), name, craft, home.id);
 

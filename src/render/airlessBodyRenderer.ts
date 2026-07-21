@@ -4,6 +4,10 @@ import { BODY_VISUALS, type BodyId } from '../content/bodyVisuals';
 import type { Body } from '../sim/universe';
 import { naturalContactSurface } from '../sim/terrain';
 import { recipeForBody } from '../sim/terrainRecipe';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from '../sim/planetDataAuthority';
 import type { BodyMaterialDescriptor } from './bodyMaterial';
 import type {
   BodyRenderer,
@@ -42,6 +46,8 @@ export class AirlessBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
   readonly kind = 'airless' as const;
   readonly root = new THREE.Group();
+  readonly terrainAuthorityGeneration: string;
+  readonly terrainGeneration: number;
   private readonly transition = new CoverageTransition();
   private readonly workerPool = typeof Worker === 'undefined' ? undefined : new TerrainChunkWorkerPool();
   private compact!: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
@@ -67,11 +73,18 @@ export class AirlessBodyRenderer implements BodyRenderer {
     readonly quality: QualityTier,
     private readonly diagnostics?: RenderDiagnosticsPort,
     private readonly flightAerial?: FlightAerialPerspectiveController,
+    private readonly authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
   ) {
     if (body.def.surfaceKind !== 'solid' || body.def.atmosphere) {
       throw new Error(`${body.id} airless renderer requires an atmosphere-free solid body`);
     }
     this.bodyId = body.id;
+    const frozenAuthority = this.authority;
+    if (frozenAuthority.bodyId !== body.id) {
+      throw new Error(`${body.id} airless renderer requires its frozen terrain authority`);
+    }
+    this.terrainAuthorityGeneration = frozenAuthority.generation;
+    this.terrainGeneration = frozenAuthority.terrainGeneration;
     this.root.name = `airless-renderer:${body.id}`;
     this.buildStack(null);
   }
@@ -96,6 +109,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
   }
 
   private buildStack(pack: Readonly<RuntimeBodyAssetPack> | null): void {
+    const terrainRecipe = recipeForBody(this.body, this.authority);
     this.stagedAssetBytes = pack?.gpuBytes ?? 0;
     const compactGeometry = createGlobalSphereGeometry(this.quality);
     const compactMaterial = pack
@@ -110,7 +124,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
       ? new TerrestrialScatter(
         this.body.radius,
         this.body.def.terrain.seed,
-        createRecipeSurfaceSampler(recipeForBody(this.body)),
+        createRecipeSurfaceSampler(terrainRecipe),
         this.quality,
         scatterProfileByName(scatterProfileName),
       )
@@ -153,6 +167,7 @@ export class AirlessBodyRenderer implements BodyRenderer {
       terrainAllocationBytes: allocation.allocationBytes,
       diagnostics: this.diagnostics,
       diagnosticSource: this.root.uuid,
+      recipe: terrainRecipe,
     });
     this.terrainDetail = pack ? new TerrainDetailController(
       this.bodyId,
@@ -293,7 +308,8 @@ export class AirlessBodyRenderer implements BodyRenderer {
       assetBytes: this.stagedAssetBytes,
       lutBytes: 0,
       cloudHistoryBytes: 0,
-      heightCacheBytes: sourceHeightCacheBytes(this.bodyId),
+      heightCacheBytes: sourceHeightCacheBytes(this.bodyId)
+        + (this.authority.region?.samples?.byteLength ?? 0),
       shadowBytes: localShadowPolicy(this.quality, this.body.radius, 0).mapSize ** 2 * 4,
       detailGpuBytes: detailStats?.gpuBytes ?? 0,
       detailPages: detailStats?.pages ?? 0,
@@ -326,6 +342,13 @@ export class AirlessBodyRenderer implements BodyRenderer {
       detailProxyRequests: detailSessionStats?.proxyRequests ?? 0,
       detailProxyBytes: detailSessionStats?.proxyBytes ?? 0,
       surfaceClassSource: 'not-applicable',
+      terrainAuthorityGeneration: this.authority.generation,
+      terrainAuthorityDatasetId: this.authority.datasetId,
+      terrainAuthorityVersion: this.authority.version,
+      terrainAuthorityCoverage: this.authority.coverage,
+      terrainAuthorityDatum: this.authority.datum,
+      terrainAuthorityMode: this.authority.mode,
+      terrainAuthorityFallbackReason: this.authority.fallbackReason,
     });
   }
 

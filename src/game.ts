@@ -628,21 +628,34 @@ class PeriluneGame {
       }
     }
     const home = this.game.universe.get(this.game.universe.homeBodyId);
+    // The VAB-to-flight boundary owns authority promotion. Retire the previous
+    // flight before fetching so no live contact query can observe a generation
+    // change, then prepare render state from the exact frozen authority.
+    this.game.clearFlightVessels();
     try {
+      this.game.warpToLaunchDaylight(home);
       await Promise.all([
-        this.world.prepareFlightBody(home),
+        this.game.prepareFlightAuthority(home, 'ksc-launch').then((authority) => {
+          if (authority.fallbackReason) {
+            clientLog.warn('terrain.authority.fallback', {
+              bodyId: home.id,
+              generation: authority.generation,
+              reason: authority.fallbackReason,
+            });
+          }
+          return this.world.prepareFlightBody(home, authority);
+        }),
         new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
       ]);
     } catch (error) {
       clientLog.error('sim.boundary.error', error, {
-        boundary: `launch-visual-preload:${home.id}`,
-        errorType: 'RenderPreloadFailure',
+        boundary: `launch-authority-preload:${home.id}`,
+        errorType: 'FlightAuthorityPreparationFailure',
       });
-      return `Could not prepare ${home.name} visuals. Retry launch.`;
+      return `Could not prepare ${home.name} terrain. Retry launch.`;
     }
     if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
     this.launchedCraft = structuredClone(craft);
-    this.game.clearFlightVessels();
     this.game.spawnOnPad(craft, craft.name);
     this.toFlight();
     telemetry.track('launch');
@@ -730,6 +743,8 @@ class PeriluneGame {
   private revert(): void {
     if (!this.launchedCraft) return;
     this.game.clearFlightVessels();
+    const home = this.game.universe.get(this.game.universe.homeBodyId);
+    this.game.warpToLaunchDaylight(home);
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.game.setWarp(0, false);
     this.toFlight();

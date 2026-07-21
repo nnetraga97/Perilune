@@ -10,6 +10,10 @@ import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
 import { AirlessBodyRenderer } from './airlessBodyRenderer';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from '../sim/planetDataAuthority';
 
 export interface BodyRendererCandidateOptions {
   readonly body: Body;
@@ -19,12 +23,14 @@ export interface BodyRendererCandidateOptions {
   readonly diagnostics?: RenderDiagnosticsPort;
   readonly activeBodyBudgetBytes?: number;
   readonly flightAerial?: FlightAerialPerspectiveController;
+  readonly authority?: Readonly<FrozenPlanetDataAuthority>;
 }
 
 export function createBodyRendererCandidate(options: BodyRendererCandidateOptions): BodyRenderer {
   const visual = BODY_VISUALS[options.body.id as BodyId];
   if (!visual) throw new Error(`Missing body visual assignment for ${options.body.id}`);
   const descriptor = bodyMaterialDescriptor(options.body, visual);
+  const authority = options.authority ?? planetDataAuthorityForBody(options.body);
   switch (visual.renderer) {
     case 'star':
       return new SolarBodyRenderer(options.body, descriptor, options.caps, options.quality);
@@ -39,6 +45,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.diagnostics,
         options.activeBodyBudgetBytes,
         options.flightAerial,
+        authority,
       );
     case 'airless':
       return new AirlessBodyRenderer(
@@ -48,6 +55,7 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.quality,
         options.diagnostics,
         options.flightAerial,
+        authority,
       );
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);

@@ -33,6 +33,7 @@ const EVENT_FIELD_POLICY = {
   'cloud.sync.error': ['errorType', 'requestId'],
   'tech.unlock': ['technologyId'],
   launch: ['mode'],
+  'terrain.authority.fallback': ['bodyId', 'generation', 'reason'],
   'sim.boundary.error': ['boundary', 'errorType'],
 } as const;
 

@@ -1,9 +1,11 @@
 import type { TerrainChunkGeometryRequest, TerrainChunkGeometryResult } from './chunkGeometry';
+import type { BodyFeatureRecipe } from '../../sim/terrainRecipe';
+import type { TerrainWorkerRequest } from './chunkWorker';
 
 export interface WorkerLike {
   onmessage: ((event: MessageEvent<TerrainChunkGeometryResult>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
-  postMessage(message: TerrainChunkGeometryRequest): void;
+  postMessage(message: TerrainWorkerRequest): void;
   terminate(): void;
 }
 
@@ -34,6 +36,7 @@ interface Slot {
   job: Job | null;
   dead: boolean;
   dispatchedAt: number;
+  configuredGeneration: number | null;
 }
 
 /** Replacement workers allowed per slot before the slot is retired. */
@@ -71,6 +74,7 @@ export class TerrainChunkWorkerPool {
     this.respawnsRemaining = size * RESPAWNS_PER_SLOT;
     this.slots = Array.from({ length: size }, () => ({
       worker: this.factory(), job: null, dead: false, dispatchedAt: 0,
+      configuredGeneration: null,
     }));
     for (const slot of this.slots) this.wireSlot(slot);
   }
@@ -176,7 +180,26 @@ export class TerrainChunkWorkerPool {
         slot.job = job;
         slot.dispatchedAt = performance.now();
         try {
-          slot.worker.postMessage(job.request);
+          const region = job.request.recipe.sourceHeightRegion;
+          if (region?.samples) {
+            if (slot.configuredGeneration !== job.request.generation) {
+              slot.worker.postMessage(Object.freeze({
+                kind: 'configure-authority',
+                generation: job.request.generation,
+                recipe: job.request.recipe,
+              }));
+              slot.configuredGeneration = job.request.generation;
+            }
+            slot.worker.postMessage(Object.freeze({
+              kind: 'build',
+              request: Object.freeze({
+                ...job.request,
+                recipe: recipeWithoutAuthoritySamples(job.request.recipe),
+              }),
+            }));
+          } else {
+            slot.worker.postMessage(job.request);
+          }
         } catch (cause) {
           slot.job = null;
           slot.dispatchedAt = 0;
@@ -225,6 +248,7 @@ export class TerrainChunkWorkerPool {
     if (this.respawnsRemaining > 0) {
       this.respawnsRemaining--;
       slot.worker = this.factory();
+      slot.configuredGeneration = null;
       this.wireSlot(slot);
     } else {
       slot.dead = true;
@@ -236,4 +260,13 @@ export class TerrainChunkWorkerPool {
     }
     this.dispatch();
   }
+}
+
+function recipeWithoutAuthoritySamples(recipe: Readonly<BodyFeatureRecipe>): BodyFeatureRecipe {
+  const region = recipe.sourceHeightRegion;
+  if (!region?.samples) return recipe;
+  return Object.freeze({
+    ...recipe,
+    sourceHeightRegion: Object.freeze({ ...region, samples: undefined }),
+  });
 }

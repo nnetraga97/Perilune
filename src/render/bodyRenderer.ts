@@ -129,6 +129,13 @@ export interface BodyRendererStats {
   readonly surfaceClassSource?: 'regional-or-global-exact' | 'not-applicable';
   /** Stable names of material paths updated by the terrestrial aerial state. */
   readonly aerialConsumers?: readonly string[];
+  readonly terrainAuthorityGeneration?: string;
+  readonly terrainAuthorityDatasetId?: string;
+  readonly terrainAuthorityVersion?: string;
+  readonly terrainAuthorityCoverage?: readonly [number, number, number, number];
+  readonly terrainAuthorityDatum?: string;
+  readonly terrainAuthorityMode?: 'resident-parent' | 'promoted-region';
+  readonly terrainAuthorityFallbackReason?: string;
 }
 
 export interface BodyRenderer {
@@ -137,6 +144,9 @@ export interface BodyRenderer {
   readonly quality: QualityTier;
   readonly root: THREE.Object3D;
   readonly ready: boolean;
+  /** Frozen numeric authority used by every terrain recipe owned by this renderer. */
+  readonly terrainAuthorityGeneration?: string;
+  readonly terrainGeneration?: number;
   /** Optional direct-light handle used by the camera-relative shadow policy. */
   readonly shadowLight?: THREE.DirectionalLight;
   /** Stage borrowed runtime assets before preparation and shader compilation. */

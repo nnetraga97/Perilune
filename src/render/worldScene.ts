@@ -19,6 +19,10 @@ import {
 } from '../sim/state';
 import { groundRadiusInertial, launchPadTerrainEnvelope } from '../sim/terrain';
 import type { Body } from '../sim/universe';
+import {
+  planetDataAuthorityForBody,
+  type FrozenPlanetDataAuthority,
+} from '../sim/planetDataAuthority';
 import type { PlanetQuality } from './planet';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual, VesselVisual } from './vesselMesh';
 import type { PartModelLibrary } from './partModelLibrary';
@@ -239,6 +243,8 @@ export class WorldScene {
   private bodyRenderers = new Map<string, BodyRenderer>();
   private bodyRendererManagers = new Map<string, BodyRendererManager>();
   private bodyRendererLoads = new Map<string, Promise<void>>();
+  /** Explicit authority selected only at the launch boundary. */
+  private bodyAuthorities = new Map<string, Readonly<FrozenPlanetDataAuthority>>();
   private lastBodyFrames = new Map<string, BodyRenderFrame>();
   private readonly rendererLedger: RendererResourceLedger;
   private readonly checkedPlanetManifest: CheckedPlanetManifest;
@@ -492,16 +498,36 @@ export class WorldScene {
    * the VAB hands control to flight. This is real readiness, not a timer-only
    * loading screen; callers can add a minimum presentation delay separately.
    */
-  async prepareFlightBody(body: Body): Promise<void> {
+  async prepareFlightBody(
+    body: Body,
+    authority: Readonly<FrozenPlanetDataAuthority> = planetDataAuthorityForBody(body),
+  ): Promise<void> {
     if (this.disposed) throw new Error('World scene is disposed');
+    const installed = planetDataAuthorityForBody(body);
+    if (authority.bodyId !== body.id || installed.generation !== authority.generation) {
+      throw new Error(`Flight authority is not installed for ${body.id}`);
+    }
+    this.bodyAuthorities.set(body.id, authority);
     this.setFlightTerrainOwner(body.id);
     this.rendererFor(body);
-    if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
     const manager = this.bodyRendererManagers.get(body.id);
     if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
 
     const pending = this.bodyRendererLoads.get(body.id);
     if (pending) await pending;
+    const currentAuthorityMismatch = () => (
+      manager.current()?.terrainAuthorityGeneration !== authority.generation
+      || manager.current()?.stats().terrainAuthorityFallbackReason !== authority.fallbackReason
+    );
+    if (currentAuthorityMismatch()) {
+      await manager.rebuildCommitted();
+      const replacement = manager.current();
+      if (replacement) this.bodyRenderers.set(body.id, replacement);
+    }
+    if (currentAuthorityMismatch()) {
+      throw new Error(`Renderer authority generation mismatch for ${body.id}`);
+    }
+    if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
     if (manager.currentAssetPack() && manager.claimFlightResidency()) {
       this.flightPromotedBodyId = body.id;
       return;
@@ -575,6 +601,7 @@ export class WorldScene {
         diagnostics: this.diagnostics,
         activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(tier),
         flightAerial: this.flightAerial,
+        authority: this.bodyAuthorities.get(candidate.id) ?? planetDataAuthorityForBody(candidate),
       }),
       loadAssets: async (candidateBody, tier) => {
         if (!this.checkedPlanetManifest.hasPack(candidateBody.id, tier)) {
@@ -621,6 +648,11 @@ export class WorldScene {
       },
       ledger: this.rendererLedger,
       diagnostics: this.diagnostics,
+      authorityGenerationForBody: (candidate) => {
+        const kind = BODY_VISUALS[candidate.id as BodyId]?.renderer;
+        if (kind !== 'terrestrial' && kind !== 'airless') return undefined;
+        return (this.bodyAuthorities.get(candidate.id) ?? planetDataAuthorityForBody(candidate)).generation;
+      },
     });
     this.bodyRendererManagers.set(body.id, manager);
     const renderer = createBodyRendererCandidate({
@@ -630,6 +662,7 @@ export class WorldScene {
       diagnostics: this.diagnostics,
       activeBodyBudgetBytes: this.rendererLedger.activeBodyBudget(this.quality),
       flightAerial: this.flightAerial,
+      authority: this.bodyAuthorities.get(body.id) ?? planetDataAuthorityForBody(body),
     });
     const hasAuthoredPack = this.checkedPlanetManifest.hasPack(body.id, this.quality);
     manager.adoptInitial(body, renderer, {
@@ -1081,7 +1114,11 @@ export class WorldScene {
         : undefined;
       bodyOrientation(b, t, _bodyQ);
       _bodySunDir.copy(_starAbs).sub(_bodyAbs);
-      if (_bodySunDir.lengthSq() > 0) _bodySunDir.normalize();
+      if (_bodySunDir.lengthSq() > 0) {
+        // Terrestrial shaders sample body-fixed directions. Keep their solar
+        // vector in that same frame so the day side rotates with the globe.
+        inertialToBodyFixed(b, t, _bodySunDir, _bodySunDir).normalize();
+      }
       const renderer = this.rendererFor(b);
       if (!renderer) continue;
       renderer.root.visible = true;
