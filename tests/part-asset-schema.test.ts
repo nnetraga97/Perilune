@@ -16,7 +16,7 @@ describe('validatePartAssetDocuments', () => {
     const { sources, recipes } = inputs();
     expect(validatePartAssetDocuments(sources, recipes)).toEqual([]);
     expect(sources.sources).toHaveLength(8);
-    expect(recipes.models).toHaveLength(32);
+    expect(recipes.models).toHaveLength(34);
     // No license classification or branding-review object is required to pass.
     for (const source of sources.sources) {
       expect(source).not.toHaveProperty('license');

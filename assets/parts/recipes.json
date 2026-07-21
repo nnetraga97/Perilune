@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "budgets": {
-    "totalTriangleLimit": 64000,
+    "totalTriangleLimit": 65000,
     "totalTransferBytes": 6291456,
     "totalGpuBytes": 33554432
   },
@@ -359,6 +359,36 @@
         { "position": [0.55, -0.80, 0.32], "rotation": [0, 0, 0, 1], "scale": 0.58 },
         { "position": [0, -0.80, -0.55], "rotation": [0, 0, 0, 1], "scale": 0.58 }
       ],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-pl100-tank",
+      "partId": "tank-s1",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-pl100-tank.glb",
+      "outputPath": "generated/perilune-pl100-tank.glb",
+      "triangleLimit": 310,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-0.63, -0.46, -0.63],
+        "max": [0.63, 0.46, 0.63]
+      },
+      "plumeAnchors": [],
+      "animationPolicy": "none"
+    },
+    {
+      "assetId": "perilune-hv1600-tank",
+      "partId": "tank-m8",
+      "authoredInProject": true,
+      "authoringPath": "authoring/perilune-hv1600-tank.glb",
+      "outputPath": "generated/perilune-hv1600-tank.glb",
+      "triangleLimit": 640,
+      "textureMaxDimension": 512,
+      "visualBounds": {
+        "min": [-1.275, -1.92, -1.275],
+        "max": [1.275, 1.92, 1.275]
+      },
+      "plumeAnchors": [],
       "animationPolicy": "none"
     },
     {

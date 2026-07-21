@@ -5,7 +5,7 @@ import { canonicalJson, sha256Bytes } from './canonical-json.mjs';
 export { canonicalJson } from './canonical-json.mjs';
 
 export const PART_ASSET_BUDGET_CEILINGS = Object.freeze({
-  totalTriangleLimit: 64_000,
+  totalTriangleLimit: 65_000,
   totalTransferBytes: 6 * 1024 * 1024,
   totalGpuBytes: 32 * 1024 * 1024,
 });
@@ -36,6 +36,8 @@ const PART_TEXTURE_LIMITS = Object.freeze({
   'wheel-mesa': 512,
   'eng-mule': 512,
   'tank-s4': 1024,
+  'tank-s1': 512,
+  'tank-m8': 512,
   'chute-main': 512,
   'tank-m4': 512,
   'tank-s2': 512,
