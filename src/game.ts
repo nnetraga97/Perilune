@@ -1594,8 +1594,8 @@ class PeriluneGame {
     const radius = craftVisualRadius(active.runtime.craft, active.runtime.massProps.com);
     this.world.resetCamera(false);
     this.world.frameCameraForVisualRadius(
-      radius * (keepEngineClearOfHud ? 1.7 : 1),
-      keepEngineClearOfHud ? -radius * 0.35 : 0,
+      radius * (keepEngineClearOfHud ? 2.6 : 1),
+      keepEngineClearOfHud ? -radius * 0.45 : 0,
     );
   }
 
