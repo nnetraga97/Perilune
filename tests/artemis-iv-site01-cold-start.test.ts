@@ -5,7 +5,7 @@ import { vesselForArtemisIvRole } from '../src/missions/artemisIv/mission';
 import { GameState, PHYSICS_DT } from '../src/sim/state';
 
 const site01Bytes = Uint8Array.from(readFileSync(new URL(
-  '../public/planets/generated/moon/site01/height-u16.bin',
+  '../assets/planets/generated/moon/site01/height-u16.bin',
   import.meta.url,
 )));
 
