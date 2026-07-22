@@ -88,6 +88,8 @@ export interface VesselVisual {
   ownedGeometries: Set<THREE.BufferGeometry>;
   /** Flight-only material variants; their geometry and textures remain borrowed. */
   ownedMaterials: Set<THREE.Material>;
+  /** Optional owner for a lazily loaded whole-craft exterior. */
+  disposeExternalResources?: () => void;
   craftVersionSeen: number;
 }
 
@@ -322,6 +324,8 @@ export function disposeVesselVisual(visual: VesselVisual): void {
   visual.partMeshes.clear();
   visual.plumes.clear();
   visual.parachutes.clear();
+  visual.disposeExternalResources?.();
+  visual.disposeExternalResources = undefined;
 }
 
 /**

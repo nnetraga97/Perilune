@@ -342,7 +342,12 @@ export function createOdysseyOrbiter(): Craft {
 
 /** Display-only shell for the unchanged third-party Starship concept model. */
 export function createStarshipConceptDisplayCraft(): Craft {
-  return createCraft('SpaceX Starship · 2019 Concept');
+  const craft = createCraft('SpaceX Starship · 2019 Concept');
+  // The inert command pod gives the simulator a finite mass and pad contact.
+  // Its normal visual is hidden whenever the external Starship model is present.
+  addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 }, identity);
+  craft.stages = [];
+  return craft;
 }
 
 export const BUILT_IN_CRAFTS: readonly BuiltInCraftDefinition[] = Object.freeze([

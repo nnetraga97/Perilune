@@ -193,7 +193,7 @@ export function surfaceSymmetryPlacements(
 }
 
 export interface EditorCallbacks {
-  onLaunch(craft: Craft): Promise<string | null>;
+  onLaunch(craft: Craft, displayVisual?: EditorDisplayVisual): Promise<string | null>;
   onExit(): void;
   loadBuiltInVisual?(id: BuiltInCraftVisualId): Promise<EditorDisplayVisual>;
   campaign(): CampaignState;
@@ -215,6 +215,7 @@ export class Editor {
 
   private visual: VesselVisual | null = null;
   private displayVisual: EditorDisplayVisual | null = null;
+  private displayVisualRequired = false;
   private displayVisualGeneration = 0;
   private ghost: THREE.Object3D | null = null;
   /** Ghost's visual wrapper and its temporary translucent materials, released on drop. */
@@ -370,12 +371,27 @@ export class Editor {
     this.launchBtn = el('button', 'hud-btn ed-launch', topPrimary, '▲ LAUNCH') as HTMLButtonElement;
     this.launchBtn.onclick = async () => {
       if (this.launchPending) return;
+      const displayVisual = this.displayVisual;
+      if (displayVisual) {
+        this.displayVisual = null;
+        this.scene.remove(displayVisual.object);
+      }
       this.launchPending = true;
       this.syncLaunchAvailability();
       try {
-        const error = await this.cb.onLaunch(structuredClone(this.craft));
-        if (error) this.showNotice(error, true);
+        const error = await this.cb.onLaunch(structuredClone(this.craft), displayVisual ?? undefined);
+        if (error) {
+          if (displayVisual) {
+            this.displayVisual = displayVisual;
+            this.scene.add(displayVisual.object);
+          }
+          this.showNotice(error, true);
+        }
       } catch (error) {
+        if (displayVisual) {
+          this.displayVisual = displayVisual;
+          this.scene.add(displayVisual.object);
+        }
         this.showNotice(error instanceof Error ? error.message : 'Launch preparation failed.', true);
       } finally {
         this.launchPending = false;
@@ -524,6 +540,8 @@ export class Editor {
   ): Promise<void> {
     this.loadCraft(definition.create());
     if (!definition.displayVisualId) return;
+    this.displayVisualRequired = true;
+    this.syncLaunchAvailability();
     if (!this.cb.loadBuiltInVisual) {
       this.showNotice('This display model is unavailable.', true);
       return;
@@ -540,8 +558,9 @@ export class Editor {
       }
       this.displayVisual = visual;
       this.scene.add(visual.object);
+      if (this.visual) this.visual.group.visible = false;
       this.frameDisplayVisual(visual.object);
-      this.showNotice('Display model loaded · not flight-ready');
+      this.showNotice('Display model loaded · inert pad preview');
     } catch (error) {
       if (generation === this.displayVisualGeneration) {
         const reason = error instanceof Error ? error.message : 'The display model could not be loaded.';
@@ -1283,6 +1302,8 @@ export class Editor {
 
   private clearDisplayVisual(): void {
     this.displayVisualGeneration++;
+    this.displayVisualRequired = false;
+    if (this.visual) this.visual.group.visible = true;
     if (!this.displayVisual) return;
     this.scene.remove(this.displayVisual.object);
     this.displayVisual.dispose();
@@ -1632,15 +1653,21 @@ export class Editor {
 
   private syncLaunchAvailability(): void {
     const campaign = this.cb.campaign();
-    const locked = lockedCraftParts(campaign, this.craft);
-    const cost = craftCost(this.craft);
+    const locked = this.displayVisualRequired ? [] : lockedCraftParts(campaign, this.craft);
+    const cost = this.displayVisualRequired ? 0 : craftCost(this.craft);
     const canAfford = campaign.mode !== 'program' || campaign.funds >= cost;
-    const canLaunch = !this.launchPending && this.craft.parts.length > 0 && locked.length === 0 && canAfford;
+    const canLaunch = !this.launchPending
+      && this.craft.parts.length > 0
+      && (!this.displayVisualRequired || this.displayVisual !== null)
+      && locked.length === 0
+      && canAfford;
     this.launchBtn.disabled = !canLaunch;
     this.launchBtn.textContent = this.launchPending ? 'PREPARING EARTH…' : '▲ LAUNCH';
     this.launchBtn.setAttribute('aria-busy', this.launchPending ? 'true' : 'false');
     this.launchBtn.title = this.launchPending
       ? 'Loading and compiling Earth visuals'
+      : this.displayVisualRequired && !this.displayVisual
+        ? 'Load the external craft visual before placing it on the pad'
       : canLaunch
       ? campaign.mode === 'program' ? `Commit ${cost.toLocaleString()} funds and launch` : 'Launch this craft'
       : this.craft.parts.length === 0

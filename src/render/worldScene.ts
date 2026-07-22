@@ -19,6 +19,7 @@ import {
 } from '../sim/state';
 import { groundRadiusInertial, launchPadTerrainEnvelope } from '../sim/terrain';
 import type { Body } from '../sim/universe';
+import { defOf } from '../sim/vessel';
 import {
   planetDataAuthorityForBody,
   type FrozenPlanetDataAuthority,
@@ -861,6 +862,53 @@ export class WorldScene {
       this.scene.add(vis.group);
     }
     return vis;
+  }
+
+  /** Replace an inert proxy craft's part meshes with a lazily loaded exterior. */
+  attachExternalVesselVisual(
+    gv: GameVessel,
+    external: Readonly<{ object: THREE.Object3D; dispose(): void }>,
+    targetHeightMeters = 50,
+  ): void {
+    this.invalidateVessel(gv.runtime.id);
+    const group = new THREE.Group();
+    const modelRoot = new THREE.Group();
+    modelRoot.add(external.object);
+    group.add(modelRoot);
+
+    group.updateMatrixWorld(true);
+    let bounds = new THREE.Box3().setFromObject(modelRoot);
+    const authoredHeight = bounds.max.y - bounds.min.y;
+    if (!(Number.isFinite(authoredHeight) && authoredHeight > 0)) {
+      external.dispose();
+      throw new Error('External craft visual has invalid bounds');
+    }
+    modelRoot.scale.setScalar(targetHeightMeters / authoredHeight);
+    group.updateMatrixWorld(true);
+    bounds = new THREE.Box3().setFromObject(modelRoot);
+    const center = bounds.getCenter(new THREE.Vector3());
+    const proxyBottom = Math.min(...gv.runtime.craft.parts.map((part) => (
+      part.position.y - defOf(part).shape.height / 2
+    )));
+    modelRoot.position.set(-center.x, proxyBottom - bounds.min.y, -center.z);
+    external.object.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.castShadow = true;
+      object.receiveShadow = true;
+    });
+
+    const visual: VesselVisual = {
+      group,
+      partMeshes: new Map(),
+      plumes: new Map(),
+      parachutes: new Map(),
+      ownedGeometries: new Set(),
+      ownedMaterials: new Set(),
+      disposeExternalResources: () => external.dispose(),
+      craftVersionSeen: gv.runtime.craft.parts.length,
+    };
+    this.vesselVisuals.set(gv.runtime.id, visual);
+    this.scene.add(group);
   }
 
   /**

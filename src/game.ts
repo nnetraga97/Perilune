@@ -21,7 +21,7 @@ import { WorldScene } from './render/worldScene';
 import { checkPartModelManifest } from './render/partModelManifest';
 import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
 import checkedPartArtifact from './generated/checked-part-manifest.json';
-import { Editor } from './ui/editor';
+import { Editor, type EditorDisplayVisual } from './ui/editor';
 import { FlightHud, type FlightControlAxis } from './ui/flightHud';
 import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
@@ -355,7 +355,7 @@ class PeriluneGame {
     if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
-      onLaunch: (craft) => this.launch(craft),
+      onLaunch: (craft, displayVisual) => this.launch(craft, displayVisual),
       onExit: () => this.showMenu(),
       loadBuiltInVisual: (id) => this.loadEditorBuiltInVisual(id),
       campaign: () => this.game.campaign,
@@ -1633,12 +1633,12 @@ class PeriluneGame {
     );
   }
 
-  private async launch(craft: Craft): Promise<string | null> {
-    const locked = lockedCraftParts(this.game.campaign, craft);
+  private async launch(craft: Craft, displayVisual?: EditorDisplayVisual): Promise<string | null> {
+    const locked = displayVisual ? [] : lockedCraftParts(this.game.campaign, craft);
     if (locked.length) {
       return `Unlock required technology for ${locked.map((part) => part.name).join(', ')}.`;
     }
-    const cost = craftCost(craft);
+    const cost = displayVisual ? 0 : craftCost(craft);
     if (this.game.campaign.mode === 'program') {
       if (cost > this.game.campaign.funds) {
         return `Launch requires ${cost.toLocaleString()} funds; ${this.game.campaign.funds.toLocaleString()} available.`;
@@ -1677,8 +1677,14 @@ class PeriluneGame {
     }
     if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
     this.launchedCraft = structuredClone(craft);
-    this.game.spawnOnPad(craft, craft.name);
-    this.frameActiveCraft();
+    const vessel = this.game.spawnOnPad(craft, craft.name);
+    if (displayVisual) {
+      this.world.attachExternalVesselVisual(vessel, displayVisual);
+      this.world.resetCamera(false);
+      this.world.frameCameraForVisualRadius(55, -20);
+    } else {
+      this.frameActiveCraft();
+    }
     this.toFlight();
     telemetry.track('launch');
     clientLog.info('launch', { mode: this.game.campaign.mode });

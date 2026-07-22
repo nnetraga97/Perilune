@@ -32,7 +32,7 @@ describe('built-in craft library', () => {
     expect(definition?.description).toContain('MartianDays (CC BY 4.0)');
     expect(createStarshipConceptDisplayCraft()).toMatchObject({
       name: 'SpaceX Starship · 2019 Concept',
-      parts: [],
+      parts: [{ defId: 'pod-voyager' }],
       stages: [],
     });
   });
