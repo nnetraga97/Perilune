@@ -26,8 +26,10 @@ import {
   type TerrainTileId,
 } from '../src/render/terrain/tile';
 import { PLANET_QUALITY, PlanetRenderer, terrainChunkKeyInfo } from '../src/render/planet';
+import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
 
 const veyra = createLegacyGameState().universe.get('veyra');
+const earth = new GameState('sandbox', GAMEPLAY_PROFILES.sol).universe.get('earth');
 
 describe('terrain chunk diagnostic keys', () => {
   it('derives stable parent and four immediate-child keys for roots and deeper chunks', () => {
@@ -139,6 +141,20 @@ function rayMeshAltitude(
 }
 
 describe('terrain chunk geometry builder', () => {
+  it('applies launch-pad mesh clearance to Earth terrain', () => {
+    const site = launchSiteBodyFixedDirection(new Vec3());
+    const tile = tileAtDirection(site, 3);
+    const result = buildTerrainChunkGeometry(request({
+      jobKey: 'earth-pad',
+      tile,
+      recipe: structuredClone(recipeForBody(earth)),
+      radius: earth.radius,
+      resolution: 9,
+    }));
+    expect(rayMeshAltitude(result, site, earth.radius, 9))
+      .toBeLessThanOrEqual(launchPadTerrainEnvelope(earth).deckHeight + 0.1);
+  });
+
   it('keeps the launchpad footprint above interpolated terrain at every LOD', () => {
     const site = launchSiteBodyFixedDirection(new Vec3());
     const east = new Vec3(-site.y, site.x, 0).normalize();

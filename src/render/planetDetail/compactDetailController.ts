@@ -67,6 +67,8 @@ export class CompactDetailController {
   private static readonly CROSSFADE_SECONDS = 0.35;
   /** The checked global parent already oversamples a body that fits on screen. */
   private static readonly FULL_DISK_VERTICAL_FOV_FRACTION = 0.98;
+  /** Prevents repeated atlas churn while the camera hovers at the full-disk boundary. */
+  private static readonly FULL_DISK_RESUME_FRACTION = 1.06;
   private source: PlanetDetailSourceAdapter | null;
   private readonly budget;
   private persistent: PersistentPlanetTileCache | null;
@@ -76,6 +78,8 @@ export class CompactDetailController {
   private signature = '';
   private atlas: THREE.CanvasTexture | null = null;
   private previousAtlas: THREE.CanvasTexture | null = null;
+  private fadeToParentReason: string | null = null;
+  private fullDiskParentActive = false;
   private generation = 0;
   private currentState: CompactDetailStats = Object.freeze({ state: 'resident-parent', level: 0, pages: 0, gpuBytes: 0, requestBytes: 0, generation: 0 });
   private disposed = false;
@@ -100,12 +104,23 @@ export class CompactDetailController {
   update(frame: Readonly<BodyRenderFrame>): void {
     if (this.disposed || !this.source || !this.budget.enabled) return;
     if (this.currentState.state === 'crossfading') {
-      const opacity = Math.min(1, (this.states[0]?.opacity.value ?? 0) + frame.deltaSeconds / CompactDetailController.CROSSFADE_SECONDS);
+      const direction = this.fadeToParentReason ? -1 : 1;
+      const opacity = THREE.MathUtils.clamp(
+        (this.states[0]?.opacity.value ?? 0)
+          + direction * frame.deltaSeconds / CompactDetailController.CROSSFADE_SECONDS,
+        0,
+        1,
+      );
       for (const state of this.states) {
         state.opacity.value = opacity;
-        state.previousOpacity.value = this.previousAtlas ? 1 - opacity : 0;
+        state.previousOpacity.value = !this.fadeToParentReason && this.previousAtlas ? 1 - opacity : 0;
       }
-      if (opacity >= 1) {
+      if (this.fadeToParentReason && opacity <= 0) {
+        const reason = this.fadeToParentReason;
+        this.fadeToParentReason = null;
+        this.releaseAtlas();
+        this.disable(reason);
+      } else if (!this.fadeToParentReason && opacity >= 1) {
         this.releasePreviousAtlas();
         this.currentState = Object.freeze({ ...this.currentState, state: 'ready', gpuBytes: this.atlasBytes() });
       }
@@ -120,11 +135,25 @@ export class CompactDetailController {
     // transitions across the visible globe (notably around 12-15 Mm at Earth).
     const moonCoarseDetailActive = this.bodyId === 'moon'
       && altitude <= MOON_COMPACT_DETAIL_CEILING_METERS;
-    if (
-      apparentDiameter <= frame.verticalFovRadians * CompactDetailController.FULL_DISK_VERTICAL_FOV_FRACTION
-      && !moonCoarseDetailActive
-    ) {
+    const fullDiskThreshold = frame.verticalFovRadians * (
+      this.fullDiskParentActive
+        ? CompactDetailController.FULL_DISK_RESUME_FRACTION
+        : CompactDetailController.FULL_DISK_VERTICAL_FOV_FRACTION
+    );
+    if (apparentDiameter <= fullDiskThreshold && !moonCoarseDetailActive) {
+      this.fullDiskParentActive = true;
       return this.suspend('resident-parent-full-disk');
+    }
+    this.fullDiskParentActive = false;
+    if (this.atlas && this.signature && this.fadeToParentReason) {
+      this.fadeToParentReason = null;
+      this.setEnabled(true);
+      this.currentState = Object.freeze({
+        ...this.currentState,
+        state: 'crossfading',
+        gpuBytes: this.atlasBytes(),
+        fallbackReason: undefined,
+      });
     }
     const metersPerPixel = 2 * altitude * Math.tan(frame.verticalFovRadians * 0.5) / Math.max(1, frame.drawingBufferHeight);
     const selectedSource = planetVisualDetailSourceForView(this.bodyId, frame.cameraBodyFixed, metersPerPixel, this.suppressedSources);
@@ -268,14 +297,25 @@ export class CompactDetailController {
   private suspend(reason: string): void {
     // Invalidate an in-flight request so it cannot re-enable a detail atlas a
     // frame after the camera has returned to a parent-only presentation.
-    if (this.signature) {
+    if (this.signature && this.currentState.state === 'requesting') {
       this.signature = '';
       this.abort.abort();
       this.abort = new AbortController();
     }
     this.releasePreviousAtlas();
-    for (const state of this.states) state.opacity.value = this.atlas ? 1 : 0;
-    this.disable(reason);
+    if (!this.atlas || (this.states[0]?.opacity.value ?? 0) <= 0) {
+      this.releaseAtlas();
+      this.disable(reason);
+      return;
+    }
+    this.fadeToParentReason = reason;
+    this.setEnabled(true);
+    this.currentState = Object.freeze({
+      ...this.currentState,
+      state: 'crossfading',
+      gpuBytes: this.atlasBytes(),
+      fallbackReason: reason,
+    });
   }
   private disable(reason: string): void {
     this.setEnabled(false);
@@ -289,6 +329,15 @@ export class CompactDetailController {
       state.previousOpacity.value = 0;
     }
   }
+  private releaseAtlas(): void {
+    this.atlas?.dispose();
+    this.atlas = null;
+    this.signature = '';
+    for (const state of this.states) {
+      state.atlas.value = null;
+      state.opacity.value = 0;
+    }
+  }
   private textureBytes(texture: THREE.CanvasTexture | null): number {
     return texture ? texture.image.width * texture.image.height * 4 * 4 / 3 : 0;
   }
@@ -299,8 +348,7 @@ export class CompactDetailController {
     this.disposed = true;
     this.abort.abort();
     this.releasePreviousAtlas();
-    this.atlas?.dispose();
-    this.atlas = null;
+    this.releaseAtlas();
     for (const state of this.states) {
       state.enabled.value = 0;
       state.atlas.value = null;

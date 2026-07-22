@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ARTEMIS_IV_CAMERA_FRAMING_RADII } from '../src/missions/artemisIv/visuals';
 import { flightCameraDistanceForVisualRadius } from '../src/render/worldScene';
+import { createFirstLightRocket } from '../src/content/crafts';
+import { computeMassProperties, craftVisualRadius } from '../src/sim/vessel';
 
 describe('external flight visual camera framing', () => {
   it('fits the full Artemis HLS envelope while preserving the stock default path', () => {
@@ -20,5 +22,14 @@ describe('external flight visual camera framing', () => {
     const portrait = flightCameraDistanceForVisualRadius(10, 62, 9 / 16);
     expect(portrait).toBeGreaterThan(landscape);
     expect(() => flightCameraDistanceForVisualRadius(0, 62, 1)).toThrow(/radius/);
+  });
+
+  it('frames the tall First Light stack around its offset center of mass', () => {
+    const craft = createFirstLightRocket();
+    const radius = craftVisualRadius(craft, computeMassProperties(craft).com);
+    const distance = flightCameraDistanceForVisualRadius(radius, 62, 16 / 9);
+
+    expect(radius).toBeGreaterThan(30);
+    expect(distance).toBeGreaterThan(60);
   });
 });

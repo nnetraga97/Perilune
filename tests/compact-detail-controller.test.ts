@@ -52,6 +52,16 @@ function moonFrame(altitude: number, deltaSeconds = 0): BodyRenderFrame {
   };
 }
 
+function earthFrame(altitude: number, deltaSeconds = 0): BodyRenderFrame {
+  const radius = 6_378_137;
+  return {
+    ...frame(deltaSeconds),
+    cameraBodyFixed: { x: radius + altitude, y: 0, z: 0 },
+    projection: { trueObserverDistance: radius + altitude, angularRadius: 0.5, projectedPixelRadius: 450, proxyDepth: 1, proxyRadius: 1, visibility: 'physical' },
+    altitude,
+  };
+}
+
 describe('compact detail controller', () => {
   it('keeps the Moon atlas coarse enough to cover the whole viewport', () => {
     const radius = 1_737_400;
@@ -124,6 +134,44 @@ describe('compact detail controller', () => {
     controller.update(frame(0.35));
     expect(controller.stats().state).toBe('ready');
     expect(state.opacity.value).toBe(1);
+    controller.dispose();
+    material.dispose();
+  });
+
+  it('crossfades to the resident Earth parent and uses hysteresis at full disk', async () => {
+    const drawImage = vi.fn();
+    const canvas = { width: 0, height: 0, getContext: () => ({ drawImage }) };
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => canvas } });
+    Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: vi.fn(async () => ({ width: 512, height: 512, close: vi.fn() })) });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob([new Uint8Array(64)], { type: 'image/jpeg' }), {
+      headers: { 'content-type': 'image/jpeg', 'content-length': '64' },
+    })));
+
+    const material = new THREE.MeshStandardMaterial();
+    const state = createPlanetDetailMaterialState();
+    material.userData.planetDetail = state;
+    const controller = new CompactDetailController('earth', 6_378_137, 'medium', [material]);
+    controller.update(earthFrame(250_000));
+    await vi.waitFor(() => expect(controller.stats().state).toBe('crossfading'));
+    controller.update(earthFrame(250_000, 0.35));
+    expect(state.opacity.value).toBe(1);
+
+    controller.update(earthFrame(12_000_000));
+    expect(controller.stats()).toMatchObject({ state: 'crossfading', fallbackReason: 'resident-parent-full-disk' });
+    expect(state.enabled.value).toBe(1);
+    controller.update(earthFrame(12_000_000, 0.175));
+    expect(state.opacity.value).toBeCloseTo(0.5, 6);
+    controller.update(earthFrame(12_000_000, 0.175));
+    expect(controller.stats()).toMatchObject({ state: 'disabled', fallbackReason: 'resident-parent-full-disk' });
+    expect(state.enabled.value).toBe(0);
+
+    // Still within the wider resume boundary: do not churn the atlas back on.
+    controller.update(earthFrame(11_000_000));
+    expect(state.enabled.value).toBe(0);
+    controller.update(earthFrame(5_000_000));
+    expect(controller.stats().state).toBe('requesting');
+    expect(state.enabled.value).toBe(0);
+    await vi.waitFor(() => expect(controller.stats().state).toBe('crossfading'));
     controller.dispose();
     material.dispose();
   });

@@ -351,6 +351,30 @@ export function computeMassProperties(craft: Craft): MassProperties {
   return { mass, dryMass, com, inertia };
 }
 
+/**
+ * Conservative craft-local sphere used to frame a vessel around its center of
+ * mass. Part rotations cannot escape each part's half-diagonal, so this stays
+ * valid for radial parts without coupling the flight camera to render assets.
+ */
+export function craftVisualRadius(craft: Craft, center = computeMassProperties(craft).com): number {
+  let radius = 0.5;
+  for (const part of craft.parts) {
+    const shape = defOf(part).shape;
+    const width = shape.width ?? Math.max(shape.radiusTop ?? 0, shape.radiusBottom ?? 0) * 2;
+    const depth = shape.depth ?? width;
+    const halfDiagonal = Math.hypot(width / 2, shape.height / 2, depth / 2);
+    radius = Math.max(
+      radius,
+      Math.hypot(
+        part.position.x - center.x,
+        part.position.y - center.y,
+        part.position.z - center.z,
+      ) + halfDiagonal,
+    );
+  }
+  return radius;
+}
+
 // ---------------------------------------------------------------------------
 // Crossfeed: which tanks can feed a given engine.
 // Fuel flows across parent/child links where BOTH parts allow crossfeed.
