@@ -256,6 +256,11 @@ describe('flight director server', () => {
     expect(body.instructions).toContain('phase.allowedActions');
     expect(body).not.toHaveProperty('previous_response_id');
     expect(body.input).toContain('telemetrySnapshot');
+    expect(body.input).toContain('availableEvidenceKeys');
+    expect(body.text.format.schema.properties.evidenceKeys.items.enum)
+      .toContain('orbit.periapsisMeters');
+    expect(body.text.format.schema.properties.evidenceKeys.items.enum)
+      .not.toContain('currentBody.atmosphereTopMeters');
     expect(result).toMatchObject({
       advisory: { tone: 'warning' }, inputTokens: 321, outputTokens: 54,
       cachedInputTokens: 120, cacheWriteTokens: 0, reasoningTokens: 18,

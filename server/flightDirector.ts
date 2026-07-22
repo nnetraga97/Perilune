@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import {
   availableFlightDirectorEvidence,
   FLIGHT_DIRECTOR_ACTION_IDS,
-  FLIGHT_DIRECTOR_EVIDENCE_KEYS,
   FLIGHT_DIRECTOR_MODEL,
   isFlightDirectorAdvisory,
   isFlightDirectorSnapshot,
   type FlightDirectorAdvisory,
+  type FlightDirectorEvidenceKey,
   type FlightDirectorSnapshot,
 } from '../src/ai/flightDirector.js';
 import { clientIp, HttpError, jsonError, jsonOk, methodNotAllowed, readJsonBody, requestId, safeHandlerError } from './http.js';
@@ -17,7 +17,7 @@ import type { FlightDirectorAuditRecord, FlightDirectorAuditRepository } from '.
 
 const REQUEST_MAX_BYTES = 24 * 1024;
 const CACHE_SECONDS = 15;
-const PROMPT_VERSION = 2;
+const PROMPT_VERSION = 3;
 
 const FLIGHT_DIRECTOR_INSTRUCTIONS = `You are Pip, Perilune's advisory-only flight companion.
 Perilune is an original fictional solar system. Use only the supplied telemetry snapshot; real-world solar-system facts do not apply.
@@ -36,44 +36,46 @@ Rules:
 - Do not perform a missing trajectory calculation or claim an exact burn time unless it is supplied.
 - Give one next action at most. Never claim to control, steer, stage, or modify the spacecraft.
 - Choose an actionId that matches phase.flightPhase. Do not repeat continuity.previousActionId unless it is still the best current action.
-- Cite 1 to 4 evidenceKeys that directly support the advisory and exist in the snapshot.
+- Cite 1 to 4 evidenceKeys that directly support the advisory and are listed in availableEvidenceKeys.
 - Treat disconnected communications as a flight-control problem only when comms.controlBlocked is true; crewed craft can fly locally.
 - If essential information is absent, name it in unknowns and lower the confidence of the wording.
 - Keep the headline under 8 words, summary under 45 words, instruction under 24 words, and timing under 10 words.
 - Use a calm, concise mission-control voice with a small amount of personality.`;
 
-const ADVISORY_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    tone: { type: 'string', enum: ['info', 'warning', 'success', 'danger'] },
-    headline: { type: 'string', minLength: 1, maxLength: 72 },
-    summary: { type: 'string', minLength: 1, maxLength: 320 },
-    evidenceKeys: {
-      type: 'array', minItems: 1, maxItems: 4,
-      items: { type: 'string', enum: FLIGHT_DIRECTOR_EVIDENCE_KEYS },
-    },
-    nextAction: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        actionId: { type: 'string', enum: FLIGHT_DIRECTOR_ACTION_IDS },
-        instruction: { type: 'string', minLength: 1, maxLength: 180 },
-        timing: { type: 'string', minLength: 1, maxLength: 80 },
+function advisorySchema(availableEvidenceKeys: readonly FlightDirectorEvidenceKey[]) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      tone: { type: 'string', enum: ['info', 'warning', 'success', 'danger'] },
+      headline: { type: 'string', minLength: 1, maxLength: 72 },
+      summary: { type: 'string', minLength: 1, maxLength: 320 },
+      evidenceKeys: {
+        type: 'array', minItems: 1, maxItems: Math.min(4, availableEvidenceKeys.length),
+        items: { type: 'string', enum: availableEvidenceKeys },
       },
-      required: ['actionId', 'instruction', 'timing'],
+      nextAction: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          actionId: { type: 'string', enum: FLIGHT_DIRECTOR_ACTION_IDS },
+          instruction: { type: 'string', minLength: 1, maxLength: 180 },
+          timing: { type: 'string', minLength: 1, maxLength: 80 },
+        },
+        required: ['actionId', 'instruction', 'timing'],
+      },
+      warnings: {
+        type: 'array', maxItems: 3,
+        items: { type: 'string', minLength: 1, maxLength: 140 },
+      },
+      unknowns: {
+        type: 'array', maxItems: 3,
+        items: { type: 'string', minLength: 1, maxLength: 140 },
+      },
     },
-    warnings: {
-      type: 'array', maxItems: 3,
-      items: { type: 'string', minLength: 1, maxLength: 140 },
-    },
-    unknowns: {
-      type: 'array', maxItems: 3,
-      items: { type: 'string', minLength: 1, maxLength: 140 },
-    },
-  },
-  required: ['tone', 'headline', 'summary', 'evidenceKeys', 'nextAction', 'warnings', 'unknowns'],
-} as const;
+    required: ['tone', 'headline', 'summary', 'evidenceKeys', 'nextAction', 'warnings', 'unknowns'],
+  };
+}
 
 interface OpenAIResponsePayload {
   output_text?: unknown;
@@ -136,6 +138,7 @@ export function createOpenAIFlightDirectorProvider(
 ): FlightDirectorProvider {
   return {
     async generate(snapshot) {
+      const availableEvidenceKeys = [...availableFlightDirectorEvidence(snapshot)];
       let response: Response;
       try {
         response = await fetchImpl('https://api.openai.com/v1/responses', {
@@ -151,13 +154,13 @@ export function createOpenAIFlightDirectorProvider(
             max_output_tokens: 300,
             prompt_cache_options: { mode: 'explicit' },
             instructions: FLIGHT_DIRECTOR_INSTRUCTIONS,
-            input: JSON.stringify({ telemetrySnapshot: snapshot }),
+            input: JSON.stringify({ availableEvidenceKeys, telemetrySnapshot: snapshot }),
             text: {
               format: {
                 type: 'json_schema',
                 name: 'perilune_flight_advisory',
                 strict: true,
-                schema: ADVISORY_SCHEMA,
+                schema: advisorySchema(availableEvidenceKeys),
               },
             },
           }),
