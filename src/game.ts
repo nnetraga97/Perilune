@@ -1588,12 +1588,14 @@ class PeriluneGame {
     this.hud.setMissionStart(this.missionStart);
   }
 
-  private frameActiveCraft(): void {
+  private frameActiveCraft(keepEngineClearOfHud = false): void {
     const active = this.game.active;
     if (!active) return;
+    const radius = craftVisualRadius(active.runtime.craft, active.runtime.massProps.com);
     this.world.resetCamera(false);
     this.world.frameCameraForVisualRadius(
-      craftVisualRadius(active.runtime.craft, active.runtime.massProps.com),
+      radius * (keepEngineClearOfHud ? 1.18 : 1),
+      keepEngineClearOfHud ? -radius * 0.35 : 0,
     );
   }
 
@@ -1662,7 +1664,7 @@ class PeriluneGame {
     }
     if (!this.game.fireStage(gv)) return;
     this.world.invalidateVessel(gv.runtime.id);
-    if (this.sessionKind === 'first-light') this.frameActiveCraft();
+    if (this.sessionKind === 'first-light') this.frameActiveCraft(true);
     if (this.sessionKind === 'artemis-iv') this.syncArtemisIvStageTopology();
   }
 

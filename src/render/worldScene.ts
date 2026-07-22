@@ -308,6 +308,7 @@ export class WorldScene {
   camYaw = 0.6;
   camPitch = 0.35;
   camDist = 18;
+  private cameraFocusAlongNose = 0;
   cameraMode: FlightCameraMode = 'orbit';
   cameraSmoothing = true;
 
@@ -325,6 +326,7 @@ export class WorldScene {
     this.camYaw = this.cameraMode === 'orbit' || this.cameraMode === 'free' ? 0.6 : 0;
     this.camPitch = 0.28;
     this.camDist = 18;
+    this.cameraFocusAlongNose = 0;
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
   }
@@ -333,13 +335,14 @@ export class WorldScene {
    * Opt-in framing for external mission visuals whose render bounds are larger
    * than their hidden physics craft. Ordinary vessels never call this path.
    */
-  frameCameraForVisualRadius(radiusMeters: number): number {
+  frameCameraForVisualRadius(radiusMeters: number, focusAlongNoseMeters = 0): number {
     const distance = flightCameraDistanceForVisualRadius(
       radiusMeters,
       this.camera.fov,
       this.camera.aspect,
     );
     this.camDist = Math.max(this.camDist, distance);
+    this.cameraFocusAlongNose = Number.isFinite(focusAlongNoseMeters) ? focusAlongNoseMeters : 0;
     return this.camDist;
   }
 
@@ -1138,7 +1141,11 @@ export class WorldScene {
     const previousCameraRotation = _previousCameraRotation.copy(this.camera.quaternion);
     this.camera.position.set(0, 0, 0);
     this.camera.up.set(cameraUp.x, cameraUp.y, cameraUp.z);
-    this.camera.lookAt(-camOffset.x, -camOffset.y, -camOffset.z);
+    this.camera.lookAt(
+      -camOffset.x + craftNose.x * this.cameraFocusAlongNose,
+      -camOffset.y + craftNose.y * this.cameraFocusAlongNose,
+      -camOffset.z + craftNose.z * this.cameraFocusAlongNose,
+    );
     if (this.cameraSmoothing && dt > 0) {
       const targetCameraRotation = _targetCameraRotation.copy(this.camera.quaternion);
       this.camera.quaternion.copy(previousCameraRotation).slerp(targetCameraRotation, 1 - Math.exp(-dt * 12));
