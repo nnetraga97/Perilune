@@ -5,6 +5,7 @@ import {
   createFirstLightRocket,
   createOdysseyOrbiter,
   createSecondLightCraft,
+  createStarshipConceptDisplayCraft,
   createWayfarerDemonstrator,
 } from '../src/content/crafts';
 import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
@@ -22,6 +23,20 @@ import { planMoonCourseCorrection, planTransfer } from '../src/sim/transfer';
 import { estimateBurnTime, nodeBurnVector, orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
 
 describe('built-in craft library', () => {
+  it('offers the unchanged Starship concept as a display-only built-in', () => {
+    const definition = BUILT_IN_CRAFTS.find((craft) => craft.id === 'spacex-starship-2019-concept');
+    expect(definition).toMatchObject({
+      name: 'SpaceX Starship · 2019 Concept',
+      displayVisualId: 'starship-2019-concept',
+    });
+    expect(definition?.description).toContain('MartianDays (CC BY 4.0)');
+    expect(createStarshipConceptDisplayCraft()).toMatchObject({
+      name: 'SpaceX Starship · 2019 Concept',
+      parts: [],
+      stages: [],
+    });
+  });
+
   it('reaches Earth orbit with a verified Moon intercept and capture reserve', () => {
     const craft = createFirstLightRocket();
     expect(BUILT_IN_CRAFTS.map((entry) => entry.id)).toContain('first-light-launch-vehicle');

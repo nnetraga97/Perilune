@@ -34,7 +34,11 @@ import type { PartModelLibrary } from '../render/partModelLibrary';
 import { deleteCraftFile, listCraftFiles, readCraftFile, writeCraftFile } from '../save/persistence';
 import { el, injectUiStyles } from './kit';
 import { partPortrait } from './partPortrait';
-import { BUILT_IN_CRAFTS } from '../content/crafts';
+import {
+  BUILT_IN_CRAFTS,
+  type BuiltInCraftDefinition,
+  type BuiltInCraftVisualId,
+} from '../content/crafts';
 import {
   craftCost,
   isPartUnlocked,
@@ -191,9 +195,15 @@ export function surfaceSymmetryPlacements(
 export interface EditorCallbacks {
   onLaunch(craft: Craft): Promise<string | null>;
   onExit(): void;
+  loadBuiltInVisual?(id: BuiltInCraftVisualId): Promise<EditorDisplayVisual>;
   campaign(): CampaignState;
   flightTuning(): Readonly<FlightTuning>;
   systemId(): GameplaySystemId;
+}
+
+export interface EditorDisplayVisual {
+  readonly object: THREE.Object3D;
+  dispose(): void;
 }
 
 export class Editor {
@@ -204,6 +214,8 @@ export class Editor {
   craft: Craft = createCraft(nextCraftName());
 
   private visual: VesselVisual | null = null;
+  private displayVisual: EditorDisplayVisual | null = null;
+  private displayVisualGeneration = 0;
   private ghost: THREE.Object3D | null = null;
   /** Ghost's visual wrapper and its temporary translucent materials, released on drop. */
   private ghostVisual: VesselVisual | null = null;
@@ -493,12 +505,52 @@ export class Editor {
       row.dataset.craftId = definition.id;
       const copy = el('div', 'ed-craft-copy', row);
       el('strong', '', copy, definition.name);
-      const analysis = analyzeCraft(craft, 9.42, 101_325, this.cb.flightTuning());
-      el('span', '', copy, `${craft.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
-      const load = el('button', 'hud-btn', row, 'Load');
+      if (definition.displayVisualId) {
+        el('span', '', copy, definition.description);
+      } else {
+        const analysis = analyzeCraft(craft, 9.42, 101_325, this.cb.flightTuning());
+        el('span', '', copy, `${craft.parts.length} parts · ${(analysis.mass / 1000).toFixed(1)} t · ${analysis.totalDeltaV.toFixed(0)} m/s`);
+      }
+      const load = el('button', 'hud-btn', row, 'Load') as HTMLButtonElement;
       load.setAttribute('aria-label', `Load built-in craft ${definition.name}`);
       load.title = definition.description;
-      load.onclick = () => this.loadCraft(definition.create());
+      load.onclick = () => void this.loadBuiltInCraft(definition, load);
+    }
+  }
+
+  private async loadBuiltInCraft(
+    definition: BuiltInCraftDefinition,
+    button: HTMLButtonElement,
+  ): Promise<void> {
+    this.loadCraft(definition.create());
+    if (!definition.displayVisualId) return;
+    if (!this.cb.loadBuiltInVisual) {
+      this.showNotice('This display model is unavailable.', true);
+      return;
+    }
+    const generation = ++this.displayVisualGeneration;
+    button.disabled = true;
+    button.textContent = 'Loading…';
+    this.showNotice('Loading the unchanged Starship concept model…');
+    try {
+      const visual = await this.cb.loadBuiltInVisual(definition.displayVisualId);
+      if (generation !== this.displayVisualGeneration) {
+        visual.dispose();
+        return;
+      }
+      this.displayVisual = visual;
+      this.scene.add(visual.object);
+      this.frameDisplayVisual(visual.object);
+      this.showNotice('Display model loaded · not flight-ready');
+    } catch (error) {
+      if (generation === this.displayVisualGeneration) {
+        const reason = error instanceof Error ? error.message : 'The display model could not be loaded.';
+        this.showNotice(reason, true);
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Load';
+      this.syncLaunchAvailability();
     }
   }
 
@@ -759,6 +811,7 @@ export class Editor {
   }
 
   private restoreCraftSnapshot(snapshot: Craft): void {
+    this.clearDisplayVisual();
     this.dropHolding();
     this.craft = structuredClone(snapshot);
     this.nameInput.value = this.craft.name;
@@ -1219,6 +1272,23 @@ export class Editor {
     this.camDist = Math.max(8, Math.min(80, span * 1.4));
   }
 
+  private frameDisplayVisual(object: THREE.Object3D): void {
+    const bounds = new THREE.Box3().setFromObject(object);
+    if (bounds.isEmpty()) return;
+    const center = bounds.getCenter(new THREE.Vector3());
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    this.camFocusOffset.set(center.x, center.y - 3, center.z);
+    this.camDist = Math.max(8, Math.min(120, sphere.radius * 2.6));
+  }
+
+  private clearDisplayVisual(): void {
+    this.displayVisualGeneration++;
+    if (!this.displayVisual) return;
+    this.scene.remove(this.displayVisual.object);
+    this.displayVisual.dispose();
+    this.displayVisual = null;
+  }
+
   frameSelected(): void {
     if (!this.selectedKeys.size) return;
     const framed = [...expandedBranchKeys(this.craft, normalizedBranchRoots(this.craft, this.selectedKeys))]
@@ -1543,6 +1613,8 @@ export class Editor {
 
   // ------------------------------------------------------------- rendering
   rebuildVisual(): void {
+    // Any normal craft edit leaves the display-only preview mode.
+    this.clearDisplayVisual();
     this.clearHighlights();
     if (this.visual) {
       this.scene.remove(this.visual.group);
@@ -1590,6 +1662,7 @@ export class Editor {
 
   setVisible(vis: boolean): void {
     if (!vis) {
+      this.clearDisplayVisual();
       this.closePartContext();
       this.updateHover(this.pointer.x, this.pointer.y, false);
     }

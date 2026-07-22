@@ -11,6 +11,7 @@ centers the model, converts its source scale to metres, and points its nose alon
 Perilune's `+Y` craft axis without changing the GLB.
 
 This 2019 model is a generic Starship concept, not Starship HLS. It may appear in
-the Artemis IV tutorial only with the manifest's stand-in label and the provider
-disclaimer. Provenance, license, attribution, and accuracy limits are locked in
-`source-lock.json`.
+the Artemis IV tutorial with the manifest's stand-in label and provider disclaimer,
+or in the Workshop's display-only built-in craft entry with visible author/license
+attribution and a non-flight-ready label. Provenance, license, attribution, and
+accuracy limits are locked in `source-lock.json`.

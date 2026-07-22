@@ -81,7 +81,11 @@ import {
 } from './sim/science';
 import type { CollectOutcome } from './sim/science';
 import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
-import { createFirstLightRocket, createSecondLightCraft } from './content/crafts';
+import {
+  createFirstLightRocket,
+  createSecondLightCraft,
+  type BuiltInCraftVisualId,
+} from './content/crafts';
 import { maneuverAutomationCommand } from './sim/maneuverAutomation';
 import { planMoonCourseCorrection, planTransfer } from './sim/transfer';
 import {
@@ -353,6 +357,7 @@ class PeriluneGame {
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft) => this.launch(craft),
       onExit: () => this.showMenu(),
+      loadBuiltInVisual: (id) => this.loadEditorBuiltInVisual(id),
       campaign: () => this.game.campaign,
       flightTuning: () => this.game.flightTuning,
       systemId: () => this.game.systemId,
@@ -817,6 +822,35 @@ class PeriluneGame {
       residentPackGpuBytes: this.world.renderStats().residentPackGpuBytes,
       drawingBufferBytes: framebuffer,
     });
+  }
+
+  private async loadEditorBuiltInVisual(id: BuiltInCraftVisualId) {
+    if (id !== 'starship-2019-concept') throw new Error(`Unknown built-in visual ${id}`);
+    const decision = preflightArtemisIvAssets({
+      currentTier: this.world.qualityTier(),
+      supportsHighTier: this.ctx.caps.backend === 'webgl2',
+      caps: this.ctx.caps,
+      ledger: this.artemisIvRendererLedger,
+    });
+    if (!decision.ok) throw new Error(decision.reason);
+    const baseUrl = import.meta.env.BASE_URL.endsWith('/')
+      ? import.meta.env.BASE_URL
+      : `${import.meta.env.BASE_URL}/`;
+    const loader = createBrowserArtemisIvAssetLoader(this.ctx.renderer, {
+      ledger: this.artemisIvRendererLedger,
+      transcoderPath: `${baseUrl}basis/`,
+      ktx2: this.ktx2Loader ?? undefined,
+    });
+    try {
+      const loaded = await loader.loadStarship();
+      return {
+        object: loaded.object,
+        dispose: () => loader.dispose(),
+      };
+    } catch (error) {
+      loader.dispose();
+      throw error;
+    }
   }
 
   private confirmArtemisIvPreparedSceneBudget(retryChapter: ArtemisIvChapter): boolean {

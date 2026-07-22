@@ -5,8 +5,11 @@ export interface BuiltInCraftDefinition {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly displayVisualId?: BuiltInCraftVisualId;
   create(): Craft;
 }
+
+export type BuiltInCraftVisualId = 'starship-2019-concept';
 
 const identity = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
 
@@ -337,7 +340,19 @@ export function createOdysseyOrbiter(): Craft {
   return craft;
 }
 
+/** Display-only shell for the unchanged third-party Starship concept model. */
+export function createStarshipConceptDisplayCraft(): Craft {
+  return createCraft('SpaceX Starship · 2019 Concept');
+}
+
 export const BUILT_IN_CRAFTS: readonly BuiltInCraftDefinition[] = Object.freeze([
+  Object.freeze({
+    id: 'spacex-starship-2019-concept',
+    name: 'SpaceX Starship · 2019 Concept',
+    description: 'Display only · “SpaceX Starship” by MartianDays (CC BY 4.0) · unchanged model · not flight-ready',
+    displayVisualId: 'starship-2019-concept',
+    create: createStarshipConceptDisplayCraft,
+  }),
   Object.freeze({
     id: 'first-light-launch-vehicle',
     name: 'First Light Launch Vehicle',
