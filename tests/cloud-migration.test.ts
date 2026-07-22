@@ -13,6 +13,10 @@ const auditUsageSql = readFileSync(
   new URL('../supabase/migrations/20260719090000_flight_director_usage_details.sql', import.meta.url),
   'utf8',
 );
+const fingerprintSql = readFileSync(
+  new URL('../supabase/migrations/20260721230000_cloud_save_fingerprint_version.sql', import.meta.url),
+  'utf8',
+);
 
 describe('cloud save migration', () => {
   it('creates an owner-scoped revisioned save table with RLS', () => {
@@ -24,6 +28,18 @@ describe('cloud save migration', () => {
     expect(sql).toContain('revoke all on table public.cloud_saves from anon');
   });
 
+});
+
+describe('canonical fingerprint migration', () => {
+  it('adds an explicit dual-version marker for the staged backfill', () => {
+    expect(fingerprintSql).toContain('fingerprint_version integer not null default 1');
+    expect(fingerprintSql).toContain('fingerprint_version in (1, 2)');
+  });
+
+  it('keeps Vercel builds free of database mutation', () => {
+    const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+    expect(vercel.buildCommand).toBe('npm run build');
+  });
 });
 
 describe('flight director audit migration', () => {

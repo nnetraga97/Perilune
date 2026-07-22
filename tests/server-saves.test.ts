@@ -20,6 +20,7 @@ function record(revision = 1): CloudSaveRecord {
   return {
     slot: 'cloud-test', label: payload.label, saveVersion: payload.saveVersion,
     payloadHash: 'a'.repeat(64), revision,
+    fingerprintVersion: 2,
     createdAt: '2026-07-13T00:00:00.000Z', updatedAt: '2026-07-13T00:00:00.000Z', payload,
   };
 }
@@ -48,6 +49,7 @@ describe('cloud save handlers', () => {
       list: async () => { throw new Error('database should not run'); },
     }), cache))(new Request('https://perilune.test/api/saves'));
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(response.headers.get('x-perilune-cache')).toBe('hit');
   });
 

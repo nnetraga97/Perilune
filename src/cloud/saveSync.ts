@@ -15,15 +15,33 @@ import { SyncStore, type SlotSyncRecord } from './syncStore';
 import type { CloudSaveMeta, ConflictChoice, UnifiedSaveSlot } from './types';
 import { telemetry } from '../telemetry/service';
 import { clientLog } from '../telemetry/log';
+import { canonicalJson } from '../save/canonicalJson';
 
 type Listener = () => void;
+export type UploadResult =
+  | { kind: 'synced'; cloud: CloudSaveMeta }
+  | { kind: 'conflict'; cloud: CloudSaveMeta | null }
+  | { kind: 'pending' }
+  | { kind: 'failed' };
+
+export interface RetryClock {
+  now(): number;
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const browserRetryClock: RetryClock = {
+  now: () => Date.now(),
+  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+  clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 function blankRecord(state: SlotSyncRecord['state']): SlotSyncRecord {
   return { revision: null, payloadHash: null, state, attempts: 0, nextRetryAt: 0, cloud: null };
 }
 
 export async function hashSave(save: SaveGame): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify(save));
+  const bytes = new TextEncoder().encode(canonicalJson(save));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -34,12 +52,17 @@ export class SaveSyncService {
   private authUnsubscribe: (() => void) | null = null;
   private refreshing: Promise<void> | null = null;
   private lastUserId: string | null = null;
-  private readonly onlineHandler = () => void this.retryPending();
+  private retryTimer: unknown = null;
+  private readonly onlineHandler = () => {
+    this.schedulePending();
+    void this.retryPending();
+  };
 
   constructor(
     private readonly auth: AuthService,
     private readonly cloud: CloudSaveClient,
     private readonly store: SyncStore,
+    private readonly retryClock: RetryClock = browserRetryClock,
   ) {}
 
   initialize(): void {
@@ -52,6 +75,7 @@ export class SaveSyncService {
     this.authUnsubscribe?.();
     this.authUnsubscribe = null;
     if (typeof window !== 'undefined') window.removeEventListener('online', this.onlineHandler);
+    this.cancelRetryTimer();
     this.listeners.clear();
   }
 
@@ -66,6 +90,7 @@ export class SaveSyncService {
     if (this.refreshing) return this.refreshing;
     this.refreshing = this.reconcile(userId).finally(() => {
       this.refreshing = null;
+      this.schedulePending();
       this.emit();
     });
     return this.refreshing;
@@ -166,15 +191,14 @@ export class SaveSyncService {
       if (choice === 'keep-local') {
         const save = await readSave(slot);
         if (!save) return false;
-        await this.upload(userId, slot, save, cloud.revision);
+        const fresh = await this.cloud.read(slot);
+        this.rememberCloud(userId, slot, fresh, 'conflict');
+        const result = await this.upload(userId, slot, save, fresh.revision);
+        if (result.kind !== 'synced') return false;
       } else if (choice === 'keep-cloud') {
         const remote = await this.cloud.read(slot);
         if (!await writeSaveDocument(slot, remote.payload)) return false;
-        this.cloudCatalog.set(slot, remote);
-        this.store.set(userId, slot, {
-          revision: remote.revision, payloadHash: remote.payloadHash, state: 'synced',
-          attempts: 0, nextRetryAt: 0, cloud: remote,
-        });
+        this.rememberCloud(userId, slot, remote, 'synced');
       } else {
         const save = await readSave(slot);
         if (!save) return false;
@@ -210,10 +234,11 @@ export class SaveSyncService {
     if (!userId) return;
     const records = this.store.all(userId);
     for (const [slot, record] of Object.entries(records)) {
-      if (record.state !== 'pending' || record.nextRetryAt > Date.now()) continue;
+      if (record.state !== 'pending' || record.nextRetryAt > this.retryClock.now()) continue;
       const save = await readSave(slot);
       if (save) await this.upload(userId, slot, save, record.revision);
     }
+    this.schedulePending();
     this.emit();
   }
 
@@ -261,7 +286,7 @@ export class SaveSyncService {
     }
   }
 
-  private async upload(userId: string, slot: string, save: SaveGame, revision?: number | null): Promise<void> {
+  private async upload(userId: string, slot: string, save: SaveGame, revision?: number | null): Promise<UploadResult> {
     const prior = this.store.all(userId)[slot] ?? blankRecord('local');
     const expected = revision === undefined ? prior.revision : revision;
     try {
@@ -274,9 +299,12 @@ export class SaveSyncService {
       telemetry.track('cloud_sync', { result: 'synced' });
       clientLog.info('cloud.sync', { result: 'synced' });
       if (prior.state === 'pending') telemetry.track('pending_sync_recovered');
+      this.schedulePending();
+      return { kind: 'synced', cloud: uploaded };
     } catch (error) {
       if (error instanceof CloudClientError && error.code === 'SAVE_CONFLICT') {
-        const cloud = this.cloudCatalog.get(slot) ?? await this.cloud.read(slot).catch(() => null);
+        const cloud = await this.cloud.read(slot).catch(() => null);
+        if (cloud) this.cloudCatalog.set(slot, cloud);
         this.store.set(userId, slot, {
           revision: cloud?.revision ?? prior.revision,
           payloadHash: await hashSave(save),
@@ -288,24 +316,67 @@ export class SaveSyncService {
           result: 'conflict',
           ...(error.requestId ? { requestId: error.requestId } : {}),
         });
-        return;
+        this.schedulePending();
+        return { kind: 'conflict', cloud };
       }
+      const retryable = error instanceof CloudClientError && error.retryable;
       const attempts = Math.min(prior.attempts + 1, 5);
       const delays = [1, 2, 4, 8, 30];
       this.store.set(userId, slot, {
         ...prior,
         payloadHash: await hashSave(save),
-        state: 'pending',
+        state: retryable && attempts < 5 ? 'pending' : 'failed',
         attempts,
-        nextRetryAt: Date.now() + delays[attempts - 1] * 1000,
+        nextRetryAt: retryable && attempts < 5
+          ? this.retryClock.now() + delays[attempts - 1] * 1000
+          : 0,
       });
-      telemetry.track('cloud_sync', { result: 'pending' });
+      telemetry.track('cloud_sync', { result: retryable && attempts < 5 ? 'pending' : 'failed' });
       const correlated = error instanceof CloudClientError ? error.requestId : undefined;
       clientLog.with(correlated ? { requestId: correlated } : {}).error('cloud.sync.error', error, {
         errorType: error instanceof Error ? error.name : 'UnknownError',
         ...(correlated ? { requestId: correlated } : {}),
       });
+      this.schedulePending();
+      return retryable && attempts < 5 ? { kind: 'pending' } : { kind: 'failed' };
     }
+  }
+
+  private rememberCloud(
+    userId: string,
+    slot: string,
+    cloud: CloudSaveMeta,
+    state: SlotSyncRecord['state'],
+  ): void {
+    this.cloudCatalog.set(slot, cloud);
+    this.store.set(userId, slot, {
+      revision: cloud.revision,
+      payloadHash: cloud.payloadHash,
+      state,
+      attempts: 0,
+      nextRetryAt: 0,
+      cloud,
+    });
+  }
+
+  private schedulePending(): void {
+    this.cancelRetryTimer();
+    const userId = this.userId();
+    if (!userId) return;
+    const next = Object.values(this.store.all(userId))
+      .filter((record) => record.state === 'pending' && record.attempts < 5)
+      .reduce((earliest, record) => Math.min(earliest, record.nextRetryAt), Infinity);
+    if (!Number.isFinite(next)) return;
+    this.retryTimer = this.retryClock.setTimeout(() => {
+      this.retryTimer = null;
+      void this.retryPending();
+    }, Math.max(0, next - this.retryClock.now()));
+  }
+
+  private cancelRetryTimer(): void {
+    if (this.retryTimer === null) return;
+    this.retryClock.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   private userId(): string | null {
@@ -317,7 +388,11 @@ export class SaveSyncService {
     if (userId === this.lastUserId) return;
     this.lastUserId = userId;
     this.cloudCatalog.clear();
-    if (userId) void this.refresh();
+    this.cancelRetryTimer();
+    if (userId) {
+      this.schedulePending();
+      void this.refresh();
+    }
     this.emit();
   }
 

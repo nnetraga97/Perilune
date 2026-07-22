@@ -18,8 +18,9 @@ export type AuthState =
 interface AuthResponse {
   ok: boolean;
   data?: {
-    session: { accessToken: string; refreshToken: string; expiresAt: number | null };
-    user: { id: string; email: string };
+    session?: { accessToken: string; refreshToken: string; expiresAt: number | null };
+    user?: { id: string; email: string };
+    confirmationRequired?: boolean;
   };
   error?: { code: string; message: string; requestId?: string };
 }
@@ -98,8 +99,8 @@ export class AuthService {
     return this.stateValue;
   }
 
-  async signUp(email: string, password: string): Promise<void> {
-    await this.authenticate('signup', email, password);
+  async signUp(email: string, password: string): Promise<'signed-in' | 'confirmation-required'> {
+    return this.authenticate('signup', email, password);
   }
 
   async signIn(email: string, password: string): Promise<void> {
@@ -131,7 +132,7 @@ export class AuthService {
     this.listeners.clear();
   }
 
-  private async authenticate(mode: 'signup' | 'login', email: string, password: string): Promise<void> {
+  private async authenticate(mode: 'signup' | 'login', email: string, password: string): Promise<'signed-in' | 'confirmation-required'> {
     if (!this.client) throw new Error('Cloud accounts are unavailable in this build.');
     let response: Response;
     try {
@@ -171,12 +172,15 @@ export class AuthService {
       });
       throw error;
     }
+    if (mode === 'signup' && body.data.confirmationRequired) return 'confirmation-required';
+    if (!body.data.session) throw new Error('The account session could not be started.');
     const result = await this.client.auth.setSession({
       access_token: body.data.session.accessToken,
       refresh_token: body.data.session.refreshToken,
     });
     if (result.error || !result.data.session) throw new Error('The account session could not be started.');
     this.publish(this.stateFor(result.data.session));
+    return 'signed-in';
   }
 
   private stateFor(session: Parameters<Parameters<SupabaseClient['auth']['onAuthStateChange']>[0]>[1]): AuthState {
