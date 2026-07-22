@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { addPart, createCraft } from '../src/sim/vessel';
+import { createFirstLightRocket } from '../src/content/crafts';
+import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
+import { GameState } from '../src/sim/state';
 import { PARTS, partById } from '../src/content/parts';
 import { buildVesselVisual, disposeVesselVisual, syncVesselVisual } from '../src/render/vesselMesh';
 import type { PartModelLibrary, InstantiatedPartModel } from '../src/render/partModelLibrary';
@@ -14,6 +17,7 @@ const EXPECTED_MODEL_IDS: Record<string, string> = {
   'pod-voyager': 'orion-voyager-pod',
   'pod-tandem': 'perilune-tandem-cab',
   'core-pilot': 'perilune-pilot-chip',
+  'tank-s1': 'perilune-pl100-tank',
   'leg-lander': 'viking-stilt-leg',
   'eng-pike': 'perilune-pike-engine',
   'eng-ember': 'perilune-ember-engine',
@@ -34,6 +38,7 @@ const EXPECTED_MODEL_IDS: Record<string, string> = {
   'wheel-mesa': 'mars-mesa-wheel',
   'eng-mule': 'shuttle-mule-engine',
   'tank-s4': 'shuttle-pl400-tank',
+  'tank-m8': 'perilune-hv1600-tank',
   'chute-main': 'orion-homecoming-housing',
   'tank-m4': 'procedural-tank-mule',
   'tank-s2': 'procedural-tank-pod',
@@ -104,6 +109,29 @@ describe('part definitions', () => {
 });
 
 describe('buildVesselVisual', () => {
+  it('keeps the checked Ember model and an active plume after First Light stages to it', () => {
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    let vessel = game.spawnOnPad(createFirstLightRocket(), 'First Light');
+    for (let stage = 0; stage < 5; stage++) {
+      expect(game.fireStage(vessel)).toBe(true);
+      vessel = game.active!;
+    }
+    const ember = vessel.runtime.craft.parts.find((part) => part.defId === 'eng-ember');
+    expect(ember?.activated).toBe(true);
+
+    const visual = buildVesselVisual(vessel.runtime.craft, fakeLibrary());
+    vessel.runtime.controls.throttle = 1;
+    syncVesselVisual(visual, vessel.runtime.craft, 1, 0, 1 / 30);
+
+    expect(visual.partMeshes.get(ember!.key)?.userData.visualSource).toBe('model');
+    expect(visual.partMeshes.get(ember!.key)?.children.some(
+      (child) => child.userData.importedTag === 'perilune-ember-engine',
+    )).toBe(true);
+    expect(visual.plumes.get(ember!.key)).toMatchObject({ visible: true });
+    expect(visual.plumes.get(ember!.key)?.userData.burning).toBe(true);
+    disposeVesselVisual(visual);
+  });
+
   it('owns flight-only material variants without mutating imported library resources', () => {
     const baseGeometry = new THREE.BoxGeometry();
     const borrowedTexture = new THREE.Texture();

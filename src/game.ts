@@ -8,7 +8,14 @@ import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { Vec3 } from './core/vec3';
 import { Quat } from './core/quat';
 import { GameState, PHYSICS_WARP_RATES, RAILS_WARP_RATES } from './sim/state';
-import { ACTION_GROUP_IDS, Craft, analyzeCraft, defOf, type ActionGroupId } from './sim/vessel';
+import {
+  ACTION_GROUP_IDS,
+  Craft,
+  analyzeCraft,
+  craftVisualRadius,
+  defOf,
+  type ActionGroupId,
+} from './sim/vessel';
 import { createRenderContext, RenderContext } from './render/context';
 import { WorldScene } from './render/worldScene';
 import { checkPartModelManifest } from './render/partModelManifest';
@@ -1581,6 +1588,15 @@ class PeriluneGame {
     this.hud.setMissionStart(this.missionStart);
   }
 
+  private frameActiveCraft(): void {
+    const active = this.game.active;
+    if (!active) return;
+    this.world.resetCamera(false);
+    this.world.frameCameraForVisualRadius(
+      craftVisualRadius(active.runtime.craft, active.runtime.massProps.com),
+    );
+  }
+
   private async launch(craft: Craft): Promise<string | null> {
     const locked = lockedCraftParts(this.game.campaign, craft);
     if (locked.length) {
@@ -1626,6 +1642,7 @@ class PeriluneGame {
     if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
     this.launchedCraft = structuredClone(craft);
     this.game.spawnOnPad(craft, craft.name);
+    this.frameActiveCraft();
     this.toFlight();
     telemetry.track('launch');
     clientLog.info('launch', { mode: this.game.campaign.mode });
@@ -1645,6 +1662,7 @@ class PeriluneGame {
     }
     if (!this.game.fireStage(gv)) return;
     this.world.invalidateVessel(gv.runtime.id);
+    if (this.sessionKind === 'first-light') this.frameActiveCraft();
     if (this.sessionKind === 'artemis-iv') this.syncArtemisIvStageTopology();
   }
 
@@ -1773,6 +1791,7 @@ class PeriluneGame {
     const home = this.game.universe.get(this.game.universe.homeBodyId);
     this.game.warpToLaunchDaylight(home);
     this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
+    this.frameActiveCraft();
     this.game.setWarp(0, false);
     this.toFlight();
     if (this.sessionKind === 'first-light') this.tutorial.restartAfterRevert();

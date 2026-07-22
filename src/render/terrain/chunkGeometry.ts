@@ -81,7 +81,7 @@ function enforceLaunchPadMeshClearance(
   bodyDirection: Float32Array,
   bodyFixedDetailAnchor: Float32Array,
 ): void {
-  if (request.recipe.bodyId !== 'veyra') return;
+  if (request.recipe.bodyId !== 'veyra' && request.recipe.bodyId !== 'earth') return;
   const site = launchSiteBodyFixedDirection(new Vec3());
   const basis = CUBE_FACE_BASES[tile.face];
   const faceScale = site.x * basis.n[0] + site.y * basis.n[1] + site.z * basis.n[2];
