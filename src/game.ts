@@ -1595,7 +1595,7 @@ class PeriluneGame {
     this.world.resetCamera(false);
     this.world.frameCameraForVisualRadius(
       radius * (keepEngineClearOfHud ? 2.6 : 1),
-      keepEngineClearOfHud ? -radius * 0.45 : 0,
+      keepEngineClearOfHud ? -radius * 0.9 : 0,
     );
   }
 
