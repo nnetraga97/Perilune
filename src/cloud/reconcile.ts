@@ -22,7 +22,7 @@ export function reconcileCatalog(
     if (localItem && !cloudItem) actions.push({ kind: 'upload', slot, local: localItem });
     else if (!localItem && cloudItem) actions.push({ kind: 'cloud-only', slot, cloud: cloudItem });
     else if (localItem && cloudItem) {
-      actions.push(localHashes[slot] === cloudItem.payloadHash
+      actions.push(cloudItem.fingerprintVersion === 2 && localHashes[slot] === cloudItem.payloadHash
         ? { kind: 'synced', slot, cloud: cloudItem }
         : { kind: 'conflict', slot, local: localItem, cloud: cloudItem });
     }

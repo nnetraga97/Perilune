@@ -5,6 +5,7 @@ export interface CloudSaveMeta {
   label: string;
   saveVersion: number;
   payloadHash: string;
+  fingerprintVersion: number;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -14,7 +15,7 @@ export interface CloudSaveRecord extends CloudSaveMeta {
   payload: SaveGame;
 }
 
-export type CloudSyncState = 'local' | 'cloud' | 'synced' | 'pending' | 'conflict';
+export type CloudSyncState = 'local' | 'cloud' | 'synced' | 'pending' | 'conflict' | 'failed';
 
 export interface UnifiedSaveSlot {
   slot: string;

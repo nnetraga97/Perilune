@@ -19,10 +19,6 @@ function supabase(result: unknown): SupabaseClient {
   } } as unknown as SupabaseClient;
 }
 
-function adminSupabase(result: unknown): SupabaseClient {
-  return { auth: { admin: { createUser: vi.fn().mockResolvedValue(result) } } } as unknown as SupabaseClient;
-}
-
 function loginRequest(body: unknown): Request {
   return new Request('https://perilune.test/api/auth/login', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '127.0.0.1' },
@@ -44,6 +40,8 @@ describe('auth handlers', () => {
     });
     const response = await handler(loginRequest({ email: 'Pilot@Example.com', password: 'strong-password' }));
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('pragma')).toBe('no-cache');
     const text = await response.text();
     expect(text).not.toContain('strong-password');
     expect(JSON.parse(text)).toMatchObject({ ok: true, data: { user: { id: 'user-1', email: 'pilot@example.com' } } });
@@ -64,29 +62,25 @@ describe('auth handlers', () => {
     expect(response.headers.get('retry-after')).toBe('60');
   });
 
-  it('creates an already-confirmed account before starting its session', async () => {
+  it('uses the provider confirmation flow without issuing a session', async () => {
     const client = supabase({
       error: null,
       data: {
-        session: { access_token: 'access', refresh_token: 'refresh', expires_at: 123 },
+        session: null,
         user: { id: 'user-1', email: 'pilot@example.com' },
       },
     });
-    const admin = adminSupabase({ error: null, data: { user: { id: 'user-1' } } });
     const handler = createAuthHandler('signup', {
       limiter: new RateLimiter(cache()),
       supabase: client,
-      adminSupabase: admin,
     });
 
     const response = await handler(loginRequest({ email: 'pilot@example.com', password: 'strong-password' }));
 
-    expect(response.status).toBe(201);
-    expect(admin.auth.admin.createUser).toHaveBeenCalledWith({
-      email: 'pilot@example.com', password: 'strong-password', email_confirm: true,
-    });
-    expect(client.auth.signInWithPassword).toHaveBeenCalledWith({
+    expect(response.status).toBe(202);
+    expect(client.auth.signUp).toHaveBeenCalledWith({
       email: 'pilot@example.com', password: 'strong-password',
     });
+    expect(await response.json()).toMatchObject({ ok: true, data: { confirmationRequired: true } });
   });
 });

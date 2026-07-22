@@ -73,8 +73,11 @@ export class AccountWindow {
       event.preventDefault();
       void this.submit(async () => {
         if (mode === 'signup') {
-          await this.auth.signUp(email.value, password.value);
+          const result = await this.auth.signUp(email.value, password.value);
           telemetry.track('account_created');
+          if (result === 'confirmation-required') {
+            this.error = 'Check your email to confirm the account, then sign in.';
+          }
         } else {
           await this.auth.signIn(email.value, password.value);
           telemetry.track('signed_in');

@@ -9,8 +9,9 @@ describe('structured log field policy', () => {
       event: 'override', level: 'error', authorization: 'Bearer abc', body: { save: true },
     })).toEqual({ method: 'GET', path: '/api/saves', status: 200, durationMs: 12 });
     expect(sanitizeLogFields('auth.login.ok', {
-      email: 'pilot@example.com', userId: 'user-1', password: 'never', ToKeN: 'never', status: 200,
-    })).toEqual({ email: 'pilot@example.com', userId: 'user-1', status: 200 });
+      email: 'pilot@example.com', accountCorrelation: '4a0f13b9', userId: 'user-1',
+      password: 'never', ToKeN: 'never', status: 200,
+    })).toEqual({ accountCorrelation: '4a0f13b9', userId: 'user-1', status: 200 });
   });
 
   it('drops secret-bearing primitive values and bounds strings', () => {

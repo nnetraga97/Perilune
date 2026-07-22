@@ -4,7 +4,7 @@ import { serverEnv } from '../../server/env.js';
 import { observeApiRequest, requestId, safeHandlerError } from '../../server/http.js';
 import { createCacheStore } from '../../server/redis.js';
 import { RateLimiter } from '../../server/rateLimit.js';
-import { createAdminAuthClient, createAuthClient } from '../../server/supabase.js';
+import { createAuthClient } from '../../server/supabase.js';
 
 let handler: ((request: Request) => Promise<Response>) | null = null;
 
@@ -16,7 +16,6 @@ export default {
           const env = serverEnv();
           handler = createAuthHandler('signup', {
             supabase: createAuthClient(env),
-            adminSupabase: createAdminAuthClient(env),
             limiter: new RateLimiter(createCacheStore(env)),
           });
         }

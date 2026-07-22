@@ -31,7 +31,7 @@ export function requestId(request: Request): string {
 }
 
 export function jsonOk<T>(data: T, status = 200, headers?: HeadersInit): Response {
-  return Response.json({ ok: true, data }, { status, headers });
+  return Response.json({ ok: true, data }, { status, headers: privateJsonHeaders(headers) });
 }
 
 export function jsonError(
@@ -43,8 +43,15 @@ export function jsonError(
 ): Response {
   return Response.json(
     { ok: false, error: { code, message, requestId: id } } satisfies ApiErrorBody,
-    { status, headers },
+    { status, headers: privateJsonHeaders(headers) },
   );
+}
+
+function privateJsonHeaders(headers?: HeadersInit): Headers {
+  const result = new Headers(headers);
+  result.set('Cache-Control', 'private, no-store');
+  result.set('Pragma', 'no-cache');
+  return result;
 }
 
 export async function readJsonBody<T>(request: Request, maxBytes: number): Promise<T> {

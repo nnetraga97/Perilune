@@ -4,6 +4,7 @@ import type { SaveGame } from '../src/save/schema.js';
 import { SAVE_VERSION, validateSave } from '../src/save/validation.js';
 import { HttpError, jsonError, jsonOk, methodNotAllowed, readJsonBody, requestId, safeHandlerError } from './http.js';
 import { log } from './log.js';
+import { canonicalJson, SAVE_FINGERPRINT_VERSION } from '../src/save/canonicalJson.js';
 import type { RateLimiter } from './rateLimit.js';
 import type { CacheStore } from './redis.js';
 
@@ -16,6 +17,7 @@ export interface CloudSaveMeta {
   label: string;
   saveVersion: number;
   payloadHash: string;
+  fingerprintVersion: number;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -59,6 +61,7 @@ function rowMeta(row: Record<string, unknown>): CloudSaveMeta {
     label: String(row.label),
     saveVersion: Number(row.save_version),
     payloadHash: String(row.payload_hash),
+    fingerprintVersion: Number(row.fingerprint_version ?? 1),
     revision: Number(row.revision),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -77,6 +80,7 @@ function writeRow(userId: string, input: CloudSaveWrite, revision: number): Reco
     save_version: input.save.saveVersion,
     payload: input.save,
     payload_hash: input.payloadHash,
+    fingerprint_version: SAVE_FINGERPRINT_VERSION,
     revision,
     updated_at: new Date().toISOString(),
   };
@@ -86,7 +90,7 @@ export function createSupabaseCloudSaveRepository(client: SupabaseClient): Cloud
   return {
     async list(userId) {
       const { data, error } = await client.from('cloud_saves')
-        .select('slot,label,save_version,payload_hash,revision,created_at,updated_at')
+        .select('slot,label,save_version,payload_hash,fingerprint_version,revision,created_at,updated_at')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false });
       if (error) throw error;
@@ -158,7 +162,7 @@ function validateSlot(raw: string): string {
 }
 
 function saveHash(save: SaveGame): string {
-  return createHash('sha256').update(JSON.stringify(save)).digest('hex');
+  return createHash('sha256').update(canonicalJson(save)).digest('hex');
 }
 
 async function rateLimit(
