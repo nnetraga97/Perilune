@@ -4,7 +4,7 @@
   "releaseBudgets": {
     "requiredQualityTier": "high",
     "missionCraftTransferBytes": 25165824,
-    "combinedSceneGpuBytes": 805306368
+    "combinedSceneGpuBytes": 1342177280
   },
   "models": [
     {

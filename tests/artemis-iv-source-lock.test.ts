@@ -110,7 +110,7 @@ describe('Artemis IV source and visual lock', () => {
     expect(manifest.releaseBudgets).toEqual({
       requiredQualityTier: 'high',
       missionCraftTransferBytes: 25_165_824,
-      combinedSceneGpuBytes: 805_306_368,
+      combinedSceneGpuBytes: 1_342_177_280,
     });
   });
 

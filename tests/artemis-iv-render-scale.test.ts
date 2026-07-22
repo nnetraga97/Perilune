@@ -29,8 +29,8 @@ function decisionAt(pixelRatio: number) {
 }
 
 describe('Artemis IV mission-only render scaling', () => {
-  it('fits a 1280x720 DPR 2 scene under the fixed combined GPU cap and restores DPR 2 on exit', () => {
-    expect(decisionAt(2)).toMatchObject({ ok: false, code: 'combined-scene-budget' });
+  it('keeps mission DPR at 1 while the expanded combined budget also admits a common DPR 2 editor preview', () => {
+    expect(decisionAt(2)).toMatchObject({ ok: true });
 
     let pixelRatio = 2;
     const setPixelRatio = vi.fn((next: number) => { pixelRatio = next; });
