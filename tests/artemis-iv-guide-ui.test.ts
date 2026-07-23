@@ -123,6 +123,7 @@ function mount(): {
     onContinue: vi.fn(),
     onContextualAction: vi.fn(),
     onRetryChapter: vi.fn(),
+    onSkipChapter: vi.fn(),
     onExit: vi.fn(),
   };
   const guide = new ArtemisIvGuide(host as unknown as HTMLElement, callbacks);
@@ -166,7 +167,12 @@ describe('Artemis IV guide DOM', () => {
     primary[0].click();
     expect(callbacks.onContinue).toHaveBeenCalledOnce();
     expect(callbacks.onContextualAction).not.toHaveBeenCalled();
-    expect(root.byClass('artiv-guide-secondary-action')).toHaveLength(2);
+    const secondary = root.byClass('artiv-guide-secondary-action');
+    expect(secondary).toHaveLength(3);
+    expect(secondary[1].textContent).toBe('Skip chapter');
+    expect(secondary[1].getAttribute('aria-label')).toBe('Skip Artemis IV chapter 2');
+    secondary[1].click();
+    expect(callbacks.onSkipChapter).toHaveBeenCalledOnce();
   });
 
   it('lets a contextual action replace Continue and presents compact live readouts', () => {
@@ -220,13 +226,25 @@ describe('Artemis IV guide DOM', () => {
     expect(root.byClass('is-current')).toHaveLength(0);
     expect(root.byClass('is-complete')).toHaveLength(2);
 
-    const [retry, exit] = root.byClass('artiv-guide-secondary-action');
+    const [retry, skip, exit] = root.byClass('artiv-guide-secondary-action');
     retry.click();
+    skip.click();
     exit.click();
     expect(callbacks.onRetryChapter).toHaveBeenCalledOnce();
+    expect(callbacks.onSkipChapter).toHaveBeenCalledOnce();
     expect(callbacks.onExit).toHaveBeenCalledOnce();
 
     guide.setVisible(false);
     expect(root.hidden).toBe(true);
+  });
+
+  it('renames the final chapter skip action without hiding it', () => {
+    const { root, guide } = mount();
+    guide.update(viewModel({ chapter: 10 }));
+
+    const skip = root.byClass('artiv-guide-skip')[0];
+    expect(skip.hidden).toBe(false);
+    expect(skip.textContent).toBe('Finish from checkpoint');
+    expect(skip.getAttribute('aria-label')).toBe('Finish Artemis IV from the chapter checkpoint');
   });
 });

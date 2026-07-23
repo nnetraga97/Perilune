@@ -14,10 +14,12 @@ import {
 import { vesselForArtemisIvRole } from '../src/missions/artemisIv/mission';
 import {
   artemisIvGuideReadouts,
+  computeArtemisIvDockingStatus,
   computeArtemisIvLandingTelemetry,
   computeArtemisIvRecoveryTelemetry,
   computeArtemisIvRelativeMotion,
   createArtemisIvRendererResourceLedger,
+  prepareArtemisIvDockingCapture,
   syncArtemisIvLiveTelemetry,
   syncArtemisIvRendezvousTelemetry,
 } from '../src/missions/artemisIv/runtime';
@@ -102,6 +104,29 @@ describe('Artemis IV live runtime telemetry', () => {
     expect(state.telemetry.holdStableForMs).toBe(0);
   });
 
+  it('turns the Chapter 3 guided approach into a real docking capture', () => {
+    const state = initializeArtemisIvCheckpoint(3);
+    expect(state.game.vessels).toHaveLength(2);
+
+    expect(prepareArtemisIvDockingCapture(state, 'orion-cm', 'hls')).toBe(true);
+    const status = computeArtemisIvDockingStatus(state, 'orion-cm', 'hls');
+    expect(status?.portSeparationMeters).toBeCloseTo(0.35, 6);
+    expect(status?.opposed).toBe(true);
+
+    state.game.update(0.02);
+    expect(state.game.vessels).toHaveLength(1);
+    expect(state.game.dockedJoints(state.game.vessels[0])).toHaveLength(1);
+  });
+
+  it('supports the same real docking capture for the returning lander', () => {
+    const state = initializeArtemisIvCheckpoint(8);
+    expect(prepareArtemisIvDockingCapture(state, 'hls', 'orion-cm')).toBe(true);
+
+    state.game.update(0.02);
+    expect(state.game.vessels).toHaveLength(1);
+    expect(state.game.dockedJoints(state.game.vessels[0])).toHaveLength(1);
+  });
+
   it('derives lunar landing gates from the four-pad footprint and surface frame', () => {
     const state = initializeArtemisIvCheckpoint(6);
     const lander = vesselForArtemisIvRole(state, 'hls')!;
@@ -160,9 +185,9 @@ describe('Artemis IV guide readouts', () => {
     const rendezvous = initializeArtemisIvCheckpoint(3);
     syncArtemisIvRendezvousTelemetry(rendezvous, 'hls', 1_000);
     expect(artemisIvGuideReadouts(rendezvous)).toEqual([
-      { label: 'Range', value: '40.0 m', tone: 'good' },
+      { label: 'Port separation', value: '33.4 m', tone: 'neutral' },
+      { label: 'Port alignment', value: 'ALIGNED', tone: 'good' },
       { label: 'Closing rate', value: '0.10 m/s CLOSING', tone: 'good' },
-      { label: 'Stable hold', value: '1.0 / 1.0 s', tone: 'good' },
     ]);
 
     const descent = initializeArtemisIvCheckpoint(6);

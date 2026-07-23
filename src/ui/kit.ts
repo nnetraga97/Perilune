@@ -159,6 +159,20 @@ export function injectUiStyles(): void {
         white-space:pre-line; }
       .game-dialog-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
       .game-dialog-actions .hud-btn { width:100%; min-height:38px; padding:7px 9px; white-space:normal; }
+      .game-dialog-mission-profile { width:min(860px,calc(100vw - 28px)); }
+      .artiv-flight-plan { margin:12px 0 14px; border:1px solid #334c58; border-radius:8px; overflow:hidden;
+        background:#05090c; box-shadow:inset 0 0 0 1px rgba(173,218,232,.035); }
+      .artiv-flight-plan a { display:block; color:#8fb2bf; text-decoration:none; }
+      .artiv-flight-plan a:focus-visible { outline:2px solid #f4c15f; outline-offset:-3px; }
+      .artiv-flight-plan img { display:block; width:100%; height:auto; aspect-ratio:16/9; }
+      .artiv-flight-plan figcaption { padding:7px 10px 8px; border-top:1px solid #263b45;
+        font:8px var(--ui-mono); letter-spacing:1.2px; text-align:right; }
+      .artiv-flight-plan a:hover figcaption { color:#d5e8ed; }
+      @media (max-width:620px) {
+        .game-dialog-mission-profile { padding:14px; }
+        .game-dialog-mission-profile .game-dialog-message { font-size:12px; }
+        .artiv-flight-plan { margin:10px 0 12px; }
+      }
       .hud-top { position:absolute; z-index:12; top:8px; left:50%; transform:translateX(-50%);
         width:min(1040px,calc(100vw - 24px)); display:grid; gap:5px; padding:5px 8px;
         background:linear-gradient(180deg,rgba(8,18,25,.97),rgba(5,12,18,.94));
@@ -1306,6 +1320,7 @@ export function injectUiStyles(): void {
         background:#153342; color:#e8f8ff; }
       .artiv-guide-secondary-actions { justify-content:space-between; }
       .artiv-guide-secondary-action { border-color:#2d4654; color:#7f969f; background:rgba(6,16,22,.55); }
+      .artiv-guide-skip { border-color:#6b5834; color:#c5ac76; }
       .artiv-guide-step-complete { border-color:#53836b; }
       .artiv-guide-step-complete .artiv-guide-next { border-left-color:#57916f;
         background:rgba(47,106,75,.12); }

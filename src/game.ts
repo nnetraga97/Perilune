@@ -105,6 +105,7 @@ import {
   assessArtemisIvPostTliCorrection,
   assessArtemisIvTransEarthInjection,
   artemisIvCheckpointForChapter,
+  completeArtemisIvAutomatedLanding,
   initializeArtemisIvCheckpoint,
   prepareArtemisIvEarthApproach,
   prepareArtemisIvLunarInsertion,
@@ -146,6 +147,7 @@ import { drawingBufferResourceBytes } from './render/resourceAccounting';
 import {
   artemisIvGuideReadouts,
   createArtemisIvRendererResourceLedger,
+  prepareArtemisIvDockingCapture,
   syncArtemisIvLiveTelemetry,
 } from './missions/artemisIv/runtime';
 
@@ -466,6 +468,7 @@ class PeriluneGame {
       onContinue: () => this.continueArtemisIvTextStep(),
       onContextualAction: (action) => this.handleArtemisIvContextualAction(action),
       onRetryChapter: () => void this.retryArtemisIvChapter(),
+      onSkipChapter: () => this.confirmSkipArtemisIvChapter(),
       onExit: () => this.confirmExitArtemisIv(),
     });
     this.artemisIvSessionStore = browserArtemisIvSessionStore();
@@ -787,6 +790,27 @@ class PeriluneGame {
         { label: 'EXIT', fn: () => {} },
       ],
     );
+    if (!this.dialogEl) return;
+    this.dialogEl.classList.add('game-dialog-mission-profile');
+    const message = this.dialogEl.querySelector('.game-dialog-message');
+    if (!message) return;
+    const figure = document.createElement('figure');
+    figure.className = 'artiv-flight-plan';
+    const fullSizeLink = document.createElement('a');
+    fullSizeLink.href = '/ui/artemis-iv-flight-plan.svg';
+    fullSizeLink.target = '_blank';
+    fullSizeLink.rel = 'noopener';
+    fullSizeLink.setAttribute('aria-label', 'Open the Artemis IV flight plan at full size');
+    const image = document.createElement('img');
+    image.src = '/ui/artemis-iv-flight-plan.svg';
+    image.alt = 'Artemis IV representative flight plan: launch from Earth, travel to lunar orbit, dock with a provider-neutral lander, send two crew to the lunar South Pole, reunite in orbit, and return in Orion for Pacific splashdown.';
+    image.width = 1600;
+    image.height = 900;
+    const caption = document.createElement('figcaption');
+    caption.textContent = 'OPEN FULL-SIZE FLIGHT PLAN ↗';
+    fullSizeLink.append(image, caption);
+    figure.appendChild(fullSizeLink);
+    message.before(figure);
   }
 
   private async beginArtemisIv(chapter: ArtemisIvChapter): Promise<void> {
@@ -1106,6 +1130,12 @@ class PeriluneGame {
       case 'guided-intercept':
         this.compressArtemisIvRendezvous();
         break;
+      case 'guided-docking':
+        this.completeArtemisIvDockingApproach();
+        break;
+      case 'automated-landing':
+        this.completeArtemisIvLanding();
+        break;
       case 'switch-hls':
         setActiveArtemisIvRole(state, 'hls');
         this.game.setWarp(0, false);
@@ -1152,6 +1182,50 @@ class PeriluneGame {
       this.game.time,
       'Prepared phasing coast complete. Final approach remains under manual RCS control.',
     );
+  }
+
+  private completeArtemisIvDockingApproach(): void {
+    const state = this.artemisIvMission;
+    if (!state || (state.chapter !== 3 && state.chapter !== 8)) return;
+    const returning = state.chapter === 8;
+    const chaserRole = returning ? 'hls' : 'orion-cm';
+    const targetRole = returning ? 'orion-cm' : 'hls';
+    if (!prepareArtemisIvDockingCapture(state, chaserRole, targetRole)) return;
+    const chaser = vesselForArtemisIvRole(state, chaserRole);
+    if (chaser) {
+      logEvent(
+        chaser.runtime,
+        this.game.time,
+        'Automatic final approach established. Docking capture is imminent.',
+      );
+    }
+  }
+
+  private completeArtemisIvLanding(): void {
+    const state = this.artemisIvMission;
+    if (!state || !completeArtemisIvAutomatedLanding(state)) return;
+    // Preserve the checked zero-speed touchdown through the guide's short
+    // confirmation dwell; the next chapter reload resumes normal simulation.
+    this.paused = true;
+    this.clearHeldThrottleInput();
+    this.resetTouchFlightControls();
+    this.artemisIvGuideProgress = {
+      chapter: 5,
+      stepId: 'lunar-landing',
+      satisfiedAtMs: null,
+      complete: false,
+    };
+    const lander = vesselForArtemisIvRole(state, 'hls');
+    if (lander) {
+      logEvent(
+        lander.runtime,
+        this.game.time,
+        'Automatic landing complete inside the South Pole training ellipse.',
+      );
+    }
+    if (lander) this.world.invalidateVessel(lander.runtime.id);
+    this.world.resetCamera(false);
+    this.world.frameCameraForVisualRadius(ARTEMIS_IV_CAMERA_FRAMING_RADII.hls);
   }
 
   private undockArtemisIvLander(): void {
@@ -1225,14 +1299,16 @@ class PeriluneGame {
     await this.beginArtemisIv((state.chapter + 1) as ArtemisIvChapter);
   }
 
-  private completeArtemisIvMission(): void {
+  private completeArtemisIvMission(completedFromCheckpoint = false): void {
     if (!this.artemisIvMission || this.artemisIvMission.chapter !== 10) return;
     this.persistArtemisIvChapter(true);
     this.paused = true;
     this.game.setWarp(0, false);
     this.showDialog(
       'Artemis IV training mission complete',
-      'Orion and all four representative crew are safely home. The mission session is complete; your normal save was never changed.',
+      completedFromCheckpoint
+        ? 'The training mission was marked complete from the Chapter 10 checkpoint. Entry and splashdown were skipped; your normal save was never changed.'
+        : 'Orion and all four representative crew are safely home. The mission session is complete; your normal save was never changed.',
       [
         { label: 'BACK TO MAIN SCREEN', fn: () => { this.paused = false; this.showMenu(); } },
         {
@@ -1349,11 +1425,13 @@ class PeriluneGame {
         ? { id: target === 'hls' ? 'target-hls' : 'target-orion', label: `TARGET ${target === 'hls' ? 'LANDER' : 'ORION'}` }
         : range !== null && range > 500
           ? { id: 'guided-intercept', label: 'RUN PREPARED PHASING' }
-          : null;
+          : step.id === 'rejoin-orion'
+            ? { id: 'guided-docking', label: 'AUTO-DOCK' }
+            : null;
     } else if (step?.id === 'dock') {
       contextualAction = state.telemetry.selectedTargetRole !== 'hls'
         ? { id: 'target-hls', label: 'TARGET LANDER' }
-        : null;
+        : { id: 'guided-docking', label: 'AUTO-DOCK' };
     } else if (step?.id === 'commit-descent') {
       contextualAction = state.activeRole !== 'hls'
         ? { id: 'switch-hls', label: 'TAKE CONTROL OF LANDER' }
@@ -1362,7 +1440,10 @@ class PeriluneGame {
           : !hasPlan
             ? { id: 'restore-node', label: 'PREPARE DESCENT NODE' }
             : !this.map.visible ? { id: 'open-map', label: 'OPEN MANEUVER PLANNER' } : null;
-    } else if (step?.id === 'lunar-landing' || step?.id === 'lunar-ascent') {
+    } else if (step?.id === 'descent-braking' || step?.id === 'descent-coast'
+      || step?.id === 'lunar-landing') {
+      contextualAction = { id: 'automated-landing', label: 'AUTO-LAND' };
+    } else if (step?.id === 'lunar-ascent') {
       const lander = vesselForArtemisIvRole(state, 'hls');
       const engineActive = lander?.runtime.craft.parts.some(
         (part) => part.defId === 'eng-aspen' && part.activated,
@@ -1479,6 +1560,30 @@ class PeriluneGame {
     const chapter = this.artemisIvMission?.chapter;
     if (chapter === undefined) return;
     await this.beginArtemisIv(chapter);
+  }
+
+  private confirmSkipArtemisIvChapter(): void {
+    const state = this.artemisIvMission;
+    if (!state) return;
+    const isFinalChapter = state.chapter === 10;
+    this.paused = true;
+    this.game.setWarp(0, false);
+    this.showDialog(
+      isFinalChapter ? 'Finish Artemis IV from checkpoint?' : `Skip Artemis IV Chapter ${state.chapter}?`,
+      isFinalChapter
+        ? 'This marks the training mission complete without requiring entry and splashdown. Your normal save is unchanged.'
+        : `This loads the prepared checkpoint for Chapter ${state.chapter + 1}. Actions in the current chapter will not be counted.`,
+      [
+        { label: 'KEEP FLYING', fn: () => { this.paused = false; } },
+        {
+          label: isFinalChapter ? 'FINISH MISSION' : `SKIP TO CHAPTER ${state.chapter + 1}`,
+          fn: () => {
+            if (isFinalChapter) this.completeArtemisIvMission(true);
+            else void this.beginArtemisIv((state.chapter + 1) as ArtemisIvChapter);
+          },
+        },
+      ],
+    );
   }
 
   private confirmExitArtemisIv(): void {

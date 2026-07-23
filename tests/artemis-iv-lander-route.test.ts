@@ -5,6 +5,7 @@ import { PHYSICS_DT } from '../src/sim/state';
 import { analyzeCraft } from '../src/sim/vessel';
 import {
   ARTEMIS_IV_SOUTH_POLE_TRAINING_ANALOGUE,
+  completeArtemisIvAutomatedLanding,
   initializeArtemisIvCheckpoint,
 } from '../src/missions/artemisIv/checkpoints';
 import { vesselForArtemisIvRole } from '../src/missions/artemisIv/mission';
@@ -67,6 +68,27 @@ describe('Artemis IV lander route feasibility', () => {
     const circularSpeed = Math.sqrt(moon.mu / (moon.radius + 100_000));
     expect(analysis.stages[0].twrStart).toBeGreaterThan(1);
     expect(analysis.stages[0].deltaV).toBeGreaterThan(circularSpeed * 2);
+  });
+
+  it('automates Chapter 5 into the checked safe landed state without skipping the chapter', () => {
+    const state = initializeArtemisIvCheckpoint(5);
+    const lander = vesselForArtemisIvRole(state, 'hls')!;
+
+    expect(completeArtemisIvAutomatedLanding(state)).toBe(true);
+    expect(state.chapter).toBe(5);
+    expect(state.game.active).toBe(lander);
+    expect(lander.runtime.situation).toBe('landed');
+    expect(lander.runtime.landedBodyFixed).not.toBeNull();
+    expect(lander.runtime.externalLandingFootprint).toMatchObject({
+      contactCount: 4,
+      tipped: false,
+    });
+    expect(state.telemetry.landing).toMatchObject({
+      contactCount: 4,
+      insideTrainingEllipse: true,
+      verticalSpeedMetersPerSecond: 0,
+      horizontalSpeedMetersPerSecond: 0,
+    });
   });
 
   it('does not discard the representative manifest during a docked split', () => {

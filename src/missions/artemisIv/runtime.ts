@@ -1,4 +1,5 @@
 import { apoapsisOf, periapsisOf, stateToElements } from '../../core/orbit';
+import { Quat } from '../../core/quat';
 import { Vec3 } from '../../core/vec3';
 import { bodyFixedDirectionToSpherical } from '../../sim/bodyReferenceFrame';
 import { inertialToBodyFixed, surfaceVelocity } from '../../sim/bodyOrientation';
@@ -25,6 +26,11 @@ export interface ArtemisIvRelativeMotion {
   readonly rangeMeters: number;
   /** Positive while closing, negative while opening. */
   readonly closingSpeedMetersPerSecond: number;
+}
+
+export interface ArtemisIvDockingStatus {
+  readonly portSeparationMeters: number;
+  readonly opposed: boolean;
 }
 
 export interface ArtemisIvRecoveryTelemetry {
@@ -80,6 +86,69 @@ export function computeArtemisIvRelativeMotion(
     ? -deltaVelocity.dot(deltaPosition) / rangeMeters
     : 0;
   return Object.freeze({ rangeMeters, closingSpeedMetersPerSecond });
+}
+
+/** Live distance and facing of the mission craft's free root docking collars. */
+export function computeArtemisIvDockingStatus(
+  state: Readonly<ArtemisIvMissionState>,
+  leftRole: ArtemisIvRole,
+  rightRole: ArtemisIvRole,
+): ArtemisIvDockingStatus | null {
+  const left = vesselForArtemisIvRole(state, leftRole);
+  const right = vesselForArtemisIvRole(state, rightRole);
+  if (!left || !right || left.runtime.id === right.runtime.id) return null;
+  const leftPort = rootDockingPort(left);
+  const rightPort = rootDockingPort(right);
+  if (!leftPort || !rightPort) return null;
+  const leftFace = dockingFaceWorld(left, leftPort, positionA);
+  const rightFace = dockingFaceWorld(right, rightPort, positionB);
+  const leftNormal = dockingNormalWorld(left, leftPort, velocityA);
+  const rightNormal = dockingNormalWorld(right, rightPort, velocityB);
+  return Object.freeze({
+    portSeparationMeters: leftFace.distanceTo(rightFace),
+    opposed: leftNormal.dot(rightNormal) <= -0.8,
+  });
+}
+
+/**
+ * Place an already-targeted mission pair on a checked, gentle final approach.
+ * The next normal physics tick performs the real docking capture and merge.
+ */
+export function prepareArtemisIvDockingCapture(
+  state: ArtemisIvMissionState,
+  chaserRole: ArtemisIvRole,
+  targetRole: ArtemisIvRole,
+): boolean {
+  const chaser = vesselForArtemisIvRole(state, chaserRole);
+  const target = vesselForArtemisIvRole(state, targetRole);
+  if (!chaser || !target || chaser.runtime.id === target.runtime.id
+    || chaser.runtime.bodyId !== target.runtime.bodyId) return false;
+  const chaserPort = rootDockingPort(chaser);
+  const targetPort = rootDockingPort(target);
+  if (!chaserPort || !targetPort) return false;
+
+  state.game.setWarp(0, false);
+  state.game.toActive(chaser);
+  state.game.toActive(target);
+  chaser.runtime.att.copy(target.runtime.att).multiply(new Quat(1, 0, 0, 0));
+  chaser.runtime.angVel.set(0, 0, 0);
+  target.runtime.angVel.set(0, 0, 0);
+  chaser.runtime.sas = 'off';
+  target.runtime.sas = 'off';
+  chaser.runtime.controls.throttle = 0;
+  chaser.runtime.controls.translate.set(0, 0, 0);
+
+  const chaserFaceOffset = dockingFaceOffsetWorld(chaser, chaserPort, positionA);
+  const targetFaceOffset = dockingFaceOffsetWorld(target, targetPort, positionB);
+  const targetNormal = dockingNormalWorld(target, targetPort, velocityA);
+  chaser.runtime.pos.copy(target.runtime.pos)
+    .add(targetFaceOffset)
+    .addScaled(targetNormal, 0.35)
+    .sub(chaserFaceOffset);
+  chaser.runtime.vel.copy(target.runtime.vel).addScaled(targetNormal, -0.1);
+  state.telemetry.selectedTargetRole = targetRole;
+  state.telemetry.holdStableForMs = 0;
+  return true;
 }
 
 /** Sync the selected role target and the chapter's one-second rendezvous hold. */
@@ -173,7 +242,8 @@ export function syncArtemisIvLiveTelemetry(
 export function artemisIvGuideReadouts(
   state: Readonly<ArtemisIvMissionState>,
 ): readonly ArtemisIvGuideReadout[] {
-  if (state.chapter === 2 || state.chapter === 3 || state.chapter === 8) return rendezvousReadouts(state);
+  if (state.chapter === 3) return dockingReadouts(state);
+  if (state.chapter === 2 || state.chapter === 8) return rendezvousReadouts(state);
   if (state.chapter === 5 || state.chapter === 6) return descentReadouts(state);
   if (state.chapter === 7) return ascentReadouts(state);
   if (state.chapter === 10) return entryReadouts(state);
@@ -242,6 +312,68 @@ function rendezvousReadouts(state: Readonly<ArtemisIvMissionState>): ArtemisIvGu
     { label: 'Closing rate', value: closing === null ? '—' : formatClosing(closing), tone: closing === null ? 'neutral' : gentle ? 'good' : 'caution' },
     { label: 'Stable hold', value: `${(state.telemetry.holdStableForMs / 1_000).toFixed(1)} / 1.0 s`, tone: state.telemetry.holdStableForMs >= 1_000 ? 'good' : 'neutral' },
   ];
+}
+
+function dockingReadouts(state: Readonly<ArtemisIvMissionState>): ArtemisIvGuideReadout[] {
+  const closing = state.telemetry.relativeClosingSpeedMetersPerSecond;
+  const status = computeArtemisIvDockingStatus(state, 'orion-cm', 'hls');
+  return [
+    {
+      label: 'Port separation',
+      value: status === null ? 'DOCKED' : formatRange(status.portSeparationMeters),
+      tone: status === null || status.portSeparationMeters <= 0.7 ? 'good' : 'neutral',
+    },
+    {
+      label: 'Port alignment',
+      value: status === null ? 'CAPTURED' : status.opposed ? 'ALIGNED' : 'ALIGN COLLARS',
+      tone: status === null || status.opposed ? 'good' : 'caution',
+    },
+    {
+      label: 'Closing rate',
+      value: closing === null ? '—' : formatClosing(closing),
+      tone: closing !== null && Math.abs(closing) <= 1.6 ? 'good' : 'caution',
+    },
+  ];
+}
+
+function rootDockingPort(vessel: GameVessel) {
+  return vessel.runtime.craft.parts.find(
+    (part) => part.defId === 'dock-port-s' && part.parentKey === null,
+  ) ?? null;
+}
+
+function dockingFaceWorld(
+  vessel: GameVessel,
+  port: NonNullable<ReturnType<typeof rootDockingPort>>,
+  out: Vec3,
+): Vec3 {
+  return out.copy(vessel.runtime.pos).add(dockingFaceOffsetWorld(vessel, port, new Vec3()));
+}
+
+function dockingFaceOffsetWorld(
+  vessel: GameVessel,
+  port: NonNullable<ReturnType<typeof rootDockingPort>>,
+  out: Vec3,
+): Vec3 {
+  const localFace = new Vec3(0, defOf(port).shape.height / 2, 0);
+  new Quat(port.rotation.x, port.rotation.y, port.rotation.z, port.rotation.w)
+    .rotate(localFace, localFace);
+  out.set(
+    port.position.x - vessel.runtime.massProps.com.x + localFace.x,
+    port.position.y - vessel.runtime.massProps.com.y + localFace.y,
+    port.position.z - vessel.runtime.massProps.com.z + localFace.z,
+  );
+  return vessel.runtime.att.rotate(out, out);
+}
+
+function dockingNormalWorld(
+  vessel: GameVessel,
+  port: NonNullable<ReturnType<typeof rootDockingPort>>,
+  out: Vec3,
+): Vec3 {
+  const partRotation = new Quat(port.rotation.x, port.rotation.y, port.rotation.z, port.rotation.w);
+  partRotation.rotate(out.set(0, 1, 0), out);
+  return vessel.runtime.att.rotate(out, out).normalize();
 }
 
 function descentReadouts(state: Readonly<ArtemisIvMissionState>): ArtemisIvGuideReadout[] {

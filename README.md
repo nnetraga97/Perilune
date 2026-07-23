@@ -14,6 +14,8 @@ step while the player flies it.
 > hands-on way to learn orbital flight. Start with [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the
 > project story, the GPT-5.6/Codex implementation, and the submission checklist.
 
+> **Artemis IV development note** — Artemis IV is in active development. Because Perilune is delivered over the web, some UI changes were made after the Build Week timeline in response to user feedback. Please judge the project based on its core functionality and technical complexity.
+
 ## Start here
 
 ```bash

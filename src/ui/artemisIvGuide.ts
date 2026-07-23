@@ -23,6 +23,7 @@ export interface ArtemisIvGuideCallbacks {
   onContinue(): void;
   onContextualAction(action: Readonly<ArtemisIvGuideContextualAction>): void;
   onRetryChapter(): void;
+  onSkipChapter(): void;
   onExit(): void;
 }
 
@@ -54,6 +55,7 @@ export class ArtemisIvGuide {
   private readonly confirmationMessageEl: HTMLElement;
   private readonly primaryBtn: HTMLButtonElement;
   private readonly retryBtn: HTMLButtonElement;
+  private readonly skipBtn: HTMLButtonElement;
   private readonly exitBtn: HTMLButtonElement;
   private currentContextualAction: Readonly<ArtemisIvGuideContextualAction> | null = null;
   private progressRenderKey = '';
@@ -149,12 +151,17 @@ export class ArtemisIvGuide {
     this.retryBtn.textContent = 'Retry chapter';
     this.retryBtn.setAttribute('aria-label', 'Retry Artemis IV chapter');
     this.retryBtn.onclick = () => this.callbacks.onRetryChapter();
+    this.skipBtn = document.createElement('button');
+    this.skipBtn.className = 'hud-btn artiv-guide-secondary-action artiv-guide-skip';
+    this.skipBtn.textContent = 'Skip chapter';
+    this.skipBtn.setAttribute('aria-label', 'Skip Artemis IV chapter');
+    this.skipBtn.onclick = () => this.callbacks.onSkipChapter();
     this.exitBtn = document.createElement('button');
     this.exitBtn.className = 'hud-btn artiv-guide-secondary-action';
     this.exitBtn.textContent = 'Exit mission';
     this.exitBtn.setAttribute('aria-label', 'Exit Artemis IV mission');
     this.exitBtn.onclick = () => this.callbacks.onExit();
-    secondaryActions.append(this.retryBtn, this.exitBtn);
+    secondaryActions.append(this.retryBtn, this.skipBtn, this.exitBtn);
     actions.append(primaryActions, secondaryActions);
 
     this.root.append(
@@ -197,6 +204,11 @@ export class ArtemisIvGuide {
     );
     setText(this.accuracyEl, viewModel.accuracyLabel);
     setText(this.chapterTitleEl, viewModel.chapterTitle);
+    setText(this.skipBtn, viewModel.chapter === 10 ? 'Finish from checkpoint' : 'Skip chapter');
+    this.skipBtn.setAttribute(
+      'aria-label',
+      viewModel.chapter === 10 ? 'Finish Artemis IV from the chapter checkpoint' : `Skip Artemis IV chapter ${viewModel.chapter}`,
+    );
     setText(this.kindEl, complete ? 'COMPLETE' : viewModel.kind.toUpperCase());
     setText(this.titleEl, viewModel.title);
     setText(this.nextTextEl, viewModel.doNext);

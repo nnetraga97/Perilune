@@ -770,6 +770,31 @@ function spawnLanded(state: ArtemisIvMissionState): void {
   const moon = state.game.universe.get('moon');
   const lander = spawnCartesian(state.game, createArtemisIvLanderGrayboxCraft(), 'Commercial lander training vehicle', 'moon', state.crew.hls);
   installHlsLandingFootprint(lander);
+  settleArtemisIvLanderAtSouthPole(state, lander);
+  bindSeparated(state, orion, lander);
+}
+
+/** Finish the playable descent with the same checked landed state used by the next chapter. */
+export function completeArtemisIvAutomatedLanding(state: ArtemisIvMissionState): boolean {
+  if (state.chapter !== 5) return false;
+  const landerId = state.roles.hls;
+  const lander = landerId
+    ? state.game.vessels.find((vessel) => vessel.runtime.id === landerId) ?? null
+    : null;
+  if (!lander || lander.runtime.bodyId !== 'moon') return false;
+  state.game.setWarp(0, false);
+  state.game.toActive(lander);
+  setActiveArtemisIvRole(state, 'hls');
+  if (!lander.runtime.externalLandingFootprint) installHlsLandingFootprint(lander);
+  settleArtemisIvLanderAtSouthPole(state, lander);
+  return true;
+}
+
+function settleArtemisIvLanderAtSouthPole(
+  state: ArtemisIvMissionState,
+  lander: GameVessel,
+): void {
+  const moon = state.game.universe.get('moon');
   const siteDirection = trainingTargetDirectionBodyFixed();
   const surface = contactSurface(moon, siteDirection);
   const surfaceHeight = surface.kind === 'none' ? 0 : surface.height;
@@ -779,8 +804,17 @@ function spawnLanded(state: ArtemisIvMissionState): void {
   surfaceVelocity(moon, lander.runtime.pos, lander.runtime.vel);
   const up = lander.runtime.pos.clone().normalize();
   lander.runtime.att.setLookRotation(tangentTo(up), up);
+  lander.runtime.angVel.set(0, 0, 0);
+  lander.runtime.controls.throttle = 0;
+  lander.runtime.controls.translate.set(0, 0, 0);
+  lander.runtime.sas = 'stability';
   lander.runtime.situation = 'landed';
-  bindSeparated(state, orion, lander);
+  const footprint = lander.runtime.externalLandingFootprint;
+  if (footprint) {
+    footprint.contactCount = 4;
+    footprint.stableForMs = ARTEMIS_IV_PREPARED.descent.requiredStableMs;
+    footprint.tipped = false;
+  }
   state.telemetry.landing = {
     contactCount: 4, stableForMs: ARTEMIS_IV_PREPARED.descent.requiredStableMs,
     insideTrainingEllipse: true, verticalSpeedMetersPerSecond: 0,

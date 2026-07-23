@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Artemis IV representative mission profile</title>
+  <desc id="desc">A hand-drawn-style mission diagram showing launch from Earth, travel to lunar orbit, docking with a provider-neutral commercial lander, a two-person expedition near the lunar South Pole, ascent and reunion with Orion, return to Earth, entry, and Pacific splashdown.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#05090c"/>
+      <stop offset="0.55" stop-color="#071016"/>
+      <stop offset="1" stop-color="#030609"/>
+    </linearGradient>
+    <radialGradient id="earthGlow">
+      <stop offset="0.78" stop-color="#79bed5" stop-opacity="0"/>
+      <stop offset="1" stop-color="#79bed5" stop-opacity="0.2"/>
+    </radialGradient>
+    <radialGradient id="moonShade" cx="34%" cy="30%">
+      <stop offset="0" stop-color="#dae0db" stop-opacity="0.18"/>
+      <stop offset="0.7" stop-color="#879198" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#02070a" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="pencil" x="-6%" y="-6%" width="112%" height="112%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.013 0.08" numOctaves="2" seed="17" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.65" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <pattern id="paperGrain" width="70" height="70" patternUnits="userSpaceOnUse">
+      <path d="M4 13h1M19 34h1M42 8h1M62 49h1M31 63h1M11 56h1M54 26h1" stroke="#dfe8e8" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+    <style>
+      .route{fill:none;stroke:#b8c7ca;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.72;filter:url(#pencil)}
+      .route-ghost{fill:none;stroke:#d8e1df;stroke-width:.75;stroke-linecap:round;opacity:.3}
+      .route-dash{fill:none;stroke:#82969b;stroke-width:1.7;stroke-dasharray:7 9;stroke-linecap:round;opacity:.64;filter:url(#pencil)}
+      .leader{fill:none;stroke:#8fa0a4;stroke-width:1.45;stroke-dasharray:4 6;stroke-linecap:round;opacity:.76}
+      .vehicle{fill:none;stroke:#d1dcdd;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;opacity:.82;filter:url(#pencil)}
+      .vehicle-faint{fill:none;stroke:#899a9e;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;opacity:.6}
+      .label{fill:#d9e2e1;font-family:"Cascadia Code","IBM Plex Mono",monospace;font-size:17px;font-weight:650;letter-spacing:1.1px}
+      .detail{fill:#85979c;font-family:"Cascadia Code","IBM Plex Mono",monospace;font-size:12px;letter-spacing:.65px}
+      .micro{fill:#77898d;font-family:"Cascadia Code","IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.15px}
+      .number{fill:#e4b654;font-family:"Cascadia Code","IBM Plex Mono",monospace;font-size:11px;font-weight:700}
+      .phase-dot{fill:#071016;stroke:#b88d36;stroke-width:1.2}
+      .body-line{fill:none;stroke:#aebabc;stroke-width:1.45;opacity:.66;filter:url(#pencil)}
+    </style>
+    <g id="orion">
+      <path class="vehicle" d="M-17 0l5-8h13l5 8-5 8h-13zM6-6h16v12H6M22-4l7 4-7 4"/>
+      <path class="vehicle-faint" d="M-10-4h8M-10 4h8M10-6v12M17-6v12"/>
+    </g>
+    <g id="lander">
+      <path class="vehicle" d="M-9-25h18l4 12-3 19H-10l-3-19zM-6-25v-8h12v8M-10 6l-10 14M10 6l10 14M-20 20h-7M20 20h7M-11-10h22"/>
+      <path class="vehicle-faint" d="M-6-3h12M-4 6v7M4 6v7M-2-33v-5M2-33v-5"/>
+    </g>
+    <g id="capsule">
+      <path class="vehicle" d="M-12 5l5-17H7l5 17zM-13 6h26M-8-12l8-5 8 5"/>
+      <path class="vehicle-faint" d="M-8 0h16M0-17v-5"/>
+    </g>
+    <g id="rocket">
+      <path class="vehicle" d="M0-47l9 14v54L4 32H-4l-5-11v-54zM-9 8l-10 19 10-5M9 8l10 19-10-5M-4 32L0 45l4-13"/>
+      <path class="vehicle-faint" d="M-9-18H9M-9 13H9M-4-30H4M-12 30l-3 9M12 30l3 9"/>
+    </g>
+  </defs>
+
+  <rect width="1600" height="900" rx="28" fill="url(#background)"/>
+  <rect x="1" y="1" width="1598" height="898" rx="27" fill="none" stroke="#30444b" stroke-width="2"/>
+  <rect width="1600" height="900" rx="28" fill="url(#paperGrain)" opacity=".6"/>
+
+  <text x="58" y="68" fill="#edf4f2" font-family="Segoe UI,Arial,sans-serif" font-size="34" font-weight="300" letter-spacing="8">ARTEMIS IV</text>
+  <text x="60" y="98" class="micro">REPRESENTATIVE MISSION PROFILE · NOT TO SCALE</text>
+  <text x="1538" y="66" text-anchor="end" fill="#8fc9df" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" letter-spacing="4">PERILUNE</text>
+  <path d="M60 119H1540" stroke="#40535a" stroke-width="1" opacity=".75"/>
+
+  <!-- Earth and Moon anchors -->
+  <circle cx="205" cy="715" r="124" fill="url(#earthGlow)"/>
+  <path class="body-line" d="M86 750c22-75 72-121 135-126 60-5 106 27 137 82M86 750c39 4 72 16 107 39 34 23 74 33 128 25M126 678c31 13 46 7 65-6 23-15 43-15 70 1M153 721c15 12 26 29 31 52M265 641c-6 23-1 45 16 66 13 16 20 36 20 60"/>
+  <text x="94" y="846" class="micro">EARTH · KENNEDY SPACE CENTER</text>
+
+  <circle cx="1336" cy="523" r="190" fill="url(#moonShade)"/>
+  <path class="body-line" d="M1171 602c45-29 104-39 163-25 60 14 114 11 166-13M1192 493c28 9 53 5 78-11 28-19 57-17 84 5M1391 391c-21 24-23 49-6 75M1263 655c45-25 89-27 136-7"/>
+  <ellipse cx="1414" cy="655" rx="51" ry="13" fill="none" stroke="#c4a455" stroke-width="1.4" stroke-dasharray="5 6" opacity=".85"/>
+  <path d="M1400 661l14-6 16 5" fill="none" stroke="#d3b45e" stroke-width="1.3"/>
+  <text x="1509" y="722" text-anchor="end" class="micro">MOON · SOUTH POLE TRAINING ANALOGUE</text>
+
+  <!-- Outbound and return trajectories -->
+  <path class="route-ghost" d="M224 584C372 250 793 154 1160 263"/>
+  <path class="route" d="M221 589C365 260 790 160 1157 266"/>
+  <path class="route-dash" d="M1160 266c132 22 195 91 188 177-5 60-40 92-81 115"/>
+  <path class="route" d="M1269 351c-15-53-5-99 34-126 49-34 114-15 141 35 34 63 8 146-52 191"/>
+  <path class="route-dash" d="M1392 451c33 51 41 97 22 141"/>
+  <path class="route" d="M1419 592c17-55 7-99-30-130"/>
+  <path class="route-dash" d="M1389 462c-20-16-46-21-78-15"/>
+  <path class="route" d="M1308 448C1156 703 760 811 407 700"/>
+  <path class="route-ghost" d="M1305 452C1152 710 757 819 404 705"/>
+  <path class="route-dash" d="M405 702c-63-15-115-6-144 34-25 34-21 75 10 96"/>
+
+  <!-- Vehicle marks along the route -->
+  <g transform="translate(232 572) rotate(22)"><use href="#rocket"/></g>
+  <g transform="translate(545 308) rotate(-18) scale(.85)"><use href="#orion"/></g>
+  <g transform="translate(881 223) rotate(-4) scale(.85)"><use href="#orion"/></g>
+  <g transform="translate(1168 274) rotate(19) scale(.8)"><use href="#orion"/></g>
+  <g transform="translate(1293 293) rotate(70) scale(.72)"><use href="#lander"/></g>
+  <g transform="translate(1372 340) rotate(14) scale(.74)"><use href="#orion"/></g>
+  <g transform="translate(1396 430) scale(.7)"><use href="#lander"/></g>
+  <g transform="translate(1413 603) scale(.9)"><use href="#lander"/></g>
+  <g transform="translate(1370 474) scale(.68)"><use href="#lander"/></g>
+  <g transform="translate(1286 473) rotate(160) scale(.78)"><use href="#orion"/></g>
+  <g transform="translate(977 659) rotate(160) scale(.84)"><use href="#orion"/></g>
+  <g transform="translate(618 750) rotate(-166) scale(.84)"><use href="#orion"/></g>
+  <g transform="translate(352 714) rotate(-148) scale(.9)"><use href="#capsule"/></g>
+  <g transform="translate(280 795) scale(.88)"><use href="#capsule"/></g>
+  <path class="vehicle" d="M259 766c-13-19-29-31-47-37 9 19 24 31 47 37zm42 0c13-19 29-31 47-37-9 19-24 31-47 37M280 773v-18M267 773l-8-7M293 773l8-7"/>
+  <path class="vehicle-faint" d="M236 832c18-8 34-8 49 0 16-7 34-7 53 0M247 842c14-6 28-6 42 0"/>
+
+  <!-- Labels and leaders -->
+  <g>
+    <circle class="phase-dot" cx="104" cy="532" r="12"/><text class="number" x="104" y="536" text-anchor="middle">1</text>
+    <text class="label" x="127" y="526">LAUNCH &amp; TLI</text>
+    <text class="detail" x="127" y="548">SUMMARIZED IN PERILUNE</text>
+    <path class="leader" d="M126 560h76l23 16"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="434" cy="201" r="12"/><text class="number" x="434" y="205" text-anchor="middle">2</text>
+    <text class="label" x="457" y="195">COURSE CORRECTION</text>
+    <text class="detail" x="457" y="217">REFINE LUNAR ENCOUNTER</text>
+    <path class="leader" d="M457 230h98l-9 59"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="850" cy="145" r="12"/><text class="number" x="850" y="149" text-anchor="middle">3</text>
+    <text class="label" x="873" y="139">LUNAR ORBIT INSERTION</text>
+    <text class="detail" x="873" y="161">POLAR STAGING ORBIT</text>
+    <path class="leader" d="M873 174h202l73 80"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="1211" cy="155" r="12"/><text class="number" x="1211" y="159" text-anchor="middle">4</text>
+    <text class="label" x="1234" y="149">RENDEZVOUS &amp; DOCK</text>
+    <text class="detail" x="1234" y="171">COMMERCIAL LANDER · PROVIDER TBD</text>
+    <path class="leader" d="M1234 183h182l-21 119"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="1068" cy="379" r="12"/><text class="number" x="1068" y="383" text-anchor="middle">5</text>
+    <text class="label" x="1091" y="373">TWO-CREW DESCENT</text>
+    <text class="detail" x="1091" y="395">ORION CREW REMAIN IN ORBIT</text>
+    <path class="leader" d="M1091 407h222l57 27"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="1157" cy="758" r="12"/><text class="number" x="1157" y="762" text-anchor="middle">6</text>
+    <text class="label" x="1180" y="752">SOUTH POLE EXPEDITION</text>
+    <text class="detail" x="1180" y="774">APPROXIMATELY ONE WEEK</text>
+    <path class="leader" d="M1180 786h206l23-116"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="1422" cy="262" r="12"/><text class="number" x="1422" y="266" text-anchor="middle">7</text>
+    <text class="label" x="1445" y="256">ASCENT</text>
+    <text class="detail" x="1445" y="278">REJOIN ORION</text>
+    <path class="leader" d="M1445 291h82l-101 136"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="1080" cy="522" r="12"/><text class="number" x="1080" y="526" text-anchor="middle">8</text>
+    <text class="label" x="1103" y="516">CREW &amp; SAMPLE TRANSFER</text>
+    <text class="detail" x="1103" y="538">FOUR CREW RETURN IN ORION</text>
+    <path class="leader" d="M1103 550h146l28-63"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="839" cy="591" r="12"/><text class="number" x="839" y="595" text-anchor="middle">9</text>
+    <text class="label" x="862" y="585">TRANS-EARTH INJECTION</text>
+    <text class="detail" x="862" y="607">DEPART LUNAR ORBIT</text>
+    <path class="leader" d="M862 619h121l-4 25"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="509" cy="646" r="12"/><text class="number" x="509" y="650" text-anchor="middle">10</text>
+    <text class="label" x="532" y="640">SERVICE MODULE SEPARATION</text>
+    <text class="detail" x="532" y="662">PREPARE FOR ENTRY</text>
+    <path class="leader" d="M532 674h81l8 58"/>
+  </g>
+  <g>
+    <circle class="phase-dot" cx="363" cy="842" r="12"/><text class="number" x="363" y="846" text-anchor="middle">11</text>
+    <text class="label" x="386" y="836">ENTRY &amp; SPLASHDOWN</text>
+    <text class="detail" x="386" y="858">REPRESENTATIVE PACIFIC RECOVERY AREA</text>
+    <path class="leader" d="M386 814h-54l-34-16"/>
+  </g>
+
+  <text x="1540" y="866" text-anchor="end" class="micro">PROVIDER-NEUTRAL TRAINING PROFILE · VEHICLE SILHOUETTES ARE ILLUSTRATIVE</text>
+</svg>

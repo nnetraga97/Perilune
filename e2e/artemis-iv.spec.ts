@@ -1,9 +1,54 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const STAND_IN_LABEL =
   'UNCHANGED 2019 STARSHIP CONCEPT STAND-IN · NASA PROVIDER TBD';
 
 test.use({ deviceScaleFactor: 2 });
+
+async function skipToChapter(page: Page, chapter: number): Promise<void> {
+  await page.getByRole('button', { name: new RegExp(`Skip Artemis IV chapter ${chapter}$`) }).click();
+  await expect(page.locator('.game-dialog-title')).toHaveText(`Skip Artemis IV Chapter ${chapter}?`);
+  await page.getByRole('button', { name: `SKIP TO CHAPTER ${chapter + 1}` }).click();
+  await expect(page.locator('.artiv-guide-progress')).toContainText(`CHAPTER ${chapter + 1}`);
+}
+
+test('Artemis IV chapters can be skipped and Chapter 3 offers real automatic docking', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Artemis IV guided lunar landing mission' }).click();
+  await page.getByRole('button', { name: 'BEGIN MISSION' }).click();
+  await expect(page.locator('.artiv-guide-progress')).toContainText('CHAPTER 1', { timeout: 120_000 });
+
+  await skipToChapter(page, 1);
+  await skipToChapter(page, 2);
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Complete docking');
+  await expect(page.getByText('Stable hold', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'TARGET LANDER' }).click();
+  const guidedDocking = page.getByRole('button', { name: 'AUTO-DOCK' });
+  await expect(guidedDocking).toBeVisible();
+  await guidedDocking.click();
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Two crew transfer to the lander');
+
+  for (const chapter of [3, 4, 5, 6, 7]) await skipToChapter(page, chapter);
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Find and redock with Orion');
+  await page.getByRole('button', { name: 'TARGET ORION' }).click();
+  await page.getByRole('button', { name: 'RUN PREPARED PHASING' }).click();
+  await page.getByRole('button', { name: 'AUTO-DOCK' }).click();
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Crew and samples return to Orion');
+});
+
+test('Artemis IV Chapter 5 can automatically land through the real safety predicate', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Artemis IV guided lunar landing mission' }).click();
+  await page.getByRole('button', { name: 'BEGIN MISSION' }).click();
+  await expect(page.locator('.artiv-guide-progress')).toContainText('CHAPTER 1', { timeout: 120_000 });
+
+  for (const chapter of [1, 2, 3, 4]) await skipToChapter(page, chapter);
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Remove sideways speed first');
+  await page.getByRole('button', { name: 'AUTO-LAND' }).click();
+  await expect(page.locator('.artiv-guide-title')).toHaveText('Chapter complete');
+  await expect(page.getByRole('button', { name: 'CONTINUE TO CHAPTER 6' })).toBeVisible();
+});
 
 test('Artemis IV starts from the public mission card with its checked Chapter 1 route', async ({ page }) => {
   const errors: string[] = [];
@@ -31,6 +76,14 @@ test('Artemis IV starts from the public mission card with its checked Chapter 1 
     'It is not a Starship HLS model or an official NASA or SpaceX flight configuration.',
   );
   await expect(page.locator('.game-dialog-message')).toHaveCSS('white-space', 'pre-line');
+  const flightPlan = page.getByRole('img', {
+    name: /Artemis IV representative flight plan/,
+  });
+  await expect(flightPlan).toBeVisible();
+  await expect(flightPlan).toHaveAttribute('src', '/ui/artemis-iv-flight-plan.svg');
+  await expect(page.getByRole('link', { name: 'Open the Artemis IV flight plan at full size' }))
+    .toHaveAttribute('target', '_blank');
+  await expect(page.locator('.game-dialog-mission-profile')).toHaveCSS('overflow-y', 'auto');
 
   await page.getByRole('button', { name: 'BEGIN MISSION' }).click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight', null, {
