@@ -51,6 +51,16 @@ test('launch and Revert preserve the fleet while the lunar concept orbit stays o
   expect(odyssey).toMatchObject({ bodyId: 'earth', active: true });
   expect(concept).toMatchObject({ bodyId: 'moon', situation: 'orbit', active: false });
 
+  await page.getByRole('button', { name: 'Fleet', exact: true }).click();
+  await page.locator('.body-row', { hasText: 'Sun' }).getByRole('button', { name: 'Orbit', exact: true }).click();
+  await expect.poll(() => page.evaluate((vesselId) => (
+    window.__TEST__ as unknown as FleetProbe
+  ).vessels().find((vessel) => vessel.id === vesselId), odyssey!.id)).toMatchObject({
+    bodyId: 'sun',
+    situation: 'orbit',
+    active: true,
+  });
+
   await page.getByRole('button', { name: 'Map' }).click();
   await expect.poll(() => page.evaluate(() => (
     window.__TEST__ as unknown as FleetProbe
@@ -71,6 +81,11 @@ test('launch and Revert preserve the fleet while the lunar concept orbit stays o
 
   const beforeRevert = await page.evaluate(() => (window.__TEST__ as unknown as FleetProbe).vessels());
   const wayfarerBefore = beforeRevert.find((vessel) => vessel.name === 'Wayfarer Heavy Demonstrator');
+  expect(beforeRevert.find((vessel) => vessel.id === odyssey?.id)).toMatchObject({
+    bodyId: 'sun',
+    situation: 'orbit',
+    active: false,
+  });
   expect(wayfarerBefore?.active).toBe(true);
 
   await page.getByRole('button', { name: 'Revert', exact: true }).click();
