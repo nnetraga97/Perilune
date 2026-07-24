@@ -1,16 +1,23 @@
 import * as THREE from 'three';
 import { describe, expect, test, vi } from 'vitest';
 import { LEGACY_AUREN_SYSTEM as AUREN_SYSTEM } from './fixtures/legacyAurenSystem';
-import { Body } from '../src/sim/universe';
+import { SOL_SYSTEM } from '../src/content/system';
+import { Body, Universe } from '../src/sim/universe';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import { createBodyRendererCandidate } from '../src/render/bodyRendererFactory';
 import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { StarBodyRenderer } from '../src/render/starBodyRenderer';
 import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
+import { CompactPlanetBodyRenderer } from '../src/render/compactPlanetBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
-import { bodyFixedCameraVelocity, pruneBodyFrameSamples, WorldScene } from '../src/render/worldScene';
+import {
+  bodyFixedCameraVelocity,
+  bodyRendererSupportsFlightTerrain,
+  pruneBodyFrameSamples,
+  WorldScene,
+} from '../src/render/worldScene';
 import type { BodyRenderer } from '../src/render/bodyRenderer';
 
 const caps: RenderCaps = {
@@ -113,6 +120,13 @@ describe('body renderer adapters', () => {
     expect(createBodyRendererCandidate({ body: star, caps, quality: 'medium' })).toBeInstanceOf(StarBodyRenderer);
     expect(createBodyRendererCandidate({ body: gas, caps, quality: 'medium' })).toBeInstanceOf(LegacyBodyRenderer);
     expect(createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' })).toBeInstanceOf(TerrestrialBodyRenderer);
+    const mars = new Universe([...SOL_SYSTEM], 'earth').get('mars');
+    const mercury = new Universe([...SOL_SYSTEM], 'earth').get('mercury');
+    expect(createBodyRendererCandidate({ body: mars, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
+    expect(createBodyRendererCandidate({ body: mercury, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
+    expect(bodyRendererSupportsFlightTerrain('mars')).toBe(false);
+    expect(bodyRendererSupportsFlightTerrain('mercury')).toBe(false);
+    expect(bodyRendererSupportsFlightTerrain('earth')).toBe(true);
   });
 
   test('legacy solid renderer owns compact, terrain, and cloud visuals during landing approach', () => {

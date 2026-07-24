@@ -15,9 +15,17 @@ describe('checked Sol constants', () => {
   it('preserves SI units and source landmarks', () => {
     expect(CHECKED_SOL_CONSTANTS.astronomicalUnitMeters).toBe(149_597_870_700);
     expect(CHECKED_SOL_CONSTANTS.bodies.sun.meanRadiusMeters).toBe(695_700_000);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mercury.meanRadiusMeters).toBeCloseTo(2_439_773.3333, 4);
     expect(CHECKED_SOL_CONSTANTS.bodies.earth.meanRadiusMeters).toBeCloseTo(6_371_008.3667, 4);
     expect(CHECKED_SOL_CONSTANTS.bodies.moon.meanRadiusMeters).toBe(1_737_400);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mars.meanRadiusMeters).toBeCloseTo(3_389_526.6667, 4);
     expect(CHECKED_SOL_CONSTANTS.bodies.earth.gmMeters3PerSecond2).toBeGreaterThan(3.98e14);
     expect(CHECKED_SOL_CONSTANTS.bodies.moon.gmMeters3PerSecond2).toBeGreaterThan(4.9e12);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mars.gmMeters3PerSecond2).toBeGreaterThan(4.28e13);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mercury.gmMeters3PerSecond2).toBeCloseTo(2.20318685514e13, 2);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mercury.orbit.semiMajorAxisMeters).toBe(57_909_226_541.52439);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mercury.orbit.eccentricity).toBeCloseTo(0.20563593, 8);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mars.orbit.semiMajorAxisMeters).toBeGreaterThan(2.27e11);
+    expect(CHECKED_SOL_CONSTANTS.bodies.mars.orbit.eccentricity).toBeCloseTo(0.0933941, 7);
   });
 });

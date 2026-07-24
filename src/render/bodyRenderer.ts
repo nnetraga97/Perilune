@@ -88,7 +88,7 @@ export interface BodyRendererStats {
   readonly effectBytes?: number;
   /** Hard byte reservation left for streamed terrain after fixed allocations. */
   readonly terrainAllocationBytes?: number;
-  readonly presentationMode?: 'physical' | 'transition' | 'proxy';
+  readonly presentationMode?: 'physical' | 'transition' | 'proxy' | 'point';
   readonly angularRadius?: number;
   /** Committed authored pack and renderer-owned auxiliary allocations. */
   readonly assetTier?: QualityTier | 'procedural';

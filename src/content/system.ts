@@ -1,4 +1,4 @@
-/** Checked, physically scaled Sun-Earth-Moon production content. */
+/** Checked, physically scaled Sol production content. */
 import type { BodyDef } from '../sim/universe';
 import { CHECKED_SOL_CONSTANTS } from '../generated/checked-sol-constants';
 
@@ -31,6 +31,41 @@ export const SOL_SYSTEM: readonly BodyDef[] = Object.freeze([
       colorLow: '#fff0c2',
       colorMid: '#fff7e3',
       colorHigh: '#ffffff',
+    },
+  },
+  {
+    id: 'mercury',
+    name: 'Mercury',
+    description: 'The innermost planet on its checked heliocentric orbit.',
+    mu: SOL.mercury.gmMeters3PerSecond2,
+    radius: SOL.mercury.meanRadiusMeters,
+    rotationPeriod: 86_400 * 360 / SOL.mercury.referenceFrame.primeMeridianRateDegreesPerDay,
+    axialTilt: SOL.mercury.obliquityRadians,
+    referenceFrame: { epoch: 'J2000', ...SOL.mercury.referenceFrame },
+    surfaceKind: 'solid',
+    terrainRecipeVersion: 1,
+    parent: 'sun',
+    color: '#8f8376',
+    scienceValue: 1,
+    orbit: {
+      a: SOL.mercury.orbit.semiMajorAxisMeters,
+      e: SOL.mercury.orbit.eccentricity,
+      i: SOL.mercury.orbit.inclinationRadians,
+      raan: SOL.mercury.orbit.longitudeAscendingNodeRadians,
+      argPe: SOL.mercury.orbit.argumentPeriapsisRadians,
+      meanAnomaly0: SOL.mercury.orbit.meanAnomalyRadiansAtEpoch,
+    },
+    // Rendering-only pass: terrain displacement and contact authority remain
+    // disabled until the separate low-orbit terrain phase.
+    terrain: {
+      seed: 199,
+      amplitude: 0,
+      frequency: 1,
+      octaves: 1,
+      oceanLevel: 0,
+      colorLow: '#5f5750',
+      colorMid: '#8f8376',
+      colorHigh: '#c3b7aa',
     },
   },
   {
@@ -132,6 +167,41 @@ export const SOL_SYSTEM: readonly BodyDef[] = Object.freeze([
       colorLow: '#575550',
       colorMid: '#aaa7a1',
       colorHigh: '#d8d5cf',
+    },
+  },
+  {
+    id: 'mars',
+    name: 'Mars',
+    description: 'The red planet on its checked heliocentric orbit.',
+    mu: SOL.mars.gmMeters3PerSecond2,
+    radius: SOL.mars.meanRadiusMeters,
+    rotationPeriod: 86_400 * 360 / SOL.mars.referenceFrame.primeMeridianRateDegreesPerDay,
+    axialTilt: SOL.mars.obliquityRadians,
+    referenceFrame: { epoch: 'J2000', ...SOL.mars.referenceFrame },
+    surfaceKind: 'solid',
+    terrainRecipeVersion: 1,
+    parent: 'sun',
+    color: '#b75c3b',
+    scienceValue: 1,
+    orbit: {
+      a: SOL.mars.orbit.semiMajorAxisMeters,
+      e: SOL.mars.orbit.eccentricity,
+      i: SOL.mars.orbit.inclinationRadians,
+      raan: SOL.mars.orbit.longitudeAscendingNodeRadians,
+      argPe: SOL.mars.orbit.argumentPeriapsisRadians,
+      meanAnomaly0: SOL.mars.orbit.meanAnomalyRadiansAtEpoch,
+    },
+    // This pass deliberately exposes only a reference sphere. Authored height,
+    // surface contact, and atmosphere physics belong to the later terrain pass.
+    terrain: {
+      seed: 499,
+      amplitude: 0,
+      frequency: 1,
+      octaves: 1,
+      oceanLevel: 0,
+      colorLow: '#7f3527',
+      colorMid: '#b75c3b',
+      colorHigh: '#d79a70',
     },
   },
 ]);

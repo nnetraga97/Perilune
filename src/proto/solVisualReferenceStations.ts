@@ -1,5 +1,5 @@
-export type SolReferenceBody = 'sun' | 'earth' | 'moon';
-export type SolReferencePresentation = 'solar-disk' | 'full-disk' | 'limb' | 'orbit' | 'surface' | 'alignment';
+export type SolReferenceBody = 'sun' | 'mercury' | 'earth' | 'moon' | 'mars';
+export type SolReferencePresentation = 'solar-disk' | 'full-disk' | 'limb' | 'orbit' | 'surface' | 'alignment' | 'point';
 
 export interface SolVisualReferenceStation {
   readonly id: string;
@@ -54,6 +54,14 @@ export const SOL_VISUAL_REFERENCE_STATIONS: readonly SolVisualReferenceStation[]
   station({ id: 'moon-site01-surface', bodyId: 'moon', latitudeDegrees: -89.47, longitudeDegrees: -137.5, altitudeMeters: 15, fovDegrees: 72, pitchDegrees: 18, sunDirection: [-0.62, -0.73, -0.08], timeSeconds: 0, presentation: 'surface', note: 'PGDA Site 01 source-backed contact geometry under grazing light.' }),
   station({ id: 'moon-low-orbit', bodyId: 'moon', latitudeDegrees: -20, longitudeDegrees: 25, altitudeMeters: 100_000, fovDegrees: 62, sunDirection: [-0.25, 0.966, -0.068], timeSeconds: 0, presentation: 'orbit', note: 'LOLA silhouette and compact/terrain handoff.' }),
   station({ id: 'moon-surface', bodyId: 'moon', latitudeDegrees: -20, longitudeDegrees: 25, altitudeMeters: 15, fovDegrees: 72, pitchDegrees: 18, sunDirection: [-0.25, 0.966, -0.068], timeSeconds: 0, presentation: 'surface', note: 'Dark regolith, grazing relief, and near-black fill.' }),
+  station({ id: 'mercury-day-full', bodyId: 'mercury', latitudeDegrees: 12, longitudeDegrees: 15, altitudeMeters: 9_000_000, fovDegrees: 34, sunDirection: [0.92, -0.2, 0.34], timeSeconds: 0, presentation: 'full-disk', note: 'Restrained MESSENGER surface identity, canonical longitude seam, and daylight terminator.' }),
+  station({ id: 'mercury-terminator-full', bodyId: 'mercury', latitudeDegrees: 8, longitudeDegrees: -35, altitudeMeters: 9_000_000, fovDegrees: 34, sunDirection: [0, 1, 0.15], timeSeconds: 0, presentation: 'full-disk', note: 'Resolved phase response with an airless, restrained illuminated limb.' }),
+  station({ id: 'mercury-proxy-handoff', bodyId: 'mercury', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 560_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'full-disk', note: 'Physical Mercury and angular proxy overlap before the 600 Mm far plane.' }),
+  station({ id: 'mercury-far-point', bodyId: 'mercury', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 20_000_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'point', note: 'Subpixel Mercury resolves to a stable phase-weighted point without flicker.' }),
+  station({ id: 'mars-day-full', bodyId: 'mars', latitudeDegrees: 12, longitudeDegrees: 15, altitudeMeters: 12_000_000, fovDegrees: 34, sunDirection: [0.92, -0.2, 0.34], timeSeconds: 0, presentation: 'full-disk', note: 'Viking global color identity, body-fixed orientation, and daylight terminator.' }),
+  station({ id: 'mars-terminator-full', bodyId: 'mars', latitudeDegrees: 8, longitudeDegrees: -35, altitudeMeters: 12_000_000, fovDegrees: 34, sunDirection: [0, 1, 0.15], timeSeconds: 0, presentation: 'full-disk', note: 'Resolved phase response and restrained illuminated limb.' }),
+  station({ id: 'mars-proxy-handoff', bodyId: 'mars', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 560_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'full-disk', note: 'Physical sphere and angular proxy overlap before the 600 Mm far plane.' }),
+  station({ id: 'mars-far-point', bodyId: 'mars', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 20_000_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'point', note: 'Subpixel Mars resolves to a stable phase-weighted point without flicker.' }),
 ]);
 
 export function solVisualReferenceStation(id: string): SolVisualReferenceStation {

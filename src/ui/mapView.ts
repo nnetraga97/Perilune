@@ -100,6 +100,16 @@ export function mapFitBounds(bodies: readonly MapBodyBounds[]): MapFitBounds {
   return { center, radius };
 }
 
+export function mapCameraDistanceCeiling(
+  systemRadius: number,
+  verticalFovDegrees: number,
+  cameraFar: number,
+): number {
+  const halfFov = THREE.MathUtils.degToRad(verticalFovDegrees * 0.5);
+  const requiredFit = Math.max(0, systemRadius) / Math.tan(halfFov) * 1.18;
+  return Math.min(cameraFar * 0.8, Math.max(3e6, requiredFit * 1.08));
+}
+
 /** Preserve physical size when visible and use only a small picking floor when distant. */
 export function mapBodyPresentationRadius(radiusMeters: number, cameraDistance: number): number {
   return Math.max(radiusMeters * SCALE, cameraDistance * 0.0045);
@@ -166,7 +176,12 @@ export function compactBodyMesh(
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
-      : pack && descriptor.renderer !== 'terrestrial'
+      : pack && descriptor.renderer === 'compact-planet'
+        ? new THREE.MeshLambertMaterial({
+          color: '#ffffff',
+          map: pack.textures.get('albedo') ?? null,
+        })
+        : pack && descriptor.renderer !== 'terrestrial'
         ? createAirlessGlobalMaterial(pack, maxAnisotropy, bodyRadius)
         : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy, bodyRadius);
   const mesh = new THREE.Mesh(geometry, material);
@@ -881,7 +896,7 @@ export class MapView {
     // Panning is the explicit operation that enters free-focus mode. Moving the
     // target toward the mouse ray made an off-center wheel event permanently
     // detach the camera from the selected craft/body.
-    this.camDist = Math.max(1, Math.min(3e6, this.camDist * factor));
+    this.camDist = Math.max(1, Math.min(this.maximumCameraDistance(), this.camDist * factor));
     this.predictionDirty = true;
   }
 
@@ -903,7 +918,10 @@ export class MapView {
     const bounds = this.currentFitBounds(scope);
     if (!bounds) return;
     const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
-    this.camDist = Math.max(8, Math.min(3e6, bounds.radius / Math.tan(halfFov) * 1.18));
+    this.camDist = Math.max(8, Math.min(
+      this.maximumCameraDistance(),
+      bounds.radius / Math.tan(halfFov) * 1.18,
+    ));
     this.cameraFocusMode = scope === 'local' ? 'fit-local' : 'fit-system';
     this.desiredFocus.copy(bounds.center);
     this.camFocus.copy(bounds.center);
@@ -925,6 +943,11 @@ export class MapView {
         radius: body.radius * SCALE,
       };
     }));
+  }
+
+  private maximumCameraDistance(): number {
+    const systemBounds = this.currentFitBounds('system');
+    return mapCameraDistanceCeiling(systemBounds?.radius ?? 0, this.camera.fov, this.camera.far);
   }
 
   resetCamera(): void {

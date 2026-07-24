@@ -18,7 +18,7 @@ describe('Sol visual reference stations', () => {
     }
   });
 
-  it('covers the Sun, global Earth, atmosphere descent, ocean, and lunar matrix', () => {
+  it('covers the Sun, global Earth, atmosphere descent, ocean, lunar matrix, and Mars orbit look', () => {
     const ids = new Set(SOL_VISUAL_REFERENCE_STATIONS.map((station) => station.id));
     for (const required of [
       'sun-from-earth', 'sun-zoomed-disk', 'sun-partial-occultation',
@@ -29,6 +29,8 @@ describe('Sol visual reference stations', () => {
       'moon-from-earth', 'moon-near-full', 'moon-far-full', 'moon-polar', 'moon-south-pole-orbit',
       'moon-detail-2000km', 'moon-detail-1100km', 'moon-detail-300km', 'moon-low-orbit', 'moon-surface',
       'moon-site01-10km', 'moon-site01-1km', 'moon-site01-surface',
+      'mercury-day-full', 'mercury-terminator-full', 'mercury-proxy-handoff', 'mercury-far-point',
+      'mars-day-full', 'mars-terminator-full', 'mars-proxy-handoff', 'mars-far-point',
     ]) expect(ids.has(required), required).toBe(true);
   });
 

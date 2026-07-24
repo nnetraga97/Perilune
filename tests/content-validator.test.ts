@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -338,6 +338,29 @@ function runValidator(
     },
   });
   return Object.assign(result, { checkedManifestPath });
+}
+
+function runRepositoryValidator(manifest: unknown) {
+  const dir = mkdtempSync(join(tmpdir(), 'perilune-repository-content-'));
+  // Asset paths are relative to the manifest directory, so keep this probe
+  // beside the production manifest while directing generated output to /tmp.
+  const manifestPath = join(process.cwd(), 'assets/planets', `.manifest-mars-test-${randomUUID()}.json`);
+  const checkedManifestPath = join(dir, 'checked-planet-manifest.json');
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  try {
+    return spawnSync(process.execPath, ['scripts/validate-content.mjs'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PERILUNE_MANIFEST_PATH: manifestPath,
+        PERILUNE_CHECKED_MANIFEST_PATH: checkedManifestPath,
+        PERILUNE_ROOT: process.cwd(),
+      },
+    });
+  } finally {
+    unlinkSync(manifestPath);
+  }
 }
 
 function replacePackage(
@@ -779,6 +802,29 @@ describe('planet content validator', () => {
     const result = runValidator(manifest);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/exact channels.*albedo.*normal.*material.*clouds/i);
+  });
+
+  it('enforces albedo-only compact-planet packs and rejects terrain-oriented channels', () => {
+    for (const bodyId of ['mercury', 'mars']) {
+      const manifest = JSON.parse(readFileSync('assets/planets/manifest.json', 'utf8')) as any;
+      const compact = manifest.packs.find((pack: any) => pack.bodyId === bodyId && pack.tier === 'low');
+      const moon = manifest.packs.find((pack: any) => pack.bodyId === 'moon' && pack.tier === 'low');
+      const normal = structuredClone(moon.channels.find((channel: any) => channel.name === 'normal'));
+      compact.channels.push(normal);
+      compact.compressedBytes += readFileSync(join('assets/planets', normal.packagePath)).byteLength;
+      const result = runRepositoryValidator(manifest);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(new RegExp(`Pack ${bodyId}/low must have exact channels albedo`, 'i'));
+    }
+  });
+
+  it('applies scientific provenance fields to every non-stellar Sol surface source', () => {
+    const manifest = JSON.parse(readFileSync('assets/planets/manifest.json', 'utf8')) as any;
+    const mercurySource = manifest.sources.find((source: any) => source.bodies?.includes('mercury'));
+    delete mercurySource.datum;
+    const result = runRepositoryValidator(manifest);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/Mercury.*datum is required/i);
   });
 
   it('rejects packaged-file checksum drift', () => {

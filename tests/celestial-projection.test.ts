@@ -47,4 +47,23 @@ describe('celestial projection', () => {
       farField: false,
     })).toMatchObject({ visibility: 'inside', projectedPixelRadius: Infinity });
   });
+
+  it('crossfades a physical body to its angular proxy before the far plane', () => {
+    const common = {
+      bodyRadius: 10,
+      verticalFovRadians: 1,
+      drawingBufferHeight: 1080,
+      physicalFarMeters: 1_000,
+      farField: false,
+    };
+    expect(computeCelestialProjection({ ...common, centerRelative: { x: 810, y: 0, z: 0 } }))
+      .toMatchObject({ physicalOpacity: 1, proxyOpacity: 0 });
+    const handoff = computeCelestialProjection({ ...common, centerRelative: { x: 935, y: 0, z: 0 } });
+    expect(handoff.visibility).toBe('physical');
+    expect(handoff.physicalOpacity).toBeGreaterThan(0);
+    expect(handoff.physicalOpacity).toBeLessThan(1);
+    expect(handoff.proxyOpacity).toBeCloseTo(1 - handoff.physicalOpacity!, 12);
+    expect(computeCelestialProjection({ ...common, centerRelative: { x: 1_020, y: 0, z: 0 } }))
+      .toMatchObject({ visibility: 'far-field', physicalOpacity: 0, proxyOpacity: 1 });
+  });
 });

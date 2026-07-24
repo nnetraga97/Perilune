@@ -10,6 +10,14 @@ const sourceText = await readFile(sourcePath, 'utf8');
 const source = JSON.parse(sourceText);
 const DEG = Math.PI / 180;
 const J2000_OBLIQUITY_DEGREES = 23.439291111;
+const SOL_BODY_NAIF_IDS = new Map([
+  ['sun', 10],
+  ['mercury', 199],
+  ['earth', 399],
+  ['moon', 301],
+  ['mars', 499],
+]);
+const SOL_BODY_IDS = [...SOL_BODY_NAIF_IDS.keys()];
 
 function finitePositive(value, label) {
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be finite and positive`);
@@ -155,7 +163,7 @@ for (const authority of source.authorities) {
   }
 }
 finitePositive(source.astronomicalUnitMeters, 'astronomicalUnitMeters');
-for (const id of ['sun', 'earth', 'moon']) {
+for (const id of SOL_BODY_IDS) {
   const body = source.bodies?.[id];
   if (!body) throw new Error(`Missing ${id} constants`);
   finitePositive(body.meanRadiusMeters, `${id}.meanRadiusMeters`);
@@ -180,7 +188,7 @@ verifyDigest(gmBytes, gmAuthority.sha256, gmAuthority.id);
 const pck = pckBytes.toString('utf8');
 const gm = gmBytes.toString('utf8');
 
-for (const [id, naifId] of [['sun', 10], ['earth', 399], ['moon', 301]]) {
+for (const [id, naifId] of SOL_BODY_NAIF_IDS) {
   const body = source.bodies[id];
   const radii = kernelNumbers(pck, `BODY${naifId}_RADII`);
   const gmKm = kernelNumbers(gm, `BODY${naifId}_GM`)[0];
@@ -202,6 +210,9 @@ for (const [id, naifId] of [['sun', 10], ['earth', 399], ['moon', 301]]) {
     `${id}.primeMeridianQuadraticDegreesPerCentury2`);
 }
 const earthRadii = kernelNumbers(pck, 'BODY399_RADII');
+// Earth is the only checked Sol body that currently authors separate
+// equatorial and polar radii. Other bodies are intentionally validated against
+// the mean of their three pinned NAIF radii by the generic loop above.
 assertClose(earthRadii[0] * 1_000, source.bodies.earth.equatorialRadiusMeters,
   'earth.equatorialRadiusMeters');
 assertClose(earthRadii[2] * 1_000, source.bodies.earth.polarRadiusMeters,
@@ -227,7 +238,7 @@ for (let index = 0; index < lunarRa.length; index++) {
 const compiled = structuredClone(source);
 compiled.compiledInertialFrame = 'ecliptic-j2000';
 compiled.j2000ObliquityDegrees = J2000_OBLIQUITY_DEGREES;
-for (const id of ['sun', 'earth', 'moon']) {
+for (const id of SOL_BODY_IDS) {
   compiled.bodies[id].referenceFrame = compileReferenceFrame(
     source.bodies[id].referenceFrame,
     id === 'moon' ? periodicAtEpoch : undefined,

@@ -54,7 +54,9 @@ const tierDimensions = {
   high: [4096, 2048],
 } as const;
 type CompiledTier = keyof typeof tierDimensions;
-type CompiledBody = 'veyra' | 'palla' | 'wisp' | 'earth' | 'moon' | 'sun';
+const compiledBodyIds = ['veyra', 'palla', 'wisp', 'mercury', 'earth', 'moon', 'mars', 'sun'] as const;
+type CompiledBody = typeof compiledBodyIds[number];
+const compiledBodies = new Set<string>(compiledBodyIds);
 
 function optionValues(name: string): string[] {
   const values: string[] = [];
@@ -70,7 +72,7 @@ function optionValues(name: string): string[] {
 const requestedBodies = optionValues('--body');
 const targetBodies = new Set<CompiledBody>(
   (requestedBodies.length > 0 ? requestedBodies : ['veyra']).map((bodyId) => {
-    if (!['veyra', 'palla', 'wisp', 'earth', 'moon', 'sun'].includes(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
+    if (!compiledBodies.has(bodyId)) throw new Error(`Unsupported compiled body: ${bodyId}`);
     return bodyId as CompiledBody;
   }),
 );
@@ -349,6 +351,54 @@ async function writeTier(
       bootCritical: (bodyId === 'veyra' || bodyId === 'earth') && tier === 'medium',
       channels,
     },
+  };
+}
+
+async function writeAlbedoOnlyTier(
+  bodyId: CompiledBody,
+  tier: CompiledTier,
+  width: number,
+  height: number,
+  albedo: Uint8Array,
+): Promise<Record<string, unknown>> {
+  if (albedo.length !== width * height * 3) throw new Error(`${bodyId}/${tier} albedo must be aligned RGB8`);
+  const tierDir = resolve(assetsRoot, `generated/${bodyId}/${tier}`);
+  mkdirSync(tierDir, { recursive: true });
+  const image = sharp(Buffer.from(albedo), { raw: { width, height, channels: 3 } });
+  const fallbackPath = resolve(tierDir, 'albedo.webp');
+  const encoderInput = resolve(tierDir, 'albedo.encoder.png');
+  await image.clone().webp({ quality: 92, effort: 6, smartSubsample: true }).toFile(fallbackPath);
+  await image.clone().png({ compressionLevel: 9, adaptiveFiltering: false, effort: 10 }).toFile(encoderInput);
+  const packagePath = resolve(tierDir, 'albedo.ktx2');
+  try {
+    await runKtx(encoderInput, packagePath, 'albedo', true);
+  } finally {
+    rmSync(encoderInput, { force: true });
+  }
+  const channel: ChannelOutput = {
+    name: 'albedo',
+    colorSpace: 'sRGB',
+    logicalFormat: 'RGB8',
+    packagePath: relativeAssetPath(packagePath),
+    fallbackPath: relativeAssetPath(fallbackPath),
+    packageChecksumSha256: sha256(readFileSync(packagePath)),
+    fallbackChecksumSha256: sha256(readFileSync(fallbackPath)),
+    gpuFormat: 'etc2-rgb',
+    gpuBytes: fullMipBytes(width, height, 8),
+    fallbackGpuBytes: fullMipRgbaBytes(width, height),
+    fallbackLayout: 'rgb',
+    transcodeTargets: ['etc2-rgb', 'bc1-rgb'],
+    mipmapped: true,
+  };
+  return {
+    bodyId,
+    tier,
+    width,
+    height,
+    compressedBytes: statSync(packagePath).size,
+    transientBytes: width * height * 3,
+    bootCritical: false,
+    channels: [channel],
   };
 }
 
@@ -792,6 +842,54 @@ async function compileMoon(
   return packs;
 }
 
+const marsSourceLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'sources/nasa-marstrek-viking/source.lock.json'), 'utf8'),
+) as {
+  id: string;
+  productPage: string;
+  urlTemplate: string;
+  localPath: string;
+  derivedSourceSha256: string;
+  sourceDimensions: readonly [number, number];
+};
+const marsSourcePath = resolve(root, marsSourceLock.localPath);
+
+const mercurySourceLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'sources/nasa-messenger-mercury/source.lock.json'), 'utf8'),
+) as {
+  id: string;
+  productPage: string;
+  sourceUrl: string;
+  localPath: string;
+  sourceSha256: string;
+  derivedSourceSha256: string;
+  sourceDimensions: readonly [number, number];
+  sourceSeamLongitudeDegrees: number;
+  canonicalSeamLongitudeDegrees: number;
+};
+const mercurySourcePath = resolve(root, mercurySourceLock.localPath);
+
+async function compileAlbedoOnlyBody(
+  bodyId: 'mercury' | 'mars',
+  sourcePath: string,
+  sourceDimensions: readonly [number, number],
+  tiersToWrite: ReadonlySet<CompiledTier>,
+): Promise<unknown[]> {
+  const metadata = await sharp(sourcePath).metadata();
+  if (metadata.width !== sourceDimensions[0] || metadata.height !== sourceDimensions[1]) {
+    throw new Error(`${bodyId} source must be ${sourceDimensions.join('x')}`);
+  }
+  const packs: unknown[] = [];
+  for (const tier of Object.keys(tierDimensions) as CompiledTier[]) {
+    if (!tiersToWrite.has(tier)) continue;
+    const [width, height] = tierDimensions[tier];
+    console.log(`compiling ${bodyId}/${tier} albedo at ${width}x${height}`);
+    const albedo = await decodeRgb(sourcePath, width, height);
+    packs.push(await writeAlbedoOnlyTier(bodyId, tier, width, height, albedo));
+  }
+  return packs;
+}
+
 const sunSourcePath = resolve(assetsRoot, 'sources/nasa-sdo-hmi-photosphere/sun-hmii-large.png');
 
 async function derivePhotosphereActivity(size: number): Promise<Uint8Array> {
@@ -916,6 +1014,81 @@ const sunSources = [{
   uvOrigin: 'north-west', valueScale: 1 / 112, valueOffset: -128 / 112,
   noDataValue: null, validRange: [16, 240], observation: '2010-12-06 HMI continuum intensity',
   productKind: 'measured', derivedRecipe: 'sun-photosphere-activity-v1', bodyReferenceFrameVersion: 'observer-image-2010-12-06',
+}] as const;
+
+const mercurySources = [{
+  id: mercurySourceLock.id,
+  url: mercurySourceLock.productPage,
+  author: 'NASA MESSENGER MDIS; Johns Hopkins University APL; Carnegie Institution of Washington',
+  license: 'NASA',
+  licenseUrl: nasaReview.termsSnapshot,
+  attribution: 'NASA/JHUAPL/Carnegie MESSENGER enhanced-color Mercury map PIA17386',
+  checksumSha256: mercurySourceLock.derivedSourceSha256,
+  localPath: mercurySourceLock.localPath.replace(/^assets\/planets\//, ''),
+  authoringOnly: true,
+  sourceDimensions: [...mercurySourceLock.sourceDimensions],
+  transformations: [
+    'verified NASA-hosted PIA17386 JPEG decode',
+    'exact half-width scanline rotation from 0-degree to -180-degree longitude seam',
+    'bounded polar no-observation fill from adjacent observed pixels',
+    '90-percent warm Rec.709 luminance with 10-percent enhanced-source chroma',
+    'deterministic canonical RGB PNG encoding',
+    'Lanczos3 tier resampling in the compiler image pipeline',
+    'BasisLZ KTX2 and WebP fallback encoding',
+  ],
+  bodies: ['mercury'],
+  channels: ['albedo'],
+  review: nasaReview,
+  datum: 'IAU Mercury 2000 reference sphere',
+  verticalDatum: 'not-applicable',
+  projection: 'simple cylindrical planetocentric latitude',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: mercurySourceLock.canonicalSeamLongitudeDegrees,
+  uvOrigin: 'north-west',
+  valueScale: 1,
+  valueOffset: 0,
+  noDataValue: null,
+  validRange: [0, 255],
+  observation: 'restrained visual albedo derived from MESSENGER MDIS enhanced-color global map PIA17386',
+  productKind: 'composited',
+  derivedRecipe: 'mercury-compact-albedo-v1',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+}] as const;
+
+const marsSources = [{
+  id: marsSourceLock.id,
+  url: marsSourceLock.productPage,
+  author: 'NASA Solar System Treks; USGS Astrogeology Science Center; Viking Orbiter teams',
+  license: 'Public-Domain',
+  licenseUrl: 'https://astrogeology.usgs.gov/search/map/mars_viking_colorized_global_mosaic_232m',
+  attribution: 'NASA Mars Trek and USGS Viking MDIM 2.1 global color mosaic',
+  checksumSha256: marsSourceLock.derivedSourceSha256,
+  localPath: marsSourceLock.localPath.replace(/^assets\/planets\//, ''),
+  authoringOnly: true,
+  sourceDimensions: [...marsSourceLock.sourceDimensions],
+  transformations: [
+    'deterministic NASA Mars Trek WMTS matrix-3 tile assembly',
+    'Lanczos3 tier resampling in the compiler image pipeline',
+    'BasisLZ KTX2 and WebP fallback encoding',
+  ],
+  bodies: ['mars'],
+  channels: ['albedo'],
+  datum: 'IAU Mars 2000 reference sphere',
+  verticalDatum: 'not-applicable',
+  projection: 'equirectangular planetocentric latitude',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: -180,
+  uvOrigin: 'north-west',
+  valueScale: 1,
+  valueOffset: 0,
+  noDataValue: null,
+  validRange: [0, 255],
+  observation: 'Viking MDIM 2.1 global color mosaic',
+  productKind: 'composited',
+  derivedRecipe: 'mars-compact-albedo-v1',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
 }] as const;
 
 const earthSources = [
@@ -1244,10 +1417,22 @@ if (write && !fingerprintsOnly) {
     generatedSources.push(...earthClassificationSources as unknown as Record<string, any>[]);
     generatedSources.push(...localMaterialSources.filter((source) => source.bodies.includes('earth')));
   }
+  if (targetBodies.has('mercury')) {
+    generatedPacks.push(...await compileAlbedoOnlyBody(
+      'mercury', mercurySourcePath, mercurySourceLock.sourceDimensions, targetTiers,
+    ) as Record<string, any>[]);
+    generatedSources.push(...mercurySources as unknown as Record<string, any>[]);
+  }
   if (targetBodies.has('moon')) {
     generatedPacks.push(...await compileMoon(solUniverse, targetTiers) as Record<string, any>[]);
     generatedSources.push(...moonSources as unknown as Record<string, any>[]);
     generatedSources.push(...localMaterialSources.filter((source) => source.bodies.includes('moon')));
+  }
+  if (targetBodies.has('mars')) {
+    generatedPacks.push(...await compileAlbedoOnlyBody(
+      'mars', marsSourcePath, marsSourceLock.sourceDimensions, targetTiers,
+    ) as Record<string, any>[]);
+    generatedSources.push(...marsSources as unknown as Record<string, any>[]);
   }
   if (targetBodies.has('sun')) {
     generatedPacks.push(...await compileSun(targetTiers) as Record<string, any>[]);

@@ -49,6 +49,28 @@
         "primeMeridianQuadraticDegreesPerCentury2": 0
       }
     },
+    "mercury": {
+      "naifId": 199,
+      "meanRadiusMeters": 2439773.3333333335,
+      "gmMeters3PerSecond2": 22031868551400.004,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 281.0103,
+        "poleRightAscensionRateDegreesPerCentury": -0.0328,
+        "poleDeclinationDegrees": 61.4155,
+        "poleDeclinationRateDegreesPerCentury": -0.0049,
+        "primeMeridianDegrees": 329.5988,
+        "primeMeridianRateDegreesPerDay": 6.1385108,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 57909226541.52439,
+        "eccentricity": 0.20563593,
+        "inclinationRadians": 0.12225994793212572,
+        "longitudeAscendingNodeRadians": 0.8435309954891992,
+        "argumentPeriapsisRadians": 0.5083625809358163,
+        "meanAnomalyRadiansAtEpoch": 3.050705107870811
+      }
+    },
     "earth": {
       "naifId": 399,
       "equatorialRadiusMeters": 6378136.6,
@@ -71,6 +93,28 @@
         "longitudeAscendingNodeRadians": 0,
         "argumentPeriapsisRadians": 1.796601474049171,
         "meanAnomalyRadiansAtEpoch": -0.04316391697638581
+      }
+    },
+    "mars": {
+      "naifId": 499,
+      "meanRadiusMeters": 3389526.6666666665,
+      "gmMeters3PerSecond2": 42828373620699.086,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 317.269202,
+        "poleRightAscensionRateDegreesPerCentury": -0.10927547,
+        "poleDeclinationDegrees": 54.432516,
+        "poleDeclinationRateDegreesPerCentury": -0.05827105,
+        "primeMeridianDegrees": 176.049863,
+        "primeMeridianRateDegreesPerDay": 350.891982443297,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 227943822427.57306,
+        "eccentricity": 0.0933941,
+        "inclinationRadians": 0.03228320542488929,
+        "longitudeAscendingNodeRadians": 0.8649771297497417,
+        "argumentPeriapsisRadians": -1.2828723009731817,
+        "meanAnomalyRadiansAtEpoch": 0.3384227896851049
       }
     },
     "moon": {

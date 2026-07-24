@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-marstrek-viking-mdim21-global-232m",
+  "urlTemplate": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{TileMatrix}/{TileRow}/{TileCol}.jpg",
+  "productPage": "https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars",
+  "tileMatrix": 3,
+  "columns": 16,
+  "rows": 8,
+  "sourceDimensions": [4096, 2048],
+  "localPath": "assets/planets/sources/nasa-marstrek-viking/mars-viking-global-4096x2048.png",
+  "derivedSourceSha256": "7a7052337cbaab69412e196cdca636a014c197c7c26c1e232696cb61b0a2464e"
+}
