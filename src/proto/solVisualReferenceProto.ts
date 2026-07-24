@@ -32,7 +32,7 @@ function direction(latitudeDegrees: number, longitudeDegrees: number): THREE.Vec
   );
 }
 
-async function loadFallbackPack(bodyId: 'earth' | 'moon' | 'mercury' | 'mars' | 'sun', tier: QualityTier): Promise<RuntimeBodyAssetPack> {
+async function loadFallbackPack(bodyId: 'earth' | 'moon' | 'mercury' | 'venus' | 'mars' | 'sun', tier: QualityTier): Promise<RuntimeBodyAssetPack> {
   const manifest = checkPlanetManifest(checkedPlanetArtifact);
   const pack = manifest.packs.find((candidate) => candidate.bodyId === bodyId && candidate.tier === tier);
   if (!pack) throw new Error(`Missing checked visual-reference pack ${bodyId}/${tier}`);

@@ -28,9 +28,10 @@ describe('which bodies get an orbit ring on the map', () => {
     expect(ids).not.toContain(game.universe.root.id);
   });
 
-  it('includes Mercury and Mars as heliocentric orbit rings in the production system', () => {
+  it('includes Mercury, Venus, and Mars as heliocentric orbit rings in the production system', () => {
     const ids = mapOrbitRingBodies(new GameState().universe).map((body) => body.id);
     expect(ids).toContain('mercury');
+    expect(ids).toContain('venus');
     expect(ids).toContain('mars');
   });
 });

@@ -3,6 +3,7 @@ import sourceLock from '../assets/planets/sol-source-lock.json';
 import localLock from '../assets/planets/local-material-source-lock.json';
 import marsLock from '../assets/planets/sources/nasa-marstrek-viking/source.lock.json';
 import mercuryLock from '../assets/planets/sources/nasa-messenger-mercury/source.lock.json';
+import venusLock from '../assets/planets/sources/jpl-venus-clouds/source.lock.json';
 import artifact from '../src/generated/checked-planet-manifest.json';
 
 const sha256 = /^[0-9a-f]{64}$/;
@@ -54,6 +55,20 @@ describe('Sol visual source provenance', () => {
       canonicalSeamLongitudeDegrees: -180,
     });
     const packs = artifact.manifest.packs.filter((pack) => pack.bodyId === 'mercury');
+    expect(packs.map((pack) => pack.tier).sort()).toEqual(['high', 'low', 'medium']);
+    for (const pack of packs) expect(pack.channels.map((channel) => channel.name)).toEqual(['albedo']);
+  });
+
+  it('pins the representative JPL cloud deck and ships albedo-only Venus tiers', () => {
+    expect(venusLock.productPage).toBe('https://maps.jpl.nasa.gov/tmaps/venus.html');
+    expect(venusLock.sourceUrl).toBe('https://maps.jpl.nasa.gov/tmaps/pix/ven0mss2.tif');
+    expect(venusLock.sourceSha256).toMatch(sha256);
+    expect(venusLock.derivedSourceSha256).toBe(venusLock.sourceSha256);
+    expect(venusLock.sourceDimensions).toEqual([1440, 720]);
+    expect(venusLock.sourceCharacter).toMatch(/representative.*not a time-resolved global measurement/i);
+    const source = artifact.manifest.sources.find((entry) => entry.bodies?.includes('venus'));
+    expect(source?.observation).toMatch(/representative static cloud texture/i);
+    const packs = artifact.manifest.packs.filter((pack) => pack.bodyId === 'venus');
     expect(packs.map((pack) => pack.tier).sort()).toEqual(['high', 'low', 'medium']);
     for (const pack of packs) expect(pack.channels.map((channel) => channel.name)).toEqual(['albedo']);
   });

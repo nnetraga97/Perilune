@@ -122,10 +122,13 @@ describe('body renderer adapters', () => {
     expect(createBodyRendererCandidate({ body: body('veyra'), caps, quality: 'medium' })).toBeInstanceOf(TerrestrialBodyRenderer);
     const mars = new Universe([...SOL_SYSTEM], 'earth').get('mars');
     const mercury = new Universe([...SOL_SYSTEM], 'earth').get('mercury');
+    const venus = new Universe([...SOL_SYSTEM], 'earth').get('venus');
     expect(createBodyRendererCandidate({ body: mars, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
     expect(createBodyRendererCandidate({ body: mercury, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
+    expect(createBodyRendererCandidate({ body: venus, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
     expect(bodyRendererSupportsFlightTerrain('mars')).toBe(false);
     expect(bodyRendererSupportsFlightTerrain('mercury')).toBe(false);
+    expect(bodyRendererSupportsFlightTerrain('venus')).toBe(false);
     expect(bodyRendererSupportsFlightTerrain('earth')).toBe(true);
   });
 

@@ -30,6 +30,7 @@ describe('Sol visual reference stations', () => {
       'moon-detail-2000km', 'moon-detail-1100km', 'moon-detail-300km', 'moon-low-orbit', 'moon-surface',
       'moon-site01-10km', 'moon-site01-1km', 'moon-site01-surface',
       'mercury-day-full', 'mercury-terminator-full', 'mercury-proxy-handoff', 'mercury-far-point',
+      'venus-day-full', 'venus-crescent-full', 'venus-proxy-handoff', 'venus-far-point',
       'mars-day-full', 'mars-terminator-full', 'mars-proxy-handoff', 'mars-far-point',
     ]) expect(ids.has(required), required).toBe(true);
   });

@@ -54,7 +54,7 @@ const tierDimensions = {
   high: [4096, 2048],
 } as const;
 type CompiledTier = keyof typeof tierDimensions;
-const compiledBodyIds = ['veyra', 'palla', 'wisp', 'mercury', 'earth', 'moon', 'mars', 'sun'] as const;
+const compiledBodyIds = ['veyra', 'palla', 'wisp', 'mercury', 'venus', 'earth', 'moon', 'mars', 'sun'] as const;
 type CompiledBody = typeof compiledBodyIds[number];
 const compiledBodies = new Set<string>(compiledBodyIds);
 
@@ -869,8 +869,23 @@ const mercurySourceLock = JSON.parse(
 };
 const mercurySourcePath = resolve(root, mercurySourceLock.localPath);
 
+const venusSourceLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'sources/jpl-venus-clouds/source.lock.json'), 'utf8'),
+) as {
+  id: string;
+  productPage: string;
+  sourceUrl: string;
+  localPath: string;
+  sourceSha256: string;
+  derivedSourceSha256: string;
+  sourceDimensions: readonly [number, number];
+  canonicalSeamLongitudeDegrees: number;
+  sourceCharacter: string;
+};
+const venusSourcePath = resolve(root, venusSourceLock.localPath);
+
 async function compileAlbedoOnlyBody(
-  bodyId: 'mercury' | 'mars',
+  bodyId: 'mercury' | 'venus' | 'mars',
   sourcePath: string,
   sourceDimensions: readonly [number, number],
   tiersToWrite: ReadonlySet<CompiledTier>,
@@ -1054,6 +1069,43 @@ const mercurySources = [{
   productKind: 'composited',
   derivedRecipe: 'mercury-compact-albedo-v1',
   bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+}] as const;
+
+const venusSources = [{
+  id: venusSourceLock.id,
+  url: venusSourceLock.productPage,
+  author: 'NASA/JPL-Caltech; David Seal; Mariner 10 imaging team',
+  license: 'JPL',
+  licenseUrl: nasaReview.termsSnapshot,
+  attribution: 'NASA/JPL representative Venus cloud texture derived from Mariner 10 visible imagery',
+  checksumSha256: venusSourceLock.derivedSourceSha256,
+  localPath: venusSourceLock.localPath.replace(/^assets\/planets\//, ''),
+  authoringOnly: true,
+  sourceDimensions: [...venusSourceLock.sourceDimensions],
+  transformations: [
+    'verified JPL-hosted TIFF decode',
+    'no claim of time-resolved or body-fixed cloud geography',
+    'Lanczos3 tier resampling in the compiler image pipeline',
+    'BasisLZ KTX2 and WebP fallback encoding',
+  ],
+  bodies: ['venus'],
+  channels: ['albedo'],
+  review: nasaReview,
+  datum: 'representative Venus cloud deck; no body-fixed geodetic authority',
+  verticalDatum: 'not-applicable',
+  projection: 'equirectangular representative cloud texture',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: venusSourceLock.canonicalSeamLongitudeDegrees,
+  uvOrigin: 'north-west',
+  valueScale: 1,
+  valueOffset: 0,
+  noDataValue: null,
+  validRange: [0, 255],
+  observation: venusSourceLock.sourceCharacter,
+  productKind: 'composited',
+  derivedRecipe: 'venus-cloud-deck-albedo-v1',
+  bodyReferenceFrameVersion: 'representative-cloud-pattern-no-geodetic-authority',
 }] as const;
 
 const marsSources = [{
@@ -1422,6 +1474,12 @@ if (write && !fingerprintsOnly) {
       'mercury', mercurySourcePath, mercurySourceLock.sourceDimensions, targetTiers,
     ) as Record<string, any>[]);
     generatedSources.push(...mercurySources as unknown as Record<string, any>[]);
+  }
+  if (targetBodies.has('venus')) {
+    generatedPacks.push(...await compileAlbedoOnlyBody(
+      'venus', venusSourcePath, venusSourceLock.sourceDimensions, targetTiers,
+    ) as Record<string, any>[]);
+    generatedSources.push(...venusSources as unknown as Record<string, any>[]);
   }
   if (targetBodies.has('moon')) {
     generatedPacks.push(...await compileMoon(solUniverse, targetTiers) as Record<string, any>[]);

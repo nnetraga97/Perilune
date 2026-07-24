@@ -13,6 +13,7 @@ const J2000_OBLIQUITY_DEGREES = 23.439291111;
 const SOL_BODY_NAIF_IDS = new Map([
   ['sun', 10],
   ['mercury', 199],
+  ['venus', 299],
   ['earth', 399],
   ['moon', 301],
   ['mars', 499],

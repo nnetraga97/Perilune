@@ -24,7 +24,7 @@
     "totalRendererGpuBytes": {
       "low": 268435456,
       "medium": 402653184,
-      "high": 805306368
+      "high": 939524096
     },
     "transientPeakBytes": {
       "low": 100663296,
@@ -52,6 +52,58 @@
     }
   ],
   "sources": [
+    {
+      "id": "jpl-venus-mariner10-representative-clouds",
+      "url": "https://maps.jpl.nasa.gov/tmaps/venus.html",
+      "author": "NASA/JPL-Caltech; David Seal; Mariner 10 imaging team",
+      "license": "JPL",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA/JPL representative Venus cloud texture derived from Mariner 10 visible imagery",
+      "checksumSha256": "d21fc5198a6607a6d061e92179d9aca41a65a71dc2977dcac61667da4c54a64f",
+      "localPath": "sources/jpl-venus-clouds/ven0mss2.tif",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        1440,
+        720
+      ],
+      "transformations": [
+        "verified JPL-hosted TIFF decode",
+        "no claim of time-resolved or body-fixed cloud geography",
+        "Lanczos3 tier resampling in the compiler image pipeline",
+        "BasisLZ KTX2 and WebP fallback encoding"
+      ],
+      "bodies": [
+        "venus"
+      ],
+      "channels": [
+        "albedo"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      },
+      "datum": "representative Venus cloud deck; no body-fixed geodetic authority",
+      "verticalDatum": "not-applicable",
+      "projection": "equirectangular representative cloud texture",
+      "axisOrder": "longitude,latitude",
+      "longitudeDirection": "east-positive",
+      "seamLongitudeDegrees": -180,
+      "uvOrigin": "north-west",
+      "valueScale": 1,
+      "valueOffset": 0,
+      "noDataValue": null,
+      "validRange": [
+        0,
+        255
+      ],
+      "observation": "Representative static cloud texture cloned from a single Mariner 10 visible-frequency observation; not a time-resolved global measurement.",
+      "productKind": "composited",
+      "derivedRecipe": "venus-cloud-deck-albedo-v1",
+      "bodyReferenceFrameVersion": "representative-cloud-pattern-no-geodetic-authority"
+    },
     {
       "id": "nasa-black-marble-earth-2016",
       "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km_geo.tif",
@@ -2644,6 +2696,93 @@
           "mipmapped": true,
           "width": 2048,
           "height": 2048
+        }
+      ]
+    },
+    {
+      "bodyId": "venus",
+      "tier": "low",
+      "width": 1024,
+      "height": 512,
+      "compressedBytes": 67266,
+      "transientBytes": 1572864,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/venus/low/albedo.ktx2",
+          "fallbackPath": "generated/venus/low/albedo.webp",
+          "packageChecksumSha256": "b3a21bbcfa19897697cdd9c52b7baf8235e78a3dda0525906d10668ca76c9bbb",
+          "fallbackChecksumSha256": "39382595175b4c4ee7d3b7d74b692208ad8e5ee9ebcad36804bf99edff35ff82",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 349544,
+          "fallbackGpuBytes": 2796204,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "venus",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 187451,
+      "transientBytes": 6291456,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/venus/medium/albedo.ktx2",
+          "fallbackPath": "generated/venus/medium/albedo.webp",
+          "packageChecksumSha256": "5757fc71a7966fd11dfbc1cbfe03a20d51195c0d42309c1dd823b92fa52d1fbd",
+          "fallbackChecksumSha256": "17f0be59a4d63ed422143aed63d5846d61443c0f5cc2a0987983fed2ddf85d9d",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "venus",
+      "tier": "high",
+      "width": 4096,
+      "height": 2048,
+      "compressedBytes": 545982,
+      "transientBytes": 25165824,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/venus/high/albedo.ktx2",
+          "fallbackPath": "generated/venus/high/albedo.webp",
+          "packageChecksumSha256": "7b035e14bf5d39734275af2b7181640a467ed27be8bbbb5b3d064054bbb40c75",
+          "fallbackChecksumSha256": "50587e63fd3845261f864413b3ac8fcb1d47762db07d665b6eca9e7ffb4b9350",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 5592424,
+          "fallbackGpuBytes": 44739244,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
         }
       ]
     },

@@ -60,7 +60,7 @@ const expectedRecipeBodies = new Set([
   'auren', 'ashen', 'vess', 'veyra', 'palla', 'wisp',
   'rusk', 'tyran', 'brimm', 'glacia', 'mote', 'farfall',
 ]);
-const solBodyIds = Object.freeze(['sun', 'mercury', 'earth', 'moon', 'mars']);
+const solBodyIds = Object.freeze(['sun', 'mercury', 'venus', 'earth', 'moon', 'mars']);
 const solBodies = new Set(solBodyIds);
 const scientificSurfaceBodies = new Set(solBodyIds.filter((bodyId) => bodyId !== 'sun'));
 const expectedBodies = new Set([...expectedRecipeBodies, ...solBodies]);
@@ -138,6 +138,7 @@ const exactPackChannelContracts = Object.freeze({
   moon: Object.freeze(['albedo', 'normal', 'material', 'heightMacro', 'localDetail']),
   mars: Object.freeze(['albedo']),
   mercury: Object.freeze(['albedo']),
+  venus: Object.freeze(['albedo']),
   sun: Object.freeze(['photosphereActivity']),
 });
 

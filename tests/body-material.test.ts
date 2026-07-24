@@ -16,7 +16,7 @@ describe('body visual assignments', () => {
     expect(BODY_VISUALS.sun).toMatchObject({ renderer: 'star', targetArchetype: 'star' });
 
     for (const [bodyId, visual] of Object.entries(BODY_VISUALS)) {
-      if (!['auren', 'sun', 'veyra', 'mercury', 'earth', 'moon', 'mars'].includes(bodyId)) expect(visual.renderer).toBe('legacy');
+      if (!['auren', 'sun', 'veyra', 'mercury', 'venus', 'earth', 'moon', 'mars'].includes(bodyId)) expect(visual.renderer).toBe('legacy');
     }
 
     expect(BODY_VISUALS.veyra.renderer).toBe('terrestrial');
@@ -30,6 +30,11 @@ describe('body visual assignments', () => {
       targetArchetype: 'terrestrial',
       compactPlanetVisual: expect.objectContaining({ limbStrength: 0.04 }),
     });
+    expect(BODY_VISUALS.venus).toMatchObject({
+      renderer: 'compact-planet',
+      targetArchetype: 'terrestrial',
+      compactPlanetVisual: expect.objectContaining({ limbStrength: 0.42 }),
+    });
     expect(BODY_VISUALS.veyra.targetArchetype).toBe('terrestrial');
     expect(BODY_VISUALS.palla.targetArchetype).toBe('airless');
     expect(BODY_VISUALS.tyran.targetArchetype).toBe('gas-giant');
@@ -41,6 +46,7 @@ describe('body visual assignments', () => {
     )).toEqual({
       sun: 'star',
       mercury: 'terrestrial',
+      venus: 'terrestrial',
       earth: 'terrestrial',
       moon: 'airless',
       mars: 'terrestrial',

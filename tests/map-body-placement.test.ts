@@ -39,7 +39,7 @@ describe('map body placement', () => {
     const game = new GameState();
     const earth = game.universe.get('earth');
     const local = new Vec3();
-    for (const bodyId of ['mercury', 'mars'] as const) {
+    for (const bodyId of ['mercury', 'venus', 'mars'] as const) {
       const body = game.universe.get(bodyId);
       for (const time of [0, 10_000_000, 50_000_000]) {
         const bodyScene = mapBodyScenePosition(game.universe, body, earth, time);

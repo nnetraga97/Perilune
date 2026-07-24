@@ -71,6 +71,28 @@
         "meanAnomalyRadiansAtEpoch": 3.050705107870811
       }
     },
+    "venus": {
+      "naifId": 299,
+      "meanRadiusMeters": 6051800,
+      "gmMeters3PerSecond2": 324858592000000,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 272.76,
+        "poleRightAscensionRateDegreesPerCentury": 0,
+        "poleDeclinationDegrees": 67.16,
+        "poleDeclinationRateDegreesPerCentury": 0,
+        "primeMeridianDegrees": 160.2,
+        "primeMeridianRateDegreesPerDay": -1.4813688,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 108209474537.37917,
+        "eccentricity": 0.00677672,
+        "inclinationRadians": 0.05924827411109566,
+        "longitudeAscendingNodeRadians": 1.3383157224083446,
+        "argumentPeriapsisRadians": 0.9585806336304322,
+        "meanAnomalyRadiansAtEpoch": 0.8792381000505897
+      }
+    },
     "earth": {
       "naifId": 399,
       "equatorialRadiusMeters": 6378136.6,

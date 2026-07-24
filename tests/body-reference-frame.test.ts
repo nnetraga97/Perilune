@@ -11,7 +11,7 @@ import {
   type BodyReferenceFrameDef,
 } from '../src/sim/bodyReferenceFrame';
 
-function checkedFrame(id: 'sun' | 'mercury' | 'earth' | 'moon' | 'mars'): BodyReferenceFrameDef {
+function checkedFrame(id: 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars'): BodyReferenceFrameDef {
   return { epoch: 'J2000', ...CHECKED_SOL_CONSTANTS.bodies[id].referenceFrame };
 }
 
@@ -51,7 +51,7 @@ describe('checked body reference frames', () => {
   });
 
   it('preserves the physical pole-to-orbit-normal obliquity', () => {
-    for (const [id, expectedDegrees] of [['mercury', 0.034], ['earth', 23.4393], ['moon', 6.68], ['mars', 23.9162]] as const) {
+    for (const [id, expectedDegrees] of [['mercury', 0.034], ['venus', 2.637], ['earth', 23.4393], ['moon', 6.68], ['mars', 23.9162]] as const) {
       const def = SOL_SYSTEM.find((body) => body.id === id)!;
       const north = referenceFrameOrientation(def.referenceFrame!, 0, new Quat())
         .rotate(new Vec3(0, 0, 1), new Vec3());
@@ -91,6 +91,15 @@ describe('checked body reference frames', () => {
     const oneDay = referenceFrameAngles(frame, 86_400).primeMeridian;
     expect((oneDay - start) * 180 / Math.PI).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
     expect(frame.primeMeridianRateDegreesPerDay).toBeCloseTo(6.1385134, 6);
+  });
+
+  it('advances the Venus prime meridian retrograde at the pinned IAU rate', () => {
+    const frame = checkedFrame('venus');
+    const start = referenceFrameAngles(frame, 0).primeMeridian;
+    const oneDay = referenceFrameAngles(frame, 86_400).primeMeridian;
+    expect((oneDay - start) * 180 / Math.PI).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
+    expect(frame.primeMeridianRateDegreesPerDay).toBeCloseTo(-1.4813688, 7);
+    expect(SOL_SYSTEM.find((body) => body.id === 'venus')!.rotationPeriod).toBeLessThan(0);
   });
 
   it('round-trips spherical body-fixed coordinates', () => {

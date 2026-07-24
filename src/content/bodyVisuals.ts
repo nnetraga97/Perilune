@@ -78,6 +78,7 @@ export interface BodyVisualDef {
 export type BodyId =
   | 'sun'
   | 'mercury'
+  | 'venus'
   | 'earth'
   | 'moon'
   | 'mars'
@@ -105,6 +106,16 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#b6aa9c',
       limbStrength: 0.04,
       pointColor: '#c2b29d',
+    },
+  },
+  venus: {
+    renderer: 'compact-planet',
+    targetArchetype: 'terrestrial',
+    materialId: 'venus-cloud-deck',
+    compactPlanetVisual: {
+      limbColor: '#ffe4a3',
+      limbStrength: 0.42,
+      pointColor: '#ffe1a0',
     },
   },
   earth: {
