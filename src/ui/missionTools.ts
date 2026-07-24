@@ -5,6 +5,8 @@ import type { WindowManager } from './window';
 import { defOf } from '../sim/vessel';
 import { isRecoverable } from '../sim/science';
 import { periapsisOf, stateToElements } from '../core/orbit';
+import type { BodyDef } from '../sim/universe';
+import type { TransferWorkerRequest, TransferWorkerResult } from '../sim/transferWorker';
 
 export interface MissionToolCallbacks {
   onSwitchVessel(vesselId: string): void;
@@ -49,6 +51,12 @@ export class MissionTools {
   private transferList: HTMLElement | null = null;
   private transferSort: HTMLSelectElement | null = null;
   private transferSignature = '';
+  private transferCalculationSignature = '';
+  private transferPlans: TransferPlan[] = [];
+  private transferPendingTargets = new Set<string>();
+  private transferWorker: Worker | null = null;
+  private transferRequestId = 0;
+  private transferError = '';
   private banner: HTMLElement | null = null;
   private fleetList: HTMLElement | null = null;
   private bodyList: HTMLElement | null = null;
@@ -222,37 +230,151 @@ export class MissionTools {
     this.transferList = el('div', 'mission-list transfer-list', content);
   }
 
+  private ensureTransferWorker(): Worker | null {
+    if (this.transferWorker) return this.transferWorker;
+    if (typeof Worker === 'undefined') return null;
+    const worker = new Worker(new URL('../sim/transferWorker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (event: MessageEvent<TransferWorkerResult>) => {
+      const result = event.data;
+      if (result.requestId !== this.transferRequestId) return;
+      this.transferPendingTargets.delete(result.targetId);
+      if (result.plan) {
+        const index = this.transferPlans.findIndex((plan) => plan.targetId === result.targetId);
+        if (index >= 0) this.transferPlans[index] = result.plan;
+        else this.transferPlans.push(result.plan);
+      }
+      if (result.error) this.transferError = 'Some intercepts could not be verified; estimates remain available.';
+      this.transferSignature = '';
+    };
+    worker.onerror = () => {
+      this.transferPendingTargets.clear();
+      this.transferError = 'Intercept verification worker unavailable; estimates remain available.';
+      this.transferSignature = '';
+      worker.terminate();
+      if (this.transferWorker === worker) this.transferWorker = null;
+    };
+    this.transferWorker = worker;
+    return worker;
+  }
+
+  private queueTransferVerification(
+    game: GameState,
+    fromId: string,
+    targets: readonly string[],
+    options: TransferWorkerRequest['options'],
+  ): void {
+    const requestId = ++this.transferRequestId;
+    if (this.transferPendingTargets.size && this.transferWorker) {
+      this.transferWorker.terminate();
+      this.transferWorker = null;
+    }
+    const worker = this.ensureTransferWorker();
+    if (!worker) {
+      this.transferError = 'Background verification is unavailable; estimates remain available.';
+      return;
+    }
+    const universe = [...game.universe.bodies.values()].map((body) => body.def) as BodyDef[];
+    this.transferPendingTargets = new Set(targets);
+    this.transferError = '';
+    for (const targetId of targets) {
+      const request: TransferWorkerRequest = {
+        requestId,
+        universe,
+        homeBodyId: game.universe.homeBodyId,
+        time: game.time,
+        fromId,
+        targetId,
+        options,
+      };
+      worker.postMessage(request);
+    }
+  }
+
   private updateTransfers(): void {
     if (!this.transferList || !this.transferSort) return;
     const game = this.game();
     const gv = game.active;
     if (!gv) return;
-    const signature = `${gv.runtime.id}:${gv.target}:${Math.floor(game.time / 30)}:${this.transferSort.value}`;
-    if (signature === this.transferSignature) return;
-    this.transferSignature = signature;
     const body = game.bodyOf(gv);
     const liveOrbit = stateToElements(body.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    const parkingOrbitDirection =
+      gv.runtime.pos.x * gv.runtime.vel.y - gv.runtime.pos.y * gv.runtime.vel.x >= 0 ? 1 : -1;
+    const nodeOrientation = Math.abs(Math.sin(liveOrbit.i)) > 1e-4
+      ? liveOrbit.raan.toFixed(4)
+      : 'equatorial';
+    const periapsisOrientation = liveOrbit.e > 1e-4
+      ? liveOrbit.argPe.toFixed(4)
+      : 'circular';
+    const calculationSignature = [
+      gv.runtime.id,
+      body.id,
+      Math.round(liveOrbit.a / 100),
+      liveOrbit.e.toFixed(5),
+      liveOrbit.i.toFixed(4),
+      nodeOrientation,
+      periapsisOrientation,
+      parkingOrbitDirection,
+      Math.floor(game.time / 300),
+    ].join(':');
+    const signature = [
+      calculationSignature,
+      gv.target,
+      this.transferSort.value,
+      Math.floor(game.time / 30),
+      [...this.transferPendingTargets].join(','),
+      this.transferPlans.map((plan) => `${plan.targetId}:${plan.accuracy}:${plan.burnTime}`).join('|'),
+      this.transferError,
+    ].join(':');
+    if (signature === this.transferSignature) return;
+    this.transferSignature = signature;
     if (gv.runtime.situation !== 'orbit' || periapsisOf(liveOrbit) <= body.radius) {
+      this.transferRequestId++;
+      this.transferCalculationSignature = '';
+      this.transferPlans = [];
+      this.transferPendingTargets.clear();
       this.transferList.innerHTML = '';
       const empty = el('div', 'mission-empty transfer-gate', this.transferList);
       el('strong', '', empty, 'STABLE ORBIT REQUIRED');
       el('span', '', empty, 'Transfer sketches use your live parking orbit. Circularize above the atmosphere first.');
       return;
     }
-    const parkingOrbitDirection =
-      gv.runtime.pos.x * gv.runtime.vel.y - gv.runtime.pos.y * gv.runtime.vel.x >= 0 ? 1 : -1;
-    const plans = allTransferPlans(game.universe, game.time, body, {
-      parkRadius: gv.runtime.pos.length(),
-      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
-      parkingOrbitDirection,
-      vesselPosition: gv.runtime.pos,
-      vesselVelocity: gv.runtime.vel,
-    });
+    if (calculationSignature !== this.transferCalculationSignature) {
+      this.transferCalculationSignature = calculationSignature;
+      const quickOptions = {
+        parkRadius: gv.runtime.pos.length(),
+        vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+        parkingOrbitDirection,
+      } as const;
+      // Circular phase estimates are cheap enough for the opening frame. The
+      // expensive patched-conic verification runs per destination off-thread.
+      this.transferPlans = allTransferPlans(game.universe, game.time, body, quickOptions);
+      const targets = this.transferPlans.map((plan) => plan.targetId);
+      if (gv.target && targets.includes(gv.target)) {
+        targets.splice(targets.indexOf(gv.target), 1);
+        targets.unshift(gv.target);
+      }
+      this.queueTransferVerification(game, body.id, targets, {
+        ...quickOptions,
+        vesselPosition: { x: gv.runtime.pos.x, y: gv.runtime.pos.y, z: gv.runtime.pos.z },
+        vesselVelocity: { x: gv.runtime.vel.x, y: gv.runtime.vel.y, z: gv.runtime.vel.z },
+      });
+    }
+    const plans = [...this.transferPlans];
     if (this.transferSort.value === 'dv') plans.sort((a, b) => a.departureDv - b.departureDv);
     else if (this.transferSort.value === 'target') plans.sort((a, b) => a.targetName.localeCompare(b.targetName));
     else plans.sort((a, b) => a.timeToWindow - b.timeToWindow);
     if (gv.target) plans.sort((a, b) => Number(b.targetId === gv.target) - Number(a.targetId === gv.target));
     this.transferList.innerHTML = '';
+    if (this.transferPendingTargets.size) {
+      el(
+        'div',
+        'mission-empty transfer-progress',
+        this.transferList,
+        `VERIFYING ${this.transferPendingTargets.size} INTERCEPT${this.transferPendingTargets.size === 1 ? '' : 'S'}…`,
+      );
+    } else if (this.transferError) {
+      el('div', 'mission-empty transfer-progress', this.transferList, this.transferError);
+    }
     if (parkingOrbitDirection < 0 && body.children.length) {
       el('div', 'mission-empty', this.transferList, 'Moon transfer windows require a prograde parking orbit.');
     }
@@ -299,15 +421,20 @@ export class MissionTools {
     const actions = el('div', 'transfer-actions', row);
     const target = el('button', 'hud-btn transfer-icon-action', actions, targeted ? 'Targeted' : 'Target');
     target.onclick = () => this.callbacks.onSetTarget(targeted ? null : plan.targetId);
-    const alarm = el('button', 'hud-btn transfer-icon-action', actions, 'Alarm');
+    const alarm = el('button', 'hud-btn transfer-icon-action', actions, 'Alarm') as HTMLButtonElement;
+    const pendingVerification = this.transferPendingTargets.has(plan.targetId);
+    alarm.disabled = pendingVerification;
     alarm.onclick = () => this.addAlarm(plan.burnTime, `Burn: ${plan.targetName}`, 'transfer');
     const sketch = el(
       'button',
       `hud-btn transfer-plan-action${plan.accuracy === 'refined-intercept' ? ' verified' : ''}`,
       actions,
-      plan.accuracy === 'refined-intercept' ? 'Plan intercept' : 'Sketch estimate',
-    );
+      pendingVerification
+        ? 'Verifying…'
+        : plan.accuracy === 'refined-intercept' ? 'Plan intercept' : 'Sketch estimate',
+    ) as HTMLButtonElement;
     sketch.setAttribute('aria-label', 'Sketch node');
+    sketch.disabled = pendingVerification;
     sketch.onclick = () => {
       this.callbacks.onSetTarget(plan.targetId);
       this.callbacks.onSketchNode(plan);
