@@ -4,6 +4,7 @@ import { ManeuverPlanController } from '../src/sim/maneuverPlan';
 import { pickOrbitSegment } from '../src/ui/orbitPicking';
 import {
   estimatedManeuverDuration,
+  maneuverLeadArcEnd,
   maneuverPlannerPresentation,
 } from '../src/ui/mapView';
 
@@ -19,6 +20,19 @@ const circularOrbit = (): OrbitalElements => ({
 });
 
 describe('map maneuver plan authority', () => {
+  it('draws at most one parking-orbit revolution before a distant transfer node', () => {
+    const orbit = circularOrbit();
+    const period = Math.PI * 2 * Math.sqrt((orbit.a ** 3) / orbit.mu);
+
+    expect(maneuverLeadArcEnd(orbit, 100, 100 + period * 400)).toBeCloseTo(100 + period, 9);
+    expect(maneuverLeadArcEnd(orbit, 100, 100 + period * 0.25)).toBeCloseTo(100 + period * 0.25, 9);
+  });
+
+  it('does not truncate an open pre-node conic as if it were periodic', () => {
+    const hyperbolic = { ...circularOrbit(), a: -720_000, e: 1.4 };
+    expect(maneuverLeadArcEnd(hyperbolic, 100, 25_000)).toBe(25_000);
+  });
+
   it('keeps the planned target tied to its captured reference orbit', () => {
     const controller = new ManeuverPlanController();
     const liveOrbit = circularOrbit();

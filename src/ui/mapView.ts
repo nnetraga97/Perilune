@@ -194,6 +194,16 @@ export function mapFitBounds(bodies: readonly MapBodyBounds[]): MapFitBounds {
   return { center, radius };
 }
 
+export function mapCameraDistanceCeiling(
+  systemRadius: number,
+  verticalFovDegrees: number,
+  cameraFar: number,
+): number {
+  const halfFov = THREE.MathUtils.degToRad(verticalFovDegrees * 0.5);
+  const requiredFit = Math.max(0, systemRadius) / Math.tan(halfFov) * 1.18;
+  return Math.min(cameraFar * 0.8, Math.max(3e6, requiredFit * 1.08));
+}
+
 /** Preserve physical size when visible and use only a small picking floor when distant. */
 export function mapBodyPresentationRadius(radiusMeters: number, cameraDistance: number): number {
   return Math.max(radiusMeters * SCALE, cameraDistance * 0.0045);
@@ -321,7 +331,12 @@ export function compactBodyMesh(
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
     : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
-      : pack && descriptor.renderer !== 'terrestrial'
+      : pack && descriptor.renderer === 'compact-planet'
+        ? new THREE.MeshLambertMaterial({
+          color: '#ffffff',
+          map: pack.textures.get('albedo') ?? null,
+        })
+        : pack && descriptor.renderer !== 'terrestrial'
         ? createAirlessGlobalMaterial(pack, maxAnisotropy, bodyRadius)
         : createTerrestrialGlobalMaterial(pack, descriptor, maxAnisotropy, bodyRadius);
   const mesh = new THREE.Mesh(geometry, material);
@@ -488,6 +503,25 @@ function fillConicTimeRange(
   commitLinePositions(line, positions);
 }
 
+/**
+ * A closed parking orbit may repeat hundreds of times before a distant
+ * transfer window. Drawing that whole duration into one fixed-size polyline
+ * aliases the revolutions into a starburst, so the lead-in is capped at one
+ * complete revolution. Open conics remain chronological and unbounded here;
+ * their SOI exit is applied by the trajectory prediction below.
+ */
+export function maneuverLeadArcEnd(
+  elements: OrbitalElements,
+  startTime: number,
+  nodeTime: number,
+): number {
+  const requestedEnd = Math.max(startTime + 1, nodeTime);
+  const period = periodOf(elements);
+  return Number.isFinite(period)
+    ? Math.min(requestedEnd, startTime + period)
+    : requestedEnd;
+}
+
 function elementsToStateSafe(el: OrbitalElements, nu: number, outR: Vec3, outV: Vec3): void {
   elementsToState(el, nu, outR, outV);
   if (!outR.isFinite()) outR.set(0, 0, 0);
@@ -524,6 +558,7 @@ export class MapView {
   private currentArcLine = orbitLine('#a9ebff', false, 4.2);
   private nodeLine = orbitLine('#e8c76b', true, 3.4);
   private completionLine = orbitLine('#fff0a8', true, 3.2);
+  private escapeLine = orbitLine('#e8c76b', true, 3.2);
   private encounterLine = orbitLine('#c88be8', true, 3.2);
   private entryLine = entryPathLine();
   private landingTargetEllipse = landingTargetEllipseLine();
@@ -550,6 +585,8 @@ export class MapView {
   private cameraFocusMode: 'selected' | 'free' | 'fit-local' | 'fit-system' = 'selected';
 
   private prediction: TrajectoryPrediction | null = null;
+  private continuationPrediction: TrajectoryPrediction | null = null;
+  private readonly continuationEncounterMarkerPosition = new THREE.Vector3();
   private predictionDirty = true;
   private lastElSig = '';
   private lastRenderedPlanRevision = -1;
@@ -680,6 +717,7 @@ export class MapView {
       this.currentArcLine,
       this.nodeLine,
       this.completionLine,
+      this.escapeLine,
       this.encounterLine,
       this.entryLine,
       this.landingTargetEllipse,
@@ -1126,7 +1164,7 @@ export class MapView {
     // Panning is the explicit operation that enters free-focus mode. Moving the
     // target toward the mouse ray made an off-center wheel event permanently
     // detach the camera from the selected craft/body.
-    this.camDist = Math.max(1, Math.min(3e6, this.camDist * factor));
+    this.camDist = Math.max(1, Math.min(this.maximumCameraDistance(), this.camDist * factor));
     this.predictionDirty = true;
   }
 
@@ -1148,7 +1186,10 @@ export class MapView {
     const bounds = this.currentFitBounds(scope);
     if (!bounds) return;
     const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
-    this.camDist = Math.max(8, Math.min(3e6, bounds.radius / Math.tan(halfFov) * 1.18));
+    this.camDist = Math.max(8, Math.min(
+      this.maximumCameraDistance(),
+      bounds.radius / Math.tan(halfFov) * 1.18,
+    ));
     this.cameraFocusMode = scope === 'local' ? 'fit-local' : 'fit-system';
     this.desiredFocus.copy(bounds.center);
     this.camFocus.copy(bounds.center);
@@ -1170,6 +1211,11 @@ export class MapView {
         radius: body.radius * SCALE,
       };
     }));
+  }
+
+  private maximumCameraDistance(): number {
+    const systemBounds = this.currentFitBounds('system');
+    return mapCameraDistanceCeiling(systemBounds?.radius ?? 0, this.camera.fov, this.camera.far);
   }
 
   resetCamera(): void {
@@ -1882,11 +1928,25 @@ export class MapView {
     // Vessel and maneuver conics.
     const elements = stateToElements(body.mu, v.pos, v.vel, t);
     this.currentElements = elements;
-    fillConic(this.vesselLine, elements, null);
-    this.updateFleetOrbitLines(game, gv.runtime.id, body, t);
     const plan = this.cb.getManeuverPlan();
     const activePlan = plan?.vesselId === v.id && plan.bodyId === body.id ? plan : null;
     const node = activePlan?.node ?? null;
+    const currentOrbitSignature = predictionOrbitSignature(body.id, elements);
+    if (elements.e < 1) {
+      fillConic(this.vesselLine, elements, null);
+    } else {
+      const predictionMatchesCurrentOrbit = !activePlan && this.lastElSig === currentOrbitSignature;
+      const transitionTime = predictionMatchesCurrentOrbit
+        ? this.prediction?.encounter?.entryTime ?? this.prediction?.escape?.exitTime
+        : undefined;
+      fillConicTimeRange(
+        this.vesselLine,
+        elements,
+        t,
+        transitionTime && transitionTime > t ? transitionTime : t + 200_000,
+      );
+    }
+    this.updateFleetOrbitLines(game, gv.runtime.id, body, t);
     if ((activePlan?.phase ?? null) !== this.lastPanelPhase) this.refreshNodePanel();
     this.vesselLine.material.opacity = this.orbitHover
       ? 0.72
@@ -1900,8 +1960,9 @@ export class MapView {
     this.landingTargetMarker.scale.setScalar(markerScale * 0.8);
     this.updateOrbitMarkers(elements, gv.target, game, markerScale);
 
+    let liveCompletionOrbit: OrbitalElements | null = null;
     if (activePlan && node) {
-      const currentArcEnd = Math.max(t + 1, node.time);
+      const currentArcEnd = maneuverLeadArcEnd(elements, t, node.time);
       fillConicTimeRange(this.currentArcLine, elements, t, currentArcEnd);
       this.currentArcLine.visible = true;
 
@@ -1940,7 +2001,7 @@ export class MapView {
       }
 
       if (activePlan.phase === 'executing') {
-        const completion = projectedOrbitAfterRemainingBurn(
+        liveCompletionOrbit = projectedOrbitAfterRemainingBurn(
           body.mu,
           v.pos,
           v.vel,
@@ -1948,10 +2009,10 @@ export class MapView {
           activePlan.burnDirection,
           activePlan.remainingDeltaV,
         );
-        const completionPeriod = periodOf(completion);
+        const completionPeriod = periodOf(liveCompletionOrbit);
         fillConicTimeRange(
           this.completionLine,
-          completion,
+          liveCompletionOrbit,
           t,
           t + (Number.isFinite(completionPeriod) ? completionPeriod : 200_000),
         );
@@ -1972,8 +2033,10 @@ export class MapView {
 
     // Prediction refresh. Local conics update immediately; encounter scans are throttled during drags.
     const signature = activePlan
-      ? `${body.id}:plan:${activePlan.revision}`
-      : predictionOrbitSignature(body.id, elements);
+      ? liveCompletionOrbit
+        ? `${body.id}:execution:${predictionOrbitSignature(body.id, liveCompletionOrbit)}`
+        : `${body.id}:plan:${activePlan.revision}`
+      : currentOrbitSignature;
     const predictionNow = performance.now();
     const transitionTime = this.prediction?.encounter?.entryTime ?? this.prediction?.escape?.exitTime;
     const hasFutureTransition = transitionTime !== undefined && transitionTime > t;
@@ -1990,12 +2053,26 @@ export class MapView {
       this.lastElSig = signature;
       this.predictionDirty = false;
       this.lastPredictionRefreshAt = predictionNow;
-      const predictionElements = activePlan?.targetOrbit ?? elements;
-      const predictionStart = activePlan?.node.time ?? t;
+      const predictionElements = liveCompletionOrbit ?? activePlan?.targetOrbit ?? elements;
+      const predictionStart = liveCompletionOrbit ? t : activePlan?.node.time ?? t;
       this.prediction = predictTrajectory(game.universe, body, predictionElements, predictionStart);
+      this.continuationPrediction = this.prediction.escape && body.parent
+        ? predictTrajectory(
+          game.universe,
+          body.parent,
+          this.prediction.escape.elements,
+          this.prediction.escape.exitTime,
+        )
+        : null;
       if (activePlan) {
         const transitionTime = this.prediction.encounter?.entryTime ?? this.prediction.escape?.exitTime;
-        if (transitionTime) fillConicTimeRange(this.nodeLine, activePlan.targetOrbit, activePlan.node.time, transitionTime);
+        if (transitionTime) {
+          if (liveCompletionOrbit) {
+            fillConicTimeRange(this.completionLine, liveCompletionOrbit, t, transitionTime);
+          } else {
+            fillConicTimeRange(this.nodeLine, activePlan.targetOrbit, activePlan.node.time, transitionTime);
+          }
+        }
       }
 
       if (this.prediction.encounter) {
@@ -2012,6 +2089,7 @@ export class MapView {
           moonPosition,
         );
         this.encounterLine.visible = true;
+        this.escapeLine.visible = false;
         this.encounterMarker.position.set(moonPosition.x * SCALE, moonPosition.y * SCALE, moonPosition.z * SCALE);
         this.encounterMarker.visible = true;
         this.encounterInfo.textContent =
@@ -2019,20 +2097,86 @@ export class MapView {
           `SOI ENTRY T−${Math.max(0, (encounter.entryTime - t) / 60).toFixed(0)} min  ·  ` +
           `PERIAPSIS ${encounter.periapsisAltitude > 0 ? (encounter.periapsisAltitude / 1000).toFixed(0) + ' km' : 'IMPACT'}`;
       } else if (this.prediction.escape) {
-        this.encounterLine.visible = false;
+        const continuationEncounter = this.continuationPrediction?.encounter ?? null;
+        // The escape state is already converted into the parent's inertial
+        // frame by predictTrajectory. Render the parent-frame leg around the
+        // parent's displayed center instead of cutting the path at the local
+        // SOI boundary.
+        if (continuationEncounter) {
+          fillConicTimeRange(
+            this.escapeLine,
+            this.prediction.escape.elements,
+            this.prediction.escape.exitTime,
+            continuationEncounter.entryTime,
+          );
+        } else {
+          fillConic(this.escapeLine, this.prediction.escape.elements, null);
+        }
+        this.escapeLine.visible = true;
         const exitPosition = new Vec3();
         const exitVelocity = new Vec3();
         elementsAtTime(this.prediction.elements, this.prediction.escape.exitTime, exitPosition, exitVelocity);
-        this.encounterMarker.position.set(exitPosition.x * SCALE, exitPosition.y * SCALE, exitPosition.z * SCALE);
-        this.encounterMarker.visible = true;
-        this.encounterInfo.textContent =
-          `PREDICTED ESCAPE · ${body.name} SOI  ·  ` +
-          `T−${Math.max(0, (this.prediction.escape.exitTime - t) / 60).toFixed(0)} min`;
+        if (continuationEncounter && body.parent) {
+          const targetBody = game.universe.get(continuationEncounter.bodyId);
+          const targetPosition = new Vec3();
+          const encounterRelativePosition = new Vec3();
+          const encounterRelativeVelocity = new Vec3();
+          game.universe.localPosition(targetBody, continuationEncounter.entryTime, targetPosition);
+          const encounterPeriod = periodOf(continuationEncounter.elements);
+          fillConicTimeRange(
+            this.encounterLine,
+            continuationEncounter.elements,
+            continuationEncounter.entryTime,
+            continuationEncounter.entryTime + (Number.isFinite(encounterPeriod) ? encounterPeriod : 80_000),
+            targetPosition,
+          );
+          this.encounterLine.visible = true;
+          elementsAtTime(
+            continuationEncounter.elements,
+            continuationEncounter.entryTime,
+            encounterRelativePosition,
+            encounterRelativeVelocity,
+          );
+          this.continuationEncounterMarkerPosition.set(
+            (targetPosition.x + encounterRelativePosition.x) * SCALE,
+            (targetPosition.y + encounterRelativePosition.y) * SCALE,
+            (targetPosition.z + encounterRelativePosition.z) * SCALE,
+          );
+          this.encounterMarker.position.copy(this.continuationEncounterMarkerPosition);
+          this.encounterMarker.visible = true;
+          this.encounterInfo.textContent =
+            `${targetBody.name} encounter!\n` +
+            `SOI entry in ${((continuationEncounter.entryTime - t) / 86_400).toFixed(1)} days\n` +
+            `periapsis ${continuationEncounter.periapsisAltitude > 0
+              ? (continuationEncounter.periapsisAltitude / 1000).toFixed(0) + ' km'
+              : 'IMPACT'}`;
+        } else {
+          this.encounterLine.visible = false;
+          this.encounterMarker.position.set(exitPosition.x * SCALE, exitPosition.y * SCALE, exitPosition.z * SCALE);
+          this.encounterMarker.visible = true;
+          this.encounterInfo.textContent =
+            `escapes ${body.name} SOI in ${((this.prediction.escape.exitTime - t) / 60).toFixed(0)} min`;
+        }
       } else {
+        this.continuationPrediction = null;
         this.encounterLine.visible = false;
+        this.escapeLine.visible = false;
         this.encounterMarker.visible = false;
         this.encounterInfo.textContent = '';
       }
+    }
+
+    if (this.prediction?.escape && body.parent && this.escapeLine.visible) {
+      mapBodyScenePosition(game.universe, body.parent, body, t, this.escapeLine.position);
+      if (this.continuationPrediction?.encounter && this.encounterLine.visible) {
+        this.encounterLine.position.copy(this.escapeLine.position);
+        this.encounterMarker.position
+          .copy(this.continuationEncounterMarkerPosition)
+          .add(this.escapeLine.position);
+      }
+    } else {
+      this.escapeLine.position.set(0, 0, 0);
+      this.encounterLine.position.set(0, 0, 0);
     }
 
     this.markerEvents.clear();
@@ -2043,6 +2187,11 @@ export class MapView {
     if (node) this.markerEvents.set(this.nodeMarker, { label: 'Maneuver node', time: node.time });
     if (this.prediction?.encounter) {
       this.markerEvents.set(this.encounterMarker, { label: `${this.prediction.encounter.bodyId} SOI entry`, time: this.prediction.encounter.entryTime });
+    } else if (this.continuationPrediction?.encounter) {
+      this.markerEvents.set(this.encounterMarker, {
+        label: `${this.continuationPrediction.encounter.bodyId} SOI entry`,
+        time: this.continuationPrediction.encounter.entryTime,
+      });
     } else if (this.prediction?.escape) {
       this.markerEvents.set(this.encounterMarker, { label: `${body.name} SOI exit`, time: this.prediction.escape.exitTime });
     }

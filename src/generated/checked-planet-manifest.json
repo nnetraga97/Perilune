@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestSha256": "a63285408aad39423a662d59c735ad9224a6dc15cc77928adb9fecd416e5996d",
+  "manifestSha256": "71932f4fe0bdb83e054f1a090afd572d89007413309e2429c3afd60ad49daa6a",
   "manifest": {
     "schemaVersion": 1,
     "compiler": {
@@ -27,7 +27,7 @@
       "totalRendererGpuBytes": {
         "low": 268435456,
         "medium": 402653184,
-        "high": 805306368
+        "high": 939524096
       },
       "transientPeakBytes": {
         "low": 100663296,
@@ -67,6 +67,58 @@
       }
     ],
     "sources": [
+      {
+        "id": "jpl-venus-mariner10-representative-clouds",
+        "url": "https://maps.jpl.nasa.gov/tmaps/venus.html",
+        "author": "NASA/JPL-Caltech; David Seal; Mariner 10 imaging team",
+        "license": "JPL",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA/JPL representative Venus cloud texture derived from Mariner 10 visible imagery",
+        "checksumSha256": "d21fc5198a6607a6d061e92179d9aca41a65a71dc2977dcac61667da4c54a64f",
+        "localPath": "sources/jpl-venus-clouds/ven0mss2.tif",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          1440,
+          720
+        ],
+        "transformations": [
+          "verified JPL-hosted TIFF decode",
+          "no claim of time-resolved or body-fixed cloud geography",
+          "Lanczos3 tier resampling in the compiler image pipeline",
+          "BasisLZ KTX2 and WebP fallback encoding"
+        ],
+        "bodies": [
+          "venus"
+        ],
+        "channels": [
+          "albedo"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "representative Venus cloud deck; no body-fixed geodetic authority",
+        "verticalDatum": "not-applicable",
+        "projection": "equirectangular representative cloud texture",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Representative static cloud texture cloned from a single Mariner 10 visible-frequency observation; not a time-resolved global measurement.",
+        "productKind": "composited",
+        "derivedRecipe": "venus-cloud-deck-albedo-v1",
+        "bodyReferenceFrameVersion": "representative-cloud-pattern-no-geodetic-authority"
+      },
       {
         "id": "nasa-black-marble-earth-2016",
         "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km_geo.tif",
@@ -388,6 +440,105 @@
           "endorsementSafe": true,
           "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
         }
+      },
+      {
+        "id": "nasa-marstrek-viking-mdim21-global-232m",
+        "url": "https://trek.nasa.gov/tiles/apidoc/trekAPI.html?body=mars",
+        "author": "NASA Solar System Treks; USGS Astrogeology Science Center; Viking Orbiter teams",
+        "license": "Public-Domain",
+        "licenseUrl": "https://astrogeology.usgs.gov/search/map/mars_viking_colorized_global_mosaic_232m",
+        "attribution": "NASA Mars Trek and USGS Viking MDIM 2.1 global color mosaic",
+        "checksumSha256": "7a7052337cbaab69412e196cdca636a014c197c7c26c1e232696cb61b0a2464e",
+        "localPath": "sources/nasa-marstrek-viking/mars-viking-global-4096x2048.png",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          4096,
+          2048
+        ],
+        "transformations": [
+          "deterministic NASA Mars Trek WMTS matrix-3 tile assembly",
+          "Lanczos3 tier resampling in the compiler image pipeline",
+          "BasisLZ KTX2 and WebP fallback encoding"
+        ],
+        "bodies": [
+          "mars"
+        ],
+        "channels": [
+          "albedo"
+        ],
+        "datum": "IAU Mars 2000 reference sphere",
+        "verticalDatum": "not-applicable",
+        "projection": "equirectangular planetocentric latitude",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "Viking MDIM 2.1 global color mosaic",
+        "productKind": "composited",
+        "derivedRecipe": "mars-compact-albedo-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+      },
+      {
+        "id": "nasa-messenger-mercury-pia17386-enhanced-color",
+        "url": "https://science.nasa.gov/photojournal/enhanced-color-mercury-map/",
+        "author": "NASA MESSENGER MDIS; Johns Hopkins University APL; Carnegie Institution of Washington",
+        "license": "NASA",
+        "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "attribution": "NASA/JHUAPL/Carnegie MESSENGER enhanced-color Mercury map PIA17386",
+        "checksumSha256": "e6ad55dfc837c8349e4747514f1ed4f7f4978e8041befc614795cb087867f459",
+        "localPath": "sources/nasa-messenger-mercury/mercury-pia17386-canonical-4096x2048.png",
+        "authoringOnly": true,
+        "sourceDimensions": [
+          4096,
+          2048
+        ],
+        "transformations": [
+          "verified NASA-hosted PIA17386 JPEG decode",
+          "exact half-width scanline rotation from 0-degree to -180-degree longitude seam",
+          "bounded polar no-observation fill from adjacent observed pixels",
+          "90-percent warm Rec.709 luminance with 10-percent enhanced-source chroma",
+          "deterministic canonical RGB PNG encoding",
+          "Lanczos3 tier resampling in the compiler image pipeline",
+          "BasisLZ KTX2 and WebP fallback encoding"
+        ],
+        "bodies": [
+          "mercury"
+        ],
+        "channels": [
+          "albedo"
+        ],
+        "review": {
+          "thirdPartyContent": false,
+          "commercialUseReviewed": true,
+          "modificationReviewed": true,
+          "endorsementSafe": true,
+          "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+        },
+        "datum": "IAU Mercury 2000 reference sphere",
+        "verticalDatum": "not-applicable",
+        "projection": "simple cylindrical planetocentric latitude",
+        "axisOrder": "longitude,latitude",
+        "longitudeDirection": "east-positive",
+        "seamLongitudeDegrees": -180,
+        "uvOrigin": "north-west",
+        "valueScale": 1,
+        "valueOffset": 0,
+        "noDataValue": null,
+        "validRange": [
+          0,
+          255
+        ],
+        "observation": "restrained visual albedo derived from MESSENGER MDIS enhanced-color global map PIA17386",
+        "productKind": "composited",
+        "derivedRecipe": "mercury-compact-albedo-v1",
+        "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
       },
       {
         "id": "nasa-osiris-rex-wisp-albedo",
@@ -1924,6 +2075,180 @@
         ]
       },
       {
+        "bodyId": "mars",
+        "tier": "low",
+        "width": 1024,
+        "height": 512,
+        "compressedBytes": 114030,
+        "transientBytes": 1572864,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mars/low/albedo.ktx2",
+            "fallbackPath": "generated/mars/low/albedo.webp",
+            "packageChecksumSha256": "315e79f10a220d9f1ca49f12303d7ae2cf9e7beb4bae1b62c2d3a60b8dbf2749",
+            "fallbackChecksumSha256": "6cd1ab31ec67865e9a04b89707eeb7c346657dee8723aad4e4501a2c7e0ab7e6",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 349544,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "mars",
+        "tier": "medium",
+        "width": 2048,
+        "height": 1024,
+        "compressedBytes": 399945,
+        "transientBytes": 6291456,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mars/medium/albedo.ktx2",
+            "fallbackPath": "generated/mars/medium/albedo.webp",
+            "packageChecksumSha256": "2517fd25434645e086d6a4e13f022460bd9dc4c61c1cbf8f1b419908e721ee49",
+            "fallbackChecksumSha256": "fc8405fdd0c1b3ff2eaddebdfc7d546872672ce117b9448713f51f8436184eca",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "mars",
+        "tier": "high",
+        "width": 4096,
+        "height": 2048,
+        "compressedBytes": 1548599,
+        "transientBytes": 25165824,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mars/high/albedo.ktx2",
+            "fallbackPath": "generated/mars/high/albedo.webp",
+            "packageChecksumSha256": "67d9a4b3c05cb6043684c957a71b8752ec28e76c52ca2cbe2cf0a7819e040886",
+            "fallbackChecksumSha256": "6e781a77a2be98cc4c8224ed993d89990386715350db6e1d3c177b10e6ed4714",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "mercury",
+        "tier": "low",
+        "width": 1024,
+        "height": 512,
+        "compressedBytes": 118597,
+        "transientBytes": 1572864,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mercury/low/albedo.ktx2",
+            "fallbackPath": "generated/mercury/low/albedo.webp",
+            "packageChecksumSha256": "16071e806909a5be492871150ffbefd182289cc17d0e4b8a8c4e80b644665d91",
+            "fallbackChecksumSha256": "ec1abd803c12fd5bb64e362df1cc03e284f7603972abc428304cf9b61bc2b871",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 349544,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "mercury",
+        "tier": "medium",
+        "width": 2048,
+        "height": 1024,
+        "compressedBytes": 415867,
+        "transientBytes": 6291456,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mercury/medium/albedo.ktx2",
+            "fallbackPath": "generated/mercury/medium/albedo.webp",
+            "packageChecksumSha256": "35ed003ae68f637b209d52f41daafe8f9dd0499358323cb8d6a1e2873be90fd6",
+            "fallbackChecksumSha256": "f8fad70de255d4ad7a2bdc7ea99325d1207ac3b4d0e536cefb3d2e29ab8d198b",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "mercury",
+        "tier": "high",
+        "width": 4096,
+        "height": 2048,
+        "compressedBytes": 1594940,
+        "transientBytes": 25165824,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/mercury/high/albedo.ktx2",
+            "fallbackPath": "generated/mercury/high/albedo.webp",
+            "packageChecksumSha256": "13aa4d3e477eb2e6261428f5bc7db350366dadce13941c70da3365880e699e79",
+            "fallbackChecksumSha256": "fed05073862d9159084b468db58a50e8d9676ee02eac789ac20654cfae539b2a",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
         "bodyId": "moon",
         "tier": "low",
         "width": 1024,
@@ -2386,6 +2711,93 @@
             "mipmapped": true,
             "width": 2048,
             "height": 2048
+          }
+        ]
+      },
+      {
+        "bodyId": "venus",
+        "tier": "low",
+        "width": 1024,
+        "height": 512,
+        "compressedBytes": 67266,
+        "transientBytes": 1572864,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/venus/low/albedo.ktx2",
+            "fallbackPath": "generated/venus/low/albedo.webp",
+            "packageChecksumSha256": "b3a21bbcfa19897697cdd9c52b7baf8235e78a3dda0525906d10668ca76c9bbb",
+            "fallbackChecksumSha256": "39382595175b4c4ee7d3b7d74b692208ad8e5ee9ebcad36804bf99edff35ff82",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 349544,
+            "fallbackGpuBytes": 2796204,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "venus",
+        "tier": "medium",
+        "width": 2048,
+        "height": 1024,
+        "compressedBytes": 187451,
+        "transientBytes": 6291456,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/venus/medium/albedo.ktx2",
+            "fallbackPath": "generated/venus/medium/albedo.webp",
+            "packageChecksumSha256": "5757fc71a7966fd11dfbc1cbfe03a20d51195c0d42309c1dd823b92fa52d1fbd",
+            "fallbackChecksumSha256": "17f0be59a4d63ed422143aed63d5846d61443c0f5cc2a0987983fed2ddf85d9d",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 1398120,
+            "fallbackGpuBytes": 11184812,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
+          }
+        ]
+      },
+      {
+        "bodyId": "venus",
+        "tier": "high",
+        "width": 4096,
+        "height": 2048,
+        "compressedBytes": 545982,
+        "transientBytes": 25165824,
+        "bootCritical": false,
+        "channels": [
+          {
+            "name": "albedo",
+            "colorSpace": "sRGB",
+            "logicalFormat": "RGB8",
+            "packagePath": "generated/venus/high/albedo.ktx2",
+            "fallbackPath": "generated/venus/high/albedo.webp",
+            "packageChecksumSha256": "7b035e14bf5d39734275af2b7181640a467ed27be8bbbb5b3d064054bbb40c75",
+            "fallbackChecksumSha256": "50587e63fd3845261f864413b3ac8fcb1d47762db07d665b6eca9e7ffb4b9350",
+            "gpuFormat": "etc2-rgb",
+            "gpuBytes": 5592424,
+            "fallbackGpuBytes": 44739244,
+            "fallbackLayout": "rgb",
+            "transcodeTargets": [
+              "etc2-rgb",
+              "bc1-rgb"
+            ],
+            "mipmapped": true
           }
         ]
       },

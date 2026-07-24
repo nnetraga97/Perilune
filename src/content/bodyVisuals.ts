@@ -1,4 +1,5 @@
-export type BodyRendererKind = 'legacy' | 'terrestrial' | 'airless' | 'gas-giant' | 'star';
+export type BodyRendererKind = 'legacy' | 'terrestrial' | 'airless' | 'compact-planet' | 'gas-giant' | 'star';
+export type BodyTargetArchetype = 'terrestrial' | 'airless' | 'gas-giant' | 'star';
 
 export interface EntryVisualDef {
   glow: string;
@@ -56,7 +57,7 @@ export function validateEntryVisual(value: Readonly<EntryVisualDef>): string[] {
 
 export interface BodyVisualDef {
   renderer: BodyRendererKind;
-  targetArchetype: Exclude<BodyRendererKind, 'legacy'>;
+  targetArchetype: BodyTargetArchetype;
   materialId: string;
   /** Renderer-only deterministic near-surface detail profile. */
   scatterProfile?: 'veyra' | 'earth-geology' | 'moon-regolith';
@@ -65,14 +66,22 @@ export interface BodyVisualDef {
     wavelengthTint: readonly [number, number, number];
     strength: number;
   };
+  compactPlanetVisual?: {
+    limbColor: string;
+    limbStrength: number;
+    pointColor: string;
+  };
   /** Renderer-only atmospheric-entry art direction. Physical heating remains simulation-owned. */
   entryVisual?: EntryVisualDef;
 }
 
 export type BodyId =
   | 'sun'
+  | 'mercury'
+  | 'venus'
   | 'earth'
   | 'moon'
+  | 'mars'
   | 'auren'
   | 'ashen'
   | 'vess'
@@ -89,6 +98,26 @@ export type BodyId =
 /** Renderer-owned visual assignments, deliberately separate from simulation body definitions. */
 export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.freeze({
   sun: { renderer: 'star', targetArchetype: 'star', materialId: 'sol-photosphere' },
+  mercury: {
+    renderer: 'compact-planet',
+    targetArchetype: 'terrestrial',
+    materialId: 'mercury-compact',
+    compactPlanetVisual: {
+      limbColor: '#b6aa9c',
+      limbStrength: 0.04,
+      pointColor: '#c2b29d',
+    },
+  },
+  venus: {
+    renderer: 'compact-planet',
+    targetArchetype: 'terrestrial',
+    materialId: 'venus-cloud-deck',
+    compactPlanetVisual: {
+      limbColor: '#ffe4a3',
+      limbStrength: 0.42,
+      pointColor: '#ffe1a0',
+    },
+  },
   earth: {
     renderer: 'terrestrial',
     targetArchetype: 'terrestrial',
@@ -100,6 +129,16 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
   moon: {
     renderer: 'airless', targetArchetype: 'airless', materialId: 'moon-airless',
     scatterProfile: 'moon-regolith',
+  },
+  mars: {
+    renderer: 'compact-planet',
+    targetArchetype: 'terrestrial',
+    materialId: 'mars-compact',
+    compactPlanetVisual: {
+      limbColor: '#d98b68',
+      limbStrength: 0.22,
+      pointColor: '#e59262',
+    },
   },
   auren: { renderer: 'star', targetArchetype: 'star', materialId: 'auren-star' },
   ashen: { renderer: 'legacy', targetArchetype: 'airless', materialId: 'ashen-airless' },

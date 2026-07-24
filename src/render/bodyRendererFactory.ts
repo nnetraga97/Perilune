@@ -8,6 +8,7 @@ import { LegacyBodyRenderer, type LegacyBodyRendererDependencies } from './legac
 import { SolarBodyRenderer } from './solarBodyRenderer';
 import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
 import { AirlessBodyRenderer } from './airlessBodyRenderer';
+import { CompactPlanetBodyRenderer } from './compactPlanetBodyRenderer';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
 import {
@@ -57,6 +58,18 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.flightAerial,
         authority,
       );
+    case 'compact-planet': {
+      if (!visual.compactPlanetVisual) {
+        throw new Error(`${options.body.id} compact planet is missing visual configuration`);
+      }
+      return new CompactPlanetBodyRenderer(
+        options.body,
+        descriptor,
+        visual.compactPlanetVisual,
+        options.caps,
+        options.quality,
+      );
+    }
     default:
       throw new Error(`Body renderer '${visual.renderer}' is not implemented for ${options.body.id}`);
   }

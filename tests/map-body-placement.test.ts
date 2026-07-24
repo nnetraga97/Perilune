@@ -5,6 +5,7 @@ import { GameState } from '../src/sim/state';
 import {
   mapBodyPresentationRadius,
   mapBodyScenePosition,
+  mapCameraDistanceCeiling,
   mapFitBounds,
 } from '../src/ui/mapView';
 
@@ -32,6 +33,37 @@ describe('map body placement', () => {
         expect(radius).toBeLessThanOrEqual(body.orbit.a * (1 + body.orbit.e) * 1.000001);
       }
     }
+  });
+
+  it('places Mercury and Mars on their checked heliocentric orbits at multiple epochs', () => {
+    const game = new GameState();
+    const earth = game.universe.get('earth');
+    const local = new Vec3();
+    for (const bodyId of ['mercury', 'venus', 'mars'] as const) {
+      const body = game.universe.get(bodyId);
+      for (const time of [0, 10_000_000, 50_000_000]) {
+        const bodyScene = mapBodyScenePosition(game.universe, body, earth, time);
+        const sunScene = mapBodyScenePosition(game.universe, game.universe.get('sun'), earth, time);
+        game.universe.localPosition(body, time, local);
+        expect(bodyScene.x - sunScene.x).toBeCloseTo(local.x * MAP_SCALE, 4);
+        expect(bodyScene.y - sunScene.y).toBeCloseTo(local.y * MAP_SCALE, 4);
+        expect(bodyScene.z - sunScene.z).toBeCloseTo(local.z * MAP_SCALE, 4);
+      }
+    }
+  });
+
+  it('allows the map camera to frame the Mercury-Earth-Mars system without clipping', () => {
+    const game = new GameState();
+    const earth = game.universe.get('earth');
+    const bounds = mapFitBounds([...game.universe.bodies.values()].map((body) => ({
+      position: mapBodyScenePosition(game.universe, body, earth, 0),
+      radius: body.radius * MAP_SCALE,
+    })));
+    const fov = 50;
+    const requiredFit = bounds.radius / Math.tan(fov * Math.PI / 360) * 1.18;
+    const ceiling = mapCameraDistanceCeiling(bounds.radius, fov, 10_000_000);
+    expect(ceiling).toBeGreaterThan(requiredFit);
+    expect(ceiling).toBeLessThanOrEqual(8_000_000);
   });
 
   it('centers the physical Earth-Moon envelope instead of framing it from Earth', () => {

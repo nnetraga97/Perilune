@@ -3,10 +3,9 @@
  * (target orbits the vessel's SOI body) and interplanetary transfers
  * (target is a sibling of the vessel's SOI body).
  *
- * Circular–coplanar approximation: windows are computed from the bodies'
- * actual analytic positions but assume near-circular transfer geometry.
- * That is accurate to a few percent for this system's orbits and is
- * plenty for planning; the maneuver planner refines the burn.
+ * Circular–coplanar estimates seed each search. When a live vessel state is
+ * available, lunar and interplanetary routes are refined into patched-conic
+ * SOI encounters before being presented as verified intercepts.
  */
 import { Vec3 } from '../core/vec3';
 import { elementsAtTime, periodOf, stateToElements } from '../core/orbit';
@@ -496,6 +495,414 @@ function nearestFuturePhaseTime(
   return candidate;
 }
 
+interface InterplanetaryCandidate {
+  node: ManeuverNode;
+  coastTime: number;
+  alignmentError: number;
+  deltaV: number;
+}
+
+interface InterplanetaryApproach {
+  distance: number;
+  time: number;
+  score: number;
+  relativeSpeed: number;
+}
+
+interface RefinedInterplanetaryTransfer {
+  node: ManeuverNode;
+  approachAltitude: number;
+  transferTime: number;
+  arrivalDv: number;
+}
+
+/**
+ * Convert a heliocentric Lambert departure into a local hyperbolic ejection.
+ *
+ * The outgoing asymptote and the vessel position define the hyperbola plane.
+ * At periapsis the velocity is perpendicular to the radius, so the resulting
+ * inertial delta-v can be decomposed exactly into the node's live RTN frame.
+ */
+function lambertEjectionCandidate(
+  universe: Universe,
+  from: Body,
+  target: Body,
+  reference: ReturnType<typeof stateToElements>,
+  burnTime: number,
+  coastTime: number,
+): InterplanetaryCandidate | null {
+  const parent = from.parent;
+  if (!parent) return null;
+  universe.localPosition(from, burnTime, _targetR, _targetV);
+  const targetPosition = new Vec3();
+  const targetVelocity = new Vec3();
+  universe.localPosition(target, burnTime + coastTime, targetPosition, targetVelocity);
+  const transferNormal = Vec3.cross(_targetR, _targetV, new Vec3()).normalize();
+  const departureVelocity = solveLambertDeparture(
+    parent.mu,
+    _targetR,
+    targetPosition,
+    coastTime,
+    transferNormal,
+    _lambertV,
+  );
+  if (!departureVelocity) return null;
+
+  const excessVelocity = new Vec3().copy(departureVelocity).sub(_targetV);
+  const excessSpeed = excessVelocity.length();
+  if (!(excessSpeed > 0) || !Number.isFinite(excessSpeed)) return null;
+  const asymptoteDirection = excessVelocity.scale(1 / excessSpeed);
+
+  elementsAtTime(reference, burnTime, _r, _v);
+  const radius = _r.length();
+  if (!(radius > from.radius)) return null;
+  const radial = new Vec3().copy(_r).scale(1 / radius);
+  const currentNormal = Vec3.cross(_r, _v, new Vec3()).normalize();
+  const currentTransverse = Vec3.cross(currentNormal, radial, new Vec3()).normalize();
+  const hyperbolaNormal = Vec3.cross(radial, asymptoteDirection, new Vec3());
+  if (hyperbolaNormal.lengthSq() < 1e-12) return null;
+  hyperbolaNormal.normalize();
+  const departureDirection = Vec3.cross(hyperbolaNormal, radial, new Vec3()).normalize();
+  // Reject the opposite, retrograde hyperbola branch. A retrograde parking
+  // orbit still works because currentTransverse follows the live orbit plane.
+  if (Vec3.dot(departureDirection, currentTransverse) <= 0) return null;
+
+  const eccentricity = 1 + radius * excessSpeed * excessSpeed / from.mu;
+  const requiredAsymptoteDot = -1 / eccentricity;
+  const alignmentError = Math.abs(Vec3.dot(radial, asymptoteDirection) - requiredAsymptoteDot);
+  const departureSpeed = Math.sqrt(excessSpeed * excessSpeed + 2 * from.mu / radius);
+  const burn = departureDirection.scale(departureSpeed).sub(_v);
+  const node: ManeuverNode = {
+    time: burnTime,
+    prograde: Vec3.dot(burn, currentTransverse),
+    normal: Vec3.dot(burn, currentNormal),
+    radial: Vec3.dot(burn, radial),
+  };
+  const deltaV = Math.hypot(node.prograde, node.normal, node.radial);
+  return Number.isFinite(deltaV)
+    ? { node, coastTime, alignmentError, deltaV }
+    : null;
+}
+
+function closestInterplanetaryApproach(
+  universe: Universe,
+  from: Body,
+  target: Body,
+  reference: ReturnType<typeof stateToElements>,
+  node: ManeuverNode,
+  coastTime: number,
+  desiredDistance: number,
+): InterplanetaryApproach | null {
+  const localPrediction = predictTrajectory(
+    universe,
+    from,
+    orbitAfterNode(reference, node),
+    node.time,
+  );
+  if (!localPrediction.escape) return null;
+
+  const craftPosition = new Vec3();
+  const craftVelocity = new Vec3();
+  const targetPosition = new Vec3();
+  const targetVelocity = new Vec3();
+  const distanceAt = (sampleTime: number): number => {
+    elementsAtTime(localPrediction.escape!.elements, sampleTime, craftPosition, craftVelocity);
+    universe.localPosition(target, sampleTime, targetPosition, targetVelocity);
+    return craftPosition.distanceTo(targetPosition);
+  };
+
+  let lo = node.time + coastTime * 0.8;
+  let hi = node.time + coastTime * 1.2;
+  for (let pass = 0; pass < 7; pass++) {
+    const width = (hi - lo) / 8;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    for (let index = 0; index <= 8; index++) {
+      const distance = distanceAt(lo + width * index);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    const center = lo + width * bestIndex;
+    lo = center - width;
+    hi = center + width;
+  }
+  const approachTime = (lo + hi) / 2;
+  const distance = distanceAt(approachTime);
+  const relativeSpeed = craftVelocity.distanceTo(targetVelocity);
+  return {
+    distance,
+    time: approachTime,
+    score: Math.abs(distance - desiredDistance),
+    relativeSpeed,
+  };
+}
+
+function refineInterplanetaryIntercept(
+  universe: Universe,
+  time: number,
+  from: Body,
+  target: Body,
+  opts: TransferOptions,
+  windowTime: number,
+  nominalTransferTime: number,
+  nominalDepartureDv: number,
+  nominalArrivalExcessSpeed: number,
+): RefinedInterplanetaryTransfer | null {
+  if (!opts.vesselPosition || !opts.vesselVelocity || !from.parent) return null;
+  const reference = stateToElements(from.mu, opts.vesselPosition, opts.vesselVelocity, time);
+  const parkingPeriod = periodOf(reference);
+  if (!Number.isFinite(parkingPeriod) || reference.e >= 1) return null;
+
+  const candidates: InterplanetaryCandidate[] = [];
+  const earliest = Math.max(time + 5, windowTime - parkingPeriod / 2);
+  const latest = Math.max(earliest + 1, windowTime + parkingPeriod / 2);
+  // Lambert supplies the true 3D heliocentric route. The Hohmann duration is
+  // only its seed; varying the coast handles eccentric and inclined planets.
+  for (let coastIndex = 0; coastIndex <= 14; coastIndex++) {
+    const coastTime = nominalTransferTime * (0.72 + coastIndex * 0.04);
+    let best: InterplanetaryCandidate | null = null;
+    let bestIndex = 0;
+    const burnSteps = 64;
+    for (let burnIndex = 0; burnIndex <= burnSteps; burnIndex++) {
+      const burnTime = earliest + (latest - earliest) * burnIndex / burnSteps;
+      const candidate = lambertEjectionCandidate(
+        universe,
+        from,
+        target,
+        reference,
+        burnTime,
+        coastTime,
+      );
+      if (
+        candidate
+        && (!best
+          || candidate.alignmentError < best.alignmentError
+          || (candidate.alignmentError === best.alignmentError && candidate.deltaV < best.deltaV))
+      ) {
+        best = candidate;
+        bestIndex = burnIndex;
+      }
+    }
+    if (!best) continue;
+    let refinedBest: InterplanetaryCandidate = best;
+    let lo = earliest + (latest - earliest) * Math.max(0, bestIndex - 1) / burnSteps;
+    let hi = earliest + (latest - earliest) * Math.min(burnSteps, bestIndex + 1) / burnSteps;
+    for (let pass = 0; pass < 5; pass++) {
+      let passBest: InterplanetaryCandidate = refinedBest;
+      let passIndex = 0;
+      for (let index = 0; index <= 8; index++) {
+        const candidate = lambertEjectionCandidate(
+          universe,
+          from,
+          target,
+          reference,
+          lo + (hi - lo) * index / 8,
+          coastTime,
+        );
+        if (
+          candidate
+          && (candidate.alignmentError < passBest.alignmentError
+            || (candidate.alignmentError === passBest.alignmentError && candidate.deltaV < passBest.deltaV))
+        ) {
+          passBest = candidate;
+          passIndex = index;
+        }
+      }
+      refinedBest = passBest;
+      const width = (hi - lo) / 8;
+      const center = lo + width * passIndex;
+      lo = Math.max(earliest, center - width);
+      hi = Math.min(latest, center + width);
+    }
+    candidates.push(refinedBest);
+  }
+  if (!candidates.length) return null;
+
+  const targetAltitude = Math.max(100_000, target.radius * 0.15);
+  const desiredPeriapsisRadius = target.radius + targetAltitude;
+  // The heliocentric miss distance is a B-plane impact parameter, not the
+  // eventual target-relative periapsis. Account for gravitational focusing so
+  // a low Mars/Venus flyby does not get optimized into an impact trajectory.
+  const focusing = nominalArrivalExcessSpeed > 0
+    ? Math.sqrt(1 + 2 * target.mu /
+      (desiredPeriapsisRadius * nominalArrivalExcessSpeed ** 2))
+    : 1;
+  const desiredDistance = desiredPeriapsisRadius * focusing;
+  const practicalDeltaVLimit = Math.max(
+    nominalDepartureDv + 5_000,
+    nominalDepartureDv * 2.5,
+  );
+  const evaluated: Array<{
+    candidate: InterplanetaryCandidate;
+    approach: InterplanetaryApproach;
+  }> = [];
+  // Alignment is only a cheap seed. Score the best candidates using the
+  // actual departure SOI handoff and moving target before selecting one.
+  for (const candidate of candidates) {
+    if (candidate.deltaV > practicalDeltaVLimit) continue;
+    const candidateApproach = closestInterplanetaryApproach(
+      universe,
+      from,
+      target,
+      reference,
+      candidate.node,
+      candidate.coastTime,
+      desiredDistance,
+    );
+    if (candidateApproach) evaluated.push({ candidate, approach: candidateApproach });
+  }
+  if (!evaluated.length) return null;
+  const broadInterceptBand = target.soiRadius * 20;
+  const practicalSeeds = [...evaluated].sort((a, b) => {
+    const aNear = a.approach.score <= broadInterceptBand;
+    const bNear = b.approach.score <= broadInterceptBand;
+    if (aNear !== bNear) return aNear ? -1 : 1;
+    return aNear
+      ? a.candidate.deltaV - b.candidate.deltaV || a.approach.score - b.approach.score
+      : a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV;
+  });
+  const closestSeeds = [...evaluated].sort((a, b) =>
+    a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV,
+  );
+  const seeds = [...practicalSeeds.slice(0, 2)];
+  for (const seed of closestSeeds.slice(0, 2)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+
+  const resolved: Array<RefinedInterplanetaryTransfer & { deltaV: number }> = [];
+  for (const seed of seeds) {
+    let node = { ...seed.candidate.node };
+    const coastTime = seed.candidate.coastTime;
+    const seedFocusing = seed.approach.relativeSpeed > 0
+      ? Math.sqrt(1 + 2 * target.mu /
+        (desiredPeriapsisRadius * seed.approach.relativeSpeed ** 2))
+      : focusing;
+    const seedDesiredDistance = desiredPeriapsisRadius * seedFocusing;
+    let approach = {
+      ...seed.approach,
+      score: Math.abs(seed.approach.distance - seedDesiredDistance),
+    };
+    const seedDeltaV = Math.hypot(node.prograde, node.normal, node.radial);
+    let steps = {
+      time: parkingPeriod / 64,
+      prograde: Math.max(25, seedDeltaV * 0.008),
+      normal: Math.max(25, seedDeltaV * 0.008),
+      radial: Math.max(25, seedDeltaV * 0.008),
+    };
+    for (let pass = 0; pass < 56 && approach.score > 10_000; pass++) {
+      let passNode = node;
+      let passApproach = approach;
+      const offsets: Array<Partial<Record<'time' | 'prograde' | 'normal' | 'radial', number>>> = [];
+      for (const component of ['time', 'prograde', 'normal', 'radial'] as const) {
+        offsets.push({ [component]: -steps[component] }, { [component]: steps[component] });
+      }
+      // Planetary targeting is a narrow 3D valley: changing one burn axis at
+      // a time can make the miss worse even when a coupled plane/energy trim
+      // is much better. Include paired and triple burn-vector moves.
+      const burnComponents = ['prograde', 'normal', 'radial'] as const;
+      for (let first = 0; first < burnComponents.length; first++) {
+        for (let second = first + 1; second < burnComponents.length; second++) {
+          for (const firstDirection of [-1, 1]) {
+            for (const secondDirection of [-1, 1]) {
+              offsets.push({
+                [burnComponents[first]]: firstDirection * steps[burnComponents[first]],
+                [burnComponents[second]]: secondDirection * steps[burnComponents[second]],
+              });
+            }
+          }
+        }
+      }
+      for (const progradeDirection of [-1, 1]) {
+        for (const normalDirection of [-1, 1]) {
+          for (const radialDirection of [-1, 1]) {
+            offsets.push({
+              prograde: progradeDirection * steps.prograde,
+              normal: normalDirection * steps.normal,
+              radial: radialDirection * steps.radial,
+            });
+          }
+        }
+      }
+      for (const offset of offsets) {
+        const candidateNode = {
+          time: node.time + (offset.time ?? 0),
+          prograde: node.prograde + (offset.prograde ?? 0),
+          normal: node.normal + (offset.normal ?? 0),
+          radial: node.radial + (offset.radial ?? 0),
+        };
+        if (candidateNode.time <= time + 1) continue;
+        const candidateApproach = closestInterplanetaryApproach(
+          universe,
+          from,
+          target,
+            reference,
+            candidateNode,
+            coastTime,
+            seedDesiredDistance,
+        );
+        if (candidateApproach && candidateApproach.score < passApproach.score) {
+          passNode = candidateNode;
+          passApproach = candidateApproach;
+        }
+      }
+      const improved = passApproach.score < approach.score;
+      if (improved) {
+        node = passNode;
+        approach = passApproach;
+      }
+      const scale = improved ? 0.9 : 0.5;
+      steps = {
+        time: steps.time * scale,
+        prograde: steps.prograde * scale,
+        normal: steps.normal * scale,
+        radial: steps.radial * scale,
+      };
+    }
+
+    const deltaV = Math.hypot(node.prograde, node.normal, node.radial);
+    if (deltaV > practicalDeltaVLimit) continue;
+    const localPrediction = predictTrajectory(
+      universe,
+      from,
+      orbitAfterNode(reference, node),
+      node.time,
+    );
+    if (!localPrediction.escape) continue;
+    const parentPrediction = predictTrajectory(
+      universe,
+      from.parent,
+      localPrediction.escape.elements,
+      localPrediction.escape.exitTime,
+      coastTime * 1.5,
+    );
+    const encounter = parentPrediction.encounter;
+    if (
+      !encounter
+      || encounter.bodyId !== target.id
+      || encounter.periapsisAltitude < 0
+      || encounter.periapsisAltitude > Math.max(4_000_000, target.radius)
+    ) continue;
+
+    const captureRadius = desiredPeriapsisRadius;
+    const arrivalExcessSpeed = encounter.elements.a < 0
+      ? Math.sqrt(target.mu / Math.abs(encounter.elements.a))
+      : 0;
+    const arrivalDv = Math.sqrt(arrivalExcessSpeed ** 2 + 2 * target.mu / captureRadius)
+      - Math.sqrt(target.mu / captureRadius);
+    resolved.push({
+      node,
+      approachAltitude: encounter.periapsisAltitude,
+      transferTime: encounter.entryTime - node.time,
+      arrivalDv,
+      deltaV,
+    });
+  }
+  resolved.sort((a, b) => a.deltaV - b.deltaV || a.approachAltitude - b.approachAltitude);
+  return resolved[0] ?? null;
+}
+
 /**
  * Plan the next transfer window from a parking orbit around `from` to
  * `target`. Supported: target orbits `from` (moon transfer), or target and
@@ -664,7 +1071,7 @@ function planInterplanetary(
   const arrivalDv =
     Math.sqrt(vInfArr * vInfArr + (2 * target.mu) / rCap) - Math.sqrt(target.mu / rCap);
 
-  const suggestedNode: ManeuverNode = {
+  const nominalNode: ManeuverNode = {
     time: burnTime,
     // The parking-orbit burn always raises local orbital energy. Inward vs.
     // outward heliocentric motion is selected by the ejection point/asymptote,
@@ -673,6 +1080,19 @@ function planInterplanetary(
     normal: 0,
     radial: 0,
   };
+  const refined = refineInterplanetaryIntercept(
+    universe,
+    time,
+    from,
+    target,
+    opts,
+    windowTime,
+    tT,
+    departureDv,
+    vInfArr,
+  );
+  const suggestedNode = refined?.node ?? nominalNode;
+  const plannedBurnTime = suggestedNode.time;
   return {
     fromId: from.id,
     targetId: target.id,
@@ -680,15 +1100,16 @@ function planInterplanetary(
     kind: 'interplanetary',
     phaseNow,
     phaseNeeded,
-    timeToWindow: Math.max(0, timeToWindow),
-    windowTime,
-    burnTime,
+    timeToWindow: Math.max(0, plannedBurnTime - time),
+    windowTime: plannedBurnTime,
+    burnTime: plannedBurnTime,
     ejectionAngle,
-    transferTime: tT,
-    departureDv,
-    arrivalDv,
+    transferTime: refined?.transferTime ?? tT,
+    departureDv: Math.hypot(suggestedNode.prograde, suggestedNode.normal, suggestedNode.radial),
+    arrivalDv: refined?.arrivalDv ?? arrivalDv,
     suggestedNode,
-    accuracy: 'phase-estimate',
+    approachAltitude: refined?.approachAltitude,
+    accuracy: refined ? 'refined-intercept' : 'phase-estimate',
   };
 }
 

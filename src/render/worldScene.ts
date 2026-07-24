@@ -239,6 +239,12 @@ export function bodyFixedCameraVelocity(
   return out;
 }
 
+/** Compact orbital-only bodies never claim streamed terrain or flight-scale pack residency. */
+export function bodyRendererSupportsFlightTerrain(bodyId: string): boolean {
+  const kind = BODY_VISUALS[bodyId as BodyId]?.renderer;
+  return kind !== 'compact-planet' && kind !== 'star';
+}
+
 export function pruneBodyFrameSamples(
   samples: Map<string, BodyRenderFrame>,
   sampledBodyIds: ReadonlySet<string>,
@@ -566,18 +572,20 @@ export class WorldScene {
     if (authority.bodyId !== body.id || installed.generation !== authority.generation) {
       throw new Error(`Flight authority is not installed for ${body.id}`);
     }
+    const supportsFlightTerrain = bodyRendererSupportsFlightTerrain(body.id);
+    const shouldClaimTerrain = claimTerrain && supportsFlightTerrain;
     const preparationLease = Object.freeze({ bodyId: body.id });
-    if (claimTerrain) this.flightTerrainPreparationLease = preparationLease;
+    if (shouldClaimTerrain) this.flightTerrainPreparationLease = preparationLease;
     try {
       this.bodyAuthorities.set(body.id, authority);
-      if (claimTerrain) this.setFlightTerrainOwner(body.id);
+      if (shouldClaimTerrain) this.setFlightTerrainOwner(body.id);
       this.rendererFor(body);
       const manager = this.bodyRendererManagers.get(body.id);
       if (!manager) throw new Error(`Renderer manager unavailable for ${body.id}`);
 
       const pending = this.bodyRendererLoads.get(body.id);
       if (pending) await pending;
-      const currentAuthorityMismatch = () => (
+      const currentAuthorityMismatch = () => supportsFlightTerrain && (
         manager.current()?.terrainAuthorityGeneration !== authority.generation
         || manager.current()?.stats().terrainAuthorityFallbackReason !== authority.fallbackReason
       );
@@ -589,7 +597,7 @@ export class WorldScene {
       if (currentAuthorityMismatch()) {
         throw new Error(`Renderer authority generation mismatch for ${body.id}`);
       }
-      if (!claimTerrain) return;
+      if (!shouldClaimTerrain) return;
       if (!this.checkedPlanetManifest.hasPack(body.id, this.quality)) return;
       if (manager.currentAssetPack() && manager.claimFlightResidency()) {
         this.flightPromotedBodyId = body.id;
@@ -1102,7 +1110,7 @@ export class WorldScene {
     const verticalFovRadians = THREE.MathUtils.degToRad(this.camera.fov);
     const drawingBufferWidth = Math.max(1, Math.floor(_drawingBufferSize.x));
     const drawingBufferHeight = Math.max(1, Math.floor(_drawingBufferSize.y));
-    this.setFlightTerrainOwner(body.id);
+    this.setFlightTerrainOwner(bodyRendererSupportsFlightTerrain(body.id) ? body.id : null);
     const t = game.time;
 
     // ---- camera position: orbit rig around the vessel, in vessel-local
@@ -1352,7 +1360,9 @@ export class WorldScene {
       stableFrame.deltaSeconds = dt;
       stableFrame.framePressure = dt > 1 / 30;
       stableFrame.altitude = dist - b.radius;
-      stableFrame.allowFlightTerrain = b.id === body.id && b.def.surfaceKind === 'solid';
+      stableFrame.allowFlightTerrain = b.id === body.id
+        && b.def.surfaceKind === 'solid'
+        && bodyRendererSupportsFlightTerrain(b.id);
       this.lastBodyFrames.set(b.id, stableFrame);
       sampledBodyIds.add(b.id);
       renderer.update(stableFrame);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapOrbitRingBodies } from '../src/ui/mapView';
 import { createLegacyGameState } from './fixtures/legacyGameState';
+import { GameState } from '../src/sim/state';
 
 describe('which bodies get an orbit ring on the map', () => {
   it('includes the anchor body so you can see the orbit you are flying in', () => {
@@ -25,5 +26,12 @@ describe('which bodies get an orbit ring on the map', () => {
     const ids = mapOrbitRingBodies(game.universe).map((body) => body.id);
 
     expect(ids).not.toContain(game.universe.root.id);
+  });
+
+  it('includes Mercury, Venus, and Mars as heliocentric orbit rings in the production system', () => {
+    const ids = mapOrbitRingBodies(new GameState().universe).map((body) => body.id);
+    expect(ids).toContain('mercury');
+    expect(ids).toContain('venus');
+    expect(ids).toContain('mars');
   });
 });

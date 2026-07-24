@@ -60,7 +60,9 @@ const expectedRecipeBodies = new Set([
   'auren', 'ashen', 'vess', 'veyra', 'palla', 'wisp',
   'rusk', 'tyran', 'brimm', 'glacia', 'mote', 'farfall',
 ]);
-const solBodies = new Set(['sun', 'earth', 'moon']);
+const solBodyIds = Object.freeze(['sun', 'mercury', 'venus', 'earth', 'moon', 'mars']);
+const solBodies = new Set(solBodyIds);
+const scientificSurfaceBodies = new Set(solBodyIds.filter((bodyId) => bodyId !== 'sun'));
 const expectedBodies = new Set([...expectedRecipeBodies, ...solBodies]);
 
 if (recipeFile) {
@@ -131,6 +133,25 @@ const channelContracts = {
     transcodeTargets: ['r8'],
   },
 };
+const exactPackChannelContracts = Object.freeze({
+  veyra: Object.freeze(['albedo', 'normal', 'material', 'clouds']),
+  moon: Object.freeze(['albedo', 'normal', 'material', 'heightMacro', 'localDetail']),
+  mars: Object.freeze(['albedo']),
+  mercury: Object.freeze(['albedo']),
+  venus: Object.freeze(['albedo']),
+  sun: Object.freeze(['photosphereActivity']),
+});
+
+function exactPackChannels(pack) {
+  if (pack.bodyId === 'earth') {
+    return [
+      'albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail',
+      'surfaceClass', 'surfaceClassRegional',
+      ...(pack.tier === 'low' ? [] : ['emissive']),
+    ];
+  }
+  return exactPackChannelContracts[pack.bodyId] ?? null;
+}
 const tierDimensions = {
   low: [1024, 512],
   medium: [2048, 1024],
@@ -481,7 +502,7 @@ if (manifest) {
         }
       }
       const scientificSource = Array.isArray(source.bodies) &&
-        source.bodies.some((bodyId) => bodyId === 'earth' || bodyId === 'moon');
+        source.bodies.some((bodyId) => scientificSurfaceBodies.has(bodyId));
       if (scientificSource) {
         for (const field of [
           'datum', 'verticalDatum', 'projection', 'axisOrder', 'longitudeDirection',
@@ -751,11 +772,11 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
   if (!Array.isArray(manifest.packs)) {
     errors.push('Manifest packs must be an array');
   } else {
-    const hasSolContent = manifest.packs.some((pack) => ['sun', 'earth', 'moon'].includes(pack.bodyId)) ||
+    const hasSolContent = manifest.packs.some((pack) => solBodies.has(pack.bodyId)) ||
       (Array.isArray(manifest.sources) && manifest.sources.some((source) =>
-        Array.isArray(source.bodies) && source.bodies.some((bodyId) => ['sun', 'earth', 'moon'].includes(bodyId))));
+        Array.isArray(source.bodies) && source.bodies.some((bodyId) => solBodies.has(bodyId))));
     for (const tier of ['low', 'medium', 'high']) {
-      for (const bodyId of ['veyra', ...(hasSolContent ? ['sun', 'earth', 'moon'] : [])]) {
+      for (const bodyId of ['veyra', ...(hasSolContent ? solBodyIds : [])]) {
         const count = manifest.packs.filter((pack) => pack.bodyId === bodyId && pack.tier === tier).length;
         if (count !== 1) errors.push(`Manifest must contain exactly one ${bodyId} ${tier} pack, got ${count}`);
       }
@@ -776,40 +797,12 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
         }
         if (pack.bootCritical) mediumBootBytes += pack.compressedBytes;
       }
-      if (pack.bodyId === 'veyra') {
-        const exactChannels = ['albedo', 'normal', 'material', 'clouds'];
+      const exactChannels = exactPackChannels(pack);
+      if (exactChannels) {
         const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
         if (presentChannels.length !== exactChannels.length ||
           exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
-          errors.push(
-            `Pack ${pack.bodyId}/${pack.tier} must have exact channels ` +
-            'albedo, normal, material, clouds',
-          );
-        }
-      }
-      if (pack.bodyId === 'earth') {
-        const exactChannels = ['albedo', 'normal', 'material', 'clouds', 'heightMacro', 'localDetail',
-          'surfaceClass', 'surfaceClassRegional',
-          ...(pack.tier === 'low' ? [] : ['emissive'])];
-        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
-        if (presentChannels.length !== exactChannels.length ||
-          exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
-          errors.push(`Pack earth/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
-        }
-      }
-      if (pack.bodyId === 'moon') {
-        const exactChannels = ['albedo', 'normal', 'material', 'heightMacro', 'localDetail'];
-        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
-        if (presentChannels.length !== exactChannels.length ||
-          exactChannels.some((channelName) => !presentChannels.includes(channelName))) {
-          errors.push(`Pack moon/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
-        }
-      }
-      if (pack.bodyId === 'sun') {
-        const exactChannels = ['photosphereActivity'];
-        const presentChannels = Array.isArray(pack.channels) ? pack.channels.map((channel) => channel.name) : [];
-        if (presentChannels.length !== 1 || !presentChannels.includes('photosphereActivity')) {
-          errors.push(`Pack sun/${pack.tier} must have exact channel photosphereActivity`);
+          errors.push(`Pack ${pack.bodyId}/${pack.tier} must have exact channels ${exactChannels.join(', ')}`);
         }
       }
       if (!Array.isArray(pack.channels) || pack.channels.length === 0) {
@@ -944,7 +937,7 @@ function validateScatterArtifact(manifest, compilerOutput, recipeFile, manifestD
       errors.push('Medium boot-critical packs exceed transfer budget');
     }
     for (const tier of hasSolContent ? ['low', 'medium', 'high'] : []) {
-      const combinedSolPackBytes = ['sun', 'earth', 'moon'].reduce(
+      const combinedSolPackBytes = solBodyIds.reduce(
         (sum, bodyId) => sum + (worstCaseByTierAndBody.get(`${tier}/${bodyId}`) ?? 0),
         0,
       );

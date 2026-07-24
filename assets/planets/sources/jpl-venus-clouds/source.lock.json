@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "jpl-venus-mariner10-representative-clouds",
+  "productPage": "https://maps.jpl.nasa.gov/tmaps/venus.html",
+  "sourceUrl": "https://maps.jpl.nasa.gov/tmaps/pix/ven0mss2.tif",
+  "localPath": "assets/planets/sources/jpl-venus-clouds/ven0mss2.tif",
+  "sourceSha256": "d21fc5198a6607a6d061e92179d9aca41a65a71dc2977dcac61667da4c54a64f",
+  "derivedSourceSha256": "d21fc5198a6607a6d061e92179d9aca41a65a71dc2977dcac61667da4c54a64f",
+  "sourceDimensions": [1440, 720],
+  "canonicalSeamLongitudeDegrees": -180,
+  "sourceCharacter": "Representative static cloud texture cloned from a single Mariner 10 visible-frequency observation; not a time-resolved global measurement."
+}

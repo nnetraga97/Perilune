@@ -10,7 +10,7 @@ import { addPart, createCraft, Craft } from '../src/sim/vessel';
 import { planTransfer } from '../src/sim/transfer';
 import { predictEntry } from '../src/sim/entry';
 import { orbitAfterNode, predictTrajectory } from '../src/sim/maneuver';
-import { stateToElements } from '../src/core/orbit';
+import { elementsAtTime, stateToElements } from '../src/core/orbit';
 import { buildAeroModel } from '../src/sim/aero';
 import { computeMassProperties } from '../src/sim/vessel';
 import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
@@ -163,6 +163,126 @@ describe('transfer planner', () => {
     while (d < -Math.PI) d += Math.PI * 2;
     expect(Math.abs(d)).toBeLessThan(0.15);
   });
+
+  it('hands an Earth escape into the same continuous heliocentric transfer used by rails execution', () => {
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    const gv = game.spawnInOrbit(createOdysseyOrbiter(), 'Odyssey', 'earth', 200_000);
+    const earth = game.universe.get('earth');
+    const mercury = game.universe.get('mercury');
+    const sun = game.universe.get('sun');
+    const plan = planTransfer(game.universe, game.time, earth, mercury, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection: 1,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.accuracy).toBe('refined-intercept');
+    expect(plan!.approachAltitude).toBeGreaterThan(0);
+
+    const reference = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    const postBurn = orbitAfterNode(reference, plan!.suggestedNode);
+    const prediction = predictTrajectory(
+      game.universe,
+      earth,
+      postBurn,
+      plan!.suggestedNode.time,
+    );
+    expect(prediction.escape).not.toBeNull();
+    expect(prediction.escape!.elements.mu).toBeCloseTo(sun.mu, 3);
+    expect(prediction.escape!.elements.e).toBeLessThan(1);
+    const parentPrediction = predictTrajectory(
+      game.universe,
+      sun,
+      prediction.escape!.elements,
+      prediction.escape!.exitTime,
+      plan!.transferTime * 1.5,
+    );
+    expect(parentPrediction.encounter?.bodyId).toBe(mercury.id);
+    expect(parentPrediction.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
+
+    const exitTime = prediction.escape!.exitTime;
+    const localPosition = new Vec3();
+    const localVelocity = new Vec3();
+    const earthPosition = new Vec3();
+    const earthVelocity = new Vec3();
+    const predictedParentPosition = new Vec3();
+    const predictedParentVelocity = new Vec3();
+    elementsAtTime(postBurn, exitTime, localPosition, localVelocity);
+    game.universe.localPosition(earth, exitTime, earthPosition, earthVelocity);
+    elementsAtTime(
+      prediction.escape!.elements,
+      exitTime,
+      predictedParentPosition,
+      predictedParentVelocity,
+    );
+    // Classical-element round-tripping at ~1 AU loses a few metres of absolute
+    // precision while preserving the patched state to far below gameplay scale.
+    expect(predictedParentPosition.distanceTo(localPosition.clone().add(earthPosition))).toBeLessThan(10);
+    expect(predictedParentVelocity.distanceTo(localVelocity.clone().add(earthVelocity))).toBeLessThan(1e-5);
+
+    // Put the vessel on the planned post-burn conic and let the authoritative
+    // rails event processor execute the same SOI transition.
+    game.time = plan!.suggestedNode.time;
+    elementsAtTime(postBurn, game.time, gv.runtime.pos, gv.runtime.vel);
+    gv.runtime.bodyId = earth.id;
+    gv.runtime.situation = 'orbit';
+    game.toRails(gv);
+    game.setWarp(5, true);
+    game.update((exitTime - game.time + 10) / game.warpRate);
+
+    expect(gv.runtime.bodyId).toBe(sun.id);
+    expect(game.time).toBeCloseTo(exitTime, 5);
+    expect(gv.rails.elements).not.toBeNull();
+    const executedPosition = new Vec3();
+    const executedVelocity = new Vec3();
+    elementsAtTime(gv.rails.elements!, game.time, executedPosition, executedVelocity);
+    expect(executedPosition.distanceTo(predictedParentPosition)).toBeLessThan(10);
+    expect(executedVelocity.distanceTo(predictedParentVelocity)).toBeLessThan(1e-5);
+  });
+
+  it.each(['venus', 'mars'] as const)(
+    'refines an Earth departure into a verified %s SOI intercept',
+    (targetId) => {
+      const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+      const gv = game.spawnInOrbit(createOdysseyOrbiter(), 'Odyssey', 'earth', 200_000);
+      const earth = game.universe.get('earth');
+      const sun = game.universe.get('sun');
+      const target = game.universe.get(targetId);
+      const plan = planTransfer(game.universe, game.time, earth, target, {
+        parkRadius: gv.runtime.pos.length(),
+        vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+        parkingOrbitDirection: 1,
+        vesselPosition: gv.runtime.pos,
+        vesselVelocity: gv.runtime.vel,
+      });
+      expect(plan?.accuracy).toBe('refined-intercept');
+      expect(plan?.departureDv).toBeGreaterThan(0);
+      expect(plan?.departureDv).toBeLessThan(12_000);
+      expect(plan?.approachAltitude).toBeGreaterThan(0);
+      expect(plan?.approachAltitude).toBeLessThan(4_000_000);
+
+      const reference = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+      const local = predictTrajectory(
+        game.universe,
+        earth,
+        orbitAfterNode(reference, plan!.suggestedNode),
+        plan!.burnTime,
+      );
+      expect(local.escape).not.toBeNull();
+      const parent = predictTrajectory(
+        game.universe,
+        sun,
+        local.escape!.elements,
+        local.escape!.exitTime,
+        plan!.transferTime * 1.5,
+      );
+      expect(parent.encounter?.bodyId).toBe(targetId);
+      expect(parent.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
+    },
+    20_000,
+  );
 
   it('uses an energy-raising local escape burn for inward planet transfers', () => {
     const game = createLegacyGameState();

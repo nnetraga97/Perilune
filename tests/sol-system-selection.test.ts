@@ -5,11 +5,11 @@ import { GameState } from '../src/sim/state';
 import { createLegacyGameState } from './fixtures/legacyGameState';
 
 describe('production and legacy system selection', () => {
-  it('boots production GameState into exactly Sun, Earth, and Moon', () => {
+  it('boots production GameState into exactly Sun, Mercury, Venus, Earth, Moon, and Mars', () => {
     const game = new GameState();
     expect(game.universe.homeBodyId).toBe(HOME_BODY_ID);
-    expect([...game.universe.bodies.keys()].sort()).toEqual(['earth', 'moon', 'sun']);
-    expect(SOL_SYSTEM).toHaveLength(3);
+    expect([...game.universe.bodies.keys()].sort()).toEqual(['earth', 'mars', 'mercury', 'moon', 'sun', 'venus']);
+    expect(SOL_SYSTEM).toHaveLength(6);
   });
 
   it('requires explicit fixture construction for the compact system', () => {

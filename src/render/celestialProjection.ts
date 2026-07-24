@@ -8,6 +8,9 @@ export interface CelestialProjection {
   readonly projectedPixelRadius: number;
   readonly proxyDepth: number;
   readonly proxyRadius: number;
+  /** Opacity weights for the far-plane-safe physical-to-proxy handoff. */
+  readonly physicalOpacity?: number;
+  readonly proxyOpacity?: number;
   readonly visibility: CelestialVisibility;
 }
 
@@ -46,6 +49,11 @@ export function projectedPixelRadius(
   return drawingBufferHeight * Math.tan(angularRadiusRadians) / (2 * Math.tan(verticalFovRadians / 2));
 }
 
+function smoothstep(minimum: number, maximum: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)));
+  return t * t * (3 - 2 * t);
+}
+
 export function computeCelestialProjection(
   input: Readonly<CelestialProjectionInput>,
 ): CelestialProjection {
@@ -64,12 +72,21 @@ export function computeCelestialProjection(
       : input.farField || distance - input.bodyRadius > input.physicalFarMeters
         ? 'far-field'
         : 'physical';
+  const surfaceDistance = Math.max(0, distance - input.bodyRadius);
+  const proxyOpacity = visibility === 'inside'
+    ? 0
+    : input.farField || visibility === 'subpixel'
+      ? 1
+      : smoothstep(input.physicalFarMeters * 0.85, input.physicalFarMeters, surfaceDistance);
+  const physicalOpacity = visibility === 'inside' ? 0 : 1 - proxyOpacity;
   return Object.freeze({
     trueObserverDistance: distance,
     angularRadius: theta,
     projectedPixelRadius: pixelRadius,
     proxyDepth,
     proxyRadius,
+    physicalOpacity,
+    proxyOpacity,
     visibility,
   });
 }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-messenger-mercury-pia17386-enhanced-color",
+  "sourceUrl": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia17/pia17386/PIA17386.jpg",
+  "productPage": "https://science.nasa.gov/photojournal/enhanced-color-mercury-map/",
+  "sourceSha256": "5e1c8607693605d18ae11c0401f925759762d3affa4a5f057ab9a611a125fdb1",
+  "sourceDimensions": [4096, 2048],
+  "sourceSeamLongitudeDegrees": 0,
+  "canonicalSeamLongitudeDegrees": -180,
+  "localPath": "assets/planets/sources/nasa-messenger-mercury/mercury-pia17386-canonical-4096x2048.png",
+  "derivedSourceSha256": "e6ad55dfc837c8349e4747514f1ed4f7f4978e8041befc614795cb087867f459"
+}

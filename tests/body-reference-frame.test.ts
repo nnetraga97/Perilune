@@ -11,7 +11,7 @@ import {
   type BodyReferenceFrameDef,
 } from '../src/sim/bodyReferenceFrame';
 
-function checkedFrame(id: 'sun' | 'earth' | 'moon'): BodyReferenceFrameDef {
+function checkedFrame(id: 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars'): BodyReferenceFrameDef {
   return { epoch: 'J2000', ...CHECKED_SOL_CONSTANTS.bodies[id].referenceFrame };
 }
 
@@ -51,7 +51,7 @@ describe('checked body reference frames', () => {
   });
 
   it('preserves the physical pole-to-orbit-normal obliquity', () => {
-    for (const [id, expectedDegrees] of [['earth', 23.4393], ['moon', 6.68]] as const) {
+    for (const [id, expectedDegrees] of [['mercury', 0.034], ['venus', 2.637], ['earth', 23.4393], ['moon', 6.68], ['mars', 23.9162]] as const) {
       const def = SOL_SYSTEM.find((body) => body.id === id)!;
       const north = referenceFrameOrientation(def.referenceFrame!, 0, new Quat())
         .rotate(new Vec3(0, 0, 1), new Vec3());
@@ -74,6 +74,32 @@ describe('checked body reference frames', () => {
     const eclipticRate = (oneDay - start) * 180 / Math.PI;
     expect(eclipticRate).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
     expect(eclipticRate).toBeCloseTo(360.9856235, 3);
+  });
+
+  it('advances the Mars prime meridian at the checked IAU rate', () => {
+    const frame = checkedFrame('mars');
+    const start = referenceFrameAngles(frame, 0).primeMeridian;
+    const oneDay = referenceFrameAngles(frame, 86_400).primeMeridian;
+    expect((oneDay - start) * 180 / Math.PI).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
+    // Conversion into the engine's ecliptic frame includes the pole-rate term.
+    expect(frame.primeMeridianRateDegreesPerDay).toBeCloseTo(350.891985, 5);
+  });
+
+  it('advances the Mercury prime meridian at the pinned IAU rate', () => {
+    const frame = checkedFrame('mercury');
+    const start = referenceFrameAngles(frame, 0).primeMeridian;
+    const oneDay = referenceFrameAngles(frame, 86_400).primeMeridian;
+    expect((oneDay - start) * 180 / Math.PI).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
+    expect(frame.primeMeridianRateDegreesPerDay).toBeCloseTo(6.1385134, 6);
+  });
+
+  it('advances the Venus prime meridian retrograde at the pinned IAU rate', () => {
+    const frame = checkedFrame('venus');
+    const start = referenceFrameAngles(frame, 0).primeMeridian;
+    const oneDay = referenceFrameAngles(frame, 86_400).primeMeridian;
+    expect((oneDay - start) * 180 / Math.PI).toBeCloseTo(frame.primeMeridianRateDegreesPerDay, 10);
+    expect(frame.primeMeridianRateDegreesPerDay).toBeCloseTo(-1.4813688, 7);
+    expect(SOL_SYSTEM.find((body) => body.id === 'venus')!.rotationPeriod).toBeLessThan(0);
   });
 
   it('round-trips spherical body-fixed coordinates', () => {
