@@ -71,6 +71,10 @@ export interface BodyDef {
   mu: number;
   /** Mean radius (m). */
   radius: number;
+  /** Optional equatorial reference radius (m), for visibly oblate bodies. */
+  equatorialRadius?: number;
+  /** Optional polar reference radius (m), for visibly oblate bodies. */
+  polarRadius?: number;
   /** Sidereal rotation period (s); 0 = tidally locked handled via period of orbit. */
   rotationPeriod: number;
   /** Axial tilt (rad). */
@@ -140,6 +144,19 @@ export class Body {
 
   get radius(): number {
     return this.def.radius;
+  }
+
+  get equatorialRadius(): number {
+    return this.def.equatorialRadius ?? this.def.radius;
+  }
+
+  get polarRadius(): number {
+    return this.def.polarRadius ?? this.def.radius;
+  }
+
+  /** Conservative radius for projection, culling, and occultation. */
+  get visualRadius(): number {
+    return Math.max(this.equatorialRadius, this.polarRadius);
   }
 
   /** Rotation angle at time t (rad). */

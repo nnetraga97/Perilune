@@ -31,6 +31,12 @@
       "url": "https://ssd.jpl.nasa.gov/sats/elem/",
       "version": "Moon mean elements",
       "units": "km and degrees"
+    },
+    {
+      "id": "jpl-horizons-jup365-j2000",
+      "url": "https://ssd.jpl.nasa.gov/api/horizons.api",
+      "version": "JUP365 geometric osculating elements at 2000-01-01 12:00 TDB in the J2000 ecliptic frame",
+      "units": "km and degrees"
     }
   ],
   "astronomicalUnitMeters": 149597870700,
@@ -137,6 +143,52 @@
         "longitudeAscendingNodeRadians": 0.8649771297497417,
         "argumentPeriapsisRadians": -1.2828723009731817,
         "meanAnomalyRadiansAtEpoch": 0.3384227896851049
+      }
+    },
+    "jupiter": {
+      "naifId": 599,
+      "equatorialRadiusMeters": 71492000,
+      "polarRadiusMeters": 66854000,
+      "meanRadiusMeters": 69946000,
+      "gmMeters3PerSecond2": 1.266865319003704e17,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 268.056595,
+        "poleRightAscensionRateDegreesPerCentury": -0.006499,
+        "poleDeclinationDegrees": 64.495303,
+        "poleDeclinationRateDegreesPerCentury": 0.002413,
+        "primeMeridianDegrees": 284.95,
+        "primeMeridianRateDegreesPerDay": 870.536,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 778557615696.1257,
+        "eccentricity": 0.04878759429164036,
+        "inclinationRadians": 0.022770099256999625,
+        "longitudeAscendingNodeRadians": 1.753901435747497,
+        "argumentPeriapsisRadians": 4.800860882673969,
+        "meanAnomalyRadiansAtEpoch": 0.32839464384879863
+      }
+    },
+    "callisto": {
+      "naifId": 504,
+      "meanRadiusMeters": 2410300,
+      "gmMeters3PerSecond2": 7179283402579.837,
+      "referenceFrame": {
+        "poleRightAscensionDegrees": 268.72,
+        "poleRightAscensionRateDegreesPerCentury": -0.009,
+        "poleDeclinationDegrees": 64.83,
+        "poleDeclinationRateDegreesPerCentury": 0.003,
+        "primeMeridianDegrees": 259.51,
+        "primeMeridianRateDegreesPerDay": 21.5710715,
+        "primeMeridianQuadraticDegreesPerCentury2": 0
+      },
+      "orbit": {
+        "semiMajorAxisMeters": 1882772953.875105,
+        "eccentricity": 0.007439434600948234,
+        "inclinationRadians": 0.035201828790876126,
+        "longitudeAscendingNodeRadians": 5.898211233324125,
+        "argumentPeriapsisRadians": 0.2814674155048803,
+        "meanAnomalyRadiansAtEpoch": 1.485604861373026
       }
     },
     "moon": {

@@ -9,6 +9,7 @@ import { SolarBodyRenderer } from './solarBodyRenderer';
 import { TerrestrialBodyRenderer } from './terrestrialBodyRenderer';
 import { AirlessBodyRenderer } from './airlessBodyRenderer';
 import { CompactPlanetBodyRenderer } from './compactPlanetBodyRenderer';
+import { GasGiantBodyRenderer } from './gasGiantBodyRenderer';
 import type { RenderDiagnosticsPort } from './renderDiagnostics';
 import type { FlightAerialPerspectiveController } from './flightAerialPerspective';
 import {
@@ -66,6 +67,18 @@ export function createBodyRendererCandidate(options: BodyRendererCandidateOption
         options.body,
         descriptor,
         visual.compactPlanetVisual,
+        options.caps,
+        options.quality,
+      );
+    }
+    case 'gas-giant': {
+      if (!visual.gasGiantVisual) {
+        throw new Error(`${options.body.id} gas giant is missing visual configuration`);
+      }
+      return new GasGiantBodyRenderer(
+        options.body,
+        descriptor,
+        visual.gasGiantVisual,
         options.caps,
         options.quality,
       );

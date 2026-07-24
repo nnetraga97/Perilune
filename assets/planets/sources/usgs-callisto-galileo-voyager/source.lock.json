@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "usgs-callisto-galileo-voyager-global-1km",
+  "sourceUrl": "https://planetarymaps.usgs.gov/mosaic/Callisto_Voyager_GalileoSSI_global_mosaic_1km.tif",
+  "productPage": "https://astrogeology.usgs.gov/search/map/callisto_galileo_voyager_global_mosaic_1km",
+  "sourceSha256": "e1f0bd2e0e05de605d067d6b5f5ededddaf31ca6c064562a1ca770f15a7dbaa3",
+  "sourceDimensions": [15138, 7569],
+  "sourceLocalPath": "assets/planets/sources/usgs-callisto-galileo-voyager/Callisto_Voyager_GalileoSSI_global_mosaic_1km.tif",
+  "colorReferenceUrl": "https://d2pn8kiwq2w21t.cloudfront.net/original_images/jpegPIA03456.jpg",
+  "colorReferenceProductPage": "https://www.jpl.nasa.gov/images/pia03456-global-callisto-in-color/",
+  "colorReferenceSha256": "a9e532314a8f1e5097c724ca2e29844087790124de349a1021ecb8f77c37398d",
+  "colorReferenceLocalPath": "assets/planets/sources/usgs-callisto-galileo-voyager/callisto-pia03456-color-reference.jpg",
+  "colorMultipliers": [1.081521853465501, 0.9876604443419357, 0.8821842681424104],
+  "canonicalDimensions": [4096, 2048],
+  "sourceLongitudeDirection": "west-positive",
+  "sourceLongitudeDomainDegrees": [0, 360],
+  "canonicalLongitudeDirection": "east-positive",
+  "canonicalSeamLongitudeDegrees": -180,
+  "localPath": "assets/planets/sources/usgs-callisto-galileo-voyager/callisto-canonical-4096x2048.png",
+  "derivedSourceSha256": "2650edee0221603804fcf5ae02bad8c938a47235e5b435ad330f6ddab34c7290",
+  "sourceCharacter": "Controlled monochrome Galileo SSI and Voyager global mosaic; a uniform restrained warm tint is derived from PIA03456 and is not spatially measured global color"
+}

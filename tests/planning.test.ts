@@ -56,6 +56,35 @@ describe('transfer planner', () => {
     expect(prediction.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
   }, 15_000);
 
+  it('solves a Jupiter-Callisto transfer into a verified Callisto approach', () => {
+    const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+    const gv = game.spawnInOrbit(createOdysseyOrbiter(), 'Odyssey', 'jupiter', 500_000);
+    const jupiter = game.universe.get('jupiter');
+    const callisto = game.universe.get('callisto');
+    const plan = planTransfer(game.universe, game.time, jupiter, callisto, {
+      parkRadius: gv.runtime.pos.length(),
+      vesselAngle: Math.atan2(gv.runtime.pos.y, gv.runtime.pos.x),
+      parkingOrbitDirection: 1,
+      vesselPosition: gv.runtime.pos,
+      vesselVelocity: gv.runtime.vel,
+    });
+
+    expect(plan?.accuracy).toBe('refined-intercept');
+    expect(plan?.departureDv).toBeGreaterThan(0);
+    expect(plan?.approachAltitude).toBeGreaterThan(0);
+    expect(plan?.approachAltitude).toBeLessThan(callisto.radius);
+    const reference = stateToElements(jupiter.mu, gv.runtime.pos, gv.runtime.vel, game.time);
+    const prediction = predictTrajectory(
+      game.universe,
+      jupiter,
+      orbitAfterNode(reference, plan!.suggestedNode),
+      plan!.suggestedNode.time,
+      plan!.transferTime * 1.65,
+    );
+    expect(prediction.encounter?.bodyId).toBe('callisto');
+    expect(prediction.encounter?.periapsisAltitude).toBeCloseTo(plan!.approachAltitude!, 3);
+  }, 15_000);
+
   it('plans a transfer to the moon Palla with a verifiable phase window', () => {
     const game = createLegacyGameState();
     game.spawnInOrbit(buildProbe(), 'Probe', 'veyra', 100_000);
@@ -242,7 +271,7 @@ describe('transfer planner', () => {
     expect(executedVelocity.distanceTo(predictedParentVelocity)).toBeLessThan(1e-5);
   });
 
-  it.each(['venus', 'mars'] as const)(
+  it.each(['venus', 'mars', 'jupiter'] as const)(
     'refines an Earth departure into a verified %s SOI intercept',
     (targetId) => {
       const game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
@@ -261,7 +290,9 @@ describe('transfer planner', () => {
       expect(plan?.departureDv).toBeGreaterThan(0);
       expect(plan?.departureDv).toBeLessThan(12_000);
       expect(plan?.approachAltitude).toBeGreaterThan(0);
-      expect(plan?.approachAltitude).toBeLessThan(4_000_000);
+      expect(plan?.approachAltitude).toBeLessThan(
+        target.def.surfaceKind === 'gas' ? target.visualRadius * 2 : 4_000_000,
+      );
 
       const reference = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, game.time);
       const local = predictTrajectory(

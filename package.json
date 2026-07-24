@@ -34,6 +34,8 @@
     "fetch:mars-albedo-source": "node scripts/fetch-mars-albedo-source.mjs",
     "fetch:mercury-albedo-source": "node scripts/fetch-mercury-albedo-source.mjs",
     "fetch:venus-albedo-source": "node scripts/fetch-venus-albedo-source.mjs",
+    "fetch:jupiter-albedo-source": "node scripts/fetch-jupiter-albedo-source.mjs",
+    "fetch:callisto-albedo-source": "node scripts/fetch-callisto-albedo-source.mjs",
     "compile:sol-constants": "node scripts/compile-sol-constants.mjs",
     "check:sol-constants": "node scripts/compile-sol-constants.mjs --check",
     "compile:planet-assets:container": "node scripts/compile-planet-assets-container.mjs",

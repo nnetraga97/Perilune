@@ -35,11 +35,11 @@ describe('map body placement', () => {
     }
   });
 
-  it('places Mercury and Mars on their checked heliocentric orbits at multiple epochs', () => {
+  it('places the non-Earth planets on their checked heliocentric orbits at multiple epochs', () => {
     const game = new GameState();
     const earth = game.universe.get('earth');
     const local = new Vec3();
-    for (const bodyId of ['mercury', 'venus', 'mars'] as const) {
+    for (const bodyId of ['mercury', 'venus', 'mars', 'jupiter'] as const) {
       const body = game.universe.get(bodyId);
       for (const time of [0, 10_000_000, 50_000_000]) {
         const bodyScene = mapBodyScenePosition(game.universe, body, earth, time);
@@ -52,7 +52,21 @@ describe('map body placement', () => {
     }
   });
 
-  it('allows the map camera to frame the Mercury-Earth-Mars system without clipping', () => {
+  it('places Callisto on its checked parent-relative orbit around Jupiter', () => {
+    const game = new GameState();
+    const callisto = game.universe.get('callisto');
+    const jupiter = game.universe.get('jupiter');
+    const local = new Vec3();
+    for (const time of [0, 1_000_000, 5_000_000]) {
+      const callistoScene = mapBodyScenePosition(game.universe, callisto, jupiter, time);
+      game.universe.localPosition(callisto, time, local);
+      expect(callistoScene.x).toBeCloseTo(local.x * MAP_SCALE, 4);
+      expect(callistoScene.y).toBeCloseTo(local.y * MAP_SCALE, 4);
+      expect(callistoScene.z).toBeCloseTo(local.z * MAP_SCALE, 4);
+    }
+  });
+
+  it('allows the map camera to frame the Mercury-through-Jupiter system without clipping', () => {
     const game = new GameState();
     const earth = game.universe.get('earth');
     const bounds = mapFitBounds([...game.universe.bodies.values()].map((body) => ({
@@ -61,9 +75,9 @@ describe('map body placement', () => {
     })));
     const fov = 50;
     const requiredFit = bounds.radius / Math.tan(fov * Math.PI / 360) * 1.18;
-    const ceiling = mapCameraDistanceCeiling(bounds.radius, fov, 10_000_000);
+    const ceiling = mapCameraDistanceCeiling(bounds.radius, fov, 20_000_000);
     expect(ceiling).toBeGreaterThan(requiredFit);
-    expect(ceiling).toBeLessThanOrEqual(8_000_000);
+    expect(ceiling).toBeLessThanOrEqual(16_000_000);
   });
 
   it('centers the physical Earth-Moon envelope instead of framing it from Earth', () => {

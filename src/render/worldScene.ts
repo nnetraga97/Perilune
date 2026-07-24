@@ -242,7 +242,7 @@ export function bodyFixedCameraVelocity(
 /** Compact orbital-only bodies never claim streamed terrain or flight-scale pack residency. */
 export function bodyRendererSupportsFlightTerrain(bodyId: string): boolean {
   const kind = BODY_VISUALS[bodyId as BodyId]?.renderer;
-  return kind !== 'compact-planet' && kind !== 'star';
+  return kind !== 'compact-planet' && kind !== 'gas-giant' && kind !== 'star';
 }
 
 export function pruneBodyFrameSamples(
@@ -1329,14 +1329,14 @@ export class WorldScene {
             { direction: _sunDir, angularRadius: solarAngularRadius },
             {
               direction: _occluderDirection,
-              angularRadius: Math.asin(Math.min(1, occluder.radius / occluderDistance)),
+              angularRadius: Math.asin(Math.min(1, occluder.visualRadius / occluderDistance)),
             },
           );
           if (occlusion.intersects && occlusion.sourceVisibleFraction < solarVisibleFraction) {
             solarVisibleFraction = occlusion.sourceVisibleFraction;
             copyCoordinates(stableFrame.solarOccluder.direction, _occluderDirection);
             stableFrame.solarOccluder.angularRadius = Math.asin(
-              Math.min(1, occluder.radius / occluderDistance),
+              Math.min(1, occluder.visualRadius / occluderDistance),
             );
           }
         }
@@ -1347,7 +1347,7 @@ export class WorldScene {
       stableFrame.drawingBufferHeight = drawingBufferHeight;
       stableFrame.projection = computeCelestialProjection({
         centerRelative: stableFrame.cameraRelativeOrigin,
-        bodyRadius: b.radius,
+        bodyRadius: b.visualRadius,
         verticalFovRadians,
         drawingBufferHeight,
         physicalFarMeters: this.camera.far,

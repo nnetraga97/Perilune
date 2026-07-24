@@ -269,6 +269,59 @@
       "derivedRecipe": "earth-source-pack-v1"
     },
     {
+      "id": "nasa-cassini-jupiter-pia07782-natural-appearance",
+      "url": "https://www.jpl.nasa.gov/images/pia07782-cassinis-best-maps-of-jupiter-cylindrical-map/",
+      "author": "NASA/JPL-Caltech/Space Science Institute; Cassini Imaging Team",
+      "license": "NASA",
+      "licenseUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "attribution": "NASA/JPL-Caltech/SSI Cassini Jupiter cylindrical map PIA07782",
+      "checksumSha256": "e70ed78b7c4a40bac39a3bc6abbe4754d7c077f7994c4643d30a1c2fd2739c64",
+      "localPath": "sources/nasa-cassini-jupiter/jupiter-pia07782-canonical-4096x2048.png",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        4096,
+        2048
+      ],
+      "transformations": [
+        "verified NASA-hosted PIA07782 JPEG decode",
+        "deterministic Lanczos3 resize to canonical 4096x2048 RGB",
+        "no recoloring or invented cloud structure",
+        "Lanczos3 tier resampling in the compiler image pipeline",
+        "BasisLZ KTX2 and WebP fallback encoding"
+      ],
+      "bodies": [
+        "jupiter"
+      ],
+      "channels": [
+        "albedo"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      },
+      "datum": "Jupiter cloud-top reference ellipsoid",
+      "verticalDatum": "not-applicable",
+      "projection": "simple cylindrical planetocentric latitude",
+      "axisOrder": "longitude,latitude",
+      "longitudeDirection": "east-positive",
+      "seamLongitudeDegrees": -180,
+      "uvOrigin": "north-west",
+      "valueScale": 1,
+      "valueOffset": 0,
+      "noDataValue": null,
+      "validRange": [
+        0,
+        255
+      ],
+      "observation": "Cassini two-filter global cloud mosaic from 2000-12-11 through 2000-12-12; colors are close to human-eye appearance, not strict true color or a current cloud map",
+      "productKind": "composited",
+      "derivedRecipe": "jupiter-cloud-top-albedo-v1",
+      "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
+    },
+    {
       "id": "nasa-lola-moon-height",
       "url": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
       "author": "NASA Scientific Visualization Studio and LOLA",
@@ -1540,9 +1593,150 @@
       "observation": "2026-07-20",
       "productKind": "measured",
       "derivedRecipe": "earth-surface-class-v1"
+    },
+    {
+      "id": "usgs-callisto-galileo-voyager-global-1km",
+      "url": "https://astrogeology.usgs.gov/search/map/callisto_galileo_voyager_global_mosaic_1km",
+      "author": "USGS Astrogeology Science Center; NASA Galileo SSI and Voyager teams",
+      "license": "Public-Domain",
+      "licenseUrl": "https://astrogeology.usgs.gov/search/map/callisto_galileo_voyager_global_mosaic_1km",
+      "attribution": "USGS/NASA Galileo SSI and Voyager controlled Callisto global mosaic",
+      "checksumSha256": "2650edee0221603804fcf5ae02bad8c938a47235e5b435ad330f6ddab34c7290",
+      "localPath": "sources/usgs-callisto-galileo-voyager/callisto-canonical-4096x2048.png",
+      "authoringOnly": true,
+      "sourceDimensions": [
+        4096,
+        2048
+      ],
+      "transformations": [
+        "verified USGS global mosaic and NASA/JPL PIA03456 color-reference checksums",
+        "deterministic 4096x2048 Lanczos3 resampling of the monochrome mosaic",
+        "west-positive 0-to-360 source longitude reprojected to east-positive -180-to-180 runtime convention",
+        "source no-data regions filled from nearest observed scanline samples with a bounded feathered blur",
+        "uniform restrained warm tint derived from PIA03456 average visible color; not spatially measured global color",
+        "BasisLZ KTX2 and WebP fallback encoding"
+      ],
+      "bodies": [
+        "callisto"
+      ],
+      "channels": [
+        "albedo"
+      ],
+      "review": {
+        "thirdPartyContent": false,
+        "commercialUseReviewed": true,
+        "modificationReviewed": true,
+        "endorsementSafe": true,
+        "termsSnapshot": "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+      },
+      "datum": "IAU Callisto reference sphere",
+      "verticalDatum": "not-applicable",
+      "projection": "simple cylindrical planetocentric latitude",
+      "axisOrder": "longitude,latitude",
+      "longitudeDirection": "east-positive",
+      "seamLongitudeDegrees": -180,
+      "uvOrigin": "north-west",
+      "valueScale": 1,
+      "valueOffset": 0,
+      "noDataValue": null,
+      "validRange": [
+        0,
+        255
+      ],
+      "observation": "Controlled monochrome Galileo SSI and Voyager global mosaic; a uniform restrained warm tint is derived from PIA03456 and is not spatially measured global color",
+      "productKind": "composited",
+      "derivedRecipe": "callisto-compact-albedo-v1",
+      "bodyReferenceFrameVersion": "iau-naif-j2000-v1"
     }
   ],
   "packs": [
+    {
+      "bodyId": "callisto",
+      "tier": "low",
+      "width": 1024,
+      "height": 512,
+      "compressedBytes": 103493,
+      "transientBytes": 1572864,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/callisto/low/albedo.ktx2",
+          "fallbackPath": "generated/callisto/low/albedo.webp",
+          "packageChecksumSha256": "21a57f0b89c88a7e4e388cdd7837a45baa7586948316e05cab8d071920a21f7a",
+          "fallbackChecksumSha256": "6606b6ff10572a318423e09d053b5a6ab1f182cd442952ee258adc6399b891e6",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 349544,
+          "fallbackGpuBytes": 2796204,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "callisto",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 354067,
+      "transientBytes": 6291456,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/callisto/medium/albedo.ktx2",
+          "fallbackPath": "generated/callisto/medium/albedo.webp",
+          "packageChecksumSha256": "ed1a6cc9c178733e595f8362783edb599396da881f61054e49cbf8462c2c74f5",
+          "fallbackChecksumSha256": "8d88d57632e706c2ff29568e4d5b8c936719c97416fca3d7301dba079892f1b2",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "callisto",
+      "tier": "high",
+      "width": 4096,
+      "height": 2048,
+      "compressedBytes": 1334659,
+      "transientBytes": 25165824,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/callisto/high/albedo.ktx2",
+          "fallbackPath": "generated/callisto/high/albedo.webp",
+          "packageChecksumSha256": "09cbf0f6e9960fb15a74a4b5a26e916a0d65ca42d6f5e832467b54747a63d218",
+          "fallbackChecksumSha256": "31d04393d132c3bfc22890f8fc9b12bcfb21819d1303a64b08d23bacfd556e08",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 5592424,
+          "fallbackGpuBytes": 44739244,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
     {
       "bodyId": "earth",
       "tier": "low",
@@ -2068,6 +2262,93 @@
             -80.2,
             28.75
           ]
+        }
+      ]
+    },
+    {
+      "bodyId": "jupiter",
+      "tier": "low",
+      "width": 1024,
+      "height": 512,
+      "compressedBytes": 103717,
+      "transientBytes": 1572864,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/jupiter/low/albedo.ktx2",
+          "fallbackPath": "generated/jupiter/low/albedo.webp",
+          "packageChecksumSha256": "3526a2a9fe918346e93e46d3fe9a29442400a5122cf79aefa39ffc77e11ca5e0",
+          "fallbackChecksumSha256": "59a7fb13a44e66c9f9f576f003d120bc5316d56e369562b416f50866a5bbb871",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 349544,
+          "fallbackGpuBytes": 2796204,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "jupiter",
+      "tier": "medium",
+      "width": 2048,
+      "height": 1024,
+      "compressedBytes": 346491,
+      "transientBytes": 6291456,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/jupiter/medium/albedo.ktx2",
+          "fallbackPath": "generated/jupiter/medium/albedo.webp",
+          "packageChecksumSha256": "f839d7a14ce8066513da358456fe3bde8324d5e6637a6656658268a4777d92de",
+          "fallbackChecksumSha256": "42c228262020f4abbea7650661c69d4e6d722bd517f0d7dd8ab11bb70e68138d",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 1398120,
+          "fallbackGpuBytes": 11184812,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
+        }
+      ]
+    },
+    {
+      "bodyId": "jupiter",
+      "tier": "high",
+      "width": 4096,
+      "height": 2048,
+      "compressedBytes": 1232914,
+      "transientBytes": 25165824,
+      "bootCritical": false,
+      "channels": [
+        {
+          "name": "albedo",
+          "colorSpace": "sRGB",
+          "logicalFormat": "RGB8",
+          "packagePath": "generated/jupiter/high/albedo.ktx2",
+          "fallbackPath": "generated/jupiter/high/albedo.webp",
+          "packageChecksumSha256": "81f1c597f53dfd4731cca087d205bd540769611407ca06b263d8fb41963632ad",
+          "fallbackChecksumSha256": "839dffae2062aaa91efa80840c442001cfad66668d2268fd915e8ef562d3007f",
+          "gpuFormat": "etc2-rgb",
+          "gpuBytes": 5592424,
+          "fallbackGpuBytes": 44739244,
+          "fallbackLayout": "rgb",
+          "transcodeTargets": [
+            "etc2-rgb",
+            "bc1-rgb"
+          ],
+          "mipmapped": true
         }
       ]
     },

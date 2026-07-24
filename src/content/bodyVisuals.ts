@@ -71,6 +71,11 @@ export interface BodyVisualDef {
     limbStrength: number;
     pointColor: string;
   };
+  gasGiantVisual?: {
+    limbColor: string;
+    limbStrength: number;
+    pointColor: string;
+  };
   /** Renderer-only atmospheric-entry art direction. Physical heating remains simulation-owned. */
   entryVisual?: EntryVisualDef;
 }
@@ -82,6 +87,8 @@ export type BodyId =
   | 'earth'
   | 'moon'
   | 'mars'
+  | 'jupiter'
+  | 'callisto'
   | 'auren'
   | 'ashen'
   | 'vess'
@@ -138,6 +145,26 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#d98b68',
       limbStrength: 0.22,
       pointColor: '#e59262',
+    },
+  },
+  jupiter: {
+    renderer: 'gas-giant',
+    targetArchetype: 'gas-giant',
+    materialId: 'jupiter-cloud-bands',
+    gasGiantVisual: {
+      limbColor: '#d8c4a4',
+      limbStrength: 0.34,
+      pointColor: '#dfc69f',
+    },
+  },
+  callisto: {
+    renderer: 'compact-planet',
+    targetArchetype: 'airless',
+    materialId: 'callisto-compact',
+    compactPlanetVisual: {
+      limbColor: '#8d8175',
+      limbStrength: 0.035,
+      pointColor: '#a99c8f',
     },
   },
   auren: { renderer: 'star', targetArchetype: 'star', materialId: 'auren-star' },

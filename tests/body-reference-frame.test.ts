@@ -11,7 +11,7 @@ import {
   type BodyReferenceFrameDef,
 } from '../src/sim/bodyReferenceFrame';
 
-function checkedFrame(id: 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars'): BodyReferenceFrameDef {
+function checkedFrame(id: 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars' | 'jupiter' | 'callisto'): BodyReferenceFrameDef {
   return { epoch: 'J2000', ...CHECKED_SOL_CONSTANTS.bodies[id].referenceFrame };
 }
 
@@ -51,7 +51,7 @@ describe('checked body reference frames', () => {
   });
 
   it('preserves the physical pole-to-orbit-normal obliquity', () => {
-    for (const [id, expectedDegrees] of [['mercury', 0.034], ['venus', 2.637], ['earth', 23.4393], ['moon', 6.68], ['mars', 23.9162]] as const) {
+    for (const [id, expectedDegrees] of [['mercury', 0.034], ['venus', 2.637], ['earth', 23.4393], ['moon', 6.68], ['mars', 23.9162], ['jupiter', 3.119], ['callisto', 0.0043]] as const) {
       const def = SOL_SYSTEM.find((body) => body.id === id)!;
       const north = referenceFrameOrientation(def.referenceFrame!, 0, new Quat())
         .rotate(new Vec3(0, 0, 1), new Vec3());

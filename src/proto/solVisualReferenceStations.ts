@@ -1,4 +1,4 @@
-export type SolReferenceBody = 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars';
+export type SolReferenceBody = 'sun' | 'mercury' | 'venus' | 'earth' | 'moon' | 'mars' | 'jupiter' | 'callisto';
 export type SolReferencePresentation = 'solar-disk' | 'full-disk' | 'limb' | 'orbit' | 'surface' | 'alignment' | 'point';
 
 export interface SolVisualReferenceStation {
@@ -66,6 +66,14 @@ export const SOL_VISUAL_REFERENCE_STATIONS: readonly SolVisualReferenceStation[]
   station({ id: 'mars-terminator-full', bodyId: 'mars', latitudeDegrees: 8, longitudeDegrees: -35, altitudeMeters: 12_000_000, fovDegrees: 34, sunDirection: [0, 1, 0.15], timeSeconds: 0, presentation: 'full-disk', note: 'Resolved phase response and restrained illuminated limb.' }),
   station({ id: 'mars-proxy-handoff', bodyId: 'mars', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 560_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'full-disk', note: 'Physical sphere and angular proxy overlap before the 600 Mm far plane.' }),
   station({ id: 'mars-far-point', bodyId: 'mars', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 20_000_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'point', note: 'Subpixel Mars resolves to a stable phase-weighted point without flicker.' }),
+  station({ id: 'jupiter-day-full', bodyId: 'jupiter', latitudeDegrees: -14, longitudeDegrees: -96, altitudeMeters: 250_000_000, fovDegrees: 34, sunDirection: [-0.101, -0.965, -0.242], timeSeconds: 0, presentation: 'full-disk', note: 'Cassini cloud-band identity, Great Red Spot, and measured polar flattening.' }),
+  station({ id: 'jupiter-terminator-full', bodyId: 'jupiter', latitudeDegrees: 8, longitudeDegrees: -35, altitudeMeters: 250_000_000, fovDegrees: 34, sunDirection: [0.574, 0.819, 0], timeSeconds: 0, presentation: 'full-disk', note: 'Soft cloud-top terminator and atmospheric limb without invented weather motion.' }),
+  station({ id: 'jupiter-proxy-handoff', bodyId: 'jupiter', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 560_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'full-disk', note: 'Oblate physical cloud globe and angular proxy overlap before the 600 Mm far plane.' }),
+  station({ id: 'jupiter-far-point', bodyId: 'jupiter', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 2_000_000_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'point', note: 'Subpixel Jupiter resolves to a stable phase-weighted point.' }),
+  station({ id: 'callisto-day-full', bodyId: 'callisto', latitudeDegrees: 12, longitudeDegrees: 105, altitudeMeters: 9_000_000, fovDegrees: 34, sunDirection: [-0.253, 0.945, 0.208], timeSeconds: 0, presentation: 'full-disk', note: 'USGS Galileo/Voyager cratered surface identity under restrained source-derived warmth.' }),
+  station({ id: 'callisto-terminator-full', bodyId: 'callisto', latitudeDegrees: 8, longitudeDegrees: -35, altitudeMeters: 9_000_000, fovDegrees: 34, sunDirection: [0.574, 0.819, 0], timeSeconds: 0, presentation: 'full-disk', note: 'Airless phase response and weak illuminated limb.' }),
+  station({ id: 'callisto-proxy-handoff', bodyId: 'callisto', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 560_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'full-disk', note: 'Physical reference sphere and angular proxy overlap before the 600 Mm far plane.' }),
+  station({ id: 'callisto-far-point', bodyId: 'callisto', latitudeDegrees: 0, longitudeDegrees: 0, altitudeMeters: 20_000_000_000, fovDegrees: 60, sunDirection: [0.85, -0.3, 0.42], timeSeconds: 0, presentation: 'point', note: 'Subpixel Callisto resolves to a stable phase-weighted point.' }),
 ]);
 
 export function solVisualReferenceStation(id: string): SolVisualReferenceStation {

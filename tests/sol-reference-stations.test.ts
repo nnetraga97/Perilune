@@ -32,6 +32,8 @@ describe('Sol visual reference stations', () => {
       'mercury-day-full', 'mercury-terminator-full', 'mercury-proxy-handoff', 'mercury-far-point',
       'venus-day-full', 'venus-crescent-full', 'venus-proxy-handoff', 'venus-far-point',
       'mars-day-full', 'mars-terminator-full', 'mars-proxy-handoff', 'mars-far-point',
+      'jupiter-day-full', 'jupiter-terminator-full', 'jupiter-proxy-handoff', 'jupiter-far-point',
+      'callisto-day-full', 'callisto-terminator-full', 'callisto-proxy-handoff', 'callisto-far-point',
     ]) expect(ids.has(required), required).toBe(true);
   });
 

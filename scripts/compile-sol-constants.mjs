@@ -17,6 +17,8 @@ const SOL_BODY_NAIF_IDS = new Map([
   ['earth', 399],
   ['moon', 301],
   ['mars', 499],
+  ['jupiter', 599],
+  ['callisto', 504],
 ]);
 const SOL_BODY_IDS = [...SOL_BODY_NAIF_IDS.keys()];
 
@@ -209,40 +211,57 @@ for (const [id, naifId] of SOL_BODY_NAIF_IDS) {
   assertClose(pm[1], body.referenceFrame.primeMeridianRateDegreesPerDay, `${id}.primeMeridianRateDegreesPerDay`);
   assertClose(pm[2], body.referenceFrame.primeMeridianQuadraticDegreesPerCentury2,
     `${id}.primeMeridianQuadraticDegreesPerCentury2`);
+  const hasEquatorialRadius = Number.isFinite(body.equatorialRadiusMeters);
+  const hasPolarRadius = Number.isFinite(body.polarRadiusMeters);
+  if (hasEquatorialRadius !== hasPolarRadius) {
+    throw new Error(`${id} must author equatorial and polar radii together`);
+  }
+  if (hasEquatorialRadius) {
+    assertClose(radii[0] * 1_000, body.equatorialRadiusMeters, `${id}.equatorialRadiusMeters`);
+    assertClose(radii[2] * 1_000, body.polarRadiusMeters, `${id}.polarRadiusMeters`);
+  }
 }
-const earthRadii = kernelNumbers(pck, 'BODY399_RADII');
-// Earth is the only checked Sol body that currently authors separate
-// equatorial and polar radii. Other bodies are intentionally validated against
-// the mean of their three pinned NAIF radii by the generic loop above.
-assertClose(earthRadii[0] * 1_000, source.bodies.earth.equatorialRadiusMeters,
-  'earth.equatorialRadiusMeters');
-assertClose(earthRadii[2] * 1_000, source.bodies.earth.polarRadiusMeters,
-  'earth.polarRadiusMeters');
+
+function periodicTermsAtEpoch(naifId) {
+  const systemId = Math.floor(naifId / 100);
+  let angles;
+  let ra;
+  let dec;
+  let pm;
+  try {
+    angles = kernelNumbers(pck, `BODY${systemId}_NUT_PREC_ANGLES`);
+    ra = kernelNumbers(pck, `BODY${naifId}_NUT_PREC_RA`);
+    dec = kernelNumbers(pck, `BODY${naifId}_NUT_PREC_DEC`);
+    pm = kernelNumbers(pck, `BODY${naifId}_NUT_PREC_PM`);
+  } catch {
+    return { ra: 0, dec: 0, pm: 0 };
+  }
+  const termCount = Math.max(ra.length, dec.length, pm.length);
+  if (angles.length < termCount * 2) {
+    throw new Error(`BODY${naifId} has inconsistent periodic orientation terms`);
+  }
+  const periodic = { ra: 0, dec: 0, pm: 0 };
+  for (let index = 0; index < termCount; index++) {
+    const angle = angles[index * 2] * DEG;
+    periodic.ra += (ra[index] ?? 0) * Math.sin(angle);
+    periodic.dec += (dec[index] ?? 0) * Math.cos(angle);
+    periodic.pm += (pm[index] ?? 0) * Math.sin(angle);
+  }
+  return periodic;
+}
 
 const lunarAngles = kernelNumbers(pck, 'BODY3_NUT_PREC_ANGLES');
-const lunarRa = kernelNumbers(pck, 'BODY301_NUT_PREC_RA');
-const lunarDec = kernelNumbers(pck, 'BODY301_NUT_PREC_DEC');
-const lunarPm = kernelNumbers(pck, 'BODY301_NUT_PREC_PM');
-const periodicAtEpoch = { ra: 0, dec: 0, pm: 0 };
-assertClose(
-  lunarAngles[0] * DEG,
-  source.bodies.moon.orbit.longitudeAscendingNodeRadians,
-  'moon.orbit.longitudeAscendingNodeRadians',
-);
-for (let index = 0; index < lunarRa.length; index++) {
-  const angle = lunarAngles[index * 2] * DEG;
-  periodicAtEpoch.ra += lunarRa[index] * Math.sin(angle);
-  periodicAtEpoch.dec += lunarDec[index] * Math.cos(angle);
-  periodicAtEpoch.pm += lunarPm[index] * Math.sin(angle);
-}
+assertClose(lunarAngles[0] * DEG, source.bodies.moon.orbit.longitudeAscendingNodeRadians,
+  'moon.orbit.longitudeAscendingNodeRadians');
 
 const compiled = structuredClone(source);
 compiled.compiledInertialFrame = 'ecliptic-j2000';
 compiled.j2000ObliquityDegrees = J2000_OBLIQUITY_DEGREES;
 for (const id of SOL_BODY_IDS) {
+  const periodicBody = id === 'moon' || id === 'jupiter' || id === 'callisto';
   compiled.bodies[id].referenceFrame = compileReferenceFrame(
     source.bodies[id].referenceFrame,
-    id === 'moon' ? periodicAtEpoch : undefined,
+    periodicBody ? periodicTermsAtEpoch(SOL_BODY_NAIF_IDS.get(id)) : undefined,
   );
   compiled.bodies[id].obliquityRadians = obliquityRadians(
     compiled.bodies[id].referenceFrame,

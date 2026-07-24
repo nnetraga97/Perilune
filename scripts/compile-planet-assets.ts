@@ -54,7 +54,9 @@ const tierDimensions = {
   high: [4096, 2048],
 } as const;
 type CompiledTier = keyof typeof tierDimensions;
-const compiledBodyIds = ['veyra', 'palla', 'wisp', 'mercury', 'venus', 'earth', 'moon', 'mars', 'sun'] as const;
+const compiledBodyIds = [
+  'veyra', 'palla', 'wisp', 'mercury', 'venus', 'earth', 'moon', 'mars', 'jupiter', 'callisto', 'sun',
+] as const;
 type CompiledBody = typeof compiledBodyIds[number];
 const compiledBodies = new Set<string>(compiledBodyIds);
 
@@ -884,8 +886,39 @@ const venusSourceLock = JSON.parse(
 };
 const venusSourcePath = resolve(root, venusSourceLock.localPath);
 
+const jupiterSourceLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'sources/nasa-cassini-jupiter/source.lock.json'), 'utf8'),
+) as {
+  id: string;
+  productPage: string;
+  sourceUrl: string;
+  localPath: string;
+  derivedSourceSha256: string;
+  sourceDimensions: readonly [number, number];
+  canonicalDimensions: readonly [number, number];
+  canonicalSeamLongitudeDegrees: number;
+  sourceCharacter: string;
+};
+const jupiterSourcePath = resolve(root, jupiterSourceLock.localPath);
+
+const callistoSourceLock = JSON.parse(
+  readFileSync(resolve(assetsRoot, 'sources/usgs-callisto-galileo-voyager/source.lock.json'), 'utf8'),
+) as {
+  id: string;
+  productPage: string;
+  sourceUrl: string;
+  colorReferenceProductPage: string;
+  localPath: string;
+  derivedSourceSha256: string;
+  sourceDimensions: readonly [number, number];
+  canonicalDimensions: readonly [number, number];
+  canonicalSeamLongitudeDegrees: number;
+  sourceCharacter: string;
+};
+const callistoSourcePath = resolve(root, callistoSourceLock.localPath);
+
 async function compileAlbedoOnlyBody(
-  bodyId: 'mercury' | 'venus' | 'mars',
+  bodyId: 'mercury' | 'venus' | 'mars' | 'jupiter' | 'callisto',
   sourcePath: string,
   sourceDimensions: readonly [number, number],
   tiersToWrite: ReadonlySet<CompiledTier>,
@@ -1140,6 +1173,83 @@ const marsSources = [{
   observation: 'Viking MDIM 2.1 global color mosaic',
   productKind: 'composited',
   derivedRecipe: 'mars-compact-albedo-v1',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+}] as const;
+
+const jupiterSources = [{
+  id: jupiterSourceLock.id,
+  url: jupiterSourceLock.productPage,
+  author: 'NASA/JPL-Caltech/Space Science Institute; Cassini Imaging Team',
+  license: 'NASA',
+  licenseUrl: nasaReview.termsSnapshot,
+  attribution: 'NASA/JPL-Caltech/SSI Cassini Jupiter cylindrical map PIA07782',
+  checksumSha256: jupiterSourceLock.derivedSourceSha256,
+  localPath: jupiterSourceLock.localPath.replace(/^assets\/planets\//, ''),
+  authoringOnly: true,
+  sourceDimensions: [...jupiterSourceLock.canonicalDimensions],
+  transformations: [
+    'verified NASA-hosted PIA07782 JPEG decode',
+    'deterministic Lanczos3 resize to canonical 4096x2048 RGB',
+    'no recoloring or invented cloud structure',
+    'Lanczos3 tier resampling in the compiler image pipeline',
+    'BasisLZ KTX2 and WebP fallback encoding',
+  ],
+  bodies: ['jupiter'],
+  channels: ['albedo'],
+  review: nasaReview,
+  datum: 'Jupiter cloud-top reference ellipsoid',
+  verticalDatum: 'not-applicable',
+  projection: 'simple cylindrical planetocentric latitude',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: jupiterSourceLock.canonicalSeamLongitudeDegrees,
+  uvOrigin: 'north-west',
+  valueScale: 1,
+  valueOffset: 0,
+  noDataValue: null,
+  validRange: [0, 255],
+  observation: jupiterSourceLock.sourceCharacter,
+  productKind: 'composited',
+  derivedRecipe: 'jupiter-cloud-top-albedo-v1',
+  bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
+}] as const;
+
+const callistoSources = [{
+  id: callistoSourceLock.id,
+  url: callistoSourceLock.productPage,
+  author: 'USGS Astrogeology Science Center; NASA Galileo SSI and Voyager teams',
+  license: 'Public-Domain',
+  licenseUrl: callistoSourceLock.productPage,
+  attribution: 'USGS/NASA Galileo SSI and Voyager controlled Callisto global mosaic',
+  checksumSha256: callistoSourceLock.derivedSourceSha256,
+  localPath: callistoSourceLock.localPath.replace(/^assets\/planets\//, ''),
+  authoringOnly: true,
+  sourceDimensions: [...callistoSourceLock.canonicalDimensions],
+  transformations: [
+    'verified USGS global mosaic and NASA/JPL PIA03456 color-reference checksums',
+    'deterministic 4096x2048 Lanczos3 resampling of the monochrome mosaic',
+    'west-positive 0-to-360 source longitude reprojected to east-positive -180-to-180 runtime convention',
+    'source no-data regions filled from nearest observed scanline samples with a bounded feathered blur',
+    'uniform restrained warm tint derived from PIA03456 average visible color; not spatially measured global color',
+    'BasisLZ KTX2 and WebP fallback encoding',
+  ],
+  bodies: ['callisto'],
+  channels: ['albedo'],
+  review: nasaReview,
+  datum: 'IAU Callisto reference sphere',
+  verticalDatum: 'not-applicable',
+  projection: 'simple cylindrical planetocentric latitude',
+  axisOrder: 'longitude,latitude',
+  longitudeDirection: 'east-positive',
+  seamLongitudeDegrees: callistoSourceLock.canonicalSeamLongitudeDegrees,
+  uvOrigin: 'north-west',
+  valueScale: 1,
+  valueOffset: 0,
+  noDataValue: null,
+  validRange: [0, 255],
+  observation: callistoSourceLock.sourceCharacter,
+  productKind: 'composited',
+  derivedRecipe: 'callisto-compact-albedo-v1',
   bodyReferenceFrameVersion: 'iau-naif-j2000-v1',
 }] as const;
 
@@ -1491,6 +1601,18 @@ if (write && !fingerprintsOnly) {
       'mars', marsSourcePath, marsSourceLock.sourceDimensions, targetTiers,
     ) as Record<string, any>[]);
     generatedSources.push(...marsSources as unknown as Record<string, any>[]);
+  }
+  if (targetBodies.has('jupiter')) {
+    generatedPacks.push(...await compileAlbedoOnlyBody(
+      'jupiter', jupiterSourcePath, jupiterSourceLock.canonicalDimensions, targetTiers,
+    ) as Record<string, any>[]);
+    generatedSources.push(...jupiterSources as unknown as Record<string, any>[]);
+  }
+  if (targetBodies.has('callisto')) {
+    generatedPacks.push(...await compileAlbedoOnlyBody(
+      'callisto', callistoSourcePath, callistoSourceLock.canonicalDimensions, targetTiers,
+    ) as Record<string, any>[]);
+    generatedSources.push(...callistoSources as unknown as Record<string, any>[]);
   }
   if (targetBodies.has('sun')) {
     generatedPacks.push(...await compileSun(targetTiers) as Record<string, any>[]);

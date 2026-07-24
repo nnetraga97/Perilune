@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "nasa-cassini-jupiter-pia07782-natural-appearance",
+  "sourceUrl": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07782/PIA07782.jpg",
+  "productPage": "https://www.jpl.nasa.gov/images/pia07782-cassinis-best-maps-of-jupiter-cylindrical-map/",
+  "sourceSha256": "6b835ddd8036ea9efd25def04f75aa60b69b096025a37eeae5e9b6978e0a2281",
+  "sourceDimensions": [3601, 1801],
+  "canonicalDimensions": [4096, 2048],
+  "canonicalSeamLongitudeDegrees": -180,
+  "localPath": "assets/planets/sources/nasa-cassini-jupiter/jupiter-pia07782-canonical-4096x2048.png",
+  "derivedSourceSha256": "e70ed78b7c4a40bac39a3bc6abbe4754d7c077f7994c4643d30a1c2fd2739c64",
+  "sourceCharacter": "Cassini two-filter global cloud mosaic from 2000-12-11 through 2000-12-12; colors are close to human-eye appearance, not strict true color or a current cloud map"
+}

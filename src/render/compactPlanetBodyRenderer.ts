@@ -75,7 +75,7 @@ function fallbackTexture(color: THREE.Color): THREE.DataTexture {
   return texture;
 }
 
-function surfaceMaterial(albedo: THREE.Texture): THREE.ShaderMaterial {
+function surfaceMaterial(albedo: THREE.Texture, gasGiant: boolean): THREE.ShaderMaterial {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uAlbedo: { value: albedo },
@@ -106,10 +106,10 @@ function surfaceMaterial(albedo: THREE.Texture): THREE.ShaderMaterial {
         vec3 normalDirection = normalize(vBodyDirection);
         vec3 albedo = texture2D(uAlbedo, bodyFixedUv(normalDirection)).rgb;
         float solarCosine = dot(normalDirection, normalize(uSunDirectionBodyFixed));
-        float terminator = smoothstep(-0.08, 0.06, solarCosine);
+        float terminator = smoothstep(${gasGiant ? '-0.16, 0.08' : '-0.08, 0.06'}, solarCosine);
         float diffuse = max(solarCosine, 0.0);
-        vec3 day = albedo * (0.16 + diffuse * 1.08);
-        vec3 night = albedo * 0.012;
+        vec3 day = albedo * (${gasGiant ? '0.24 + diffuse * 0.96' : '0.16 + diffuse * 1.08'});
+        vec3 night = albedo * ${gasGiant ? '0.02' : '0.012'};
         gl_FragColor = vec4(mix(night, day, terminator), uOpacity);
       }
     `,
@@ -218,7 +218,7 @@ function pointMaterial(color: THREE.Color): THREE.ShaderMaterial {
 
 export class CompactPlanetBodyRenderer implements BodyRenderer {
   readonly bodyId: string;
-  readonly kind = 'compact-planet' as const;
+  readonly kind: 'compact-planet' | 'gas-giant';
   readonly root = new THREE.Group();
   private readonly geometry: THREE.SphereGeometry;
   private readonly fallbackAlbedo: THREE.DataTexture;
@@ -243,14 +243,16 @@ export class CompactPlanetBodyRenderer implements BodyRenderer {
     visual: Readonly<NonNullable<BodyVisualDef['compactPlanetVisual']>>,
     readonly caps: Readonly<RenderCaps>,
     readonly quality: QualityTier,
+    rendererKind: 'compact-planet' | 'gas-giant' = 'compact-planet',
   ) {
     this.bodyId = body.id;
-    this.root.name = `compact-planet:${body.id}`;
+    this.kind = rendererKind;
+    this.root.name = `${rendererKind}:${body.id}`;
     this.geometry = createGlobalSphereGeometry(quality);
     this.fallbackAlbedo = fallbackTexture(new THREE.Color(descriptor.albedo.mid));
     configureAlbedo(this.fallbackAlbedo, caps.maxAnisotropy);
-    this.physicalSurface = surfaceMaterial(this.fallbackAlbedo);
-    this.proxySurface = surfaceMaterial(this.fallbackAlbedo);
+    this.physicalSurface = surfaceMaterial(this.fallbackAlbedo, rendererKind === 'gas-giant');
+    this.proxySurface = surfaceMaterial(this.fallbackAlbedo, rendererKind === 'gas-giant');
     this.physicalLimb = limbMaterial(new THREE.Color(visual.limbColor), visual.limbStrength);
     this.proxyLimb = limbMaterial(new THREE.Color(visual.limbColor), visual.limbStrength);
     const addGlobeMeshes = (
@@ -260,20 +262,20 @@ export class CompactPlanetBodyRenderer implements BodyRenderer {
       suffix: 'physical' | 'proxy',
     ) => {
       const surfaceMesh = new THREE.Mesh(this.geometry, surface);
-      surfaceMesh.name = `compact-planet-surface:${body.id}:${suffix}`;
+      surfaceMesh.name = `${rendererKind}-surface:${body.id}:${suffix}`;
       surfaceMesh.renderOrder = suffix === 'physical' ? 4 : 5;
       const limbMesh = new THREE.Mesh(this.geometry, limb);
-      limbMesh.name = `compact-planet-limb:${body.id}:${suffix}`;
+      limbMesh.name = `${rendererKind}-limb:${body.id}:${suffix}`;
       limbMesh.scale.setScalar(1.018);
       limbMesh.renderOrder = 6;
-      globe.name = `compact-planet-globe:${body.id}:${suffix}`;
+      globe.name = `${rendererKind}-globe:${body.id}:${suffix}`;
       globe.add(surfaceMesh, limbMesh);
     };
     addGlobeMeshes(this.physicalGlobe, this.physicalSurface, this.physicalLimb, 'physical');
     addGlobeMeshes(this.proxyGlobe, this.proxySurface, this.proxyLimb, 'proxy');
     this.pointGeometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
     this.point = new THREE.Points(this.pointGeometry, pointMaterial(new THREE.Color(visual.pointColor)));
-    this.point.name = `compact-planet-point:${body.id}`;
+    this.point.name = `${rendererKind}-point:${body.id}`;
     this.point.frustumCulled = false;
     this.root.add(this.physicalGlobe, this.proxyGlobe, this.point);
   }
@@ -294,7 +296,7 @@ export class CompactPlanetBodyRenderer implements BodyRenderer {
     }
     const channels = [...pack.textures.keys()];
     if (channels.length !== 1 || channels[0] !== 'albedo') {
-      throw new Error(`${pack.bodyId}/${pack.tier} compact pack must contain exact channel albedo`);
+      throw new Error(`${pack.bodyId}/${pack.tier} ${this.kind} pack must contain exact channel albedo`);
     }
     const albedo = pack.textures.get('albedo');
     if (!albedo) throw new Error(`${pack.bodyId}/${pack.tier} is missing albedo`);
@@ -329,14 +331,23 @@ export class CompactPlanetBodyRenderer implements BodyRenderer {
 
     const origin = frame.cameraRelativeOrigin;
     this.physicalGlobe.position.set(origin.x, origin.y, origin.z);
-    this.physicalGlobe.scale.setScalar(this.body.radius);
+    this.physicalGlobe.scale.set(
+      this.body.equatorialRadius,
+      this.body.equatorialRadius,
+      this.body.polarRadius,
+    );
     const inverseDistance = 1 / (Math.hypot(origin.x, origin.y, origin.z) || 1);
     this.proxyGlobe.position.set(
       origin.x * inverseDistance * frame.projection.proxyDepth,
       origin.y * inverseDistance * frame.projection.proxyDepth,
       origin.z * inverseDistance * frame.projection.proxyDepth,
     );
-    this.proxyGlobe.scale.setScalar(frame.projection.proxyRadius);
+    const proxyPolarRatio = this.body.polarRadius / this.body.equatorialRadius;
+    this.proxyGlobe.scale.set(
+      frame.projection.proxyRadius,
+      frame.projection.proxyRadius,
+      frame.projection.proxyRadius * proxyPolarRatio,
+    );
     this.physicalGlobe.quaternion.set(
       frame.orientation.x,
       frame.orientation.y,

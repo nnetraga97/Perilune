@@ -329,7 +329,12 @@ export function compactBodyMesh(
 
   const material: THREE.Material = descriptor.identity === 'star'
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
-    : descriptor.identity === 'gas'
+    : descriptor.identity === 'gas' && pack
+      ? new THREE.MeshLambertMaterial({
+        color: '#ffffff',
+        map: pack.textures.get('albedo') ?? null,
+      })
+      : descriptor.identity === 'gas'
       ? new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 18 })
       : pack && descriptor.renderer === 'compact-planet'
         ? new THREE.MeshLambertMaterial({
@@ -696,7 +701,9 @@ export class MapView {
 
   constructor(private readonly uiRoot: HTMLElement, cb: MapCallbacks) {
     this.cb = cb;
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 1e7);
+    // Jupiter expands the physically scaled heliocentric map beyond the
+    // original inner-planet 10 Mm map-space far plane.
+    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 2e7);
     this.resizeHandler = () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -1821,7 +1828,12 @@ export class MapView {
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }
-      mesh.scale.setScalar(mapBodyPresentationRadius(b.radius, this.camDist));
+      const presentationRadius = mapBodyPresentationRadius(b.visualRadius, this.camDist);
+      mesh.scale.set(
+        presentationRadius,
+        presentationRadius,
+        presentationRadius * b.polarRadius / b.equatorialRadius,
+      );
       mesh.position.copy(pos);
       updateCompactBodyOrientation(mesh, b, t);
       const bodyMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];

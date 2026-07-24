@@ -4,6 +4,8 @@ import localLock from '../assets/planets/local-material-source-lock.json';
 import marsLock from '../assets/planets/sources/nasa-marstrek-viking/source.lock.json';
 import mercuryLock from '../assets/planets/sources/nasa-messenger-mercury/source.lock.json';
 import venusLock from '../assets/planets/sources/jpl-venus-clouds/source.lock.json';
+import jupiterLock from '../assets/planets/sources/nasa-cassini-jupiter/source.lock.json';
+import callistoLock from '../assets/planets/sources/usgs-callisto-galileo-voyager/source.lock.json';
 import artifact from '../src/generated/checked-planet-manifest.json';
 
 const sha256 = /^[0-9a-f]{64}$/;
@@ -69,6 +71,33 @@ describe('Sol visual source provenance', () => {
     const source = artifact.manifest.sources.find((entry) => entry.bodies?.includes('venus'));
     expect(source?.observation).toMatch(/representative static cloud texture/i);
     const packs = artifact.manifest.packs.filter((pack) => pack.bodyId === 'venus');
+    expect(packs.map((pack) => pack.tier).sort()).toEqual(['high', 'low', 'medium']);
+    for (const pack of packs) expect(pack.channels.map((channel) => channel.name)).toEqual(['albedo']);
+  });
+
+  it('pins the NASA/JPL Cassini cloud mosaic and ships albedo-only Jupiter tiers', () => {
+    expect(jupiterLock.productPage).toContain('jpl.nasa.gov/images/pia07782');
+    expect(jupiterLock.sourceUrl).toMatch(/^https:\/\/assets\.science\.nasa\.gov\//);
+    expect(jupiterLock.sourceSha256).toMatch(sha256);
+    expect(jupiterLock.derivedSourceSha256).toMatch(sha256);
+    expect(jupiterLock.sourceCharacter).toMatch(/close to human-eye.*not strict true color/i);
+    const packs = artifact.manifest.packs.filter((pack) => pack.bodyId === 'jupiter');
+    expect(packs.map((pack) => pack.tier).sort()).toEqual(['high', 'low', 'medium']);
+    for (const pack of packs) expect(pack.channels.map((channel) => channel.name)).toEqual(['albedo']);
+  });
+
+  it('pins the USGS Callisto mosaic and its NASA/JPL color reference', () => {
+    expect(callistoLock.productPage).toMatch(/^https:\/\/astrogeology\.usgs\.gov\//);
+    expect(callistoLock.sourceSha256).toMatch(sha256);
+    expect(callistoLock.colorReferenceSha256).toMatch(sha256);
+    expect(callistoLock.derivedSourceSha256).toMatch(sha256);
+    expect(callistoLock).toMatchObject({
+      sourceLongitudeDirection: 'west-positive',
+      canonicalLongitudeDirection: 'east-positive',
+      canonicalSeamLongitudeDegrees: -180,
+    });
+    expect(callistoLock.sourceCharacter).toMatch(/not spatially measured global color/i);
+    const packs = artifact.manifest.packs.filter((pack) => pack.bodyId === 'callisto');
     expect(packs.map((pack) => pack.tier).sort()).toEqual(['high', 'low', 'medium']);
     for (const pack of packs) expect(pack.channels.map((channel) => channel.name)).toEqual(['albedo']);
   });

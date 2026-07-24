@@ -805,7 +805,7 @@ describe('planet content validator', () => {
   });
 
   it('enforces albedo-only compact-planet packs and rejects terrain-oriented channels', () => {
-    for (const bodyId of ['mercury', 'venus', 'mars']) {
+    for (const bodyId of ['mercury', 'venus', 'mars', 'jupiter', 'callisto']) {
       const manifest = JSON.parse(readFileSync('assets/planets/manifest.json', 'utf8')) as any;
       const compact = manifest.packs.find((pack: any) => pack.bodyId === bodyId && pack.tier === 'low');
       const moon = manifest.packs.find((pack: any) => pack.bodyId === 'moon' && pack.tier === 'low');

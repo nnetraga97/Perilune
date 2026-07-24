@@ -9,6 +9,7 @@ import { LegacyBodyRenderer } from '../src/render/legacyBodyRenderer';
 import { StarBodyRenderer } from '../src/render/starBodyRenderer';
 import { TerrestrialBodyRenderer } from '../src/render/terrestrialBodyRenderer';
 import { CompactPlanetBodyRenderer } from '../src/render/compactPlanetBodyRenderer';
+import { GasGiantBodyRenderer } from '../src/render/gasGiantBodyRenderer';
 import type { RenderCaps } from '../src/render/context';
 import type { BodyRenderFrame, RuntimeBodyAssetPack } from '../src/render/bodyRenderer';
 import { disposeVesselVisual, type VesselVisual } from '../src/render/vesselMesh';
@@ -123,12 +124,18 @@ describe('body renderer adapters', () => {
     const mars = new Universe([...SOL_SYSTEM], 'earth').get('mars');
     const mercury = new Universe([...SOL_SYSTEM], 'earth').get('mercury');
     const venus = new Universe([...SOL_SYSTEM], 'earth').get('venus');
+    const jupiter = new Universe([...SOL_SYSTEM], 'earth').get('jupiter');
+    const callisto = new Universe([...SOL_SYSTEM], 'earth').get('callisto');
     expect(createBodyRendererCandidate({ body: mars, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
     expect(createBodyRendererCandidate({ body: mercury, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
     expect(createBodyRendererCandidate({ body: venus, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
+    expect(createBodyRendererCandidate({ body: jupiter, caps, quality: 'medium' })).toBeInstanceOf(GasGiantBodyRenderer);
+    expect(createBodyRendererCandidate({ body: callisto, caps, quality: 'medium' })).toBeInstanceOf(CompactPlanetBodyRenderer);
     expect(bodyRendererSupportsFlightTerrain('mars')).toBe(false);
     expect(bodyRendererSupportsFlightTerrain('mercury')).toBe(false);
     expect(bodyRendererSupportsFlightTerrain('venus')).toBe(false);
+    expect(bodyRendererSupportsFlightTerrain('jupiter')).toBe(false);
+    expect(bodyRendererSupportsFlightTerrain('callisto')).toBe(false);
     expect(bodyRendererSupportsFlightTerrain('earth')).toBe(true);
   });
 

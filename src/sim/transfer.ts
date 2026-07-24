@@ -878,11 +878,14 @@ function refineInterplanetaryIntercept(
       coastTime * 1.5,
     );
     const encounter = parentPrediction.encounter;
+    const maximumApproachAltitude = target.def.surfaceKind === 'gas'
+      ? target.visualRadius * 2
+      : Math.max(4_000_000, target.radius);
     if (
       !encounter
       || encounter.bodyId !== target.id
       || encounter.periapsisAltitude < 0
-      || encounter.periapsisAltitude > Math.max(4_000_000, target.radius)
+      || encounter.periapsisAltitude > maximumApproachAltitude
     ) continue;
 
     const captureRadius = desiredPeriapsisRadius;

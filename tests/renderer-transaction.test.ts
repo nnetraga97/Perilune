@@ -663,7 +663,7 @@ describe('planet asset loading boundary', () => {
     expect(checkedManifest.packs[0].channels[0]).toMatchObject({ gpuBytes: 20, fallbackGpuBytes: 80 });
     expect(empty.budgets).toEqual(manifestBudgets);
     const production = checkPlanetManifest(checkedPlanetArtifact);
-    expect(production.packs).toHaveLength(23);
+    expect(production.packs).toHaveLength(29);
     expect(production.hasPack('earth', 'low')).toBe(true);
     expect(production.hasPack('earth', 'medium')).toBe(true);
     expect(production.hasPack('sun', 'low')).toBe(true);
@@ -682,6 +682,12 @@ describe('planet asset loading boundary', () => {
     expect(production.hasPack('venus', 'low')).toBe(true);
     expect(production.hasPack('venus', 'medium')).toBe(true);
     expect(production.hasPack('venus', 'high')).toBe(true);
+    expect(production.hasPack('jupiter', 'low')).toBe(true);
+    expect(production.hasPack('jupiter', 'medium')).toBe(true);
+    expect(production.hasPack('jupiter', 'high')).toBe(true);
+    expect(production.hasPack('callisto', 'low')).toBe(true);
+    expect(production.hasPack('callisto', 'medium')).toBe(true);
+    expect(production.hasPack('callisto', 'high')).toBe(true);
     expect(production.hasPack('palla', 'medium')).toBe(true);
     expect(production.hasPack('wisp', 'medium')).toBe(true);
   });
