@@ -80,20 +80,3 @@ Choose **First Light** at the menu. For a local Pip briefing, set
 remain available. The production flight-director route additionally uses Redis
 for rate limiting and can persist server-side audit records when its Supabase
 environment variables are configured.
-
-## Build Week submission checklist
-
-- [ ] Choose **Apps for Your Life** on Devpost.
-- [ ] Add the public demo URL or clear local-run instructions.
-- [ ] Record a public YouTube demo of three minutes or less, with an English
-  voiceover showing First Light, Pip, and how Codex/GPT-5.6 were used.
-- [ ] Add the repository URL and this README to the submission.
-- [ ] Paste the `/feedback` Session ID from the primary Codex build thread.
-- [ ] Confirm third-party sources are disclosed in [docs/LEGAL.md](docs/LEGAL.md).
-- [ ] Recheck the official rules and Devpost form immediately before submitting.
-
-The official requirements call for a working project built with Codex and
-GPT-5.6, a clear description, a public narrated YouTube demo, repository/testing
-access, and the primary Codex `/feedback` Session ID. The video must be three
-minutes or less. Refer to the [Build Week FAQ](https://openai.devpost.com/details/faqs)
-and [official rules](https://openai.devpost.com/rules) as the source of truth.
