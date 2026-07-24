@@ -54,7 +54,7 @@ export class MissionTools {
   private transferCalculationSignature = '';
   private transferPlans: TransferPlan[] = [];
   private transferPendingTargets = new Set<string>();
-  private transferWorker: Worker | null = null;
+  private transferWorkers: Worker[] = [];
   private transferRequestId = 0;
   private transferError = '';
   private banner: HTMLElement | null = null;
@@ -230,9 +230,7 @@ export class MissionTools {
     this.transferList = el('div', 'mission-list transfer-list', content);
   }
 
-  private ensureTransferWorker(): Worker | null {
-    if (this.transferWorker) return this.transferWorker;
-    if (typeof Worker === 'undefined') return null;
+  private createTransferWorker(): Worker {
     const worker = new Worker(new URL('../sim/transferWorker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<TransferWorkerResult>) => {
       const result = event.data;
@@ -250,11 +248,22 @@ export class MissionTools {
       this.transferPendingTargets.clear();
       this.transferError = 'Intercept verification worker unavailable; estimates remain available.';
       this.transferSignature = '';
-      worker.terminate();
-      if (this.transferWorker === worker) this.transferWorker = null;
+      for (const activeWorker of this.transferWorkers) activeWorker.terminate();
+      this.transferWorkers = [];
     };
-    this.transferWorker = worker;
     return worker;
+  }
+
+  private ensureTransferWorkers(): readonly Worker[] {
+    if (typeof Worker === 'undefined') return [];
+    const concurrency = Math.max(
+      1,
+      Math.min(2, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1),
+    );
+    while (this.transferWorkers.length < concurrency) {
+      this.transferWorkers.push(this.createTransferWorker());
+    }
+    return this.transferWorkers;
   }
 
   private queueTransferVerification(
@@ -264,19 +273,19 @@ export class MissionTools {
     options: TransferWorkerRequest['options'],
   ): void {
     const requestId = ++this.transferRequestId;
-    if (this.transferPendingTargets.size && this.transferWorker) {
-      this.transferWorker.terminate();
-      this.transferWorker = null;
+    if (this.transferPendingTargets.size && this.transferWorkers.length) {
+      for (const worker of this.transferWorkers) worker.terminate();
+      this.transferWorkers = [];
     }
-    const worker = this.ensureTransferWorker();
-    if (!worker) {
+    const workers = this.ensureTransferWorkers();
+    if (!workers.length) {
       this.transferError = 'Background verification is unavailable; estimates remain available.';
       return;
     }
     const universe = [...game.universe.bodies.values()].map((body) => body.def) as BodyDef[];
     this.transferPendingTargets = new Set(targets);
     this.transferError = '';
-    for (const targetId of targets) {
+    targets.forEach((targetId, index) => {
       const request: TransferWorkerRequest = {
         requestId,
         universe,
@@ -286,8 +295,8 @@ export class MissionTools {
         targetId,
         options,
       };
-      worker.postMessage(request);
-    }
+      workers[index % workers.length].postMessage(request);
+    });
   }
 
   private updateTransfers(): void {
@@ -388,6 +397,7 @@ export class MissionTools {
   }
 
   private renderTransfer(plan: TransferPlan, targeted: boolean): void {
+    const pendingVerification = this.transferPendingTargets.has(plan.targetId);
     const row = el('div', `transfer-row${targeted ? ' targeted' : ''}`, this.transferList!);
     const dial = el('div', 'phase-dial', row);
     dial.title = 'Current phase and required departure phase';
@@ -416,13 +426,14 @@ export class MissionTools {
       'span',
       `transfer-accuracy ${plan.accuracy === 'refined-intercept' ? 'refined' : ''}`,
       info,
-      plan.accuracy === 'refined-intercept' ? 'INTERCEPT VERIFIED' : 'PHASE ESTIMATE · FINE-TUNE IN MAP',
+      pendingVerification
+        ? 'CALCULATING VERIFIED INTERCEPT'
+        : plan.accuracy === 'refined-intercept' ? 'INTERCEPT VERIFIED' : 'PHASE ESTIMATE · FINE-TUNE IN MAP',
     );
     const actions = el('div', 'transfer-actions', row);
     const target = el('button', 'hud-btn transfer-icon-action', actions, targeted ? 'Targeted' : 'Target');
     target.onclick = () => this.callbacks.onSetTarget(targeted ? null : plan.targetId);
     const alarm = el('button', 'hud-btn transfer-icon-action', actions, 'Alarm') as HTMLButtonElement;
-    const pendingVerification = this.transferPendingTargets.has(plan.targetId);
     alarm.disabled = pendingVerification;
     alarm.onclick = () => this.addAlarm(plan.burnTime, `Burn: ${plan.targetName}`, 'transfer');
     const sketch = el(
