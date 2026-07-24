@@ -55,8 +55,12 @@ export class MissionTools {
   private transferPlans: TransferPlan[] = [];
   private transferPendingTargets = new Set<string>();
   private transferWorkers: Worker[] = [];
+  private transferWorkerAssignments = new Map<Worker, Readonly<{ requestId: number; targetId: string }>>();
+  private transferQueuedTargets: string[] = [];
+  private transferRequest: Omit<TransferWorkerRequest, 'targetId'> | null = null;
   private transferRequestId = 0;
   private transferError = '';
+  private disposed = false;
   private banner: HTMLElement | null = null;
   private fleetList: HTMLElement | null = null;
   private bodyList: HTMLElement | null = null;
@@ -233,29 +237,37 @@ export class MissionTools {
   private createTransferWorker(): Worker {
     const worker = new Worker(new URL('../sim/transferWorker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<TransferWorkerResult>) => {
+      this.transferWorkerAssignments.delete(worker);
       const result = event.data;
-      if (result.requestId !== this.transferRequestId) return;
-      this.transferPendingTargets.delete(result.targetId);
-      if (result.plan) {
-        const index = this.transferPlans.findIndex((plan) => plan.targetId === result.targetId);
-        if (index >= 0) this.transferPlans[index] = result.plan;
-        else this.transferPlans.push(result.plan);
+      if (result.requestId === this.transferRequestId) {
+        this.transferPendingTargets.delete(result.targetId);
+        if (result.plan) {
+          const index = this.transferPlans.findIndex((plan) => plan.targetId === result.targetId);
+          if (index >= 0) this.transferPlans[index] = result.plan;
+          else this.transferPlans.push(result.plan);
+        }
+        if (result.error) this.transferError = 'Some intercepts could not be verified; estimates remain available.';
+        this.transferSignature = '';
       }
-      if (result.error) this.transferError = 'Some intercepts could not be verified; estimates remain available.';
-      this.transferSignature = '';
+      this.dispatchTransferWork(worker);
     };
     worker.onerror = () => {
-      this.transferPendingTargets.clear();
-      this.transferError = 'Intercept verification worker unavailable; estimates remain available.';
-      this.transferSignature = '';
-      for (const activeWorker of this.transferWorkers) activeWorker.terminate();
-      this.transferWorkers = [];
+      const assignment = this.transferWorkerAssignments.get(worker);
+      this.transferWorkerAssignments.delete(worker);
+      this.transferWorkers = this.transferWorkers.filter((candidate) => candidate !== worker);
+      worker.terminate();
+      if (assignment?.requestId === this.transferRequestId) {
+        this.transferPendingTargets.delete(assignment.targetId);
+        this.transferError = 'Some intercepts could not be verified; estimates remain available.';
+        this.transferSignature = '';
+      }
+      for (const idleWorker of this.ensureTransferWorkers()) this.dispatchTransferWork(idleWorker);
     };
     return worker;
   }
 
   private ensureTransferWorkers(): readonly Worker[] {
-    if (typeof Worker === 'undefined') return [];
+    if (this.disposed || typeof Worker === 'undefined') return [];
     const concurrency = Math.max(
       1,
       Math.min(2, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1),
@@ -266,6 +278,16 @@ export class MissionTools {
     return this.transferWorkers;
   }
 
+  /** Give an idle persistent worker one target from the newest request only. */
+  private dispatchTransferWork(worker: Worker): void {
+    if (this.disposed || this.transferWorkerAssignments.has(worker) || !this.transferRequest) return;
+    const targetId = this.transferQueuedTargets.shift();
+    if (!targetId) return;
+    const request: TransferWorkerRequest = { ...this.transferRequest, targetId };
+    this.transferWorkerAssignments.set(worker, { requestId: request.requestId, targetId });
+    worker.postMessage(request);
+  }
+
   private queueTransferVerification(
     game: GameState,
     fromId: string,
@@ -273,10 +295,6 @@ export class MissionTools {
     options: TransferWorkerRequest['options'],
   ): void {
     const requestId = ++this.transferRequestId;
-    if (this.transferPendingTargets.size && this.transferWorkers.length) {
-      for (const worker of this.transferWorkers) worker.terminate();
-      this.transferWorkers = [];
-    }
     const workers = this.ensureTransferWorkers();
     if (!workers.length) {
       this.transferError = 'Background verification is unavailable; estimates remain available.';
@@ -284,19 +302,17 @@ export class MissionTools {
     }
     const universe = [...game.universe.bodies.values()].map((body) => body.def) as BodyDef[];
     this.transferPendingTargets = new Set(targets);
+    this.transferQueuedTargets = [...targets];
     this.transferError = '';
-    targets.forEach((targetId, index) => {
-      const request: TransferWorkerRequest = {
-        requestId,
-        universe,
-        homeBodyId: game.universe.homeBodyId,
-        time: game.time,
-        fromId,
-        targetId,
-        options,
-      };
-      workers[index % workers.length].postMessage(request);
-    });
+    this.transferRequest = {
+      requestId,
+      universe,
+      homeBodyId: game.universe.homeBodyId,
+      time: game.time,
+      fromId,
+      options,
+    };
+    for (const worker of workers) this.dispatchTransferWork(worker);
   }
 
   private updateTransfers(): void {
@@ -338,6 +354,8 @@ export class MissionTools {
     this.transferSignature = signature;
     if (gv.runtime.situation !== 'orbit' || periapsisOf(liveOrbit) <= body.radius) {
       this.transferRequestId++;
+      this.transferRequest = null;
+      this.transferQueuedTargets = [];
       this.transferCalculationSignature = '';
       this.transferPlans = [];
       this.transferPendingTargets.clear();
@@ -530,5 +548,18 @@ export class MissionTools {
         terminate.onclick = () => this.callbacks.onTerminateVessel(v.id);
       }
     }
+  }
+
+  /** Release the long-lived transfer worker pool when the game page is torn down. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.transferRequestId++;
+    this.transferRequest = null;
+    this.transferQueuedTargets = [];
+    this.transferPendingTargets.clear();
+    this.transferWorkerAssignments.clear();
+    for (const worker of this.transferWorkers) worker.terminate();
+    this.transferWorkers = [];
   }
 }

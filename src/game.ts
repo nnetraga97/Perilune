@@ -298,6 +298,7 @@ class PeriluneGame {
     this.gpuProfiler.dispose();
     this.saveSync.dispose();
     this.auth.dispose();
+    this.missionTools.dispose();
     this.map.dispose();
     this.disposeArtemisIvVisualResources(false);
     // Remove vessel visuals first, then release shared model resources once.
