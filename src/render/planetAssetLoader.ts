@@ -203,7 +203,7 @@ export class PlanetAssetLoader {
     const textures = new Map<string, THREE.Texture>();
     let selectedGpuBytes = 0;
     try {
-      for (const channel of pack.channels) {
+      const outcomes = await Promise.allSettled(pack.channels.map(async (channel) => {
         try {
           const selectedPath = compressed ? channel.packagePath : channel.fallbackPath;
           this.options.diagnostics?.record({
@@ -233,8 +233,7 @@ export class PlanetAssetLoader {
           if (channel.name === 'surfaceClass' || channel.name === 'surfaceClassRegional') {
             configureSurfaceClassTexture(texture);
           }
-          textures.set(channel.name, texture);
-          selectedGpuBytes += compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
+          const gpuBytes = compressed ? channel.gpuBytes : channel.fallbackGpuBytes;
           this.options.diagnostics?.record({
             subsystem: 'assets', event: 'asset-channel-loaded', severity: 'state',
             data: {
@@ -245,6 +244,7 @@ export class PlanetAssetLoader {
               selectedGpuBytes: compressed ? channel.gpuBytes : channel.fallbackGpuBytes,
             },
           }, { bodyId });
+          return { name: channel.name, texture, gpuBytes };
         } catch (error) {
           const normalized = normalizeDiagnosticError(error);
           this.options.diagnostics?.record({
@@ -257,7 +257,14 @@ export class PlanetAssetLoader {
             { cause: error },
           );
         }
+      }));
+      for (const outcome of outcomes) {
+        if (outcome.status !== 'fulfilled') continue;
+        textures.set(outcome.value.name, outcome.value.texture);
+        selectedGpuBytes += outcome.value.gpuBytes;
       }
+      const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     } catch (error) {
       for (const texture of textures.values()) texture.dispose();
       throw error;

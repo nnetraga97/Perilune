@@ -4,9 +4,18 @@ export interface Float32Tiff {
   readonly values: Float32Array;
 }
 
+export interface Float32TiffDecodeOptions {
+  /** Authoring-only support for sparse ArcGIS tiles. Missing tiles become NaN. */
+  readonly allowSparseTiles?: boolean;
+}
+
 const TYPE_BYTES: Readonly<Record<number, number>> = Object.freeze({ 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 11: 4, 12: 8 });
 
-export function decodeFloat32Tiff(buffer: ArrayBuffer, maximumPixels = 16 * 1024 * 1024): Float32Tiff {
+export function decodeFloat32Tiff(
+  buffer: ArrayBuffer,
+  maximumPixels = 16 * 1024 * 1024,
+  options: Readonly<Float32TiffDecodeOptions> = {},
+): Float32Tiff {
   const view = new DataView(buffer);
   if (view.byteLength < 8) throw new Error('TIFF header is truncated');
   const marker = String.fromCharCode(view.getUint8(0), view.getUint8(1));
@@ -65,6 +74,14 @@ export function decodeFloat32Tiff(buffer: ArrayBuffer, maximumPixels = 16 * 1024
       const tileIndex = tileY * across + tileX;
       const sourceOffset = tileOffsets[tileIndex];
       const sourceBytes = tileByteCounts[tileIndex];
+      if (options.allowSparseTiles && sourceOffset === 0 && sourceBytes === 0) {
+        for (let y = 0; y < tileHeight && tileY * tileHeight + y < height; y++) {
+          for (let x = 0; x < tileWidth && tileX * tileWidth + x < width; x++) {
+            values[(tileY * tileHeight + y) * width + tileX * tileWidth + x] = Number.NaN;
+          }
+        }
+        continue;
+      }
       if (sourceOffset + sourceBytes > view.byteLength || sourceBytes < tileWidth * tileHeight * 4) throw new Error('TIFF tile payload is truncated');
       for (let y = 0; y < tileHeight && tileY * tileHeight + y < height; y++) {
         for (let x = 0; x < tileWidth && tileX * tileWidth + x < width; x++) {

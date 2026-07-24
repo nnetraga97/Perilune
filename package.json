@@ -23,6 +23,7 @@
     "validate:content": "npm run check:sol-constants && npm run check:height-authority && npm run check:surface-class-authority && node scripts/validate-content.mjs && tsx scripts/validate-game-content.ts",
     "compile:planet-assets": "tsx scripts/compile-planet-assets.ts",
     "compile:height-authority": "node scripts/compile-height-authority.mjs",
+    "compile:ksc-launch-authority": "tsx scripts/compile-ksc-launch-authority.ts",
     "compile:moon-site01-authority": "node scripts/compile-moon-site01-authority.mjs",
     "compile:surface-class-authority": "tsx scripts/compile-surface-class-authority.ts",
     "check:surface-class-authority": "tsx scripts/compile-surface-class-authority.ts",

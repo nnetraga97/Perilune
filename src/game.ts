@@ -264,6 +264,11 @@ class PeriluneGame {
   private rendererFailureEl: HTMLElement | null = null;
   private rendererFailureMessage: HTMLElement | null = null;
   private reportedRendererFailure = '';
+  private launchPreparation: {
+    readonly game: GameState;
+    readonly bodyId: string;
+    readonly promise: Promise<void>;
+  } | null = null;
   private readonly diagnostics: RenderDiagnostics;
   private readonly renderOptions: RenderStartupOptions;
 
@@ -1735,6 +1740,7 @@ class PeriluneGame {
       return;
     }
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
+    this.launchPreparation = null;
     this.sessionKind = 'standard';
     this.ensureDefaultConceptLander();
     this.editor.refreshCampaign();
@@ -1746,6 +1752,7 @@ class PeriluneGame {
     this.cancelArtemisIvTransition();
     const profile = GAMEPLAY_PROFILES[systemOverride ?? this.uiSettings?.gameSystem ?? 'sol'];
     this.game = new GameState(mode, profile);
+    this.launchPreparation = null;
     this.sessionKind = 'standard';
     this.firstLightMoonCorrectionApplied = false;
     this.conceptVisualPending.clear();
@@ -1776,6 +1783,7 @@ class PeriluneGame {
       this.artemisIvManeuverIds.clear();
       this.sessionKind = 'standard';
       this.game = new GameState('sandbox', GAMEPLAY_PROFILES.sol);
+      this.launchPreparation = null;
       this.world.resetCamera(false);
       this.world.resetDynamicState();
       this.refreshArtemisIvMenuState();
@@ -1812,7 +1820,36 @@ class PeriluneGame {
     this.windows.setScreen('editor');
     this.editor.refreshCampaign();
     if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
+    this.warmEditorLaunch();
     void this.writeSave('auto', 'autosave');
+  }
+
+  private ensureEditorLaunchPreparation(): Promise<void> {
+    const game = this.game;
+    const home = game.universe.get(game.universe.homeBodyId);
+    const active = this.launchPreparation;
+    if (active?.game === game && active.bodyId === home.id) return active.promise;
+    const promise = (async () => {
+      const authority = game.vessels.length === 0
+        ? await game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent')
+        : game.frozenFlightAuthority(home.id);
+      if (this.game !== game) return;
+      await this.world.prepareFlightBody(home, authority);
+    })();
+    this.launchPreparation = { game, bodyId: home.id, promise };
+    void promise.catch(() => {
+      if (this.launchPreparation?.promise === promise) this.launchPreparation = null;
+    });
+    return promise;
+  }
+
+  private warmEditorLaunch(): void {
+    void this.ensureEditorLaunchPreparation().catch((error) => {
+      clientLog.warn('sim.boundary.error', {
+        boundary: `editor-launch-warmup:${this.game.universe.homeBodyId}`,
+        errorType: error instanceof Error ? error.name : 'LaunchWarmupFailure',
+      });
+    });
   }
 
   private toFlight(spawn = true): void {
@@ -1858,11 +1895,16 @@ class PeriluneGame {
     const firstFleetLaunch = this.game.vessels.length === 0;
     try {
       if (firstFleetLaunch) this.game.warpToLaunchDaylight(home);
-      // Terrain authority is promoted once, before the first fleet launch.
-      // Later launches reuse that frozen authority so orbiting craft survive.
-      const authority = firstFleetLaunch
-        ? await this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent')
-        : this.game.frozenFlightAuthority(home.id);
+      // The first launch reuses the same local authority and renderer warmup
+      // started on VAB entry. Later fleet launches retain that frozen authority.
+      const preparation = firstFleetLaunch
+        ? this.ensureEditorLaunchPreparation()
+        : this.world.prepareFlightBody(home, this.game.frozenFlightAuthority(home.id));
+      await Promise.all([
+        preparation,
+        new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
+      ]);
+      const authority = this.game.frozenFlightAuthority(home.id);
       if (authority.fallbackReason) {
         clientLog.warn('terrain.authority.fallback', {
           bodyId: authority.bodyId,
@@ -1870,12 +1912,6 @@ class PeriluneGame {
           reason: authority.fallbackReason,
         });
       }
-      await Promise.all([
-        // The launch boundary preloads only the active launch region. Secondary
-        // bodies remain on their resident parent data until flight approaches them.
-        this.world.prepareFlightBody(home, authority),
-        new Promise<void>((resolve) => window.setTimeout(resolve, 650)),
-      ]);
     } catch (error) {
       clientLog.error('sim.boundary.error', error, {
         boundary: `launch-authority-preload:${home.id}`,
@@ -2000,6 +2036,7 @@ class PeriluneGame {
     const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
+    this.launchPreparation = null;
     this.ensureDefaultConceptLander();
     this.conceptVisualPending.clear();
     this.conceptVisualFailed.clear();

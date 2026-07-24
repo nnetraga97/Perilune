@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestSha256": "b63545d754e73bff27901db10be6fb1437ae9b12f64a1c4d231d7464aa712266",
+  "manifestSha256": "a63285408aad39423a662d59c735ad9224a6dc15cc77928adb9fecd416e5996d",
   "manifest": {
     "schemaVersion": 1,
     "compiler": {
@@ -41,6 +41,18 @@
       }
     },
     "numericAuthorities": [
+      {
+        "bodyId": "earth",
+        "datasetId": "usgs-3dep-ksc-1m-86037",
+        "version": "OBJECTID-86037-vdatum48-grid-20260720-bundled-u16-v1",
+        "path": "generated/earth/ksc/height-u16.bin",
+        "sha256": "3c6f7b7c47b8424385cc32010e974f84b3b5a3557068660f4b5f9472f5a44ec3",
+        "byteLength": 196608,
+        "width": 384,
+        "height": 256,
+        "projection": "EPSG:4326",
+        "referenceFrame": "WGS84 body-fixed"
+      },
       {
         "bodyId": "moon",
         "datasetId": "nasa-pgda-lola-site01-5m",

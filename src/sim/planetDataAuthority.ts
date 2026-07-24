@@ -1,13 +1,7 @@
 import { CHECKED_HEIGHT_AUTHORITY_VERSION, sourceHeightGrid } from './sourceHeightAuthority';
 import type { Body } from './universe';
-import {
-  KSC_3DEP_HEIGHT,
-  type HeightImageAddress,
-} from '../render/planetDetail/heightSourceAdapter';
-import { decodeFloat32Tiff } from '../render/planetDetail/numericTiff';
-import { kscNavd88ToEgm2008Correction } from '../render/planetDetail/heightDatum';
-import { requestPlanetTile } from '../render/planetDetail/tileRequest';
 import type { FrozenSourceHeightRegion } from './sourceHeightAuthority';
+import kscLaunch from '../../assets/planets/ksc-launch-authority.json';
 import moonSite01 from '../../assets/planets/moon-site01-authority.json';
 
 export type PlanetAuthorityRequest = 'parent' | 'ksc-launch' | 'moon-site01';
@@ -62,87 +56,53 @@ function parentAuthority(body: Body, fallbackReason?: string): FrozenPlanetDataA
   return authority;
 }
 
-async function digestRegion(address: Readonly<HeightImageAddress>, samples: Float32Array): Promise<string> {
-  const metadata = new TextEncoder().encode([
-    address.datasetId,
-    address.cacheKey,
-    address.verticalDatum,
-    address.engineDatum,
-    address.bounds.join(','),
-    address.width,
-    address.height,
-  ].join('|'));
-  const sampleBytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
-  const content = new Uint8Array(metadata.byteLength + sampleBytes.byteLength);
-  content.set(metadata, 0);
-  content.set(sampleBytes, metadata.byteLength);
-  if (globalThis.crypto?.subtle) {
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', content);
-    return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
-  }
-  let hash = 0x811c9dc5;
-  for (const value of content) hash = Math.imul(hash ^ value, 0x01000193);
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 async function prepareKscAuthority(body: Body): Promise<FrozenPlanetDataAuthority> {
-  const source = KSC_3DEP_HEIGHT;
-  const cached = promoted.get(`${body.id}:${source.generation}`);
+  const cached = promoted.get(`${body.id}:${kscLaunch.version}`);
   if (cached) return cached;
-  const bounds = source.coverage;
-  const address = source.request(bounds, 512, 512);
-  const response = await requestPlanetTile(address, new AbortController().signal);
-  const decoded = decodeFloat32Tiff(await response.blob.arrayBuffer(), 512 * 512);
-  if (decoded.width !== address.width || decoded.height !== address.height) {
-    throw new Error('KSC authority dimensions do not match the frozen request');
+  const configuredBaseUrl = import.meta.env.BASE_URL;
+  const baseUrl = configuredBaseUrl.endsWith('/') ? configuredBaseUrl : `${configuredBaseUrl}/`;
+  const artifactUrl = `${baseUrl}planets/${kscLaunch.path}?v=${kscLaunch.sha256}`;
+  const response = await fetch(artifactUrl, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`KSC authority HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== kscLaunch.byteLength) throw new Error('KSC authority byte length changed');
+  if (!globalThis.crypto?.subtle) throw new Error('KSC authority requires SHA-256 support');
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const digest = [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join('');
+  if (digest !== kscLaunch.sha256) throw new Error('KSC authority checksum changed');
+  const samples = new Float32Array(kscLaunch.width * kscLaunch.height);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const span = kscLaunch.quantizationMaximumMeters - kscLaunch.quantizationMinimumMeters;
+  for (let index = 0; index < samples.length; index++) {
+    samples[index] = kscLaunch.quantizationMinimumMeters + view.getUint16(index * 2, true) / 65535 * span;
   }
-  const samples = new Float32Array(decoded.values.length);
-  let minimumHeightMeters = Number.POSITIVE_INFINITY;
-  let maximumHeightMeters = Number.NEGATIVE_INFINITY;
-  const [west, south, east, north] = bounds;
-  for (let y = 0; y < decoded.height; y++) {
-    const latitude = north - (y / (decoded.height - 1)) * (north - south);
-    for (let x = 0; x < decoded.width; x++) {
-      const longitude = west + (x / (decoded.width - 1)) * (east - west);
-      const sourceHeight = decoded.values[y * decoded.width + x];
-      if (!Number.isFinite(sourceHeight) || sourceHeight < -100 || sourceHeight > 250) {
-        throw new Error(`KSC authority contains invalid height ${sourceHeight}`);
-      }
-      const height = sourceHeight + kscNavd88ToEgm2008Correction(longitude, latitude);
-      samples[y * decoded.width + x] = height;
-      minimumHeightMeters = Math.min(minimumHeightMeters, height);
-      maximumHeightMeters = Math.max(maximumHeightMeters, height);
-    }
-  }
-  const digest = await digestRegion(address, samples);
-  const generation = `${source.generation}:${digest}`;
+  const generation = `${kscLaunch.version}:${digest}`;
   const region: FrozenSourceHeightRegion = Object.freeze({
-    datasetId: source.datasetId,
-    version: source.generation,
+    datasetId: kscLaunch.datasetId,
+    version: kscLaunch.version,
     digest,
-    coverage: Object.freeze([...bounds]) as unknown as readonly [number, number, number, number],
-    verticalDatum: source.verticalDatum,
-    engineDatum: source.engineDatum,
-    width: decoded.width,
-    height: decoded.height,
-    /** Match the complete ETOPO parent over the outer ~1.1 km of the region. */
-    blendBandDegrees: 0.01,
-    minimumHeightMeters,
-    maximumHeightMeters,
+    coverage: Object.freeze([...kscLaunch.coverage]) as readonly [number, number, number, number],
+    verticalDatum: kscLaunch.verticalDatum,
+    engineDatum: kscLaunch.engineDatum,
+    width: kscLaunch.width,
+    height: kscLaunch.height,
+    blendBandDegrees: kscLaunch.blendBandDegrees,
+    minimumHeightMeters: kscLaunch.observedMinimumHeightMeters,
+    maximumHeightMeters: kscLaunch.observedMaximumHeightMeters,
     samples,
   });
   const authority = Object.freeze({
     bodyId: body.id,
-    datasetId: source.datasetId,
-    version: source.generation,
+    datasetId: kscLaunch.datasetId,
+    version: kscLaunch.version,
     coverage: region.coverage,
-    datum: source.engineDatum,
+    datum: kscLaunch.engineDatum,
     generation,
     terrainGeneration: generationNumber(generation),
     mode: 'promoted-region' as const,
     region,
   });
-  promoted.set(`${body.id}:${source.generation}`, authority);
+  promoted.set(`${body.id}:${kscLaunch.version}`, authority);
   return authority;
 }
 

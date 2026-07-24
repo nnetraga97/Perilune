@@ -51,6 +51,16 @@ describe('numeric TIFF source boundary', () => {
     expect(() => decodeFloat32Tiff(floatStripTiff(1, 1, [0], 5))).toThrow(/uncompressed/);
   });
 
+  it('keeps sparse ArcGIS tile handling behind the authoring-only option', () => {
+    const sparse = floatTileTiff();
+    const view = new DataView(sparse);
+    view.setUint32(10 + 9 * 12 + 8, 0, true);
+    view.setUint32(10 + 10 * 12 + 8, 0, true);
+    expect(() => decodeFloat32Tiff(sparse)).toThrow(/payload is truncated/);
+    expect(Array.from(decodeFloat32Tiff(sparse, 16, { allowSparseTiles: true }).values)
+      .every(Number.isNaN)).toBe(true);
+  });
+
   it('constructs locked 3DEP and LOLA numeric exports without caller-controlled operations', () => {
     const earth = KSC_3DEP_HEIGHT.request([-80.621, 28.6271, -80.6208, 28.6273], 258, 258);
     const earthUrl = new URL(earth.url);

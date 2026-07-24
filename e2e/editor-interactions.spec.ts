@@ -132,6 +132,10 @@ test('desktop selection, hover, movement history, and launch remain coherent', a
 });
 
 test('launch keeps the VAB visible until Earth visuals are ready', async ({ page }) => {
+  const liveElevationRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('elevation.nationalmap.gov')) liveElevationRequests.push(request.url());
+  });
   await openEditor(page);
   await page.locator('.ed-part', { hasText: 'Voyager Pod' }).dragTo(page.locator('#game-canvas'), {
     targetPosition: { x: 640, y: 400 },
@@ -145,7 +149,10 @@ test('launch keeps the VAB visible until Earth visuals are ready', async ({ page
   await expect(launchButton).toHaveAttribute('aria-busy', 'true');
   expect(await page.evaluate(() => window.__TEST__.screen())).toBe('editor');
   await page.waitForFunction(() => window.__TEST__.screen() === 'flight');
-  expect(Date.now() - launchStartedAt).toBeGreaterThanOrEqual(500);
+  const launchDurationMs = Date.now() - launchStartedAt;
+  expect(launchDurationMs).toBeGreaterThanOrEqual(500);
+  expect(launchDurationMs).toBeLessThan(5_000);
+  expect(liveElevationRequests).toEqual([]);
 });
 
 test('two selected branches move together and undo as one action', async ({ page }) => {

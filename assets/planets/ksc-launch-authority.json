@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "bodyId": "earth",
+  "datasetId": "usgs-3dep-ksc-1m-86037",
+  "version": "OBJECTID-86037-vdatum48-grid-20260720-bundled-u16-v1",
+  "sourceUrl": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox=-80.75%2C28.5%2C-80.5%2C28.75&bboxSR=4326&imageSR=4326&size=512%2C512&format=tiff&pixelType=F32&interpolation=RSP_BilinearInterpolation&mosaicRule=%7B%22mosaicMethod%22%3A%22esriMosaicLockRaster%22%2C%22lockRasterIds%22%3A%5B86037%5D%7D&f=image",
+  "sourceSha256": "972773ae1d0bd8c32cafcda4a8002d99eb9c76d78181e89970f918de05f69dd9",
+  "path": "generated/earth/ksc/height-u16.bin",
+  "sha256": "3c6f7b7c47b8424385cc32010e974f84b3b5a3557068660f4b5f9472f5a44ec3",
+  "byteLength": 196608,
+  "width": 384,
+  "height": 256,
+  "requestCoverage": [
+    -80.75,
+    28.5,
+    -80.5,
+    28.75
+  ],
+  "coverage": [
+    -80.75,
+    28.56262230919765,
+    -80.56262230919765,
+    28.68737769080235
+  ],
+  "verticalDatum": "NAVD88/GEOID18",
+  "engineDatum": "EGM2008 orthometric presentation height",
+  "quantizationMinimumMeters": -128,
+  "quantizationMaximumMeters": 256,
+  "observedMinimumHeightMeters": -0.9872989284265161,
+  "observedMaximumHeightMeters": 15.465450095926315,
+  "blendBandDegrees": 0.01
+}
