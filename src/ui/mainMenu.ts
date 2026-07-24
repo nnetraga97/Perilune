@@ -21,6 +21,13 @@ export type ArtemisIvMenuState =
   | { status: 'complete' };
 
 export type ArtemisIvMenuAction = 'start' | 'resume' | 'fly-again';
+export type RestartableMission = 'artemis-iv' | 'first-light';
+
+export interface MissionRestartAction {
+  mission: RestartableMission;
+  label: string;
+  ariaLabel: string;
+}
 
 export interface MenuMissionOptions {
   artemisIvEnabled?: boolean;
@@ -33,6 +40,7 @@ export interface MenuMission {
   title: string;
   detail: string;
   qualifier?: string;
+  restart?: MissionRestartAction;
   primary: boolean;
 }
 
@@ -47,6 +55,11 @@ function artemisIvMission(
       title: `RESUME ARTEMIS IV · CHAPTER ${state.chapter}`,
       detail: 'Resume begins at the chapter checkpoint',
       qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+      restart: {
+        mission: 'artemis-iv',
+        label: 'RESTART FROM CHAPTER 1',
+        ariaLabel: 'Restart Artemis IV from Chapter 1',
+      },
       primary: !save,
     };
   }
@@ -81,6 +94,11 @@ export function menuMissions(
       eyebrow: 'GUIDED',
       title: 'FIRST LIGHT',
       detail: 'Earth orbit to the Moon',
+      restart: {
+        mission: 'first-light',
+        label: 'START OVER FROM LAUNCH',
+        ariaLabel: 'Restart First Light from launch',
+      },
       primary: !save && !artemisIvEnabled,
     },
     {
@@ -129,6 +147,7 @@ export interface MainMenuCallbacks {
   onContinue(): Promise<void> | void;
   onArtemisIv?(action: ArtemisIvMenuAction): Promise<void> | void;
   onFirstLight(): void;
+  onRestart(mission: RestartableMission): void;
   onSandbox(): void;
   onExploration(): void;
   onProgram(): void;
@@ -249,10 +268,11 @@ export class MainMenu {
       missions.some((mission) => mission.id === 'artemis-iv'),
     );
     for (const mission of missions) {
+      const group = el('div', 'perilune-mission-group', this.commandDeck);
       const button = el(
         'button',
         `perilune-mission${mission.primary ? ' perilune-mission-primary' : ''}`,
-        this.commandDeck,
+        group,
       ) as HTMLButtonElement;
       button.type = 'button';
       button.setAttribute('aria-label', actionLabels[mission.id]);
@@ -275,6 +295,17 @@ export class MainMenu {
         else if (mission.id === 'program') this.callbacks.onProgram();
         else this.callbacks.onSandbox();
       };
+      if (mission.restart) {
+        const restart = el(
+          'button',
+          'perilune-mission-restart',
+          group,
+          mission.restart.label,
+        ) as HTMLButtonElement;
+        restart.type = 'button';
+        restart.setAttribute('aria-label', mission.restart.ariaLabel);
+        restart.onclick = () => this.callbacks.onRestart(mission.restart!.mission);
+      }
     }
 
     const utilities = el('div', 'perilune-menu-utilities', this.commandDeck);

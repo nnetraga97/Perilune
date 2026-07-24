@@ -399,6 +399,10 @@ export class Editor {
       }
     };
     const topScroll = el('div', 'ed-topbar-scroll', top);
+    const mainMenu = el('button', 'hud-btn', topScroll, '← Main Menu');
+    mainMenu.title = 'Return to the main menu';
+    mainMenu.setAttribute('aria-label', 'Return to the main menu');
+    mainMenu.onclick = () => this.cb.onExit();
     this.undoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Undo') as HTMLButtonElement;
     this.undoBtn.onclick = () => this.undo();
     this.redoBtn = el('button', 'hud-btn ed-history-btn', topScroll, 'Redo') as HTMLButtonElement;

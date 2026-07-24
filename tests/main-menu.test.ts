@@ -77,6 +77,19 @@ describe('main-menu mission hierarchy', () => {
       title: 'RESUME ARTEMIS IV · CHAPTER 4',
       detail: 'Resume begins at the chapter checkpoint',
       qualifier: ARTEMIS_IV_VISIBLE_QUALIFIER,
+      restart: {
+        mission: 'artemis-iv',
+        label: 'RESTART FROM CHAPTER 1',
+      },
+    });
+  });
+
+  it('offers an explicit First Light restart from launch', () => {
+    expect(menuMissions(null).find((mission) => mission.id === 'first-light')).toMatchObject({
+      restart: {
+        mission: 'first-light',
+        label: 'START OVER FROM LAUNCH',
+      },
     });
   });
 

@@ -10,6 +10,10 @@ export interface BuiltInCraftDefinition {
 }
 
 export type BuiltInCraftVisualId = 'starship-2019-concept';
+export const STARSHIP_CONCEPT_CRAFT_NAME = 'SpaceX Starship · 2019 Concept';
+export const STARSHIP_CONCEPT_DEFAULT_VESSEL_NAME = 'Artemis IV lander concept';
+export const STARSHIP_CONCEPT_DEFAULT_BODY_ID = 'moon';
+export const STARSHIP_CONCEPT_DEFAULT_ORBIT_ALTITUDE = 100_000;
 
 const identity = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
 
@@ -342,7 +346,7 @@ export function createOdysseyOrbiter(): Craft {
 
 /** Display-only shell for the unchanged third-party Starship concept model. */
 export function createStarshipConceptDisplayCraft(): Craft {
-  const craft = createCraft('SpaceX Starship · 2019 Concept');
+  const craft = createCraft(STARSHIP_CONCEPT_CRAFT_NAME);
   // The inert command pod gives the simulator a finite mass and pad contact.
   // Its normal visual is hidden whenever the external Starship model is present.
   addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 0, z: 0 }, identity);
@@ -350,10 +354,17 @@ export function createStarshipConceptDisplayCraft(): Craft {
   return craft;
 }
 
+export function isStarshipConceptDisplayCraft(craft: Readonly<Craft>): boolean {
+  return craft.name === STARSHIP_CONCEPT_CRAFT_NAME
+    && craft.parts.length === 1
+    && craft.parts[0].defId === 'pod-voyager'
+    && craft.stages.length === 0;
+}
+
 export const BUILT_IN_CRAFTS: readonly BuiltInCraftDefinition[] = Object.freeze([
   Object.freeze({
     id: 'spacex-starship-2019-concept',
-    name: 'SpaceX Starship · 2019 Concept',
+    name: STARSHIP_CONCEPT_CRAFT_NAME,
     description: 'Display only · “SpaceX Starship” by MartianDays (CC BY 4.0) · unchanged model · not flight-ready',
     displayVisualId: 'starship-2019-concept',
     create: createStarshipConceptDisplayCraft,

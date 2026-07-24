@@ -1185,8 +1185,9 @@ export function injectUiStyles(): void {
         padding:10px; background:linear-gradient(180deg,rgba(9,18,26,.86),rgba(5,11,17,.95));
         border:1px solid rgba(100,163,193,.5); border-top-color:#73bfdf; backdrop-filter:blur(12px);
         box-shadow:0 18px 50px rgba(0,0,0,.42); animation:menuDeckIn .45s ease-out both; }
+      .perilune-mission-group { min-width:0; display:flex; flex-direction:column; }
       .perilune-mission { min-height:76px; padding:12px 14px; text-align:left; color:#e8f0f3;
-        border:1px solid #345267; background:rgba(10,23,33,.68); cursor:pointer; }
+        border:1px solid #345267; background:rgba(10,23,33,.68); cursor:pointer; flex:1; }
       .perilune-mission:hover { border-color:#8ed1ec; transform:translateY(-1px); }
       .perilune-mission:focus-visible { border-color:#8ed1ec; outline:2px solid #f4c15f;
         outline-offset:3px; transform:translateY(-1px); }
@@ -1196,6 +1197,10 @@ export function injectUiStyles(): void {
       .perilune-mission-detail { display:block; margin-top:5px; color:#9fadb4; font-size:9px; }
       .perilune-mission-qualifier { display:block; margin-top:7px; color:#caa75d; font:6.5px/1.35 var(--ui-mono);
         letter-spacing:.55px; }
+      .perilune-mission-restart { min-height:28px; padding:5px 10px; color:#c5d3dc; font:8px var(--ui-mono);
+        letter-spacing:.8px; border:1px solid #345267; border-top:0; background:rgba(7,16,23,.92); cursor:pointer; }
+      .perilune-mission-restart:hover { color:#fff; border-color:#dca94a; background:rgba(91,58,24,.62); }
+      .perilune-mission-restart:focus-visible { outline:2px solid #f4c15f; outline-offset:2px; }
       .perilune-menu-utilities { grid-column:-2/-1; display:flex; align-items:center; gap:6px; padding:0 4px 0 10px; border-left:1px solid #29404f; }
       .perilune-menu-utilities .k-icon-btn { width:42px; height:42px; }
       @keyframes menuDeckIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
@@ -1209,7 +1214,7 @@ export function injectUiStyles(): void {
       }
       @media (prefers-reduced-motion:reduce) {
         .perilune-command-deck { animation:none; }
-        .perilune-mission,.k-icon-tooltip { transition:none; }
+        .perilune-mission,.perilune-mission-restart,.k-icon-tooltip { transition:none; }
       }
 
       /* ============================== tutorial */

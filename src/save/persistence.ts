@@ -21,6 +21,7 @@ import { partById, type ResourceId } from '../content/parts';
 import {
   migrateSave,
   SaveGame,
+  SavedCraft,
   SavedSurfacePose,
   SavedVessel,
   SAVE_VERSION,
@@ -46,6 +47,58 @@ function cloneActionGroups(groups: Readonly<ActionGroups>): ActionGroups {
     if (assignments?.length) clone[group] = assignments.map((assignment) => ({ ...assignment }));
   }
   return clone;
+}
+
+function serializeCraft(craft: Readonly<Craft>): SavedCraft {
+  return {
+    name: craft.name,
+    version: craft.version,
+    parts: craft.parts.map((p) => ({
+      key: p.key,
+      defId: p.defId,
+      parentKey: p.parentKey,
+      attach: p.attach,
+      position: { ...p.position },
+      rotation: { ...p.rotation },
+      resources: { ...p.resources } as Record<string, number>,
+      symmetry: p.symmetry,
+      activated: p.activated,
+      deployed: p.deployed,
+      temperature: p.temperature,
+      interstageShroud: p.interstageShroud ? { ...p.interstageShroud } : undefined,
+    })),
+    stages: craft.stages.map((stage) => ({ partKeys: [...stage.partKeys] })),
+    actionGroups: cloneActionGroups(craft.actionGroups),
+    nextKey: craft.nextKey,
+  };
+}
+
+function restoreCraft(saved: Readonly<SavedCraft>): Craft {
+  return {
+    name: saved.name,
+    version: saved.version,
+    parts: saved.parts.map(
+      (p): PartInstance => ({
+        key: p.key,
+        defId: p.defId,
+        parentKey: p.parentKey,
+        attach: p.attach as AttachKind,
+        position: { ...p.position },
+        rotation: { ...p.rotation },
+        resources: { ...p.resources } as Partial<Record<ResourceId, number>>,
+        symmetry: p.symmetry,
+        activated: p.activated,
+        deployed: p.deployed,
+        temperature: p.temperature,
+        interstageShroud: p.interstageShroud
+          ? sanitizeInterstageShroudSpec(p.interstageShroud) ?? undefined
+          : undefined,
+      }),
+    ),
+    stages: saved.stages.map((stage) => ({ partKeys: [...stage.partKeys] })),
+    actionGroups: cloneActionGroups(saved.actionGroups),
+    nextKey: saved.nextKey,
+  };
 }
 
 function isSurfaceSituation(situation: SavedVessel['situation']): boolean {
@@ -85,27 +138,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
     return {
       id: v.id,
       name: v.name,
-      craft: {
-        name: v.craft.name,
-        version: v.craft.version,
-        parts: v.craft.parts.map((p) => ({
-          key: p.key,
-          defId: p.defId,
-          parentKey: p.parentKey,
-          attach: p.attach,
-          position: { ...p.position },
-          rotation: { ...p.rotation },
-          resources: { ...p.resources } as Record<string, number>,
-          symmetry: p.symmetry,
-          activated: p.activated,
-          deployed: p.deployed,
-          temperature: p.temperature,
-          interstageShroud: p.interstageShroud ? { ...p.interstageShroud } : undefined,
-        })),
-        stages: v.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
-        actionGroups: cloneActionGroups(v.craft.actionGroups),
-        nextKey: v.craft.nextKey,
-      },
+      craft: serializeCraft(v.craft),
       bodyId: v.bodyId,
       regime: gv.regime,
       pos: { x: v.pos.x, y: v.pos.y, z: v.pos.z },
@@ -131,6 +164,8 @@ export function serializeGame(game: GameState, label: string): SaveGame {
         : null,
       surfacePose: serializeSurfacePose(game, gv),
       target: gv.target,
+      launchId: gv.launchId ?? null,
+      launchCraft: gv.launchCraft ? serializeCraft(gv.launchCraft) : null,
     };
   });
 
@@ -205,31 +240,7 @@ export function restoreGame(save: SaveGame, options: Readonly<GameStateOptions> 
   }
 
   for (const sv of migrated.vessels) {
-    const craft: Craft = {
-      name: sv.craft.name,
-      version: sv.craft.version,
-      parts: sv.craft.parts.map(
-        (p): PartInstance => ({
-          key: p.key,
-          defId: p.defId,
-          parentKey: p.parentKey,
-          attach: p.attach as AttachKind,
-          position: { ...p.position },
-          rotation: { ...p.rotation },
-          resources: { ...p.resources } as Partial<Record<ResourceId, number>>,
-          symmetry: p.symmetry,
-          activated: p.activated,
-          deployed: p.deployed,
-          temperature: p.temperature,
-          interstageShroud: p.interstageShroud
-            ? sanitizeInterstageShroudSpec(p.interstageShroud) ?? undefined
-            : undefined,
-        }),
-      ),
-      stages: sv.craft.stages.map((s) => ({ partKeys: [...s.partKeys] })),
-      actionGroups: cloneActionGroups(sv.craft.actionGroups),
-      nextKey: sv.craft.nextKey,
-    };
+    const craft = restoreCraft(sv.craft);
     const runtime = createVesselRuntime(sv.id, sv.name, craft, sv.bodyId);
     runtime.pos.set(sv.pos.x, sv.pos.y, sv.pos.z);
     runtime.vel.set(sv.vel.x, sv.vel.y, sv.vel.z);
@@ -323,6 +334,8 @@ export function restoreGame(save: SaveGame, options: Readonly<GameStateOptions> 
         landedAtt,
       },
       target: sv.target,
+      launchId: sv.launchId ?? null,
+      launchCraft: sv.launchCraft ? restoreCraft(sv.launchCraft) : null,
     };
     game.vessels.push(gv);
     game.noteRestoredVessel(sv.id);

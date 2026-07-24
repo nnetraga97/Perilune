@@ -520,6 +520,7 @@ export class MapView {
   private bodyOrbits = new Map<string, MapLine>();
   private soiMeshes = new Map<string, THREE.Mesh>();
   private vesselLine = orbitLine('#7fd0e8', false, 3.2);
+  private fleetOrbitLines = new Map<string, MapLine>();
   private currentArcLine = orbitLine('#a9ebff', false, 4.2);
   private nodeLine = orbitLine('#e8c76b', true, 3.4);
   private completionLine = orbitLine('#fff0a8', true, 3.2);
@@ -1882,6 +1883,7 @@ export class MapView {
     const elements = stateToElements(body.mu, v.pos, v.vel, t);
     this.currentElements = elements;
     fillConic(this.vesselLine, elements, null);
+    this.updateFleetOrbitLines(game, gv.runtime.id, body, t);
     const plan = this.cb.getManeuverPlan();
     const activePlan = plan?.vesselId === v.id && plan.bodyId === body.id ? plan : null;
     const node = activePlan?.node ?? null;
@@ -2104,6 +2106,54 @@ export class MapView {
     this.updateEntryPrediction(game, body, elements, markerScale);
   }
 
+  private updateFleetOrbitLines(
+    game: GameState,
+    activeVesselId: string,
+    anchorBody: Body,
+    time: number,
+  ): void {
+    const shown = new Set<string>();
+    const offset = new Vec3();
+    for (const vessel of game.vessels) {
+      const runtime = vessel.runtime;
+      if (
+        runtime.id === activeVesselId || runtime.isDebris
+        || !['suborbital', 'orbit', 'escaping'].includes(runtime.situation)
+      ) continue;
+      const body = game.bodyOf(vessel);
+      const elements = stateToElements(body.mu, runtime.pos, runtime.vel, time);
+      if (!Number.isFinite(elements.a) || !Number.isFinite(elements.e)) continue;
+      let line = this.fleetOrbitLines.get(runtime.id);
+      if (!line) {
+        line = orbitLine('#d6ad63', false, 2.4);
+        line.material.opacity = 0.72;
+        line.userData.vesselId = runtime.id;
+        this.fleetOrbitLines.set(runtime.id, line);
+        this.scene.add(line);
+      }
+      let bodyOffset: Vec3 | null = null;
+      if (body.id !== anchorBody.id) {
+        game.universe.relativePosition(body, anchorBody, time, offset);
+        bodyOffset = offset;
+      }
+      fillConic(line, elements, bodyOffset);
+      line.userData.vesselName = runtime.name;
+      line.visible = true;
+      shown.add(runtime.id);
+    }
+    for (const [vesselId, line] of this.fleetOrbitLines) {
+      line.visible = shown.has(vesselId);
+    }
+  }
+
+  fleetOrbitCount(): number {
+    let count = 0;
+    for (const line of this.fleetOrbitLines.values()) {
+      if (line.visible) count++;
+    }
+    return count;
+  }
+
   private updateOrbitMarkers(
     elements: OrbitalElements,
     targetBodyId: string | null,
@@ -2310,6 +2360,7 @@ export class MapView {
     this.bodyMeshes.clear();
     this.bodyOrbits.clear();
     this.soiMeshes.clear();
+    this.fleetOrbitLines?.clear();
     this.depositMarkers.length = 0;
     this.depositCache.clear();
     this.scene.clear();

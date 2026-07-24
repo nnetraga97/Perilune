@@ -54,6 +54,13 @@ test('landing page and utility launchers use the approved hierarchy', async ({ p
   expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(1440);
   expect(tooltipBox!.y).toBeGreaterThanOrEqual(0);
   expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(900);
+  await page.getByRole('button', { name: 'Return to the main menu' }).click();
+  await page.waitForFunction(() => window.__TEST__?.screen() === 'menu');
+  await expect(menu).toBeVisible();
+  await page.getByRole('button', { name: 'Restart First Light from launch' }).click();
+  await expect(page.locator('.game-dialog-title')).toHaveText('Restart First Light?');
+  await expect(page.getByRole('button', { name: 'RESTART FROM LAUNCH' })).toBeVisible();
+  await page.getByRole('button', { name: 'KEEP CURRENT MISSION' }).click();
   expect(errors, `console errors:\n${errors.join('\n')}`).toEqual([]);
 });
 

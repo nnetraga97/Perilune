@@ -95,6 +95,13 @@ export function validateSave(raw: unknown): raw is SaveGame {
       if (!record(vessel.scienceBuffer) || Object.keys(vessel.scienceBuffer).length > MAX_COLLECTION) return false;
       if (!Object.entries(vessel.scienceBuffer).every(([key, entry]) => text(key) && validBufferedResult(entry))) return false;
     }
+    if (vessel.launchId !== undefined || vessel.launchCraft !== undefined) {
+      const launchId = vessel.launchId ?? null;
+      const launchCraft = vessel.launchCraft ?? null;
+      if (launchId !== null && !text(launchId, 128)) return false;
+      if (launchCraft !== null && !validCraft(launchCraft, s.saveVersion, 0)) return false;
+      if ((launchId === null) !== (launchCraft === null)) return false;
+    }
   }
   if (s.activeVesselId !== null && !vesselIds.has(s.activeVesselId)) return false;
   if (s.saveVersion >= 7 && s.alarms.some((alarm) => alarm.vesselId !== null && !vesselIds.has(alarm.vesselId))) return false;

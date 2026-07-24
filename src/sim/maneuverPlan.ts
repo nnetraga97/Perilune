@@ -141,6 +141,17 @@ export class ManeuverPlanController {
     this.recomputeSchedule(plan.vesselId, plan.bodyId);
   }
 
+  removeVessel(vesselId: string): void {
+    const removed = this.plans.filter((plan) => plan.vesselId === vesselId);
+    if (removed.length === 0) return;
+    const removedIds = new Set(removed.map((plan) => plan.id));
+    this.plans = this.plans.filter((plan) => !removedIds.has(plan.id));
+    for (const id of removedIds) this.capturedReferences.delete(id);
+    if (this.selectedId && removedIds.has(this.selectedId)) {
+      this.selectedId = this.plans[0]?.id ?? null;
+    }
+  }
+
   beginExecution(id = this.selectedId): boolean {
     const plan = this.find(id);
     if (!plan || (plan.phase !== 'planned' && plan.phase !== 'overdue')) return false;

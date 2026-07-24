@@ -88,6 +88,10 @@ export interface GameVessel {
   rails: RailsState;
   /** Optional body id selected for navigation and map readouts. */
   target: string | null;
+  /** Original pad launch shared by every component split from that flight. */
+  launchId?: string | null;
+  /** Complete pre-launch craft used for vessel-scoped Revert. */
+  launchCraft?: Craft | null;
 }
 
 interface RailsEvent {
@@ -353,6 +357,8 @@ export class GameState {
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
       target: null,
+      launchId: runtime.id,
+      launchCraft: structuredClone(craft),
     };
     this.vessels.push(gv);
     this.activeVesselId = runtime.id;
@@ -374,10 +380,29 @@ export class GameState {
       regime: 'active',
       rails: { elements: null, landedPos: null, landedAtt: null },
       target: null,
+      launchId: null,
+      launchCraft: null,
     };
     this.vessels.push(gv);
     this.activeVesselId = runtime.id;
     return gv;
+  }
+
+  /** Replace one pad-launched flight family while leaving the rest of the fleet untouched. */
+  revertLaunch(gv: GameVessel): { vessel: GameVessel; removedVesselIds: readonly string[] } | null {
+    const launchId = gv.launchId ?? null;
+    const launchCraft = gv.launchCraft ? structuredClone(gv.launchCraft) : null;
+    if (!launchId || !launchCraft || !this.vessels.includes(gv)) return null;
+    const removedVesselIds = this.vessels
+      .filter((candidate) => candidate.launchId === launchId)
+      .map((candidate) => candidate.runtime.id);
+    const removed = new Set(removedVesselIds);
+    this.vessels = this.vessels.filter((candidate) => !removed.has(candidate.runtime.id));
+    this.activeVesselId = null;
+    this.lastDestruction = null;
+    const vessel = this.spawnOnPad(launchCraft, launchCraft.name);
+    this.setWarp(0, false);
+    return { vessel, removedVesselIds };
   }
 
   /** Move the active craft into a stable equatorial debug ellipse, starting at apoapsis. */
@@ -732,6 +757,8 @@ export class GameState {
         regime: 'active',
         rails: { elements: null, landedPos: null, landedAtt: null },
         target: gv.target,
+        launchId: gv.launchId ?? null,
+        launchCraft: gv.launchCraft ? structuredClone(gv.launchCraft) : null,
       };
       this.vessels.push(componentGv);
       componentVessels.push({ gv: componentGv, keys: data.keys });
@@ -1297,6 +1324,9 @@ export class GameState {
     this.flags['campaign:first-docking'] = true;
     this.vessels = this.vessels.filter((x) => x !== b);
     if (this.activeVesselId === vb.id) this.activeVesselId = va.id;
+    // A docked composite no longer has one unambiguous pad configuration.
+    a.launchId = null;
+    a.launchCraft = null;
   }
 
   /** Undock at a docked port pair (child port whose parent is a port). */

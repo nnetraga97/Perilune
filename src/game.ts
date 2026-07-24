@@ -84,6 +84,11 @@ import { GAMEPLAY_PROFILES } from './content/gameplayProfiles';
 import {
   createFirstLightRocket,
   createSecondLightCraft,
+  createStarshipConceptDisplayCraft,
+  isStarshipConceptDisplayCraft,
+  STARSHIP_CONCEPT_DEFAULT_BODY_ID,
+  STARSHIP_CONCEPT_DEFAULT_ORBIT_ALTITUDE,
+  STARSHIP_CONCEPT_DEFAULT_VESSEL_NAME,
   type BuiltInCraftVisualId,
 } from './content/crafts';
 import { maneuverAutomationCommand } from './sim/maneuverAutomation';
@@ -213,7 +218,8 @@ class PeriluneGame {
   private mapPinchMidpoint = { x: 0, y: 0 };
   private editorLongPressTimer: number | null = null;
   private lastFrame = performance.now();
-  private launchedCraft: Craft | null = null;
+  private readonly conceptVisualPending = new Set<string>();
+  private readonly conceptVisualFailed = new Set<string>();
   private sessionKind: SessionKind = 'standard';
   private artemisIvSessionStore: ArtemisIvSessionStore | null = null;
   private artemisIvMission: ArtemisIvMissionState | null = null;
@@ -550,6 +556,10 @@ class PeriluneGame {
     this.menu = new MainMenu(this.uiRoot, {
       onArtemisIv: (action) => this.openArtemisIv(action),
       onFirstLight: () => this.startFirstLight(),
+      onRestart: (mission) => {
+        if (mission === 'artemis-iv') this.confirmRestartArtemisIv();
+        else this.confirmRestartFirstLight();
+      },
       onSandbox: () => {
         this.newGame('sandbox');
         this.toEditor();
@@ -663,6 +673,15 @@ class PeriluneGame {
       properAcceleration: () => this.game.active?.runtime.properAccel ?? 0,
       throttle: () => this.game.active?.runtime.controls.throttle ?? 0,
       vesselCount: () => this.game.vessels.length,
+      vessels: () => this.game.vessels.map((vessel) => ({
+        id: vessel.runtime.id,
+        name: vessel.runtime.name,
+        bodyId: vessel.runtime.bodyId,
+        situation: vessel.runtime.situation,
+        active: vessel.runtime.id === this.game.activeVesselId,
+      })),
+      fleetOrbitCount: () => this.map.fleetOrbitCount(),
+      externalVisualAttached: (vesselId: string) => this.world.hasExternalVesselVisual(vesselId),
       time: () => this.game.time,
       sciencePoints: () => this.game.sciencePoints,
       campaign: () => ({
@@ -877,6 +896,60 @@ class PeriluneGame {
     }
   }
 
+  private ensureDefaultConceptLander(): void {
+    if (this.sessionKind === 'artemis-iv') return;
+    if (!this.game.universe.bodies.has(STARSHIP_CONCEPT_DEFAULT_BODY_ID)) return;
+    const existing = this.game.vessels.find((vessel) => (
+      !vessel.launchId && isStarshipConceptDisplayCraft(vessel.runtime.craft)
+    ));
+    if (existing) return;
+    const previousActiveId = this.game.activeVesselId;
+    const craft = createStarshipConceptDisplayCraft();
+    const lander = this.game.spawnInOrbit(
+      craft,
+      STARSHIP_CONCEPT_DEFAULT_VESSEL_NAME,
+      STARSHIP_CONCEPT_DEFAULT_BODY_ID,
+      STARSHIP_CONCEPT_DEFAULT_ORBIT_ALTITUDE,
+    );
+    lander.runtime.sas = 'stability';
+    lander.runtime.crew = [];
+    this.game.activeVesselId = previousActiveId;
+  }
+
+  private ensureActiveConceptVisual(): void {
+    const vessel = this.game.active;
+    if (
+      !vessel || !isStarshipConceptDisplayCraft(vessel.runtime.craft)
+      || this.world.hasExternalVesselVisual(vessel.runtime.id)
+      || this.conceptVisualPending.has(vessel.runtime.id)
+      || this.conceptVisualFailed.has(vessel.runtime.id)
+    ) return;
+    const vesselId = vessel.runtime.id;
+    this.conceptVisualPending.add(vesselId);
+    void this.loadEditorBuiltInVisual('starship-2019-concept').then((visual) => {
+      const current = this.game.vessels.find((candidate) => candidate.runtime.id === vesselId);
+      if (!current || !isStarshipConceptDisplayCraft(current.runtime.craft)) {
+        visual.dispose();
+        return;
+      }
+      this.world.attachExternalVesselVisual(current, visual);
+      if (this.game.activeVesselId === vesselId) {
+        this.world.resetCamera(false);
+        this.world.frameCameraForVisualRadius(55, -20);
+      }
+    }).catch((error) => {
+      this.conceptVisualFailed.add(vesselId);
+      clientLog.warn('sim.boundary.error', {
+        boundary: 'starship-concept-visual',
+        errorType: 'ExternalVisualUnavailable',
+        vesselId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }).finally(() => {
+      this.conceptVisualPending.delete(vesselId);
+    });
+  }
+
   private confirmArtemisIvPreparedSceneBudget(retryChapter: ArtemisIvChapter): boolean {
     const decision = recheckArtemisIvPreparedSceneBudget(this.artemisIvRendererLedger);
     if (decision.ok) return true;
@@ -996,7 +1069,6 @@ class PeriluneGame {
       this.artemisIvMission = mission;
       this.artemisIvGuideProgress = createArtemisIvGuideProgress(chapter);
       this.sessionKind = 'artemis-iv';
-      this.launchedCraft = null;
       this.maneuver = new ManeuverPlanController();
       this.artemisIvManeuverIds.clear();
       this.autoManeuverPlanId = null;
@@ -1627,6 +1699,35 @@ class PeriluneGame {
     this.toEditor();
   }
 
+  private confirmRestartFirstLight(): void {
+    this.showDialog(
+      'Restart First Light?',
+      'This starts First Light again with a fresh vehicle on the launch path. The new mission will replace the current autosave.',
+      [
+        { label: 'KEEP CURRENT MISSION', fn: () => {} },
+        { label: 'RESTART FROM LAUNCH', fn: () => this.startFirstLight() },
+      ],
+    );
+  }
+
+  private confirmRestartArtemisIv(): void {
+    this.showDialog(
+      'Restart Artemis IV?',
+      'This clears the saved Artemis IV chapter checkpoint and starts again from Chapter 1. Your normal save is unchanged.',
+      [
+        { label: 'KEEP CHECKPOINT', fn: () => {} },
+        {
+          label: 'RESTART FROM CHAPTER 1',
+          fn: () => {
+            this.artemisIvSessionStore?.clear();
+            this.refreshArtemisIvMenuState();
+            void this.beginArtemisIv(1);
+          },
+        },
+      ],
+    );
+  }
+
   private async continueAutosave(): Promise<void> {
     const save = await this.saveSync.read('auto');
     if (!save) {
@@ -1635,6 +1736,7 @@ class PeriluneGame {
     }
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
     this.sessionKind = 'standard';
+    this.ensureDefaultConceptLander();
     this.editor.refreshCampaign();
     if (this.game.active) this.toFlight(false);
     else this.toEditor();
@@ -1646,6 +1748,8 @@ class PeriluneGame {
     this.game = new GameState(mode, profile);
     this.sessionKind = 'standard';
     this.firstLightMoonCorrectionApplied = false;
+    this.conceptVisualPending.clear();
+    this.conceptVisualFailed.clear();
     this.maneuver = new ManeuverPlanController();
     this.autoManeuverPlanId = null;
     this.autoManeuverPauseLoggedFor = null;
@@ -1725,6 +1829,7 @@ class PeriluneGame {
     this.windows.setScreen('flight');
     this.missionStart = this.game.time;
     this.hud.setMissionStart(this.missionStart);
+    this.ensureActiveConceptVisual();
   }
 
   private frameActiveCraft(keepEngineClearOfHud = false): void {
@@ -1750,16 +1855,14 @@ class PeriluneGame {
       }
     }
     const home = this.game.universe.get(this.game.universe.homeBodyId);
-    // The VAB-to-flight boundary owns authority promotion. Retire the previous
-    // flight before fetching so no live contact query can observe a generation
-    // change, then prepare render state from the exact frozen authority.
-    this.game.clearFlightVessels();
+    const firstFleetLaunch = this.game.vessels.length === 0;
     try {
-      this.game.warpToLaunchDaylight(home);
-      const authority = await this.game.prepareFlightAuthority(
-        home,
-        home.id === 'earth' ? 'ksc-launch' : 'parent',
-      );
+      if (firstFleetLaunch) this.game.warpToLaunchDaylight(home);
+      // Terrain authority is promoted once, before the first fleet launch.
+      // Later launches reuse that frozen authority so orbiting craft survive.
+      const authority = firstFleetLaunch
+        ? await this.game.prepareFlightAuthority(home, home.id === 'earth' ? 'ksc-launch' : 'parent')
+        : this.game.frozenFlightAuthority(home.id);
       if (authority.fallbackReason) {
         clientLog.warn('terrain.authority.fallback', {
           bodyId: authority.bodyId,
@@ -1781,7 +1884,6 @@ class PeriluneGame {
       return `Could not prepare ${home.name} terrain. Retry launch.`;
     }
     if (this.game.campaign.mode === 'program') this.game.campaign.funds -= cost;
-    this.launchedCraft = structuredClone(craft);
     const vessel = this.game.spawnOnPad(craft, craft.name);
     if (displayVisual) {
       this.world.attachExternalVesselVisual(vessel, displayVisual);
@@ -1790,6 +1892,7 @@ class PeriluneGame {
     } else {
       this.frameActiveCraft();
     }
+    this.ensureDefaultConceptLander();
     this.toFlight();
     telemetry.track('launch');
     clientLog.info('launch', { mode: this.game.campaign.mode });
@@ -1897,6 +2000,9 @@ class PeriluneGame {
     const save = await this.saveSync.read(slot);
     if (!save) return;
     this.game = restoreGame(save, GAMEPLAY_PROFILES.sol);
+    this.ensureDefaultConceptLander();
+    this.conceptVisualPending.clear();
+    this.conceptVisualFailed.clear();
     this.editor.refreshCampaign();
     this.world.resetDynamicState();
     if (this.game.active) this.toFlight(false);
@@ -1928,16 +2034,20 @@ class PeriluneGame {
       void this.retryArtemisIvChapter();
       return;
     }
-    if (!this.launchedCraft) return;
-    this.game.clearFlightVessels();
-    this.maneuver = new ManeuverPlanController();
+    const active = this.game.active;
+    if (!active) return;
+    const reverted = this.game.revertLaunch(active);
+    if (!reverted) return;
+    for (const vesselId of reverted.removedVesselIds) {
+      this.world.invalidateVessel(vesselId);
+      this.maneuver.removeVessel(vesselId);
+      this.conceptVisualPending.delete(vesselId);
+      this.conceptVisualFailed.delete(vesselId);
+    }
     this.autoManeuverPlanId = null;
     this.autoManeuverPauseLoggedFor = null;
     this.pendingWarpStop = null;
     this.firstLightMoonCorrectionApplied = false;
-    const home = this.game.universe.get(this.game.universe.homeBodyId);
-    this.game.warpToLaunchDaylight(home);
-    this.game.spawnOnPad(structuredClone(this.launchedCraft), this.launchedCraft.name);
     this.frameActiveCraft();
     this.game.setWarp(0, false);
     this.toFlight();
@@ -2627,6 +2737,7 @@ class PeriluneGame {
     }
     this.map.focusActiveVessel(this.game);
     this.hud.setMissionStart(this.game.time);
+    this.ensureActiveConceptVisual();
   }
 
   private stepWarp(dir: number): void {
@@ -3162,20 +3273,28 @@ class PeriluneGame {
   }
 
   private startSecondLight(): boolean {
-    this.game.clearFlightVessels();
+    const preserved = this.game.vessels.filter((vessel) => (
+      isStarshipConceptDisplayCraft(vessel.runtime.craft) && !vessel.launchId
+    ));
+    const removed = this.game.vessels.filter((vessel) => !preserved.includes(vessel));
+    for (const vessel of removed) this.world.invalidateVessel(vessel.runtime.id);
+    this.game.vessels = preserved;
+    this.game.activeVesselId = null;
     this.maneuver = new ManeuverPlanController();
     this.autoManeuverPlanId = null;
     this.autoManeuverPauseLoggedFor = null;
     this.pendingWarpStop = null;
     this.firstLightMoonCorrectionApplied = false;
     this.sessionKind = 'first-light';
-    this.launchedCraft = createFirstLightRocket();
     const craft = createSecondLightCraft();
     const vessel = this.game.spawnInOrbit(craft, craft.name, 'earth', 200_000);
+    vessel.launchId = vessel.runtime.id;
+    vessel.launchCraft = createFirstLightRocket();
     vessel.runtime.currentStage = 1;
     vessel.runtime.controls.throttle = 0;
     vessel.runtime.sas = 'stability';
     this.game.setWarp(0, false);
+    this.ensureDefaultConceptLander();
     this.toFlight(false);
     return this.planFirstLightMoonTransfer();
   }

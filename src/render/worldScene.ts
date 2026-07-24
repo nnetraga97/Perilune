@@ -911,6 +911,10 @@ export class WorldScene {
     this.scene.add(group);
   }
 
+  hasExternalVesselVisual(vesselId: string): boolean {
+    return this.vesselVisuals.get(vesselId)?.disposeExternalResources !== undefined;
+  }
+
   /**
    * Read-only test probe: number of nozzle plume holders for a part on the
    * active vessel (three for the Mule, one for the Colt), or 0 if absent.

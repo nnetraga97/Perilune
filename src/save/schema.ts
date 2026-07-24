@@ -104,6 +104,9 @@ export interface SavedVessel {
   surfacePose: SavedSurfacePose | null;
   /** Optional body id selected for navigation and map readouts (v6). */
   target: string | null;
+  /** Additive launch identity and blueprint used by vessel-scoped Revert. */
+  launchId?: string | null;
+  launchCraft?: SavedCraft | null;
 }
 
 export interface SaveGame {

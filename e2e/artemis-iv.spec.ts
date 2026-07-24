@@ -147,6 +147,10 @@ test('Artemis IV starts from the public mission card with its checked Chapter 1 
   await expect(mission.locator('.perilune-mission-title')).toHaveText(
     'RESUME ARTEMIS IV · CHAPTER 1',
   );
+  await page.getByRole('button', { name: 'Restart Artemis IV from Chapter 1' }).click();
+  await expect(page.locator('.game-dialog-title')).toHaveText('Restart Artemis IV?');
+  await expect(page.getByRole('button', { name: 'RESTART FROM CHAPTER 1' })).toBeVisible();
+  await page.getByRole('button', { name: 'KEEP CHECKPOINT' }).click();
   await mission.click();
   await page.waitForFunction(() => window.__TEST__?.screen() === 'flight', null, {
     timeout: 120_000,
