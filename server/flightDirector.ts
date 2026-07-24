@@ -128,6 +128,22 @@ function responseText(payload: OpenAIResponsePayload): string | null {
   return null;
 }
 
+function parseAdvisoryJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Structured output should be raw JSON, but tolerate an otherwise-valid
+    // JSON response wrapped in a single Markdown fence by a provider edge case.
+    const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (!fenced) throw new OpenAIProviderError('invalid_advisory_json');
+    try {
+      return JSON.parse(fenced[1]);
+    } catch {
+      throw new OpenAIProviderError('invalid_advisory_json');
+    }
+  }
+}
+
 function tokenCount(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
@@ -178,12 +194,7 @@ export function createOpenAIFlightDirectorProvider(
       }
       const text = responseText(payload);
       if (!text) throw new OpenAIProviderError('missing_output_text');
-      let advisory: unknown;
-      try {
-        advisory = JSON.parse(text);
-      } catch {
-        throw new OpenAIProviderError('invalid_advisory_json');
-      }
+      const advisory = parseAdvisoryJson(text);
       if (!isFlightDirectorAdvisory(advisory)) throw new OpenAIProviderError('invalid_advisory_shape');
       return {
         advisory,

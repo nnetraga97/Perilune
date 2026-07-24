@@ -267,6 +267,17 @@ describe('flight director server', () => {
     });
   });
 
+  it('accepts an otherwise-valid advisory wrapped in a Markdown JSON fence', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({
+      output_text: `\`\`\`json\n${JSON.stringify(advisory())}\n\`\`\``,
+    }));
+    const provider = createOpenAIFlightDirectorProvider('test-key', fetchImpl as typeof fetch);
+
+    await expect(provider.generate(snapshot())).resolves.toMatchObject({
+      advisory: { headline: 'Periapsis is still below ground' },
+    });
+  });
+
   it('writes the exact structured snapshot and advisory through the service-role REST endpoint', async () => {
     const fetchImpl = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>
