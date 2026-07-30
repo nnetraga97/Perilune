@@ -1078,8 +1078,8 @@ export class Editor {
     const actions = el('div', 'ed-part-context-actions', panel);
     const remove = el('button', 'hud-btn', actions, 'Remove');
     remove.onclick = () => this.deleteSelected();
-    const frame = el('button', 'hud-btn', actions, 'Frame');
-    frame.onclick = () => this.frameSelected();
+    const focus = el('button', 'hud-btn', actions, 'Focus camera');
+    focus.onclick = () => this.focusPrimaryPart();
     if (this.selectedKeys.size === 1) {
       const reroot = el('button', 'hud-btn', actions, 'Make root') as HTMLButtonElement;
       reroot.disabled = part.parentKey === null;
@@ -1334,6 +1334,15 @@ export class Editor {
     const span = framed.reduce((max, part) => Math.max(max, Math.hypot(part.position.x - center.x, part.position.y - center.y, part.position.z - center.z)), 0);
     this.camFocusOffset.set(center.x, center.y - mid, center.z);
     this.camDist = Math.max(5, Math.min(40, Math.max(12, span * 3)));
+  }
+
+  private focusPrimaryPart(): void {
+    const part = this.primarySelectedKey === null ? null : craftPart(this.craft, this.primarySelectedKey);
+    if (!part) return;
+    const ys = this.craft.parts.map((candidate) => candidate.position.y);
+    const mid = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 3;
+    this.camFocusOffset.set(part.position.x, part.position.y - mid, part.position.z);
+    this.closePartContext();
   }
 
   panCameraLocal(x: number, y: number, z: number): void {

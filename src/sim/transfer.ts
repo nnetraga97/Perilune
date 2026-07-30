@@ -70,6 +70,8 @@ const _rHat = new Vec3();
 const _nHat = new Vec3();
 const _tHat = new Vec3();
 const _dv = new Vec3();
+/** Prefer a higher-energy route over asking the player to idle for months. */
+const MAX_INTERPLANETARY_WAIT = 60 * 86_400;
 
 function captureDeltaV(body: Body, encounter: EncounterPrediction): number {
   const periapsisRadius = body.radius + encounter.periapsisAltitude;
@@ -1225,30 +1227,52 @@ function planInterplanetary(
     normal: 0,
     radial: 0,
   };
+  const preferredWindowTime = Math.min(windowTime, time + MAX_INTERPLANETARY_WAIT);
   const refined = refineInterplanetaryIntercept(
     universe,
     time,
     from,
     target,
     opts,
-    windowTime,
+    preferredWindowTime,
     tT,
     departureDv,
     vInfArr,
-  );
+  ) ?? (preferredWindowTime < windowTime
+    ? refineInterplanetaryIntercept(
+      universe,
+      time,
+      from,
+      target,
+      opts,
+      windowTime,
+      tT,
+      departureDv,
+      vInfArr,
+    )
+    : null);
   const suggestedNode = refined?.node ?? nominalNode;
   const plannedBurnTime = suggestedNode.time;
+  const plannedPhaseNeeded = refined
+    ? norm2pi(angleOf(universe, target, plannedBurnTime) - angleOf(universe, from, plannedBurnTime))
+    : phaseNeeded;
+  let plannedEjectionAngle = ejectionAngle;
+  if (refined && opts.vesselPosition && opts.vesselVelocity) {
+    const reference = stateToElements(from.mu, opts.vesselPosition, opts.vesselVelocity, time);
+    elementsAtTime(reference, plannedBurnTime, _r, _v);
+    plannedEjectionAngle = norm2pi(Math.atan2(_r.y, _r.x));
+  }
   return {
     fromId: from.id,
     targetId: target.id,
     targetName: target.name,
     kind: 'interplanetary',
     phaseNow,
-    phaseNeeded,
+    phaseNeeded: plannedPhaseNeeded,
     timeToWindow: Math.max(0, plannedBurnTime - time),
     windowTime: plannedBurnTime,
     burnTime: plannedBurnTime,
-    ejectionAngle,
+    ejectionAngle: plannedEjectionAngle,
     transferTime: refined?.transferTime ?? tT,
     departureDv: Math.hypot(suggestedNode.prograde, suggestedNode.normal, suggestedNode.radial),
     arrivalDv: refined?.arrivalDv ?? arrivalDv,

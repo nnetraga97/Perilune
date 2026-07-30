@@ -188,12 +188,22 @@ test('two selected branches move together and undo as one action', async ({ page
   expect(restored[1].x).toBeCloseTo(boosters[1].x, 5);
 });
 
-test('secondary click exposes Make root while secondary drag remains camera orbit', async ({ page }) => {
+test('secondary click can focus a part or make it root while secondary drag remains camera orbit', async ({ page }) => {
   await openEditor(page);
   await loadWayfarer(page);
   const tank = await page.evaluate(() => (window as any).__TEST__.parts().find((part: any) => part.defId === 'tank-s2'));
-  const tankPoint = await projectPart(page, tank.key);
+  let tankPoint = await projectPart(page, tank.key);
 
+  await page.mouse.click(tankPoint.x, tankPoint.y, { button: 'right' });
+  await expect(page.locator('.ed-part-context')).toBeVisible();
+  await page.getByRole('button', { name: 'Focus camera' }).click();
+  await expect(page.locator('.ed-part-context')).toHaveCount(0);
+  await expect.poll(async () => {
+    const focused = await projectPart(page, tank.key);
+    return Math.hypot(focused.x - 640, focused.y - 360);
+  }).toBeLessThan(5);
+
+  tankPoint = await projectPart(page, tank.key);
   await page.mouse.click(tankPoint.x, tankPoint.y, { button: 'right' });
   await expect(page.locator('.ed-part-context')).toBeVisible();
   const contextPartKey = await page.evaluate(() => (window as any).__TEST__.debug().selected);
@@ -202,6 +212,7 @@ test('secondary click exposes Make root while secondary drag remains camera orbi
   expect(rootKeys).toEqual([contextPartKey]);
   await page.keyboard.press('Control+KeyZ');
 
+  tankPoint = await projectPart(page, tank.key);
   await page.keyboard.down('Control');
   await page.mouse.click(tankPoint.x, tankPoint.y);
   await page.keyboard.up('Control');

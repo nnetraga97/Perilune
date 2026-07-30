@@ -2732,7 +2732,11 @@ class PeriluneGame {
       else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
-        this.world.camDist = Math.max(4, Math.min(2000, this.world.camDist * factor));
+        const active = this.game.active;
+        const minimumDistance = active
+          ? Math.max(4, craftVisualRadius(active.runtime.craft) * 1.05)
+          : 4;
+        this.world.camDist = Math.max(minimumDistance, Math.min(2000, this.world.camDist * factor));
       }
       e.preventDefault();
     }, { passive: false });

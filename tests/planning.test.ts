@@ -210,6 +210,7 @@ describe('transfer planner', () => {
     });
     expect(plan).not.toBeNull();
     expect(plan!.accuracy).toBe('refined-intercept');
+    expect(plan!.timeToWindow).toBeLessThanOrEqual(61 * 86_400);
     expect(plan!.approachAltitude).toBeGreaterThan(0);
 
     const reference = stateToElements(earth.mu, gv.runtime.pos, gv.runtime.vel, game.time);
