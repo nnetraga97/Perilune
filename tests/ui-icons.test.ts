@@ -33,6 +33,8 @@ describe('utility icon registry', () => {
       /\.ed-utility-host \.k-icon-btn:hover \.k-icon-tooltip,\s*\.ed-utility-host \.k-icon-btn:focus-visible \.k-icon-tooltip,\s*\.hud-utility-host \.k-icon-btn:hover \.k-icon-tooltip,\s*\.hud-utility-host \.k-icon-btn:focus-visible \.k-icon-tooltip/s,
     );
     expect(kitSource).toMatch(/\.hud-events\s*\{[^}]*top:\s*88px;/s);
+    expect(kitSource).toMatch(/\.hud-right\s*\{[^}]*width:200px;/s);
+    expect(kitSource).toMatch(/\.hud-stages\s*\{[^}]*width:200px;/s);
     expect(kitSource).toMatch(/@media \(max-width:820px\), \(pointer:coarse\)\s*\{[\s\S]*?\.k-icon-btn\s*\{[^}]*width:42px;[^}]*height:42px;/);
   });
 });

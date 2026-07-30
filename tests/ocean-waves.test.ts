@@ -29,7 +29,7 @@ describe('body-fixed ocean wave normals', () => {
       expect(Math.hypot(...first.gradient)).toBeLessThanOrEqual(OCEAN_MAX_NORMAL_SLOPE);
     }
     expect(oceanWavePolicy('low').componentCount).toBe(1);
-    expect(oceanWavePolicy('medium').componentCount).toBe(2);
+    expect(oceanWavePolicy('medium').componentCount).toBe(3);
     expect(oceanWavePolicy('high').componentCount).toBe(OCEAN_WAVE_COMPONENTS.length);
   });
 
@@ -53,14 +53,17 @@ describe('body-fixed ocean wave normals', () => {
     const medium = createOceanCapMaterial('medium', null, '#173d5c', RADIUS);
     const source = medium.fragmentShader;
     expect(source).toContain('float phaseFootprint = fwidth(phase)');
-    expect(source).toContain('smoothstep(0.75, 2.5, phaseFootprint)');
+    expect(source).toContain('smoothstep(0.18, 0.85, phaseFootprint)');
     expect(source).toContain('filteredOceanWaveNormal');
+    expect(source).toContain('float broadGlint');
+    expect(source).toContain('vec3 deepWater');
+    expect(source).toContain('float swellTint');
     expect(source).toContain(`totalSlope > ${OCEAN_MAX_NORMAL_SLOPE.toFixed(3)}`);
     expect(source).not.toContain('sin(vBodyDirection.x * 170.0');
     expect(medium.vertexShader).not.toContain('uTime');
     expect(medium.vertexShader).not.toContain('wave');
-    expect(medium.uniforms.uWaveComponentCount.value).toBe(2);
-    expect(medium.customProgramCacheKey()).toContain('terrestrial-ocean-v4');
+    expect(medium.uniforms.uWaveComponentCount.value).toBe(3);
+    expect(medium.customProgramCacheKey()).toContain('terrestrial-ocean-v5');
     medium.dispose();
   });
 });

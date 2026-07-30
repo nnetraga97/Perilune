@@ -14,7 +14,7 @@ describe('active reentry visual stack', () => {
       'reentry-trails',
       'reentry-bowshock-bowl',
       'reentry-bowshock-wisps',
-      '',
+      'reentry-sparks',
     ]);
     expect(effect.stats()).toMatchObject({ active: false, glow: false, trails: false, bowshock: false });
     const input = {
@@ -30,11 +30,27 @@ describe('active reentry visual stack', () => {
     expect(effect.stats().particles).toBeGreaterThan(0);
     const points = effect.group.children[4] as THREE.Points;
     const positions = points.geometry.getAttribute('position');
+    const life = points.geometry.getAttribute('aLife');
+    let alive = 0;
     for (let index = 0; index < positions.count; index++) {
-      expect([positions.getX(index), positions.getY(index), positions.getZ(index)]).not.toEqual([0, 0, 0]);
+      const position = [positions.getX(index), positions.getY(index), positions.getZ(index)];
+      if (life.getX(index) > 0) {
+        alive++;
+        expect(position).not.toEqual([0, 0, 0]);
+      } else {
+        expect(position).toEqual([0, 0, 0]);
+      }
     }
+    expect(alive).toBe(effect.stats().particles);
+    expect((points.material as THREE.ShaderMaterial).fragmentShader).toContain('if (vLife <= 0.0) discard;');
     effect.update({ ...input, reducedMotion: true });
     expect(points.visible).toBe(false);
+    expect(Array.from((points.geometry.getAttribute('aLife') as THREE.BufferAttribute).array)).toEqual(
+      Array.from({ length: positions.count }, () => 0),
+    );
+    expect(Array.from((points.geometry.getAttribute('position') as THREE.BufferAttribute).array)).toEqual(
+      Array.from({ length: positions.count * 3 }, () => 0),
+    );
     effect.dispose();
   });
 

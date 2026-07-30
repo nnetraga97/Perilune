@@ -54,8 +54,8 @@ function stackNeighbors(craft: Craft, part: PartInstance): PartInstance[] {
 }
 
 /**
- * Resolve a fitted M-to-S shell from the connected stack. The upper walk skips
- * engines so the shroud closes against the upper tank rather than the engine bell.
+ * Resolve a fitted shell from the connected stack. The upper walk skips engines
+ * so the shroud closes against the upper tank rather than the engine bell.
  */
 export function deriveInterstageShroud(
   craft: Craft,
@@ -74,8 +74,10 @@ export function deriveInterstageShroud(
   const lower = lowerCandidates[0];
   let upper = upperCandidates[0];
   let previous = separator;
+  let enclosedEngine = false;
   const visited = new Set<number>([separator.key]);
   for (let step = 0; step < MAX_WALK_PARTS && defOf(upper).engine; step++) {
+    enclosedEngine = true;
     if (visited.has(upper.key)) return null;
     visited.add(upper.key);
     const next = stackNeighbors(craft, upper).filter((candidate) => (
@@ -88,13 +90,13 @@ export function deriveInterstageShroud(
     previous = upper;
     upper = next[0];
   }
-  if (defOf(upper).engine || visited.has(upper.key)) return null;
+  if (!enclosedEngine || defOf(upper).engine || visited.has(upper.key)) return null;
 
   const lowerDef = defOf(lower);
   const upperDef = defOf(upper);
   const lowerRadius = radiusAtFace(lowerDef, true);
   const upperRadius = radiusAtFace(upperDef, false);
-  if (lowerRadius === null || upperRadius === null || Math.abs(lowerRadius - upperRadius) < 0.025) return null;
+  if (lowerRadius === null || upperRadius === null) return null;
 
   const spec = sanitizeInterstageShroudSpec({
     lowerRadius,

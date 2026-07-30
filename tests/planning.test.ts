@@ -41,6 +41,8 @@ describe('transfer planner', () => {
     expect(plan?.suggestedNode.normal).not.toBe(0);
     expect(plan?.departureDv).toBeGreaterThan(3_000);
     expect(plan?.departureDv).toBeLessThan(4_500);
+    expect(plan!.departureDv + plan!.arrivalDv).toBeLessThan(4_100);
+    expect(plan?.transferTime).toBeGreaterThan(5 * 86_400);
     expect(plan?.approachAltitude).toBeGreaterThan(50_000);
     expect(plan?.approachAltitude).toBeLessThan(500_000);
 

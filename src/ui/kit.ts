@@ -310,7 +310,7 @@ export function injectUiStyles(): void {
       .hud-readout-label { font-size: 9px; letter-spacing: 1.5px; color: #7d8b96; }
       .hud-readout-value { font-family: var(--ui-mono); font-size: 15px; }
       .hud-right { position:absolute; right:12px; top:106px; display:flex; flex-direction:column; gap:6px;
-        width: 230px; pointer-events: auto; }
+        width:200px; pointer-events:auto; }
       .hud-data-toggle { min-height:34px; border:1px solid #315064; border-radius:6px; background:rgba(7,16,23,.94);
         color:#9fb4c4; font:9px var(--ui-mono); letter-spacing:1px; cursor:pointer; text-align:left; padding:0 10px; }
       .hud-data-toggle:hover,.hud-data-toggle:focus-visible { border-color:var(--ui-accent); color:#e8f4f7; }

@@ -9,7 +9,12 @@
  */
 import { Vec3 } from '../core/vec3';
 import { elementsAtTime, periodOf, stateToElements } from '../core/orbit';
-import { orbitAfterNode, predictTrajectory, type ManeuverNode } from './maneuver';
+import {
+  orbitAfterNode,
+  predictTrajectory,
+  type EncounterPrediction,
+  type ManeuverNode,
+} from './maneuver';
 import type { Body, Universe } from './universe';
 
 export interface TransferPlan {
@@ -33,7 +38,7 @@ export interface TransferPlan {
   transferTime: number;
   /** Departure burn from the parking orbit (m/s). */
   departureDv: number;
-  /** Capture burn into a low target orbit, when the target has gravity (m/s). */
+  /** Capture/circularization burn at the planned target periapsis (m/s). */
   arrivalDv: number;
   /** Node produced for the active vessel. Refined transfers may differ from the textbook estimate. */
   suggestedNode: ManeuverNode;
@@ -49,6 +54,13 @@ export interface MoonCourseCorrection {
   approachAltitude: number;
 }
 
+interface RefinedMoonTransfer {
+  node: ManeuverNode;
+  approachAltitude: number;
+  transferTime: number;
+  arrivalDv: number;
+}
+
 const _r = new Vec3();
 const _v = new Vec3();
 const _targetR = new Vec3();
@@ -58,6 +70,16 @@ const _rHat = new Vec3();
 const _nHat = new Vec3();
 const _tHat = new Vec3();
 const _dv = new Vec3();
+
+function captureDeltaV(body: Body, encounter: EncounterPrediction): number {
+  const periapsisRadius = body.radius + encounter.periapsisAltitude;
+  if (!(periapsisRadius > body.radius) || !Number.isFinite(encounter.elements.a)) return Infinity;
+  const periapsisSpeedSquared = body.mu * (2 / periapsisRadius - 1 / encounter.elements.a);
+  if (!(periapsisSpeedSquared > 0)) return Infinity;
+  return Math.abs(
+    Math.sqrt(periapsisSpeedSquared) - Math.sqrt(body.mu / periapsisRadius),
+  );
+}
 
 function stumpff(z: number): { c: number; s: number } {
   if (z > 1e-6) {
@@ -194,16 +216,22 @@ export function refineLambertMoonTransfer(
   parkingPeriod: number,
   nominalTransferTime: number,
   targetAltitude: number,
-): { node: ManeuverNode; approachAltitude: number; transferTime: number } | null {
+): RefinedMoonTransfer | null {
   type LambertCandidate = {
     node: ManeuverNode;
     transferTime: number;
     deltaV: number;
   };
   const earliest = time + 5;
-  const latest = time + parkingPeriod;
+  const nearTermLatest = time + parkingPeriod;
+  const latest = time + Math.min(
+    moon.orbitalPeriod,
+    Math.max(parkingPeriod * 48, nominalTransferTime * 2),
+  );
   let best: LambertCandidate | null = null;
   const alternates: LambertCandidate[] = [];
+  const nearTermAlternates: LambertCandidate[] = [];
+  const shortCoastAlternates: LambertCandidate[] = [];
   const consider = (burnTime: number, transferTime: number): void => {
     const node = lambertMoonNode(universe, from, moon, reference, burnTime, transferTime);
     if (!node) return;
@@ -212,19 +240,27 @@ export function refineLambertMoonTransfer(
     const candidate = { node, transferTime, deltaV };
     if (!best || deltaV < best.deltaV) best = candidate;
     alternates.push(candidate);
-    if (alternates.length > 96) {
+    if (burnTime <= nearTermLatest) nearTermAlternates.push(candidate);
+    if (burnTime <= nearTermLatest && transferTime <= nominalTransferTime * 1.001) {
+      shortCoastAlternates.push(candidate);
+    }
+    if (alternates.length > 256) {
       alternates.sort((a, b) => a.deltaV - b.deltaV);
-      alternates.length = 64;
+      alternates.length = 192;
     }
   };
 
   // A real inclined lunar orbit does not generally share the textbook
-  // coplanar Hohmann window. Search the next parking-orbit revolution and a
-  // compact family of practical coast times, then refine the cheapest route.
-  for (let coastIndex = 0; coastIndex <= 14; coastIndex++) {
+  // coplanar Hohmann window. Search a broad time-of-flight family and multiple
+  // future parking-orbit passes. This is intentionally worker-side and may
+  // take longer: minimum total maneuver cost matters more than earliest arrival.
+  for (let coastIndex = 0; coastIndex <= 34; coastIndex++) {
     const transferTime = nominalTransferTime * (0.3 + coastIndex * 0.05);
     for (let burnIndex = 0; burnIndex <= 32; burnIndex++) {
-      consider(earliest + (latest - earliest) * burnIndex / 32, transferTime);
+      consider(earliest + (nearTermLatest - earliest) * burnIndex / 32, transferTime);
+    }
+    for (let burnIndex = 0; burnIndex <= 128; burnIndex++) {
+      consider(earliest + (latest - earliest) * burnIndex / 128, transferTime);
     }
   }
   if (!best) return null;
@@ -248,60 +284,136 @@ export function refineLambertMoonTransfer(
   }
 
   alternates.sort((a, b) => a.deltaV - b.deltaV);
-  let resolved: LambertCandidate | null = null;
-  let resolvedApproach: { altitude: number; score: number } | null = null;
+  type MoonApproach = {
+    altitude: number;
+    score: number;
+    arrivalDv: number;
+    totalDv: number;
+  };
   const evaluateApproach = (
     node: ManeuverNode,
     transferTime: number,
-  ): { altitude: number; score: number } | null => {
+  ): MoonApproach | null => {
     const postBurn = orbitAfterNode(reference, node);
     const encounter = predictTrajectory(universe, from, postBurn, node.time, transferTime * 1.65).encounter;
     if (!encounter || encounter.bodyId !== moon.id) return null;
+    const arrivalDv = captureDeltaV(moon, encounter);
+    const departureDv = Math.hypot(node.prograde, node.normal, node.radial);
     return {
       altitude: encounter.periapsisAltitude,
       score: Math.abs(encounter.periapsisAltitude - targetAltitude),
+      arrivalDv,
+      totalDv: departureDv + arrivalDv,
     };
   };
 
-  // The cheapest Lambert solution is not necessarily the useful lunar
-  // approach once the patched-conic encounter is evaluated. Compare a bounded
-  // set of the lowest-dV candidates and choose the one closest to the requested
-  // periapsis instead of accepting the first Moon encounter, which can be a
-  // high flyby that the capture tutorial cannot complete.
-  for (const candidate of alternates.slice(0, 32)) {
+  const maximumUsefulAltitude = Math.max(100_000, Math.min(500_000, moon.radius * 0.5));
+  const evaluated: Array<{ candidate: LambertCandidate; approach: MoonApproach }> = [];
+  nearTermAlternates.sort((a, b) => a.deltaV - b.deltaV);
+  shortCoastAlternates.sort((a, b) => a.deltaV - b.deltaV);
+  const candidatesToEvaluate = [
+    ...shortCoastAlternates.slice(0, 96),
+    ...nearTermAlternates.slice(0, 96),
+    ...alternates,
+  ];
+  for (const candidate of candidatesToEvaluate) {
     const candidateApproach = evaluateApproach(candidate.node, candidate.transferTime);
-    if (!candidateApproach) continue;
-    if (
-      !resolved
-      || !resolvedApproach
-      || candidateApproach.score < resolvedApproach.score
-      || (candidateApproach.score === resolvedApproach.score && candidate.deltaV < resolved.deltaV)
-    ) {
-      resolved = candidate;
-      resolvedApproach = candidateApproach;
-    }
+    if (candidateApproach) evaluated.push({ candidate, approach: candidateApproach });
   }
-  if (!resolved || !resolvedApproach) return null;
+  if (!evaluated.length) return null;
 
-  let node = { ...resolved.node };
-  let approach = resolvedApproach;
-  let componentStep = Math.max(25, resolved.deltaV * 0.025);
-  for (let pass = 0; pass < 9 && approach.score > 2_000; pass++) {
-    let improved = false;
-    for (const component of ['prograde', 'normal', 'radial'] as const) {
-      for (const direction of [-1, 1]) {
-        const candidateNode = { ...node, [component]: node[component] + direction * componentStep };
-        const candidateApproach = evaluateApproach(candidateNode, resolved.transferTime);
-        if (candidateApproach && candidateApproach.score < approach.score) {
-          node = candidateNode;
-          approach = candidateApproach;
-          improved = true;
+  const useful = (approach: MoonApproach): boolean =>
+    approach.altitude >= 0
+    && approach.altitude <= maximumUsefulAltitude
+    && Number.isFinite(approach.totalDv);
+  const closest = [...evaluated].sort((a, b) =>
+    a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV,
+  );
+  const shortCoastSet = new Set(shortCoastAlternates);
+  const shortCoastClosest = evaluated.filter((item) => shortCoastSet.has(item.candidate)).sort((a, b) =>
+    a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV,
+  );
+  const shortCoastLowCostApproaches = evaluated
+    .filter((item) => shortCoastSet.has(item.candidate))
+    .sort((a, b) => a.candidate.deltaV - b.candidate.deltaV)
+    .slice(0, 64)
+    .sort((a, b) => a.approach.score - b.approach.score);
+  const globalLowCostApproaches = [...evaluated]
+    .sort((a, b) => a.candidate.deltaV - b.candidate.deltaV)
+    .slice(0, 96)
+    .sort((a, b) => a.approach.score - b.approach.score);
+  const cheapestUseful = evaluated.filter((item) => useful(item.approach)).sort((a, b) =>
+    a.approach.totalDv - b.approach.totalDv || a.approach.score - b.approach.score,
+  );
+  const seeds = [...closest.slice(0, 16)];
+  for (const seed of shortCoastClosest.slice(0, 16)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+  for (const seed of shortCoastLowCostApproaches.slice(0, 32)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+  for (const seed of globalLowCostApproaches.slice(0, 32)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+  for (const seed of cheapestUseful.slice(0, 16)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+  const resolved: Array<{ candidate: LambertCandidate; approach: MoonApproach }> = [];
+  const targetingTolerance = Math.max(25_000, targetAltitude * 0.1);
+  for (const seed of seeds) {
+    let node = { ...seed.candidate.node };
+    let approach = seed.approach;
+    let componentStep = Math.max(25, seed.candidate.deltaV * 0.025);
+    for (let pass = 0; pass < 12; pass++) {
+      let passNode = node;
+      let passApproach = approach;
+      for (const component of ['prograde', 'normal', 'radial'] as const) {
+        for (const direction of [-1, 1]) {
+          const candidateNode = {
+            ...node,
+            [component]: node[component] + direction * componentStep,
+          };
+          const candidateApproach = evaluateApproach(candidateNode, seed.candidate.transferTime);
+          if (!candidateApproach) continue;
+          const currentUseful = useful(passApproach);
+          const candidateUseful = useful(candidateApproach);
+          const improves = !currentUseful
+            ? candidateUseful || candidateApproach.score < passApproach.score
+            : candidateUseful && (
+              passApproach.score > targetingTolerance
+                ? candidateApproach.score < passApproach.score
+                : candidateApproach.score <= targetingTolerance
+                  && candidateApproach.totalDv < passApproach.totalDv
+            );
+          if (improves) {
+            passNode = candidateNode;
+            passApproach = candidateApproach;
+          }
         }
       }
+      const improved = passNode !== node;
+      node = passNode;
+      approach = passApproach;
+      componentStep *= improved ? 0.65 : 0.5;
     }
-    componentStep *= improved ? 0.65 : 0.5;
+    if (useful(approach)) {
+      resolved.push({
+        candidate: { ...seed.candidate, node, deltaV: Math.hypot(node.prograde, node.normal, node.radial) },
+        approach,
+      });
+    }
   }
-  return { node, approachAltitude: approach.altitude, transferTime: resolved.transferTime };
+  resolved.sort((a, b) =>
+    a.approach.totalDv - b.approach.totalDv || a.approach.score - b.approach.score,
+  );
+  const bestResolved = resolved[0];
+  if (!bestResolved) return null;
+  return {
+    node: bestResolved.candidate.node,
+    approachAltitude: bestResolved.approach.altitude,
+    transferTime: bestResolved.candidate.transferTime,
+    arrivalDv: bestResolved.approach.arrivalDv,
+  };
 }
 
 function angleOf(universe: Universe, body: Body, t: number): number {
@@ -338,11 +450,12 @@ function refineMoonIntercept(
   opts: TransferOptions,
   nominalNode: ManeuverNode,
   transferTime: number,
-): { node: ManeuverNode; approachAltitude: number; transferTime: number } | null {
+): RefinedMoonTransfer | null {
   type InterceptCandidate = {
     node: ManeuverNode;
     approachAltitude: number;
     score: number;
+    arrivalDv: number;
   };
   if (!opts.vesselPosition || !opts.vesselVelocity) return null;
   const reference = stateToElements(from.mu, opts.vesselPosition, opts.vesselVelocity, time);
@@ -359,10 +472,13 @@ function refineMoonIntercept(
     const postBurn = orbitAfterNode(reference, node);
     const encounter = predictTrajectory(universe, from, postBurn, burnTime, horizon).encounter;
     if (!encounter || encounter.bodyId !== moon.id) return null;
+    const arrivalDv = captureDeltaV(moon, encounter);
+    if (!Number.isFinite(arrivalDv)) return null;
     return {
       node,
       approachAltitude: encounter.periapsisAltitude,
       score: Math.abs(encounter.periapsisAltitude - targetAltitude),
+      arrivalDv,
     };
   };
 
@@ -396,11 +512,8 @@ function refineMoonIntercept(
       lo = Math.max(earliest, center - width);
       hi = Math.min(latest, center + width);
     }
-    if (best.score <= Math.max(100_000, moon.radius * 0.25)) {
-      return { node: best.node, approachAltitude: best.approachAltitude, transferTime };
-    }
   }
-  return refineLambertMoonTransfer(
+  const lambert = refineLambertMoonTransfer(
     universe,
     from,
     moon,
@@ -409,7 +522,24 @@ function refineMoonIntercept(
     parkingPeriod,
     transferTime,
     targetAltitude,
-  ) ?? (best ? { node: best.node, approachAltitude: best.approachAltitude, transferTime } : null);
+  );
+  const nominal = best && best.approachAltitude >= 0
+    && best.score <= Math.max(500_000, moon.radius * 0.5)
+    ? { ...best, transferTime }
+    : null;
+  if (!lambert) return nominal;
+  if (!nominal) return lambert;
+  const nominalTotal = Math.hypot(
+    nominal.node.prograde,
+    nominal.node.normal,
+    nominal.node.radial,
+  ) + nominal.arrivalDv;
+  const lambertTotal = Math.hypot(
+    lambert.node.prograde,
+    lambert.node.normal,
+    lambert.node.radial,
+  ) + lambert.arrivalDv;
+  return lambertTotal < nominalTotal ? lambert : nominal;
 }
 
 /**
@@ -660,8 +790,8 @@ function refineInterplanetaryIntercept(
   const latest = Math.max(earliest + 1, windowTime + parkingPeriod / 2);
   // Lambert supplies the true 3D heliocentric route. The Hohmann duration is
   // only its seed; varying the coast handles eccentric and inclined planets.
-  for (let coastIndex = 0; coastIndex <= 14; coastIndex++) {
-    const coastTime = nominalTransferTime * (0.72 + coastIndex * 0.04);
+  for (let coastIndex = 0; coastIndex <= 30; coastIndex++) {
+    const coastTime = nominalTransferTime * (0.5 + coastIndex * 0.05);
     let best: InterplanetaryCandidate | null = null;
     let bestIndex = 0;
     const burnSteps = 64;
@@ -755,19 +885,31 @@ function refineInterplanetaryIntercept(
   }
   if (!evaluated.length) return null;
   const broadInterceptBand = target.soiRadius * 20;
+  const estimatedTotalDv = (item: typeof evaluated[number]): number => {
+    const arrivalDv = Math.sqrt(
+      item.approach.relativeSpeed ** 2 + 2 * target.mu / desiredPeriapsisRadius,
+    ) - Math.sqrt(target.mu / desiredPeriapsisRadius);
+    return item.candidate.deltaV + arrivalDv;
+  };
   const practicalSeeds = [...evaluated].sort((a, b) => {
     const aNear = a.approach.score <= broadInterceptBand;
     const bNear = b.approach.score <= broadInterceptBand;
     if (aNear !== bNear) return aNear ? -1 : 1;
     return aNear
-      ? a.candidate.deltaV - b.candidate.deltaV || a.approach.score - b.approach.score
+      ? estimatedTotalDv(a) - estimatedTotalDv(b) || a.approach.score - b.approach.score
       : a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV;
   });
   const closestSeeds = [...evaluated].sort((a, b) =>
     a.approach.score - b.approach.score || a.candidate.deltaV - b.candidate.deltaV,
   );
-  const seeds = [...practicalSeeds.slice(0, 2)];
+  const cheapestDepartureSeeds = [...evaluated].sort((a, b) =>
+    a.candidate.deltaV - b.candidate.deltaV || a.approach.score - b.approach.score,
+  );
+  const seeds = [...practicalSeeds.slice(0, 4)];
   for (const seed of closestSeeds.slice(0, 2)) {
+    if (!seeds.includes(seed)) seeds.push(seed);
+  }
+  for (const seed of cheapestDepartureSeeds.slice(0, 2)) {
     if (!seeds.includes(seed)) seeds.push(seed);
   }
 
@@ -888,12 +1030,8 @@ function refineInterplanetaryIntercept(
       || encounter.periapsisAltitude > maximumApproachAltitude
     ) continue;
 
-    const captureRadius = desiredPeriapsisRadius;
-    const arrivalExcessSpeed = encounter.elements.a < 0
-      ? Math.sqrt(target.mu / Math.abs(encounter.elements.a))
-      : 0;
-    const arrivalDv = Math.sqrt(arrivalExcessSpeed ** 2 + 2 * target.mu / captureRadius)
-      - Math.sqrt(target.mu / captureRadius);
+    const arrivalDv = captureDeltaV(target, encounter);
+    if (!Number.isFinite(arrivalDv)) continue;
     resolved.push({
       node,
       approachAltitude: encounter.periapsisAltitude,
@@ -902,7 +1040,11 @@ function refineInterplanetaryIntercept(
       deltaV,
     });
   }
-  resolved.sort((a, b) => a.deltaV - b.deltaV || a.approachAltitude - b.approachAltitude);
+  resolved.sort((a, b) =>
+    (a.deltaV + a.arrivalDv) - (b.deltaV + b.arrivalDv)
+    || a.deltaV - b.deltaV
+    || a.transferTime - b.transferTime,
+  );
   return resolved[0] ?? null;
 }
 
@@ -1005,7 +1147,7 @@ function planMoonTransfer(
     burnTime: suggestedNode.time,
     transferTime: plannedTransferTime,
     departureDv: Math.hypot(suggestedNode.prograde, suggestedNode.normal, suggestedNode.radial),
-    arrivalDv,
+    arrivalDv: refined?.arrivalDv ?? arrivalDv,
     suggestedNode,
     approachAltitude: refined?.approachAltitude,
     accuracy: refined ? 'refined-intercept' : 'phase-estimate',

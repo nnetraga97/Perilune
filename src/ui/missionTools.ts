@@ -224,7 +224,7 @@ export class MissionTools {
     const toolbar = el('div', 'mission-toolbar', content);
     el('span', '', toolbar, 'Sort');
     this.transferSort = el('select', 'mission-input', toolbar) as HTMLSelectElement;
-    for (const [value, label] of [['window', 'window'], ['dv', 'departure Δv'], ['target', 'destination']]) {
+    for (const [value, label] of [['window', 'window'], ['dv', 'total Δv'], ['target', 'destination']]) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
@@ -387,7 +387,11 @@ export class MissionTools {
       });
     }
     const plans = [...this.transferPlans];
-    if (this.transferSort.value === 'dv') plans.sort((a, b) => a.departureDv - b.departureDv);
+    if (this.transferSort.value === 'dv') {
+      plans.sort((a, b) =>
+        (a.departureDv + a.arrivalDv) - (b.departureDv + b.arrivalDv),
+      );
+    }
     else if (this.transferSort.value === 'target') plans.sort((a, b) => a.targetName.localeCompare(b.targetName));
     else plans.sort((a, b) => a.timeToWindow - b.timeToWindow);
     if (gv.target) plans.sort((a, b) => Number(b.targetId === gv.target) - Number(a.targetId === gv.target));
@@ -435,8 +439,9 @@ export class MissionTools {
       el('strong', '', cell, value);
     };
     metric('BURN', `${plan.departureDv.toFixed(0)} m/s`);
-    metric('COAST', duration(plan.transferTime));
     metric('CAPTURE', `${plan.arrivalDv.toFixed(0)} m/s`);
+    metric('TOTAL', `${(plan.departureDv + plan.arrivalDv).toFixed(0)} m/s`);
+    metric('COAST', duration(plan.transferTime));
     if (plan.approachAltitude !== undefined) {
       metric('APPROACH', `${(plan.approachAltitude / 1000).toFixed(0)} km`);
     }
@@ -525,7 +530,11 @@ export class MissionTools {
       const row = el('div', `mission-row fleet-row${v.id === game.activeVesselId ? ' active' : ''}`, this.fleetList);
       const info = el('div', 'mission-row-info', row);
       const name = el('input', 'fleet-name', info) as HTMLInputElement;
-      name.value = v.name;
+      // Repair the visible symptom for saves created before component names
+      // followed control ownership. New splits no longer generate this suffix.
+      name.value = !v.isDebris && v.name.endsWith(' debris')
+        ? v.name.slice(0, -' debris'.length)
+        : v.name;
       name.onchange = () => this.callbacks.onRenameVessel(v.id, name.value.trim() || v.name);
       const type = v.isDebris
         ? 'debris'

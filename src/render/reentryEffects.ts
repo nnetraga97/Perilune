@@ -292,6 +292,7 @@ class ReentrySparks {
   private readonly velocities: Float32Array;
   private readonly life: Float32Array;
   private readonly positionAttribute: THREE.BufferAttribute;
+  private readonly lifeAttribute: THREE.BufferAttribute;
   private cursor = 0;
   private seed = 0x4f1bbcdc;
   private activeCount = 0;
@@ -299,25 +300,30 @@ class ReentrySparks {
 
   constructor(private readonly capacity: number, color: string) {
     this.positions = new Float32Array(capacity * 3);
-    this.positions.fill(1_000_000);
     this.velocities = new Float32Array(capacity * 3);
     this.life = new Float32Array(capacity);
     const geometry = new THREE.BufferGeometry();
     this.positionAttribute = new THREE.BufferAttribute(this.positions, 3);
     this.positionAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.lifeAttribute = new THREE.BufferAttribute(this.life, 1);
+    this.lifeAttribute.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('position', this.positionAttribute);
+    geometry.setAttribute('aLife', this.lifeAttribute);
     geometry.setDrawRange(0, capacity);
     const material = new THREE.ShaderMaterial({
       uniforms: { uColor: { value: new THREE.Color(color) } },
       vertexShader: `
         #include <common>
+        attribute float aLife;
         varying float vDepthFade;
+        varying float vLife;
         #include <logdepthbuf_pars_vertex>
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(34.0 / max(1.0, -mv.z), 1.2, 5.0);
+          gl_PointSize = aLife > 0.0 ? clamp(34.0 / max(1.0, -mv.z), 1.2, 5.0) : 0.0;
           vDepthFade = clamp(12.0 / max(1.0, -mv.z), 0.25, 1.0);
+          vLife = aLife;
           #include <logdepthbuf_vertex>
         }
       `,
@@ -325,8 +331,10 @@ class ReentrySparks {
         #include <common>
         uniform vec3 uColor;
         varying float vDepthFade;
+        varying float vLife;
         #include <logdepthbuf_pars_fragment>
         void main() {
+          if (vLife <= 0.0) discard;
           vec2 q = gl_PointCoord * 2.0 - 1.0;
           float alpha = max(0.0, 1.0 - dot(q, q)) * vDepthFade;
           if (alpha < 0.05) discard;
@@ -341,6 +349,7 @@ class ReentrySparks {
       toneMapped: false,
     });
     this.points = new THREE.Points(geometry, material);
+    this.points.name = 'reentry-sparks';
     this.points.frustumCulled = false;
     this.points.renderOrder = 53;
   }
@@ -360,9 +369,12 @@ class ReentrySparks {
   ): void {
     if (!enabled) {
       this.life.fill(0);
+      this.positions.fill(0);
       this.activeCount = 0;
       this.spawnAccumulator = 0;
       this.points.visible = false;
+      this.positionAttribute.needsUpdate = true;
+      this.lifeAttribute.needsUpdate = true;
       return;
     }
     const dt = Math.max(0, Math.min(0.1, delta));
@@ -372,9 +384,9 @@ class ReentrySparks {
       this.life[index] -= dt;
       const base = index * 3;
       if (this.life[index] <= 0) {
-        this.positions[base] = 1_000_000;
-        this.positions[base + 1] = 1_000_000;
-        this.positions[base + 2] = 1_000_000;
+        this.positions[base] = 0;
+        this.positions[base + 1] = 0;
+        this.positions[base + 2] = 0;
         continue;
       }
       this.positions[base] += this.velocities[base] * dt;
@@ -413,6 +425,7 @@ class ReentrySparks {
       }
     }
     this.positionAttribute.needsUpdate = true;
+    this.lifeAttribute.needsUpdate = true;
     this.points.visible = this.activeCount > 0 || strength > threshold;
   }
 

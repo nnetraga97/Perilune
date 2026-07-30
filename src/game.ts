@@ -2079,9 +2079,8 @@ class PeriluneGame {
       void this.retryArtemisIvChapter();
       return;
     }
-    const active = this.game.active;
-    if (!active) return;
-    const reverted = this.game.revertLaunch(active);
+    const reverted = this.game.revertDestroyedLaunch()
+      ?? (this.game.active ? this.game.revertLaunch(this.game.active) : null);
     if (!reverted) return;
     for (const vesselId of reverted.removedVesselIds) {
       this.world.invalidateVessel(vesselId);

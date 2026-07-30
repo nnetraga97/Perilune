@@ -94,6 +94,12 @@ export interface GameVessel {
   launchCraft?: Craft | null;
 }
 
+interface DestroyedLaunchSnapshot {
+  readonly vesselId: string;
+  readonly launchId: string;
+  readonly launchCraft: Craft;
+}
+
 interface RailsEvent {
   time: number;
   kind: 'primary-exit' | 'child-entry' | 'hazard';
@@ -140,6 +146,8 @@ export class GameState {
   private nextVesselSerial = 1;
   /** Set when the active vessel was destroyed this frame (UI reacts). */
   lastDestruction: { vesselId: string; reason: string } | null = null;
+  /** In-memory launch data retained after an active vessel is removed on impact. */
+  private destroyedLaunch: DestroyedLaunchSnapshot | null = null;
   /** Spendable science balance from all delivery channels. */
   sciencePoints = 0;
   /** Persisted progression, economy, and contract state. */
@@ -219,6 +227,7 @@ export class GameState {
     this.vessels = [];
     this.activeVesselId = null;
     this.lastDestruction = null;
+    this.destroyedLaunch = null;
     this.autoScienceSites.clear();
     this.setWarp(0, false);
   }
@@ -362,6 +371,7 @@ export class GameState {
     };
     this.vessels.push(gv);
     this.activeVesselId = runtime.id;
+    this.destroyedLaunch = null;
     return gv;
   }
 
@@ -393,13 +403,37 @@ export class GameState {
     const launchId = gv.launchId ?? null;
     const launchCraft = gv.launchCraft ? structuredClone(gv.launchCraft) : null;
     if (!launchId || !launchCraft || !this.vessels.includes(gv)) return null;
-    const removedVesselIds = this.vessels
+    return this.restoreLaunch(launchId, launchCraft);
+  }
+
+  /** Restore the pad launch retained when the active vessel was destroyed. */
+  revertDestroyedLaunch(): { vessel: GameVessel; removedVesselIds: readonly string[] } | null {
+    const snapshot = this.destroyedLaunch;
+    if (!snapshot) return null;
+    return this.restoreLaunch(snapshot.launchId, structuredClone(snapshot.launchCraft), [snapshot.vesselId]);
+  }
+
+  private restoreLaunch(
+    launchId: string,
+    launchCraft: Craft,
+    alreadyRemovedVesselIds: readonly string[] = [],
+  ): { vessel: GameVessel; removedVesselIds: readonly string[] } {
+    const removedVesselIds = [...new Set([
+      ...alreadyRemovedVesselIds,
+      ...this.vessels
       .filter((candidate) => candidate.launchId === launchId)
-      .map((candidate) => candidate.runtime.id);
+        .map((candidate) => candidate.runtime.id),
+    ])];
     const removed = new Set(removedVesselIds);
     this.vessels = this.vessels.filter((candidate) => !removed.has(candidate.runtime.id));
+    for (let i = this.alarms.length - 1; i >= 0; i--) {
+      const vesselId = this.alarms[i].vesselId;
+      if (vesselId && removed.has(vesselId)) this.alarms.splice(i, 1);
+    }
+    for (const vesselId of removed) this.autoScienceSites.delete(vesselId);
     this.activeVesselId = null;
     this.lastDestruction = null;
+    this.destroyedLaunch = null;
     const vessel = this.spawnOnPad(launchCraft, launchCraft.name);
     this.setWarp(0, false);
     return { vessel, removedVesselIds };
@@ -708,7 +742,7 @@ export class GameState {
     ].filter((component) => component.size > 0);
     if (orderedComponents.length < 2) return;
 
-    const componentData = orderedComponents.map((keys, index) => {
+    const componentData = orderedComponents.map((keys) => {
       const parts = sourceParts.filter((part) => keys.has(part.key));
       for (const part of parts) {
         if (part.parentKey !== null && !keys.has(part.parentKey)) {
@@ -723,21 +757,39 @@ export class GameState {
         consumedStageKeys,
       );
       const craft: Craft = {
-        name: index === 0 ? sourceCraft.name : `${v.name} debris`,
+        name: sourceCraft.name,
         version: sourceCraft.version,
         parts,
         stages: stagePlan.stages,
         actionGroups: partitionActionGroups(sourceActionGroups, keys).detached,
         nextKey: sourceCraft.nextKey,
       };
-      return { keys, craft, stagePlan };
+      return { keys, craft, stagePlan, isDebris: !hasControlSource(craft), name: '' };
     });
+
+    // Graph order describes which physical component stays in the existing
+    // runtime; it does not describe which component remains the spacecraft.
+    // Name components only after control ownership is known so a detached pod
+    // never inherits a generated "debris" name when it becomes the active craft.
+    const sourceName = v.name;
+    const primaryControlledIndex = componentData.findIndex((data) => !data.isDebris);
+    let controlledSerial = 0;
+    for (let index = 0; index < componentData.length; index++) {
+      const data = componentData[index];
+      data.name = data.isDebris
+        ? `${sourceName} debris`
+        : index === primaryControlledIndex
+          ? sourceName
+          : `${sourceName} segment ${++controlledSerial}`;
+      data.craft.name = data.name;
+    }
 
     const retained = componentData[0];
     v.craft = retained.craft;
+    v.name = retained.name;
     v.currentStage = retained.stagePlan.currentStage;
     refreshDerived(v);
-    v.isDebris = !hasControlSource(v.craft);
+    v.isDebris = retained.isDebris;
 
     const componentVessels: Array<{ gv: GameVessel; keys: ReadonlySet<number> }> = [
       { gv, keys: retained.keys },
@@ -746,12 +798,12 @@ export class GameState {
       const data = componentData[index];
       const runtime = createVesselRuntime(
         this.newVesselId(),
-        data.craft.name,
+        data.name,
         data.craft,
         v.bodyId,
       );
       runtime.currentStage = data.stagePlan.currentStage;
-      runtime.isDebris = !hasControlSource(data.craft);
+      runtime.isDebris = data.isDebris;
       const componentGv: GameVessel = {
         runtime,
         regime: 'active',
@@ -1374,8 +1426,18 @@ export class GameState {
     gv.runtime.situation = 'destroyed';
     if (gv.runtime.id === this.activeVesselId) {
       this.lastDestruction = { vesselId: gv.runtime.id, reason };
+      const launchId = gv.launchId ?? null;
+      const launchCraft = gv.launchCraft ? structuredClone(gv.launchCraft) : null;
+      this.destroyedLaunch = launchId && launchCraft
+        ? { vesselId: gv.runtime.id, launchId, launchCraft }
+        : null;
+      this.activeVesselId = null;
     }
     this.vessels = this.vessels.filter((x) => x !== gv);
+    for (let i = this.alarms.length - 1; i >= 0; i--) {
+      if (this.alarms[i].vesselId === gv.runtime.id) this.alarms.splice(i, 1);
+    }
+    this.autoScienceSites.delete(gv.runtime.id);
   }
 
   private cullDebris(): void {

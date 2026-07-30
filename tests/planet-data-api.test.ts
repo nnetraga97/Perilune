@@ -15,6 +15,12 @@ function request(query: string): Request {
   return new Request(`https://perilune.test/api/planet-data?${query}`);
 }
 
+function jpegResponse(): Response {
+  return new Response(new Uint8Array(64).fill(0x2a), {
+    headers: { 'content-type': 'image/jpeg', 'content-length': '64' },
+  });
+}
+
 describe('planet data API', () => {
   it('defaults proxy-backed detail off without the configured cost ceiling', async () => {
     const tile = kscTile();
@@ -30,9 +36,7 @@ describe('planet data API', () => {
     let requestedUrl: URL | null = null;
     const fetchImpl: typeof fetch = vi.fn(async (input) => {
       requestedUrl = new URL(String(input));
-      return new Response(new Uint8Array(64).fill(0x2a), {
-      headers: { 'content-type': 'image/jpeg', 'content-length': '64' },
-      });
+      return jpegResponse();
     });
     const response = await planetDataRuntimeHandler(request(new URLSearchParams({
       datasetId: 'usda-naip-ksc-2025-29992', level: String(tile.level), row: String(tile.row), column: String(tile.column),
@@ -44,6 +48,44 @@ describe('planet data API', () => {
     expect(upstream.hostname).toBe('apps.geo.fpac.usda.gov');
     expect(upstream.searchParams.get('mosaicRule')).toContain('29992');
     expect(upstream.searchParams.get('size')).toBe('512,512');
+  });
+
+  it('allows the complete 3x3 render neighborhood at the KSC coverage edges', async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => jpegResponse());
+    const edgeTiles = [
+      // Exact production regression: overlaps coverage but is not fully contained.
+      { level: 12, row: 1395, column: 2261 },
+      // Outermost 3x3 neighbors when the camera is at each coverage corner.
+      { level: 12, row: 1394, column: 2258 },
+      { level: 12, row: 1394, column: 2263 },
+      { level: 12, row: 1399, column: 2258 },
+      { level: 12, row: 1399, column: 2263 },
+    ];
+
+    for (const tile of edgeTiles) {
+      const response = await planetDataRuntimeHandler(request(new URLSearchParams({
+        datasetId: 'usda-naip-ksc-2025-29992',
+        level: String(tile.level),
+        row: String(tile.row),
+        column: String(tile.column),
+      }).toString()), { monthlyCostCeilingUsd: '500', fetchImpl });
+      expect(response.status).toBe(200);
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(edgeTiles.length);
+  });
+
+  it('keeps coarser and beyond-neighborhood imagery requests blocked', async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => jpegResponse());
+    const coarse = await planetDataRuntimeHandler(request(
+      'datasetId=usda-naip-ksc-2025-29992&level=11&row=697&column=1130',
+    ), { monthlyCostCeilingUsd: '500', fetchImpl });
+    expect(coarse.status).toBe(400);
+
+    const beyond = await planetDataRuntimeHandler(request(
+      'datasetId=usda-naip-ksc-2025-29992&level=12&row=1393&column=2261',
+    ), { monthlyCostCeilingUsd: '500', fetchImpl });
+    expect(beyond.status).toBe(404);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('rejects arbitrary inputs, out-of-coverage tiles, and oversized responses', async () => {

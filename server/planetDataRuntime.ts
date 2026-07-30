@@ -6,6 +6,7 @@ const DATASET_ID = 'usda-naip-ksc-2025-29992';
 const UPSTREAM = 'https://apps.geo.fpac.usda.gov/geo-imagery/rest/services/naip/conus_naip/ImageServer/exportImage';
 const COVERAGE = Object.freeze({ west: -80.69, south: 28.56, east: -80.58, north: 28.69 });
 const TILE_SIZE = 512;
+const MIN_LEVEL = 12;
 const MAX_LEVEL = 18;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const LOCKED_MOSAIC_RULE = JSON.stringify({ mosaicMethod: 'esriMosaicLockRaster', lockRasterIds: [29992] });
@@ -77,9 +78,14 @@ function tileBounds(level: number, row: number, column: number): Readonly<{ west
   return Object.freeze({ west, south, east, north });
 }
 
-function insideCoverage(bounds: Readonly<{ west: number; south: number; east: number; north: number }>): boolean {
-  return bounds.west >= COVERAGE.west && bounds.east <= COVERAGE.east
-    && bounds.south >= COVERAGE.south && bounds.north <= COVERAGE.north;
+function withinCoverageNeighborhood(bounds: Readonly<{ west: number; south: number; east: number; north: number }>): boolean {
+  const tileWidth = bounds.east - bounds.west;
+  const tileHeight = bounds.north - bounds.south;
+  // The renderer requests a 3x3 atlas around a camera point inside COVERAGE.
+  // Permit the adjacent ring so edge views do not fail as an all-or-nothing
+  // batch, while keeping requests beyond that render neighborhood blocked.
+  return bounds.east > COVERAGE.west - tileWidth && bounds.west < COVERAGE.east + tileWidth
+    && bounds.north > COVERAGE.south - tileHeight && bounds.south < COVERAGE.north + tileHeight;
 }
 
 function costCeilingEnabled(raw: string | undefined): boolean {
@@ -131,7 +137,7 @@ export async function planetDataRuntimeHandler(
     }
   }
   if (query.get('datasetId') !== DATASET_ID) return json(404, 'DATASET_NOT_ALLOWED', 'Unknown planet dataset');
-  const level = exactInteger(query.get('level'), 0, MAX_LEVEL);
+  const level = exactInteger(query.get('level'), MIN_LEVEL, MAX_LEVEL);
   if (level === null) return json(400, 'INVALID_TILE', 'Invalid tile level');
   const matrixWidth = 2 ** (level + 1);
   const matrixHeight = 2 ** level;
@@ -139,7 +145,7 @@ export async function planetDataRuntimeHandler(
   const column = exactInteger(query.get('column'), 0, matrixWidth - 1);
   if (row === null || column === null) return json(400, 'INVALID_TILE', 'Invalid tile coordinate');
   const bounds = tileBounds(level, row, column);
-  if (!insideCoverage(bounds)) return json(404, 'OUTSIDE_COVERAGE', 'Tile is outside the locked dataset coverage');
+  if (!withinCoverageNeighborhood(bounds)) return json(404, 'OUTSIDE_COVERAGE', 'Tile is outside the locked dataset coverage');
 
   const upstream = new URL(UPSTREAM);
   upstream.searchParams.set('bbox', `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`);

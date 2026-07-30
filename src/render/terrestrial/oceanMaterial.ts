@@ -36,24 +36,31 @@ function unitDirection(x: number, y: number, z: number): readonly [number, numbe
 export const OCEAN_WAVE_COMPONENTS: readonly OceanWaveComponent[] = Object.freeze([
   Object.freeze({
     direction: unitDirection(0.82, 0.31, 0.48),
-    wavelengthMeters: 46,
-    phaseSpeedRadiansPerSecond: 0.16,
+    wavelengthMeters: 180,
+    phaseSpeedRadiansPerSecond: 0.08,
     phaseOffset: 0.4,
-    slopeAmplitude: 0.045,
+    slopeAmplitude: 0.032,
   }),
   Object.freeze({
     direction: unitDirection(-0.24, 0.91, 0.33),
-    wavelengthMeters: 19,
-    phaseSpeedRadiansPerSecond: -0.31,
+    wavelengthMeters: 54,
+    phaseSpeedRadiansPerSecond: -0.19,
     phaseOffset: 2.1,
-    slopeAmplitude: 0.030,
+    slopeAmplitude: 0.038,
   }),
   Object.freeze({
     direction: unitDirection(0.46, -0.52, 0.72),
-    wavelengthMeters: 7.5,
-    phaseSpeedRadiansPerSecond: 0.54,
+    wavelengthMeters: 21,
+    phaseSpeedRadiansPerSecond: 0.34,
     phaseOffset: 4.7,
-    slopeAmplitude: 0.018,
+    slopeAmplitude: 0.025,
+  }),
+  Object.freeze({
+    direction: unitDirection(-0.67, -0.18, 0.72),
+    wavelengthMeters: 8,
+    phaseSpeedRadiansPerSecond: -0.57,
+    phaseOffset: 1.3,
+    slopeAmplitude: 0.014,
   }),
 ]);
 
@@ -64,8 +71,8 @@ const WAVE_POLICY_BY_QUALITY: Readonly<Record<QualityTier, {
   readonly slopeScale: number;
 }>> = Object.freeze({
   low: Object.freeze({ componentCount: 1, slopeScale: 0.65 }),
-  medium: Object.freeze({ componentCount: 2, slopeScale: 0.85 }),
-  high: Object.freeze({ componentCount: 3, slopeScale: 1 }),
+  medium: Object.freeze({ componentCount: 3, slopeScale: 0.85 }),
+  high: Object.freeze({ componentCount: 4, slopeScale: 1 }),
 });
 
 export function oceanWavePolicy(quality: QualityTier) {
@@ -233,9 +240,10 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
     if (tangentLength <= 0.000001) return vec3(0.0);
     float phase = 6.283185307179586 * dot(bodyPoint, waveDirection) / wavelengthMeters
       + uTime * phaseSpeed + phaseOffset;
-    // A component fades before its phase footprint exceeds a stable pixel.
+    // Fade well before a wavelength becomes sub-pixel. The previous threshold
+    // left diagonal moire bands across low-altitude ocean horizons.
     float phaseFootprint = fwidth(phase);
-    float footprintFilter = 1.0 - smoothstep(0.75, 2.5, phaseFootprint);
+    float footprintFilter = 1.0 - smoothstep(0.18, 0.85, phaseFootprint);
     return tangent / tangentLength
       * (slopeAmplitude * cos(phase) * footprintFilter * uWaveSlopeScale);
   }
@@ -266,6 +274,14 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
       ${OCEAN_WAVE_COMPONENTS[2].phaseOffset.toFixed(1)},
       ${OCEAN_WAVE_COMPONENTS[2].slopeAmplitude.toFixed(3)}
     );
+    if (uWaveComponentCount > 3.5) gradient += oceanWaveContribution(
+      bodyPoint, bodyNormal,
+      vec3(${OCEAN_WAVE_COMPONENTS[3].direction.join(', ')}),
+      ${OCEAN_WAVE_COMPONENTS[3].wavelengthMeters.toFixed(1)},
+      ${OCEAN_WAVE_COMPONENTS[3].phaseSpeedRadiansPerSecond.toFixed(2)},
+      ${OCEAN_WAVE_COMPONENTS[3].phaseOffset.toFixed(1)},
+      ${OCEAN_WAVE_COMPONENTS[3].slopeAmplitude.toFixed(3)}
+    );
     float totalSlope = length(gradient);
     if (totalSlope > ${OCEAN_MAX_NORMAL_SLOPE.toFixed(3)}) {
       gradient *= ${OCEAN_MAX_NORMAL_SLOPE.toFixed(3)} / totalSlope;
@@ -282,18 +298,42 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
     #include <logdepthbuf_fragment>
     float shore = 4.0 * oceanMask * (1.0 - oceanMask);
     vec3 bodyPoint = normalize(vBodyDirection) * uBodyRadius;
-    vec3 waveBodyNormal = filteredOceanWaveNormal(bodyPoint, normalize(vBodyDirection));
+    vec3 datumNormal = normalize(vBodyDirection);
+    vec3 waveBodyNormal = filteredOceanWaveNormal(bodyPoint, datumNormal);
     vec3 waveViewNormal = normalize(normalMatrix * waveBodyNormal);
-    float fresnel = pow(1.0 - max(0.0, dot(waveViewNormal, normalize(vViewDirection))), 4.0);
+    float viewCosine = max(0.0, dot(waveViewNormal, normalize(vViewDirection)));
+    float fresnel = 0.02 + 0.98 * pow(1.0 - viewCosine, 5.0);
     vec3 reflectedSun = reflect(-normalize(uSunDirection), waveBodyNormal);
     vec3 bodyView = normalize(uCameraBodyFixed - vBodyDirection * uBodyRadius);
-    float glitter = pow(max(0.0, dot(reflectedSun, bodyView)), 96.0) *
-      uGlitterStrength * uSolarVisibility;
-    vec3 skyReflection = mix(vec3(0.025, 0.09, 0.18), vec3(0.32, 0.55, 0.82),
-      pow(1.0 - max(0.0, dot(waveViewNormal, normalize(vViewDirection))), 0.65));
-    vec3 depthTint = mix(uOceanColor * 1.18, skyReflection, 0.26 + fresnel * 0.64);
+    float reflectionAlignment = max(0.0, dot(reflectedSun, bodyView));
+    float broadGlint = pow(reflectionAlignment, 28.0) * 0.12;
+    float sharpGlint = pow(reflectionAlignment, 160.0) * 0.72;
+    float glitter = (broadGlint + sharpGlint) * uGlitterStrength * uSolarVisibility;
+    float waveSlope = clamp(length(waveBodyNormal - datumNormal) / ${OCEAN_MAX_NORMAL_SLOPE.toFixed(3)}, 0.0, 1.0);
+    float sunFacing = max(0.0, dot(waveBodyNormal, normalize(uSunDirection)));
+    vec3 facetDirection = normalize(bodyView + normalize(uSunDirection));
+    float facetLight = dot(waveBodyNormal - datumNormal, facetDirection);
+    float swellPhaseA = 6.283185307179586 * dot(bodyPoint,
+      vec3(${OCEAN_WAVE_COMPONENTS[0].direction.join(', ')})) / ${OCEAN_WAVE_COMPONENTS[0].wavelengthMeters.toFixed(1)}
+      + uTime * ${OCEAN_WAVE_COMPONENTS[0].phaseSpeedRadiansPerSecond.toFixed(2)};
+    float swellPhaseB = 6.283185307179586 * dot(bodyPoint,
+      vec3(${OCEAN_WAVE_COMPONENTS[1].direction.join(', ')})) / ${OCEAN_WAVE_COMPONENTS[1].wavelengthMeters.toFixed(1)}
+      + uTime * ${OCEAN_WAVE_COMPONENTS[1].phaseSpeedRadiansPerSecond.toFixed(2)};
+    float swellA = sin(swellPhaseA) * (1.0 - smoothstep(0.75, 2.5, fwidth(swellPhaseA)));
+    float swellB = sin(swellPhaseB) * (1.0 - smoothstep(0.3, 1.2, fwidth(swellPhaseB)));
+    float swellTint = (swellA * 0.48 + swellB * 0.24 + swellA * swellB * 0.28) * 0.1;
+    vec3 deepWater = mix(
+      uOceanColor * mix(0.86, 1.3, viewCosine),
+      vec3(0.018, 0.085, 0.16),
+      0.32
+    );
+    deepWater *= 0.94 + sunFacing * 0.12 + waveSlope * 0.035 + facetLight * 1.35;
+    deepWater *= 1.0 + swellTint;
+    vec3 skyReflection = mix(vec3(0.012, 0.045, 0.095), vec3(0.08, 0.24, 0.48),
+      pow(1.0 - viewCosine, 0.72));
+    vec3 depthTint = mix(deepWater, skyReflection, fresnel * 0.86);
     vec3 foam = vec3(0.72, 0.82, 0.84) * shore;
-    vec3 oceanBaseColor = depthTint + foam * 0.64 + glitter * 0.62;
+    vec3 oceanBaseColor = depthTint + foam * 0.52 + vec3(1.0, 0.86, 0.64) * glitter;
     vec3 oceanShadedColor = applyTerrestrialAerialPerspective(
       normalize(vBodyDirection) * uBodyRadius,
       oceanBaseColor
@@ -380,6 +420,6 @@ export function createOceanCapMaterial(
   material.userData.oceanCap = true;
   attachTerrestrialAerialPerspective(material, aerialPerspective);
   bindTerrestrialAerialPerspectiveUniforms(material, aerialPerspective);
-  material.customProgramCacheKey = () => `terrestrial-ocean-v4:${quality}:${surfaceClasses?.hasGlobal ? 'class' : 'legacy'}`;
+  material.customProgramCacheKey = () => `terrestrial-ocean-v5:${quality}:${surfaceClasses?.hasGlobal ? 'class' : 'legacy'}`;
   return material;
 }

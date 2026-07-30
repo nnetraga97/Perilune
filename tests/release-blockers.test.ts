@@ -31,6 +31,9 @@ describe('M2 release blockers', () => {
 
     expect(game.active?.runtime.craft.parts.some((p) => defOf(p).pod)).toBe(true);
     expect(game.active?.runtime.isDebris).toBe(false);
+    expect(game.active?.runtime.name).toBe('control transfer');
+    expect(original.runtime.isDebris).toBe(true);
+    expect(original.runtime.name).toBe('control transfer debris');
   });
 
   it('provides graph-based auto staging for a two-stage stack', () => {

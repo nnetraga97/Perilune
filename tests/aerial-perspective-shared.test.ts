@@ -181,7 +181,7 @@ describe('shared terrestrial aerial perspective', () => {
     expect(ocean.material.fragmentShader).toContain('normalize(vBodyDirection) * uBodyRadius');
     expect(compact.customProgramCacheKey()).toContain('terrestrial-global-v4');
     expect(surface.customProgramCacheKey()).toContain('terrestrial-surface-v4');
-    expect(ocean.material.customProgramCacheKey()).toContain('terrestrial-ocean-v4');
+    expect(ocean.material.customProgramCacheKey()).toContain('terrestrial-ocean-v5');
     compact.dispose();
     surface.dispose();
     ocean.dispose();

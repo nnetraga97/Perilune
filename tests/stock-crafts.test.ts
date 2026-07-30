@@ -455,4 +455,15 @@ describe('built-in craft library', () => {
       upperY: expect.closeTo(0.53, 8),
     });
   });
+
+  it('derives the fitted M-to-M envelope through the core-stage Aspen engine', () => {
+    const craft = createOdysseyOrbiter();
+    const separator = craft.parts.find((part) => part.defId === 'dec-m')!;
+    expect(deriveInterstageShroud(craft, separator)).toEqual({
+      lowerRadius: 1.25,
+      upperRadius: 1.25,
+      lowerY: expect.closeTo(-0.1, 8),
+      upperY: expect.closeTo(1.6, 8),
+    });
+  });
 });
