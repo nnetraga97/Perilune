@@ -58,7 +58,8 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "redis": "^6.1.0",
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "three-mesh-bvh": "^0.9.13"
   },
   "devDependencies": {
     "@gltf-transform/cli": "4.3.0",

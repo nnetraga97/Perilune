@@ -14,6 +14,8 @@ trademarks from Kerbal Space Program or its mods.
 ## Software
 
 - Three.js (MIT) is the runtime renderer.
+- three-mesh-bvh 0.9.13 (MIT) provides spatial queries for the Aerodynamics Lab.
+  Source: https://github.com/gkjohnson/three-mesh-bvh
 - TypeScript, Vite, Vitest, fast-check, tsx, and the Three type definitions are
   MIT licensed.
 - Playwright and Sharp are Apache-2.0; Sharp's development-only libvips

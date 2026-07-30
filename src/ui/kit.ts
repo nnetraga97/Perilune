@@ -140,6 +140,57 @@ export function injectUiStyles(): void {
         background:#2b210d; color:#fff0c5; cursor:pointer; white-space:nowrap; }
       .k-render-failure-retry:hover,.k-render-failure-retry:focus-visible { border-color:var(--ui-warn); }
 
+      /* ============================== aerodynamics lab */
+      .aero-lab { position:absolute; inset:0; z-index:40; pointer-events:none; color:var(--ui-fg);
+        font-family:var(--ui-font); background:radial-gradient(circle at 50% 45%,rgba(20,61,78,.12),transparent 48%); }
+      .aero-lab-loading { position:absolute; inset:0; z-index:41; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; gap:16px; background:#061018; color:#aeeaff;
+        font:11px var(--ui-mono); letter-spacing:2px; pointer-events:auto; }
+      .aero-lab button,.aero-lab input,.aero-lab select { pointer-events:auto; }
+      .aero-lab-header { position:absolute; z-index:2; left:18px; right:18px; top:14px; display:flex;
+        align-items:center; justify-content:space-between; gap:16px; padding:10px 13px;
+        border:1px solid #2c5365; border-radius:8px; background:rgba(5,14,20,.92); pointer-events:auto; }
+      .aero-lab-kicker { color:#6f9dad; font:8px var(--ui-mono); letter-spacing:2px; }
+      .aero-lab-header h1 { margin:2px 0 0; color:#dff7ff; font:16px var(--ui-mono); letter-spacing:3px; }
+      .aero-lab-header-actions { display:flex; align-items:center; gap:10px; }
+      .aero-lab-status { max-width:280px; color:#79d8f2; font:9px var(--ui-mono); letter-spacing:1px; text-align:right; }
+      .aero-lab-panel { position:absolute; z-index:2; top:88px; width:270px; max-height:calc(100dvh - 132px);
+        box-sizing:border-box; overflow:auto; padding:13px; border:1px solid #294a5a; border-radius:8px;
+        background:rgba(5,14,20,.9); pointer-events:auto; box-shadow:0 14px 34px rgba(0,0,0,.25); }
+      .aero-lab-controls { left:18px; }
+      .aero-lab-results { right:18px; }
+      .aero-lab-panel h2 { margin:0 0 10px; color:#8db4c2; font:9px var(--ui-mono); letter-spacing:2px; }
+      .aero-lab-panel h2:not(:first-child) { margin-top:18px; }
+      .aero-lab-presets,.aero-lab-modes { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+      .aero-lab-modes { grid-template-columns:repeat(2,1fr); }
+      .aero-lab-presets .hud-btn,.aero-lab-modes .hud-btn { padding:6px 4px; font:9px var(--ui-mono); }
+      .aero-lab-modes .active { border-color:var(--ui-accent); background:#123242; color:#fff; }
+      .aero-lab-field { display:grid; gap:5px; margin-top:12px; color:#9bb3bf; font-size:10px; }
+      .aero-lab-field-heading { display:flex; justify-content:space-between; gap:10px; }
+      .aero-lab-field output { color:#e1f3f8; font-family:var(--ui-mono); }
+      .aero-lab-field input[type='range'] { width:100%; margin:0; accent-color:#4bbbd7; }
+      .aero-lab-field select { height:28px; border:1px solid #315064; border-radius:4px;
+        background:#091720; color:#dce9ee; padding:0 6px; font:10px var(--ui-mono); }
+      .aero-lab-pause { width:100%; margin-top:10px; }
+      .aero-lab-regime { margin-bottom:12px; padding:7px 8px; border-left:2px solid #ffbf69;
+        background:rgba(255,191,105,.08); color:#f2d5a7; font:9px/1.45 var(--ui-mono); letter-spacing:.6px; }
+      .aero-lab-metrics { display:grid; grid-template-columns:1fr auto; gap:6px 12px; margin:0; }
+      .aero-lab-metrics dt { color:#8299a5; font-size:10px; }
+      .aero-lab-metrics dd { margin:0; color:#e0eef3; font:10px var(--ui-mono); text-align:right; }
+      .aero-lab-marker-key { color:#8fdcf2; font:8px var(--ui-mono); line-height:1.6; }
+      .aero-lab-note { margin:11px 0 0; color:#718894; font-size:9px; line-height:1.5; }
+      .aero-lab-hint { position:absolute; z-index:2; left:50%; bottom:15px; transform:translateX(-50%);
+        padding:6px 10px; border:1px solid #244452; border-radius:5px; background:rgba(4,12,17,.84);
+        color:#71909d; font:8px var(--ui-mono); letter-spacing:1px; white-space:nowrap; }
+      @media (max-width:760px) {
+        .aero-lab-header { left:8px; right:8px; top:8px; }
+        .aero-lab-status { display:none; }
+        .aero-lab-panel { top:78px; width:calc(50% - 12px); max-height:calc(100dvh - 118px); padding:9px; }
+        .aero-lab-controls { left:8px; }
+        .aero-lab-results { right:8px; }
+        .aero-lab-hint { display:none; }
+      }
+
       /* ============================== flight HUD */
       .hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--ui-font); }
       .hud button { pointer-events: auto; }
@@ -612,6 +663,7 @@ export function injectUiStyles(): void {
       .ed-mobile-group { display:contents; }
       .ed-panel { border: 1px solid #223240; border-radius: 8px; padding: 8px 10px; }
       .ed-panel h3 { font-size: 10px; letter-spacing: 2px; color: #9fb4c4; margin-bottom: 6px; font-weight: normal; }
+      .ed-airflow { width:100%; margin-top:7px; border-color:#37677a; color:#bfeeff; }
       .ed-stats { font-size: 11px; }
       .ed-engineering-grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
       .ed-engineering-key { color: #7d8b96; font-size: 10px; }

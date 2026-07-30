@@ -20,6 +20,7 @@ import {
   partWetMass,
 } from './vessel';
 import { AeroModel, buildAeroModel, evaluateAero, newAeroForces, AeroForces } from './aero';
+import { evaluateThermalExposure } from './aeroThermalExposure';
 import type { Body } from './universe';
 import { groundRadiusInertial } from './terrain';
 import { RESOURCE_DENSITY } from '../content/parts';
@@ -1210,27 +1211,10 @@ function stepThermal(
     }
     return;
   }
-  // Which end of the craft faces the airflow decides who gets hot.
-  const w = (1 + v.aero.flowAlign) / 2; // 1 = nose-first, 0 = tail-first
-  const shieldFracs: number[] = [];
-  for (const part of v.craft.parts) {
-    if (defOf(part).heatShield) shieldFracs.push(v.aeroModel.axialFrac.get(part.key) ?? 0.5);
-  }
+  const exposureByPart = evaluateThermalExposure(v.craft, v.aeroModel, v.aero.flowAlign);
   for (const p of v.craft.parts) {
     const def = defOf(p);
-    const frac = v.aeroModel.axialFrac.get(p.key) ?? 0.5;
-    let exposure =
-      0.15 + 0.85 * (w * frac * frac + (1 - w) * (1 - frac) * (1 - frac));
-    // The aero model is axial rather than mesh-resolved: a shield mounted at
-    // either end protects the stack behind it while the shield itself absorbs
-    // and ablates. This keeps protection authoritative even during attitude
-    // transients that the coarse single-axis pressure model cannot resolve.
-    if (
-      !def.heatShield
-      && shieldFracs.some((shieldFrac) => shieldFrac <= 0.5 ? frac > shieldFrac : frac < shieldFrac)
-    ) {
-      exposure *= 0.08;
-    }
+    const exposure = exposureByPart.get(p.key) ?? 0.15;
     let temp = p.temperature ?? 280;
     // Heat shields facing the flow soak heat into ablator instead.
     // Scale tuned so subsonic flight is warm at most and re-entry at

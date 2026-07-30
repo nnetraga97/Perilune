@@ -10,7 +10,7 @@ import { el, injectUiStyles } from './kit';
 import { iconButton, type UtilityIcon } from './icons';
 import { ProfileStore } from './profileStore';
 
-export type WindowScreen = 'flight' | 'editor' | 'menu' | 'any';
+export type WindowScreen = 'flight' | 'editor' | 'aero-lab' | 'menu' | 'any';
 
 export interface WindowDef {
   id: string;
@@ -257,9 +257,9 @@ export class WindowManager {
     this.launcher.classList.toggle('k-launcher-floating', host === null);
   }
 
-  setScreen(screen: 'flight' | 'editor' | 'menu'): void {
+  setScreen(screen: 'flight' | 'editor' | 'aero-lab' | 'menu'): void {
     this.screen = screen;
-    this.launcher.style.display = screen === 'menu' ? 'none' : '';
+    this.launcher.style.display = screen === 'menu' || screen === 'aero-lab' ? 'none' : '';
     this.applyScreen();
   }
 
@@ -281,7 +281,9 @@ export class WindowManager {
 
   private applyScreen(): void {
     for (const win of this.windows.values()) {
-      const visible = win.def.screen === 'any' || win.def.screen === this.screen;
+      const visible = this.screen === 'aero-lab'
+        ? win.def.screen === 'aero-lab'
+        : win.def.screen === 'any' || win.def.screen === this.screen;
       win.setScreenVisible(visible);
       const btn = this.buttons.get(win.def.id);
       if (btn) btn.style.display = visible ? '' : 'none';

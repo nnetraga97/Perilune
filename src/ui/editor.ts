@@ -28,6 +28,7 @@ import {
 } from '../sim/vessel';
 import { PARTS, PartDef, partById } from '../content/parts';
 import { buildAeroModel } from '../sim/aero';
+import type { AeroLabEnvironmentToken } from '../sim/aeroLab';
 import { computeMassProperties } from '../sim/vessel';
 import { buildVesselVisual, disposeVesselVisual, VesselVisual, type VesselVisualSource } from '../render/vesselMesh';
 import type { PartModelLibrary } from '../render/partModelLibrary';
@@ -194,6 +195,8 @@ export function surfaceSymmetryPlacements(
 
 export interface EditorCallbacks {
   onLaunch(craft: Craft, displayVisual?: EditorDisplayVisual): Promise<string | null>;
+  onSimulateAirflow(craft: Craft, environment: AeroLabEnvironmentToken): void;
+  canSimulateAirflow(): boolean;
   onExit(): void;
   loadBuiltInVisual?(id: BuiltInCraftVisualId): Promise<EditorDisplayVisual>;
   campaign(): CampaignState;
@@ -253,6 +256,7 @@ export class Editor {
   private symmetryBtn!: HTMLElement;
   private snapBtn!: HTMLElement;
   private launchBtn!: HTMLButtonElement;
+  private simulateBtn!: HTMLButtonElement;
   private launchPending = false;
   private campaignEl!: HTMLElement;
   private undoBtn!: HTMLButtonElement;
@@ -455,6 +459,11 @@ export class Editor {
     this.configureEnvironmentOptions();
     this.envSelect.onchange = () => (this.statsDirty = true);
     envPanel.appendChild(this.envSelect);
+    this.simulateBtn = el('button', 'hud-btn ed-airflow', envPanel, 'SIMULATE AIRFLOW') as HTMLButtonElement;
+    this.simulateBtn.onclick = () => this.cb.onSimulateAirflow(
+      structuredClone(this.craft),
+      this.environmentToken,
+    );
 
     const statsPanel = el('div', 'ed-panel', engineerGroup);
     statsPanel.innerHTML = '<h3>ENGINEERING</h3>';
@@ -1678,6 +1687,17 @@ export class Editor {
           ? `Craft contains locked technology: ${locked.map((part) => part.name).join(', ')}`
           : `Insufficient funds: ${cost.toLocaleString()} required`;
     this.launchBtn.setAttribute('aria-label', this.launchBtn.title);
+    this.simulateBtn.disabled = this.craft.parts.length === 0 || !this.cb.canSimulateAirflow();
+    this.simulateBtn.title = this.craft.parts.length === 0
+      ? 'Add at least one part before simulating airflow'
+      : !this.cb.canSimulateAirflow()
+        ? 'Aerodynamics Lab is available in the standard workshop'
+      : 'Open the Aerodynamics Lab for this craft';
+    this.simulateBtn.setAttribute('aria-label', this.simulateBtn.title);
+  }
+
+  get environmentToken(): AeroLabEnvironmentToken {
+    return this.envSelect.value as AeroLabEnvironmentToken;
   }
 
   orbitCamera(dx: number, dy: number): void {

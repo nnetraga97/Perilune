@@ -23,6 +23,9 @@ import { checkPartModelManifest } from './render/partModelManifest';
 import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
 import checkedPartArtifact from './generated/checked-part-manifest.json';
 import { Editor, type EditorDisplayVisual } from './ui/editor';
+import type { AeroLab } from './ui/aeroLab';
+import { resolveAeroLabEnvironment } from './sim/aeroLab';
+import { aeroLabFingerprint } from './render/aeroLabGeometry';
 import { FlightHud, type FlightControlAxis } from './ui/flightHud';
 import { MapView } from './ui/mapView';
 import { Tutorial } from './ui/tutorial';
@@ -157,8 +160,12 @@ import {
   syncArtemisIvLiveTelemetry,
 } from './missions/artemisIv/runtime';
 
-type Screen = 'menu' | 'editor' | 'flight';
+type Screen = 'menu' | 'editor' | 'aero-lab' | 'flight';
 type SessionKind = 'standard' | 'first-light' | 'artemis-iv';
+
+function isBindingScreen(screen: Screen): screen is BindingScreen {
+  return screen !== 'menu';
+}
 
 const ARTEMIS_IV_MENU_ENABLED = import.meta.env.DEV
   || import.meta.env.VITE_ARTEMIS_IV_MENU_ENABLED === 'true';
@@ -186,6 +193,10 @@ class PeriluneGame {
   private partModels!: PartModelLibrary;
   private ktx2Loader: KTX2Loader | null = null;
   private editor!: Editor;
+  private aeroLab: AeroLab | null = null;
+  private aeroLabLoadingEl!: HTMLElement;
+  private aeroLabLoadingMessage!: HTMLElement;
+  private aeroLabSnapshotFingerprint = '';
   private hud!: FlightHud;
   private map!: MapView;
   private tutorial!: Tutorial;
@@ -371,12 +382,19 @@ class PeriluneGame {
     this.perf = new PerfOverlay(this.uiRoot);
     this.editor = new Editor(this.uiRoot, {
       onLaunch: (craft, displayVisual) => this.launch(craft, displayVisual),
+      onSimulateAirflow: (craft, environment) => void this.enterAeroLab(craft, environment),
+      canSimulateAirflow: () => this.sessionKind === 'standard',
       onExit: () => this.showMenu(),
       loadBuiltInVisual: (id) => this.loadEditorBuiltInVisual(id),
       campaign: () => this.game.campaign,
       flightTuning: () => this.game.flightTuning,
       systemId: () => this.game.systemId,
     }, this.partModels, this.ctx.renderer);
+    this.aeroLabLoadingEl = el('div', 'aero-lab-loading', this.uiRoot);
+    this.aeroLabLoadingMessage = el('div', '', this.aeroLabLoadingEl, 'LOADING AERODYNAMICS LAB');
+    const cancelAeroLabLoad = el('button', 'hud-btn', this.aeroLabLoadingEl, '← BACK TO WORKSHOP');
+    cancelAeroLabLoad.onclick = () => this.restoreEditorFromAeroLab();
+    this.aeroLabLoadingEl.style.display = 'none';
     this.hud = new FlightHud(this.uiRoot, {
       onStage: () => this.stage(),
       onToggleMap: () => this.toggleMap(),
@@ -590,8 +608,8 @@ class PeriluneGame {
     this.unsubscribeMenuSave = bindMenuContinueSave(this.saveSync, this.menu);
     void this.auth.start();
     this.windows.addAction('keyboard', 'Keyboard reference (?)', () => {
-      if (this.screen === 'flight' || this.screen === 'editor') {
-        this.cheatSheet.toggle(this.screen as BindingScreen);
+      if (isBindingScreen(this.screen)) {
+        this.cheatSheet.toggle(this.screen);
       }
     });
     this.registerBindings();
@@ -603,6 +621,7 @@ class PeriluneGame {
     // All ACTIONS in tests go through real UI events.
     (window as unknown as Record<string, unknown>).__TEST__ = {
       screen: () => this.screen,
+      aeroLab: () => this.aeroLab?.testState() ?? null,
       partVisualSource: (key: number) => this.editor.visualSourceForPart(key),
       plumeCount: (key: number) => this.world.plumeCountForPart(key),
       plumeState: (key: number) => this.world.plumeStateForPart(key),
@@ -1826,6 +1845,74 @@ class PeriluneGame {
     void this.writeSave('auto', 'autosave');
   }
 
+  private async enterAeroLab(
+    craft: Craft,
+    environmentToken: import('./sim/aeroLab').AeroLabEnvironmentToken,
+  ): Promise<void> {
+    if (this.sessionKind !== 'standard' || craft.parts.length === 0) return;
+    this.resetTouchFlightControls();
+    this.paused = false;
+    this.screen = 'aero-lab';
+    document.getElementById('game-canvas')?.classList.remove('vab-active');
+    this.menu.setVisible(false);
+    this.editor.setVisible(false);
+    this.hud.root.style.display = 'none';
+    this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(null);
+    this.windows.setScreen('aero-lab');
+    if (this.rendererFailureEl) this.rendererFailureEl.hidden = true;
+    this.aeroLabSnapshotFingerprint = aeroLabFingerprint(craft);
+    this.aeroLabLoadingMessage.textContent = 'LOADING AERODYNAMICS LAB';
+    this.aeroLabLoadingEl.style.display = '';
+    try {
+      if (!this.aeroLab) {
+        const { AeroLab } = await import('./ui/aeroLab');
+        this.aeroLab = new AeroLab(this.uiRoot, this.partModels, this.ctx.renderer, {
+          onBack: () => this.restoreEditorFromAeroLab(),
+          onAnalysisError: (errorType) => clientLog.warn('sim.boundary.error', {
+            boundary: 'aero-lab-worker',
+            errorType,
+          }),
+        });
+      }
+      if (this.screen !== 'aero-lab') return;
+      this.aeroLabLoadingEl.style.display = 'none';
+      const bodyIds = this.game.systemId === 'sol' ? ['earth', 'moon'] : ['veyra', 'palla'];
+      this.aeroLab.open(
+        craft,
+        resolveAeroLabEnvironment(this.game.universe, environmentToken),
+        bodyIds.map((id) => this.game.universe.get(id)),
+      );
+    } catch (error) {
+      this.aeroLabLoadingMessage.textContent = 'THE AERODYNAMICS LAB COULD NOT LOAD';
+      clientLog.warn('sim.boundary.error', {
+        boundary: 'aero-lab-load',
+        errorType: error instanceof Error ? error.name : 'AeroLabLoadError',
+      });
+    }
+  }
+
+  private restoreEditorFromAeroLab(): void {
+    if (this.screen !== 'aero-lab') return;
+    if (this.aeroLabSnapshotFingerprint !== aeroLabFingerprint(this.editor.craft)) {
+      clientLog.warn('sim.boundary.error', {
+        boundary: 'aero-lab-editor-restore',
+        errorType: 'CraftChangedWhileReadOnly',
+      });
+    }
+    this.aeroLab?.close();
+    this.aeroLabLoadingEl.style.display = 'none';
+    this.screen = 'editor';
+    document.getElementById('game-canvas')?.classList.add('vab-active');
+    this.editor.setVisible(true);
+    this.hud.root.style.display = 'none';
+    this.map.setVisible(false);
+    this.perf.setMiniVisible(false);
+    this.windows.setLauncherHost(this.editor.utilityHost);
+    this.windows.setScreen('editor');
+  }
+
   private ensureEditorLaunchPreparation(): Promise<void> {
     const game = this.game;
     const home = game.universe.get(game.universe.homeBodyId);
@@ -2476,8 +2563,8 @@ class PeriluneGame {
         this.cheatSheet.hide();
         return;
       }
-      if (this.screen === 'flight' || this.screen === 'editor') {
-        this.input.dispatch(e, this.screen as BindingScreen);
+      if (isBindingScreen(this.screen)) {
+        this.input.dispatch(e, this.screen);
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -2605,6 +2692,8 @@ class PeriluneGame {
       }
       else if (this.screen === 'flight') {
         this.world.orbitCamera(dx, dy);
+      } else if (this.screen === 'aero-lab') {
+        this.aeroLab?.orbitCamera(dx, dy);
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -2640,6 +2729,7 @@ class PeriluneGame {
     canvas.addEventListener('wheel', (e) => {
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
       if (this.screen === 'editor') this.editor.zoomCamera(factor);
+      else if (this.screen === 'aero-lab') this.aeroLab?.zoomCamera(factor);
       else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {
@@ -2653,6 +2743,7 @@ class PeriluneGame {
   private registerBindings(): void {
     const flight = 'flight' as const;
     const editor = 'editor' as const;
+    const aeroLab = 'aero-lab' as const;
     const vessel = (fn: (v: import('./sim/flight').VesselRuntime) => void) => () => {
       const gv = this.game.active;
       if (gv) fn(gv.runtime);
@@ -2747,9 +2838,14 @@ class PeriluneGame {
       { code: '', screen: editor, group: 'Workshop', label: 'Pan camera', keyLabel: 'Middle-drag' },
       { code: '', screen: editor, group: 'Workshop', label: 'Duplicate subtree', keyLabel: 'Alt+click' },
       { code: '', screen: editor, group: 'Workshop', label: 'Zoom', keyLabel: 'Wheel' },
-      // ---- help (both screens)
+      // ---- aerodynamics lab
+      { code: 'Escape', screen: aeroLab, group: 'Lab', label: 'Back to Workshop', keyLabel: 'Esc', handler: () => this.restoreEditorFromAeroLab() },
+      { code: 'Space', screen: aeroLab, group: 'Lab', label: 'Pause / resume airflow', keyLabel: 'Space', handler: () => this.aeroLab?.togglePaused() },
+      { code: '', screen: aeroLab, group: 'Camera', label: 'Orbit camera', keyLabel: 'Drag' },
+      { code: '', screen: aeroLab, group: 'Camera', label: 'Zoom', keyLabel: 'Wheel' },
+      // ---- help
       { code: 'Slash', shift: true, screen: 'any', group: 'Help', label: 'Show this cheat sheet', keyLabel: '?', handler: () => {
-        if (this.screen === 'flight' || this.screen === 'editor') this.cheatSheet.toggle(this.screen as BindingScreen);
+        if (isBindingScreen(this.screen)) this.cheatSheet.toggle(this.screen);
       } },
     );
     for (const group of ACTION_GROUP_IDS) {
@@ -3021,6 +3117,12 @@ class PeriluneGame {
     } else if (this.screen === 'editor') {
       this.editor.update();
       if (!this.ctx.renderPaused) this.ctx.renderer.render(this.editor.scene, this.editor.camera);
+    } else if (this.screen === 'aero-lab') {
+      this.aeroLab?.update(dt);
+      if (!this.ctx.renderPaused) {
+        if (this.aeroLab) this.aeroLab.render();
+        else this.ctx.renderer.clear();
+      }
     } else {
       // Menu: idle starfield via world scene if available.
       if (!this.ctx.renderPaused) this.ctx.renderer.clear();

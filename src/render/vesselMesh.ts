@@ -26,7 +26,7 @@ export type VesselVisualSource = 'model' | 'procedural';
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 
-function geometryFor(def: PartDef): THREE.BufferGeometry {
+export function vesselPartGeometry(def: PartDef): THREE.BufferGeometry {
   let geo = geoCache.get(def.id);
   if (geo) return geo;
   const s = def.shape;
@@ -127,7 +127,7 @@ function buildPartMesh(
     });
     holder.userData.visualSource = 'model' satisfies VesselVisualSource;
   } else {
-    const body = new THREE.Mesh(geometryFor(def), materialFor(def.color ?? '#c8cdd2'));
+    const body = new THREE.Mesh(vesselPartGeometry(def), materialFor(def.color ?? '#c8cdd2'));
     body.castShadow = true;
     body.receiveShadow = true;
     holder.add(body);
