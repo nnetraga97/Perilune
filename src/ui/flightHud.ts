@@ -15,6 +15,7 @@ import { estimateBurnTime, nodeDeltaV, type ManeuverNode } from '../sim/maneuver
 import { stateToElements, periapsisOf, apoapsisOf, timeToTrueAnomaly } from '../core/orbit';
 import { navHeading, projectNavDirection } from './navball';
 import { surfaceVelocity } from '../sim/bodyOrientation';
+import { groundRadiusInertial } from '../sim/terrain';
 import { el, injectUiStyles } from './kit';
 import { appendNavballIcon, type NavballIcon } from './icons';
 import type { EntryPrediction } from '../sim/entry';
@@ -586,14 +587,20 @@ export class FlightHud {
     this.throttleInput.setAttribute('aria-valuetext', `${throttlePercent} percent throttle`);
     const body = game.bodyOf(gv);
     const r = v.pos.length();
-    const alt = r - body.radius;
+    const altitudeAsl = r - body.radius;
+    // The primary flight altimeter is a terrain-clearance instrument on solid
+    // worlds. Reference-sphere altitude remains available in Flight Data, but
+    // can be negative inside lunar craters even while touching the surface.
+    const alt = body.def.surfaceKind === 'solid'
+      ? Math.max(0, r - groundRadiusInertial(body, v.pos, game.time))
+      : altitudeAsl;
 
     // Speed: surface-relative in atmosphere / near ground, orbital above.
     const surfaceVel = surfaceVelocity(body, v.pos, new Vec3());
     const surfSpeed = new Vec3().copy(v.vel).sub(surfaceVel).length();
     const orbSpeed = v.vel.length();
     const surfaceMode =
-      alt < (body.def.atmosphere?.height ?? Math.max(10_000, body.radius * 0.08));
+      altitudeAsl < (body.def.atmosphere?.height ?? Math.max(10_000, body.radius * 0.08));
     this.speedModeEl.textContent = surfaceMode ? 'SURFACE' : 'ORBIT';
     this.speedEl.textContent = `${(surfaceMode ? surfSpeed : orbSpeed).toFixed(surfaceMode && surfSpeed < 100 ? 1 : 0)} m/s`;
     this.altEl.textContent = fmtDistance(alt);

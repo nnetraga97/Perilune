@@ -1,4 +1,10 @@
-import { addPart, createCraft, removeSubtree, type Craft } from '../sim/vessel';
+import {
+  addPart,
+  craftAxialVisualBounds,
+  createCraft,
+  removeSubtree,
+  type Craft,
+} from '../sim/vessel';
 import { partById } from './parts';
 
 export interface BuiltInCraftDefinition {
@@ -130,6 +136,11 @@ export function createFirstLightRocket(): Craft {
     { partKeys: [capsuleSeparator.key] },
     { partKeys: [chute.key] },
   ];
+  // Built-ins open directly in the workshop, whose deck is y=0. Keep the
+  // complete launch vehicle above that deck instead of authoring it around an
+  // arbitrary root-part origin that leaves the lower stack underground.
+  const workshopOffset = -craftAxialVisualBounds(craft).minimum;
+  for (const part of craft.parts) part.position.y += workshopOffset;
   return craft;
 }
 

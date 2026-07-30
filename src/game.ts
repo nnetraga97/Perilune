@@ -12,6 +12,7 @@ import {
   ACTION_GROUP_IDS,
   Craft,
   analyzeCraft,
+  craftAxialVisualBounds,
   craftVisualRadius,
   defOf,
   type ActionGroupId,
@@ -1873,11 +1874,17 @@ class PeriluneGame {
   private frameActiveCraft(keepEngineClearOfHud = false): void {
     const active = this.game.active;
     if (!active) return;
-    const radius = craftVisualRadius(active.runtime.craft, active.runtime.massProps.com);
+    const craft = active.runtime.craft;
+    const com = active.runtime.massProps.com;
+    const bounds = craftAxialVisualBounds(craft);
+    const axialSpan = bounds.maximum - bounds.minimum;
+    const focusAlongNose = bounds.center - com.y
+      - (keepEngineClearOfHud ? axialSpan * 0.08 : 0);
+    const radius = craftVisualRadius(craft, new Vec3(com.x, bounds.center, com.z));
     this.world.resetCamera(false);
     this.world.frameCameraForVisualRadius(
-      radius * (keepEngineClearOfHud ? 2.6 : 1),
-      keepEngineClearOfHud ? -radius * 0.9 : 0,
+      radius * (keepEngineClearOfHud ? 1.55 : 1),
+      focusAlongNose,
     );
   }
 
@@ -1927,7 +1934,7 @@ class PeriluneGame {
       this.world.resetCamera(false);
       this.world.frameCameraForVisualRadius(55, -20);
     } else {
-      this.frameActiveCraft();
+      this.frameActiveCraft(this.sessionKind === 'first-light');
     }
     this.ensureDefaultConceptLander();
     this.toFlight();

@@ -356,7 +356,10 @@ export function computeMassProperties(craft: Craft): MassProperties {
  * mass. Part rotations cannot escape each part's half-diagonal, so this stays
  * valid for radial parts without coupling the flight camera to render assets.
  */
-export function craftVisualRadius(craft: Craft, center = computeMassProperties(craft).com): number {
+export function craftVisualRadius(
+  craft: Craft,
+  center: Readonly<Vec3Like> = computeMassProperties(craft).com,
+): number {
   let radius = 0.5;
   for (const part of craft.parts) {
     const shape = defOf(part).shape;
@@ -373,6 +376,45 @@ export function craftVisualRadius(craft: Craft, center = computeMassProperties(c
     );
   }
   return radius;
+}
+
+export interface CraftAxialVisualBounds {
+  readonly minimum: number;
+  readonly maximum: number;
+  readonly center: number;
+}
+
+/**
+ * Craft-local visual bounds along the stack axis. Unlike attachment-node
+ * positions, these include each part's rotated shape envelope, so workshop
+ * placement and flight-camera focus can agree on the visible rocket.
+ */
+export function craftAxialVisualBounds(craft: Craft): CraftAxialVisualBounds {
+  if (craft.parts.length === 0) return { minimum: 0, maximum: 0, center: 0 };
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const part of craft.parts) {
+    const shape = defOf(part).shape;
+    const halfWidth = (shape.width ?? Math.max(shape.radiusTop ?? 0, shape.radiusBottom ?? 0) * 2) / 2;
+    const halfHeight = shape.height / 2;
+    const halfDepth = (shape.depth ?? halfWidth * 2) / 2;
+    const q = part.rotation;
+    const xx = q.x * q.x;
+    const zz = q.z * q.z;
+    const xy = q.x * q.y;
+    const yz = q.y * q.z;
+    const wx = q.w * q.x;
+    const wz = q.w * q.z;
+    const r10 = 2 * (xy + wz);
+    const r11 = 1 - 2 * (xx + zz);
+    const r12 = 2 * (yz - wx);
+    const halfExtent = Math.abs(r10) * halfWidth
+      + Math.abs(r11) * halfHeight
+      + Math.abs(r12) * halfDepth;
+    minimum = Math.min(minimum, part.position.y - halfExtent);
+    maximum = Math.max(maximum, part.position.y + halfExtent);
+  }
+  return { minimum, maximum, center: (minimum + maximum) / 2 };
 }
 
 // ---------------------------------------------------------------------------
@@ -647,25 +689,17 @@ export function analyzeCraft(
       sp.engineLit = true;
     }
 
-    // 3. Burn: engines drain reachable propellant.
+    // 3. Burn until the first independent feed group empties. Engines remain
+    // lit across staging events, so a following separator-only stage can
+    // correctly account for the propellant and thrust left in the core.
     const litEngines = [...sim.values()].filter((sp) => sp.alive && sp.engineLit && sp.def.engine);
     const massStart = liveMass();
-
-    if (litEngines.length === 0) {
-      stages.push({
-        stageIndex: si,
-        deltaV: 0,
-        twrStart: 0,
-        twrEnd: 0,
-        burnTime: 0,
-        massStart,
-        massEnd: massStart,
-        thrust: 0,
-        isp: 0,
-      });
-      continue;
-    }
-
+    const feedGroups = new Map<string, {
+      resource: 'propellant' | 'solidFuel';
+      tankKeys: number[];
+      availableMass: number;
+      flow: number;
+    }>();
     let thrust = 0;
     let flowSum = 0; // kg/s
     for (const sp of litEngines) {
@@ -675,11 +709,31 @@ export function analyzeCraft(
       const thrustHere = eng.airBreathing
         ? eng.thrustVac * Math.min(1, atmPressure / seaLevelPressure) * tuning.thrustMultiplier
         : eng.thrustVac * (isp / (eng.ispVac * tuning.ispMultiplier)) * tuning.thrustMultiplier;
+      const resource = eng.propellant === 'solidFuel' ? 'solidFuel' : 'propellant';
+      const feedKeys = resource === 'solidFuel'
+        ? [sp.key]
+        : [...crossfeedFor(sp.key)].sort((a, b) => a - b);
+      const groupKey = `${resource}:${feedKeys[0] ?? sp.key}`;
+      let feed = feedGroups.get(groupKey);
+      if (!feed) {
+        const tankKeys = feedKeys.filter((key) => {
+          const tank = sim.get(key);
+          return Boolean(tank?.alive && (tank.resources[resource] ?? 0) > 0);
+        });
+        const availableMass = tankKeys.reduce((sum, key) => (
+          sum + (sim.get(key)?.resources[resource] ?? 0) * RESOURCE_DENSITY[resource]
+        ), 0);
+        feed = { resource, tankKeys, availableMass, flow: 0 };
+        feedGroups.set(groupKey, feed);
+      }
+      if (!(feed.availableMass > 0) || !(thrustHere > 0) || !(isp > 0)) continue;
+      const flowHere = thrustHere / (isp * G0);
       thrust += thrustHere;
-      flowSum += thrustHere / (isp * G0);
+      flowSum += flowHere;
+      feed.flow += flowHere;
     }
     if (flowSum <= 0) {
-      // Engines lit but producing nothing here (air-breathers in vacuum).
+      // No lit engine has both usable propellant and thrust in this environment.
       stages.push({
         stageIndex: si,
         deltaV: 0,
@@ -695,41 +749,23 @@ export function analyzeCraft(
     }
     const effIsp = thrust / (flowSum * G0);
 
-    // Available propellant: union of crossfeed pools for liquid engines,
-    // self-contained fuel for solids.
-    let availableProp = 0;
-    const countedTanks = new Set<number>();
-    for (const sp of litEngines) {
-      const eng = sp.def.engine!;
-      if (eng.propellant === 'solidFuel') {
-        if (!countedTanks.has(sp.key)) {
-          availableProp += (sp.resources.solidFuel ?? 0) * RESOURCE_DENSITY.solidFuel;
-          countedTanks.add(sp.key);
-        }
-      } else {
-        for (const k of crossfeedFor(sp.key)) {
-          if (countedTanks.has(k)) continue;
-          const tank = sim.get(k);
-          if (tank?.alive && (tank.resources.propellant ?? 0) > 0) {
-            availableProp += (tank.resources.propellant ?? 0) * RESOURCE_DENSITY.propellant;
-            countedTanks.add(k);
-          }
-        }
+    const burnTime = Math.min(...[...feedGroups.values()]
+      .filter((feed) => feed.availableMass > 0 && feed.flow > 0)
+      .map((feed) => feed.availableMass / feed.flow));
+    for (const feed of feedGroups.values()) {
+      if (!(feed.availableMass > 0) || !(feed.flow > 0)) continue;
+      const remainingFraction = Math.max(
+        0,
+        1 - Math.min(feed.availableMass, feed.flow * burnTime) / feed.availableMass,
+      );
+      for (const key of feed.tankKeys) {
+        const tank = sim.get(key);
+        if (!tank) continue;
+        tank.resources[feed.resource] = (tank.resources[feed.resource] ?? 0) * remainingFraction;
       }
     }
-
-    const massEnd = massStart - availableProp;
-    const deltaV = availableProp > 0 ? effIsp * G0 * Math.log(massStart / massEnd) : 0;
-    const burnTime = availableProp > 0 ? availableProp / flowSum : 0;
-
-    // Drain the counted tanks for the next stage's bookkeeping.
-    for (const k of countedTanks) {
-      const tank = sim.get(k)!;
-      if (tank.def.engine?.propellant === 'solidFuel' || tank.resources.solidFuel !== undefined) {
-        if (tank.resources.solidFuel !== undefined) tank.resources.solidFuel = 0;
-      }
-      if (tank.resources.propellant !== undefined) tank.resources.propellant = 0;
-    }
+    const massEnd = liveMass();
+    const deltaV = massEnd < massStart ? effIsp * G0 * Math.log(massStart / massEnd) : 0;
 
     stages.push({
       stageIndex: si,

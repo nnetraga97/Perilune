@@ -650,9 +650,7 @@ export class Editor {
     for (const def of parts) {
       const unlocked = isPartUnlocked(this.cb.campaign(), def);
       const tuning = this.cb.flightTuning();
-      const displayBlurb = tuning === undefined || tuning.ispMultiplier === 1
-        ? def.blurb
-        : `Flight-qualified ${def.category.replace('-', ' ')} hardware for real-scale Sol missions.`;
+      const displayBlurb = def.blurb;
       const card = el('div', unlocked ? 'ed-part' : 'ed-part ed-part-locked', this.partListEl);
       card.draggable = unlocked && !coarsePointer;
       card.setAttribute('aria-disabled', String(!unlocked));

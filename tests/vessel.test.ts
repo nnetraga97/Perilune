@@ -154,6 +154,26 @@ describe('craft graph', () => {
     expect(analysis.stages[2].thrust).toBeGreaterThan(0);
   });
 
+  it('carries a lit core engine into a following separator-only stage', () => {
+    const craft = createCraft('Parallel booster staging');
+    const pod = addPart(craft, 'pod-voyager', null, 'root', { x: 0, y: 4, z: 0 });
+    const tank = addPart(craft, 'tank-m8', pod.key, 'stack-bottom', { x: 0, y: 1, z: 0 });
+    const core = addPart(craft, 'eng-mule', tank.key, 'stack-bottom', { x: 0, y: -2, z: 0 });
+    const coupling = addPart(craft, 'dec-radial', tank.key, 'surface', { x: 1.4, y: 1, z: 0 });
+    const booster = addPart(craft, 'srb-torch', coupling.key, 'surface', { x: 2.1, y: 1, z: 0 });
+    craft.stages = [
+      { partKeys: [core.key, booster.key] },
+      { partKeys: [coupling.key] },
+    ];
+
+    const analysis = analyzeCraft(craft, 9.80665, 0);
+
+    expect(analysis.stages[0].burnTime).toBeGreaterThan(0);
+    expect(analysis.stages[1].thrust).toBeGreaterThan(0);
+    expect(analysis.stages[1].twrStart).toBeGreaterThan(0);
+    expect(analysis.stages[1].deltaV).toBeGreaterThan(0);
+  });
+
   it('warns when no control source exists', () => {
     const craft = createCraft('Headless');
     const tank = addPart(craft, 'tank-s1', null, 'root', { x: 0, y: 0, z: 0 });

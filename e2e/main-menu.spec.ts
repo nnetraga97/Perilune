@@ -101,6 +101,12 @@ test('First Light opens with the prepared Sol trainer and guided launch card', a
   await expect(page.locator('input.ed-name')).toHaveValue('First Light Launch Vehicle');
   await expect.poll(() => page.evaluate(() => window.__TEST__?.partCount())).toBe(35);
   await expect.poll(() => page.evaluate(() => window.__TEST__?.stageCount())).toBe(7);
+  await expect(page.locator('.ed-part', { hasText: 'Voyager Pod' }).locator('.ed-part-blurb'))
+    .toHaveText('A snug single-seat command pod. The window is small; the view is not.');
+  await expect(page.locator('.ed-part', { hasText: 'Tandem Cab' }).locator('.ed-part-blurb'))
+    .toHaveText('Two seats, one purpose: putting bootprints somewhere new.');
+  await expect(page.locator('.ed-part', { hasText: 'Pilot Chip' }).locator('.ed-part-blurb'))
+    .toHaveText('A stubborn little guidance computer. Never complains about the catering.');
   const tutorial = page.locator('.tut-box');
   await expect(tutorial).toBeVisible();
   await expect(page.locator('.tut-title')).toHaveText('The mission: make an orbit');

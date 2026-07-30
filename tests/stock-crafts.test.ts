@@ -12,7 +12,7 @@ import { GAMEPLAY_PROFILES } from '../src/content/gameplayProfiles';
 import { partById } from '../src/content/parts';
 import { validateCraftFile } from '../src/save/persistence';
 import { deriveInterstageShroud } from '../src/sim/interstage';
-import { analyzeCraft, buildAutoStages } from '../src/sim/vessel';
+import { analyzeCraft, buildAutoStages, craftAxialVisualBounds } from '../src/sim/vessel';
 import { evaluateStructure } from '../src/sim/structure';
 import { Vec3 } from '../src/core/vec3';
 import { apoapsisOf, elementsAtTime, periapsisOf, stateToElements } from '../src/core/orbit';
@@ -43,6 +43,7 @@ describe('built-in craft library', () => {
     expect(validateCraftFile(JSON.parse(JSON.stringify(craft)))).not.toBeNull();
     expect(craft.parts).toHaveLength(35);
     expect(craft.parts.filter((part) => part.defId === 'batt-m')).toHaveLength(1);
+    expect(craftAxialVisualBounds(craft).minimum).toBeCloseTo(0, 8);
     expect(craft.stages.map((stage) => stage.partKeys.map((key) => (
       craft.parts.find((part) => part.key === key)!.defId
     )))).toEqual([
@@ -301,7 +302,8 @@ describe('built-in craft library', () => {
     const launchAnalysis = analyzeCraft(craft, 9.80665, 101_325);
     const vacuumAnalysis = analyzeCraft(craft, 9.80665, 0);
     const propulsionStages = vacuumAnalysis.stages.filter((stage) => stage.deltaV > 0);
-    expect(propulsionStages).toHaveLength(3);
+    expect(propulsionStages).toHaveLength(4);
+    expect(vacuumAnalysis.stages[1].twrStart).toBeGreaterThan(0);
     expect(launchAnalysis.stages[0].twrStart).toBeGreaterThan(1.8);
     expect(vacuumAnalysis.totalDeltaV).toBeGreaterThan(9_500);
     expect(propulsionStages.at(-1)!.deltaV).toBeGreaterThan(3_500);
