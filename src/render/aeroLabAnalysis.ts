@@ -21,8 +21,8 @@ export interface AeroLabFieldResult extends AeroLabSurface {
 
 const QUALITY = {
   low: { lines: 24, steps: 80, stations: 32 },
-  medium: { lines: 48, steps: 120, stations: 48 },
-  high: { lines: 72, steps: 160, stations: 64 },
+  medium: { lines: 72, steps: 120, stations: 48 },
+  high: { lines: 112, steps: 160, stations: 64 },
 } as const;
 
 function geometryFrom(positions: Float32Array): THREE.BufferGeometry {
@@ -152,10 +152,10 @@ function traceStreamlines(
   const config = QUALITY[quality];
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.z, 0.5);
+  const crossRadius = Math.max(size.x, size.z, 1) * 0.5;
   const flowExtent = (Math.abs(flow.x) * size.x + Math.abs(flow.y) * size.y + Math.abs(flow.z) * size.z) * 0.5;
   const shockDistance = mach > 1.2 ? Math.max(flowExtent, 0.5) * 1.35 : null;
-  const extent = Math.max(size.length() * 0.9, radius * 4);
+  const extent = Math.max(size.length() * 0.9, crossRadius * 8);
   const step = extent * 2 / config.steps;
   const upstream = center.clone().addScaledVector(flow, -extent);
   const basisA = new THREE.Vector3(0, 0, 1);
@@ -170,13 +170,13 @@ function traceStreamlines(
   const ray = new THREE.Ray();
   for (let line = 0; line < config.lines; line++) {
     const angle = line * 2.399963229728653;
-    const laneRadius = radius * (0.25 + 1.8 * Math.sqrt((line + 0.5) / config.lines));
+    const laneRadius = crossRadius * (0.12 + 1.15 * Math.sqrt((line + 0.5) / config.lines));
     const point = upstream.clone()
       .addScaledVector(basisA, Math.cos(angle) * laneRadius)
       .addScaledVector(basisB, Math.sin(angle) * laneRadius);
     positions.push(point.x, point.y, point.z);
     for (let iteration = 0; iteration < config.steps; iteration++) {
-      rk4(point, step, flow, sources, radius * 0.35, next);
+      rk4(point, step, flow, sources, crossRadius * 0.7, next);
       if (
         shockDistance !== null
         && (next.x - center.x) * flow.x + (next.y - center.y) * flow.y + (next.z - center.z) * flow.z
@@ -196,7 +196,7 @@ function traceStreamlines(
   if (mach > 1.2) {
     for (let line = 0; line < config.lines; line++) {
       const angle = line * 2.399963229728653;
-      const laneRadius = radius * (0.18 + 1.1 * Math.sqrt((line + 0.5) / config.lines));
+      const laneRadius = crossRadius * (0.1 + 1.15 * Math.sqrt((line + 0.5) / config.lines));
       const point = center.clone().addScaledVector(flow, shockDistance!)
         .addScaledVector(basisA, Math.cos(angle) * laneRadius)
         .addScaledVector(basisB, Math.sin(angle) * laneRadius);

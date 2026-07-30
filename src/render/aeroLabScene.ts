@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { PartModelLibrary } from './partModelLibrary';
 import { buildVesselVisual, disposeVesselVisual, type VesselVisual } from './vesselMesh';
 import { craftAxialVisualBounds, craftVisualRadius, type Craft } from '../sim/vessel';
@@ -18,32 +19,29 @@ export class AeroLabScene {
   readonly camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2_000);
 
   private readonly content = new THREE.Group();
+  private readonly controls: OrbitControls;
   private visual: VesselVisual | null = null;
   private surface: THREE.Mesh | null = null;
   private surfaceMaterial: THREE.MeshStandardMaterial | null = null;
   private streamlines: THREE.LineSegments | null = null;
-  private particles: THREE.Points | null = null;
+  private streamlineMaterial: THREE.ShaderMaterial | null = null;
+  private smoke: THREE.Points | null = null;
+  private smokeMaterial: THREE.ShaderMaterial | null = null;
   private shock: THREE.Mesh | null = null;
-  private streamlinePositions = new Float32Array();
-  private streamlineOffsets = new Uint32Array();
-  private particlePhases = new Float32Array();
   private surfaceData: AeroLabFieldResult | null = null;
   private condition: AeroLabCondition | null = null;
   private reading: AeroLabReading | null = null;
   private mode: AeroLabSurfaceMode = 'flow';
   private radius = 4;
-  private yaw = 0.72;
-  private pitch = 0.18;
-  private distance = 14;
   private time = 0;
   private paused = false;
   private readonly comMarker: THREE.Mesh;
   private readonly copMarker: THREE.Mesh;
   private readonly forceArrow = new THREE.ArrowHelper();
 
-  constructor(private readonly models: PartModelLibrary) {
-    this.scene.background = new THREE.Color('#061018');
-    this.scene.fog = new THREE.FogExp2('#061018', 0.018);
+  constructor(private readonly models: PartModelLibrary, canvas: HTMLCanvasElement) {
+    this.scene.background = new THREE.Color('#071014');
+    this.scene.fog = new THREE.FogExp2('#071014', 0.014);
     this.scene.add(new THREE.HemisphereLight('#b8e8ff', '#081018', 1.4));
     const key = new THREE.DirectionalLight('#fff4df', 2.2);
     key.position.set(7, 12, 9);
@@ -61,6 +59,12 @@ export class AeroLabScene {
     this.comMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: '#65d6ff' }));
     this.copMarker = new THREE.Mesh(markerGeometry.clone(), new THREE.MeshBasicMaterial({ color: '#ffbf69' }));
     this.content.add(this.comMarker, this.copMarker, this.forceArrow);
+
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.enabled = false;
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = false;
   }
 
   setCraft(craft: Craft): void {
@@ -70,10 +74,12 @@ export class AeroLabScene {
     const bounds = craftAxialVisualBounds(craft);
     this.content.position.y = -bounds.center;
     this.radius = craftVisualRadius(craft);
-    this.distance = THREE.MathUtils.clamp(this.radius * 3.2, 6, 80);
+    this.controls.minDistance = Math.max(2, this.radius * 1.35);
+    this.controls.maxDistance = Math.max(30, this.radius * 12);
     this.camera.near = Math.max(0.02, this.radius / 200);
     this.camera.far = Math.max(200, this.radius * 30);
     this.camera.updateProjectionMatrix();
+    this.resetCamera();
   }
 
   setAnalysis(
@@ -107,47 +113,115 @@ export class AeroLabScene {
     this.content.add(this.surface);
 
     const segmentPositions: number[] = [];
+    const segmentProgress: number[] = [];
+    const smokePositions: number[] = [];
+    const smokeProgress: number[] = [];
     for (let line = 0; line + 1 < result.streamlineOffsets.length; line++) {
       const start = result.streamlineOffsets[line];
       const end = result.streamlineOffsets[line + 1];
+      const lineLength = Math.max(1, end - start - 1);
+      const phaseOffset = (line * 0.61803398875) % 1;
       for (let point = start; point + 1 < end; point++) {
         const a = point * 3;
         const b = (point + 1) * 3;
+        const progressA = (point - start) / lineLength + phaseOffset;
+        const progressB = (point + 1 - start) / lineLength + phaseOffset;
         segmentPositions.push(
           result.streamlinePositions[a], result.streamlinePositions[a + 1], result.streamlinePositions[a + 2],
           result.streamlinePositions[b], result.streamlinePositions[b + 1], result.streamlinePositions[b + 2],
         );
+        segmentProgress.push(progressA, progressB);
+        for (let sample = 0; sample < 3; sample++) {
+          const t = sample / 3;
+          smokePositions.push(
+            THREE.MathUtils.lerp(result.streamlinePositions[a], result.streamlinePositions[b], t),
+            THREE.MathUtils.lerp(result.streamlinePositions[a + 1], result.streamlinePositions[b + 1], t),
+            THREE.MathUtils.lerp(result.streamlinePositions[a + 2], result.streamlinePositions[b + 2], t),
+          );
+          smokeProgress.push(THREE.MathUtils.lerp(progressA, progressB, t));
+        }
       }
     }
     const lineGeometry = new THREE.BufferGeometry();
     lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(segmentPositions, 3));
+    lineGeometry.setAttribute('lineProgress', new THREE.Float32BufferAttribute(segmentProgress, 1));
+    this.streamlineMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: this.time },
+        uOpacity: { value: 1 },
+      },
+      vertexShader: `
+        attribute float lineProgress;
+        varying float vProgress;
+        void main() {
+          vProgress = lineProgress;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uOpacity;
+        varying float vProgress;
+        void main() {
+          float phase = fract(vProgress * 6.0 - uTime * 0.7);
+          float pulse = smoothstep(0.58, 0.88, phase) * (1.0 - smoothstep(0.88, 1.0, phase));
+          vec3 base = vec3(0.31, 0.62, 0.59);
+          vec3 highlight = vec3(0.78, 0.92, 0.72);
+          gl_FragColor = vec4(mix(base, highlight, pulse), (0.04 + pulse * 0.16) * uOpacity);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
     this.streamlines = new THREE.LineSegments(
       lineGeometry,
-      new THREE.LineBasicMaterial({ color: '#79d8f2', transparent: true, opacity: 0.34 }),
+      this.streamlineMaterial,
     );
     this.content.add(this.streamlines);
 
-    this.streamlinePositions = new Float32Array(result.streamlinePositions);
-    this.streamlineOffsets = new Uint32Array(result.streamlineOffsets);
-    const particleCount = Math.max(0, (result.streamlineOffsets.length - 1) * 3);
-    this.particlePhases = new Float32Array(particleCount);
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(particleCount * 3), 3));
-    for (let i = 0; i < particleCount; i++) this.particlePhases[i] = (i % 3) / 3;
-    this.particles = new THREE.Points(
-      particleGeometry,
-      new THREE.PointsMaterial({
-        color: '#d8f7ff',
-        size: Math.max(0.035, this.radius * 0.018),
-        sizeAttenuation: true,
-        transparent: true,
-      }),
-    );
-    this.content.add(this.particles);
+    const smokeGeometry = new THREE.BufferGeometry();
+    smokeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(smokePositions, 3));
+    smokeGeometry.setAttribute('flowProgress', new THREE.Float32BufferAttribute(smokeProgress, 1));
+    this.smokeMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: this.time },
+        uOpacity: { value: 1 },
+      },
+      vertexShader: `
+        attribute float flowProgress;
+        uniform float uTime;
+        varying float vPulse;
+        varying float vNoise;
+        void main() {
+          float phase = fract(flowProgress * 5.0 - uTime * 0.55);
+          vPulse = smoothstep(0.52, 0.84, phase) * (1.0 - smoothstep(0.84, 1.0, phase));
+          vNoise = 0.5 + 0.5 * sin(flowProgress * 31.0 + uTime * 0.8);
+          vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * viewPosition;
+          gl_PointSize = 10.0 + vPulse * 8.0 + vNoise * 4.0;
+        }
+      `,
+      fragmentShader: `
+        uniform float uOpacity;
+        varying float vPulse;
+        varying float vNoise;
+        void main() {
+          float distanceFromCenter = length(gl_PointCoord - vec2(0.5)) * 2.0;
+          float softness = pow(max(0.0, 1.0 - distanceFromCenter), 1.35);
+          vec3 smokeColor = mix(vec3(0.42, 0.6, 0.58), vec3(0.78, 0.9, 0.73), vPulse);
+          float opacity = (0.035 + vPulse * 0.12) * (0.72 + vNoise * 0.28);
+          gl_FragColor = vec4(smokeColor, softness * opacity * uOpacity);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.smoke = new THREE.Points(smokeGeometry, this.smokeMaterial);
+    this.content.add(this.smoke);
     this.updateSurface();
     this.updateShock();
     this.updateMarkers();
-    this.updateParticles();
   }
 
   updateReading(condition: AeroLabCondition, reading: AeroLabReading): void {
@@ -176,45 +250,41 @@ export class AeroLabScene {
 
   setAnalysisPending(pending: boolean): void {
     if (this.surfaceMaterial) this.surfaceMaterial.opacity = pending ? 0.22 : 0.72;
-    if (this.streamlines) (this.streamlines.material as THREE.LineBasicMaterial).opacity = pending ? 0.1 : 0.34;
-    if (this.particles) (this.particles.material as THREE.PointsMaterial).opacity = pending ? 0.25 : 1;
+    if (this.streamlineMaterial) this.streamlineMaterial.uniforms.uOpacity.value = pending ? 0.2 : 1;
+    if (this.smokeMaterial) this.smokeMaterial.uniforms.uOpacity.value = pending ? 0.2 : 1;
   }
 
   setPaused(paused: boolean): void {
     this.paused = paused;
   }
 
-  orbitCamera(dx: number, dy: number): void {
-    this.yaw -= dx * 0.006;
-    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.006, -1.35, 1.35);
+  setControlsEnabled(enabled: boolean): void {
+    this.controls.enabled = enabled;
   }
 
-  zoomCamera(factor: number): void {
-    this.distance = THREE.MathUtils.clamp(this.distance * factor, this.radius * 1.4, this.radius * 12);
+  resetCamera(): void {
+    const distance = THREE.MathUtils.clamp(this.radius * 2.9, 6, 80);
+    this.camera.position.set(distance * 0.74, distance * 0.18, distance * 0.65);
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
   }
 
   update(dt: number): void {
-    if (!this.paused) {
-      this.time += dt;
-      this.updateParticles();
-    }
+    if (!this.paused) this.time += dt;
+    if (this.streamlineMaterial) this.streamlineMaterial.uniforms.uTime.value = this.time;
+    if (this.smokeMaterial) this.smokeMaterial.uniforms.uTime.value = this.time;
+    this.controls.update();
     const aspect = window.innerWidth / Math.max(1, window.innerHeight);
     if (this.camera.aspect !== aspect) {
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
     }
-    const cp = Math.cos(this.pitch);
-    this.camera.position.set(
-      Math.cos(this.yaw) * cp * this.distance,
-      Math.sin(this.pitch) * this.distance,
-      Math.sin(this.yaw) * cp * this.distance,
-    );
-    this.camera.lookAt(0, 0, 0);
   }
 
   dispose(): void {
     this.disposeAnalysis();
     this.clearCraft();
+    this.controls.dispose();
     this.comMarker.geometry.dispose();
     (this.comMarker.material as THREE.Material).dispose();
     this.copMarker.geometry.dispose();
@@ -297,32 +367,8 @@ export class AeroLabScene {
     this.content.add(this.shock);
   }
 
-  private updateParticles(): void {
-    if (!this.particles || this.streamlineOffsets.length < 2) return;
-    const positions = this.particles.geometry.getAttribute('position') as THREE.BufferAttribute;
-    for (let particle = 0; particle < positions.count; particle++) {
-      const line = Math.floor(particle / 3);
-      const start = this.streamlineOffsets[line];
-      const end = this.streamlineOffsets[line + 1];
-      const length = end - start;
-      if (length < 2) continue;
-      const progress = (this.particlePhases[particle] + this.time * 0.28) % 1;
-      const index = start + Math.min(length - 2, Math.floor(progress * (length - 1)));
-      const local = progress * (length - 1) - Math.floor(progress * (length - 1));
-      const a = index * 3;
-      const b = (index + 1) * 3;
-      positions.setXYZ(
-        particle,
-        THREE.MathUtils.lerp(this.streamlinePositions[a], this.streamlinePositions[b], local),
-        THREE.MathUtils.lerp(this.streamlinePositions[a + 1], this.streamlinePositions[b + 1], local),
-        THREE.MathUtils.lerp(this.streamlinePositions[a + 2], this.streamlinePositions[b + 2], local),
-      );
-    }
-    positions.needsUpdate = true;
-  }
-
   private disposeAnalysis(): void {
-    for (const object of [this.surface, this.streamlines, this.particles, this.shock]) {
+    for (const object of [this.surface, this.streamlines, this.smoke, this.shock]) {
       if (!object) continue;
       this.content.remove(object);
       object.geometry.dispose();
@@ -332,7 +378,9 @@ export class AeroLabScene {
     this.surface = null;
     this.surfaceMaterial = null;
     this.streamlines = null;
-    this.particles = null;
+    this.streamlineMaterial = null;
+    this.smoke = null;
+    this.smokeMaterial = null;
     this.shock = null;
     this.surfaceData = null;
   }

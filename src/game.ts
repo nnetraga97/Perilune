@@ -2588,6 +2588,7 @@ class PeriluneGame {
         this.editorPointerDown(canvas, e);
         return;
       }
+      if (this.screen === 'aero-lab') return;
       if (this.screen === 'flight' && this.map.visible && e.pointerType !== 'mouse') {
         this.mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.mapPointers.size >= 2) {
@@ -2692,8 +2693,6 @@ class PeriluneGame {
       }
       else if (this.screen === 'flight') {
         this.world.orbitCamera(dx, dy);
-      } else if (this.screen === 'aero-lab') {
-        this.aeroLab?.orbitCamera(dx, dy);
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -2727,9 +2726,9 @@ class PeriluneGame {
       }
     });
     canvas.addEventListener('wheel', (e) => {
+      if (this.screen === 'aero-lab') return;
       const factor = e.deltaY > 0 ? 1.12 : 0.9;
       if (this.screen === 'editor') this.editor.zoomCamera(factor);
-      else if (this.screen === 'aero-lab') this.aeroLab?.zoomCamera(factor);
       else if (this.screen === 'flight' && this.map.visible) this.map.zoomCamera(factor);
       else if (this.screen === 'flight' && e.shiftKey) this.world.zoomFov(e.deltaY > 0 ? 3 : -3);
       else if (this.screen === 'flight') {

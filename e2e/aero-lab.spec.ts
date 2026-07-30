@@ -50,10 +50,18 @@ test('analyzes the current craft and returns to the unchanged workshop', async (
   const canvas = page.locator('#game-canvas');
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
+  const cameraBefore = await page.evaluate(() => (window as any).__TEST__.aeroLab()?.cameraPosition);
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.down();
   await page.mouse.move(box!.x + box!.width / 2 + 120, box!.y + box!.height / 2 + 30, { steps: 5 });
   await page.mouse.up();
+  await page.waitForTimeout(200);
+  const cameraAfterOrbit = await page.evaluate(() => (window as any).__TEST__.aeroLab()?.cameraPosition);
+  expect(cameraAfterOrbit).not.toEqual(cameraBefore);
+  await page.mouse.wheel(0, -400);
+  await page.waitForTimeout(200);
+  const cameraAfterZoom = await page.evaluate(() => (window as any).__TEST__.aeroLab()?.cameraPosition);
+  expect(cameraAfterZoom).not.toEqual(cameraAfterOrbit);
 
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.__TEST__?.screen() === 'editor');

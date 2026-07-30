@@ -77,7 +77,7 @@ export class AeroLab {
     private readonly callbacks: AeroLabCallbacks,
   ) {
     injectUiStyles();
-    this.scene = new AeroLabScene(models);
+    this.scene = new AeroLabScene(models, renderer.domElement);
     this.paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.root = el('section', 'aero-lab', uiRoot);
     this.root.setAttribute('aria-label', 'Aerodynamics Lab');
@@ -88,16 +88,19 @@ export class AeroLab {
     el('h1', '', title, 'AERODYNAMICS LAB');
     const headerActions = el('div', 'aero-lab-header-actions', header);
     this.statusEl = el('span', 'aero-lab-status', headerActions, 'READY');
+    const resetView = el('button', 'hud-btn', headerActions, 'RESET VIEW') as HTMLButtonElement;
+    resetView.onclick = () => this.scene.resetCamera();
     const back = el('button', 'hud-btn', headerActions, '← BACK TO WORKSHOP') as HTMLButtonElement;
     back.onclick = () => this.callbacks.onBack();
 
     const controls = el('aside', 'aero-lab-panel aero-lab-controls', this.root);
-    el('h2', '', controls, 'CONDITIONS');
-    const bodyRow = el('label', 'aero-lab-field', controls);
+    const bodyRow = el('label', 'aero-lab-field aero-lab-field-environment', controls);
     el('span', '', bodyRow, 'Environment');
     this.bodySelect = el('select', '', bodyRow) as HTMLSelectElement;
     this.bodySelect.onchange = () => this.selectBody(this.bodySelect.value);
-    const presets = el('div', 'aero-lab-presets', controls);
+    const presetGroup = el('div', 'aero-lab-toolbar-group aero-lab-preset-group', controls);
+    el('span', '', presetGroup, 'Scenario');
+    const presets = el('div', 'aero-lab-presets', presetGroup);
     for (const [id, label] of [['ascent', 'ASCENT'], ['high-q', 'HIGH Q'], ['reentry', 'RE-ENTRY']] as const) {
       const button = el('button', 'hud-btn', presets, label) as HTMLButtonElement;
       button.onclick = () => this.applyPreset(id);
@@ -132,7 +135,7 @@ export class AeroLab {
       input.oninput = () => this.readControls();
     }
 
-    const qualityRow = el('label', 'aero-lab-field', controls);
+    const qualityRow = el('label', 'aero-lab-field aero-lab-field-quality', controls);
     el('span', '', qualityRow, 'Flow detail');
     const quality = el('select', '', qualityRow) as HTMLSelectElement;
     for (const value of ['low', 'medium', 'high'] as const) {
@@ -147,8 +150,9 @@ export class AeroLab {
       this.scheduleAnalysis(0);
     };
 
-    el('h2', '', controls, 'DISPLAY');
-    const modes = el('div', 'aero-lab-modes', controls);
+    const modeGroup = el('div', 'aero-lab-toolbar-group aero-lab-mode-group', controls);
+    el('span', '', modeGroup, 'Visualization');
+    const modes = el('div', 'aero-lab-modes', modeGroup);
     for (const [mode, label] of [
       ['flow', 'FLOW'],
       ['load', 'LOAD'],
@@ -168,11 +172,12 @@ export class AeroLab {
     this.pauseButton = el('button', 'hud-btn aero-lab-pause', controls) as HTMLButtonElement;
     this.pauseButton.onclick = () => this.togglePaused();
     this.syncPauseButton();
-    this.legendEl = el('p', 'aero-lab-note', controls);
+
+    this.legendEl = el('aside', 'aero-lab-scale', this.root);
     this.updateLegend();
 
     const results = el('aside', 'aero-lab-panel aero-lab-results', this.root);
-    el('h2', '', results, 'FLIGHT-MODEL RESULTS');
+    el('h2', '', results, 'FLIGHT MODEL');
     this.regimeEl = el('div', 'aero-lab-regime', results);
     this.metricsEl = el('dl', 'aero-lab-metrics', results);
     el('p', 'aero-lab-marker-key', results, '● CoM   ● Axial CoP   → Total aerodynamic force');
@@ -203,6 +208,7 @@ export class AeroLab {
     for (const button of this.presetButtons) button.disabled = !environment.body.hasAtmosphere();
     this.model = buildAeroModel(this.craft);
     this.scene.setCraft(this.craft);
+    this.scene.setControlsEnabled(true);
     this.condition = {
       altitude: environment.altitude,
       mach: environment.vacuum ? 0 : 0.3,
@@ -224,6 +230,7 @@ export class AeroLab {
     this.closeWorker();
     this.scene.clearAnalysis();
     this.scene.clearCraft();
+    this.scene.setControlsEnabled(false);
     this.craft = null;
     this.environment = null;
     this.model = null;
@@ -235,14 +242,6 @@ export class AeroLab {
 
   render(): void {
     this.renderer.render(this.scene.scene, this.scene.camera);
-  }
-
-  orbitCamera(dx: number, dy: number): void {
-    this.scene.orbitCamera(dx, dy);
-  }
-
-  zoomCamera(factor: number): void {
-    this.scene.zoomCamera(factor);
   }
 
   togglePaused(): void {
@@ -258,6 +257,7 @@ export class AeroLab {
       dynamicPressure: this.reading?.dynamicPressure ?? null,
       drag: this.reading?.drag ?? null,
       mode: this.mode,
+      cameraPosition: this.scene.camera.position.toArray(),
     };
   }
 
@@ -269,7 +269,7 @@ export class AeroLab {
     step: number,
     format: (value: number) => string,
   ): [HTMLInputElement, HTMLElement] {
-    const row = el('label', 'aero-lab-field', parent);
+    const row = el('label', 'aero-lab-field aero-lab-field-slider', parent);
     const heading = el('span', 'aero-lab-field-heading', row);
     el('span', '', heading, label);
     const value = el('output', '', heading, format(min));
@@ -439,13 +439,23 @@ export class AeroLab {
   }
 
   private updateLegend(): void {
-    this.legendEl.textContent = this.mode === 'flow'
-      ? 'Animated lines show the approximate local flow direction.'
+    const content = this.mode === 'flow'
+      ? ['FLOW PATH', 'UPSTREAM', 'FIELD', 'DOWNSTREAM', 'Approximate direction']
       : this.mode === 'load'
-        ? 'Blue-to-red shows relative aerodynamic load. No local pressure units are implied.'
+        ? ['RELATIVE LOAD', '100%', '50%', '0%', 'No pressure units implied']
         : this.mode === 'thermal'
-          ? 'Blue-to-red combines the flight exposure heuristic with windward incidence and shielding.'
-          : 'Red areas are exposed to the freestream; blue areas are shielded by another craft surface.';
+          ? ['RELATIVE HEATING', '100%', '50%', '0%', 'Exposure heuristic']
+          : ['EXPOSURE', 'EXPOSED', 'PARTIAL', 'SHIELDED', 'Freestream visibility'];
+    this.legendEl.dataset.mode = this.mode;
+    this.legendEl.replaceChildren();
+    el('div', 'aero-lab-scale-title', this.legendEl, content[0]);
+    const scale = el('div', 'aero-lab-scale-body', this.legendEl);
+    el('div', 'aero-lab-scale-bar', scale);
+    const labels = el('div', 'aero-lab-scale-labels', scale);
+    el('span', '', labels, content[1]);
+    el('span', '', labels, content[2]);
+    el('span', '', labels, content[3]);
+    el('p', 'aero-lab-scale-note', this.legendEl, content[4]);
   }
 
   private syncPauseButton(): void {

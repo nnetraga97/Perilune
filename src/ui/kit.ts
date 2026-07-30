@@ -142,36 +142,46 @@ export function injectUiStyles(): void {
 
       /* ============================== aerodynamics lab */
       .aero-lab { position:absolute; inset:0; z-index:40; pointer-events:none; color:var(--ui-fg);
-        font-family:var(--ui-font); background:radial-gradient(circle at 50% 45%,rgba(20,61,78,.12),transparent 48%); }
+        font-family:var(--ui-font); background:radial-gradient(circle at 50% 45%,rgba(24,72,78,.1),transparent 52%); }
+      #ui-root > .aero-lab { pointer-events:none; }
       .aero-lab-loading { position:absolute; inset:0; z-index:41; display:flex; flex-direction:column;
         align-items:center; justify-content:center; gap:16px; background:#061018; color:#aeeaff;
         font:11px var(--ui-mono); letter-spacing:2px; pointer-events:auto; }
       .aero-lab button,.aero-lab input,.aero-lab select { pointer-events:auto; }
-      .aero-lab-header { position:absolute; z-index:2; left:18px; right:18px; top:14px; display:flex;
-        align-items:center; justify-content:space-between; gap:16px; padding:10px 13px;
-        border:1px solid #2c5365; border-radius:8px; background:rgba(5,14,20,.92); pointer-events:auto; }
+      .aero-lab-header { position:absolute; z-index:3; left:0; right:0; top:0; height:58px; box-sizing:border-box;
+        display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 18px;
+        border-bottom:1px solid #294b58; background:linear-gradient(180deg,rgba(8,20,25,.98),rgba(6,16,21,.94));
+        pointer-events:auto; box-shadow:0 8px 30px rgba(0,0,0,.22); }
       .aero-lab-kicker { color:#6f9dad; font:8px var(--ui-mono); letter-spacing:2px; }
       .aero-lab-header h1 { margin:2px 0 0; color:#dff7ff; font:16px var(--ui-mono); letter-spacing:3px; }
       .aero-lab-header-actions { display:flex; align-items:center; gap:10px; }
       .aero-lab-status { max-width:280px; color:#79d8f2; font:9px var(--ui-mono); letter-spacing:1px; text-align:right; }
-      .aero-lab-panel { position:absolute; z-index:2; top:88px; width:270px; max-height:calc(100dvh - 132px);
-        box-sizing:border-box; overflow:auto; padding:13px; border:1px solid #294a5a; border-radius:8px;
-        background:rgba(5,14,20,.9); pointer-events:auto; box-shadow:0 14px 34px rgba(0,0,0,.25); }
-      .aero-lab-controls { left:18px; }
-      .aero-lab-results { right:18px; }
+      .aero-lab-panel { position:absolute; z-index:2; box-sizing:border-box; border:1px solid #294a5a;
+        background:rgba(5,14,20,.88); pointer-events:auto; box-shadow:0 14px 34px rgba(0,0,0,.25); }
+      .aero-lab-controls { left:0; right:0; top:58px; min-height:76px; display:flex; align-items:flex-end;
+        gap:12px; overflow-x:auto; padding:9px 18px 10px; border-width:0 0 1px; border-radius:0;
+        background:rgba(7,17,22,.94); box-shadow:0 12px 28px rgba(0,0,0,.16); }
+      .aero-lab-results { right:18px; bottom:48px; width:250px; max-height:calc(100dvh - 210px);
+        overflow:auto; padding:12px; border-radius:7px; }
       .aero-lab-panel h2 { margin:0 0 10px; color:#8db4c2; font:9px var(--ui-mono); letter-spacing:2px; }
       .aero-lab-panel h2:not(:first-child) { margin-top:18px; }
+      .aero-lab-toolbar-group { display:grid; flex:0 0 auto; gap:5px; color:#7895a2; font-size:9px; }
+      .aero-lab-preset-group { width:186px; }
+      .aero-lab-mode-group { width:244px; }
       .aero-lab-presets,.aero-lab-modes { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
-      .aero-lab-modes { grid-template-columns:repeat(2,1fr); }
+      .aero-lab-modes { grid-template-columns:repeat(4,1fr); }
       .aero-lab-presets .hud-btn,.aero-lab-modes .hud-btn { padding:6px 4px; font:9px var(--ui-mono); }
       .aero-lab-modes .active { border-color:var(--ui-accent); background:#123242; color:#fff; }
-      .aero-lab-field { display:grid; gap:5px; margin-top:12px; color:#9bb3bf; font-size:10px; }
+      .aero-lab-field { display:grid; flex:0 0 auto; gap:5px; margin:0; color:#7895a2; font-size:9px; }
+      .aero-lab-field-environment { width:120px; }
+      .aero-lab-field-slider { width:118px; }
+      .aero-lab-field-quality { width:88px; }
       .aero-lab-field-heading { display:flex; justify-content:space-between; gap:10px; }
       .aero-lab-field output { color:#e1f3f8; font-family:var(--ui-mono); }
-      .aero-lab-field input[type='range'] { width:100%; margin:0; accent-color:#4bbbd7; }
-      .aero-lab-field select { height:28px; border:1px solid #315064; border-radius:4px;
+      .aero-lab-field input[type='range'] { width:100%; height:24px; margin:0; accent-color:#4bbbd7; }
+      .aero-lab-field select { height:29px; border:1px solid #315064; border-radius:4px;
         background:#091720; color:#dce9ee; padding:0 6px; font:10px var(--ui-mono); }
-      .aero-lab-pause { width:100%; margin-top:10px; }
+      .aero-lab-pause { flex:0 0 124px; height:29px; margin:0; white-space:nowrap; }
       .aero-lab-regime { margin-bottom:12px; padding:7px 8px; border-left:2px solid #ffbf69;
         background:rgba(255,191,105,.08); color:#f2d5a7; font:9px/1.45 var(--ui-mono); letter-spacing:.6px; }
       .aero-lab-metrics { display:grid; grid-template-columns:1fr auto; gap:6px 12px; margin:0; }
@@ -179,15 +189,30 @@ export function injectUiStyles(): void {
       .aero-lab-metrics dd { margin:0; color:#e0eef3; font:10px var(--ui-mono); text-align:right; }
       .aero-lab-marker-key { color:#8fdcf2; font:8px var(--ui-mono); line-height:1.6; }
       .aero-lab-note { margin:11px 0 0; color:#718894; font-size:9px; line-height:1.5; }
+      .aero-lab-scale { position:absolute; z-index:2; left:18px; top:166px; width:94px; padding:10px;
+        box-sizing:border-box; border:1px solid rgba(51,88,102,.75); border-radius:6px;
+        background:rgba(5,14,20,.74); box-shadow:0 12px 28px rgba(0,0,0,.2); }
+      .aero-lab-scale-title { margin-bottom:9px; color:#d8edf2; font:8px var(--ui-mono); letter-spacing:1px; }
+      .aero-lab-scale-body { display:grid; grid-template-columns:12px 1fr; gap:8px; height:156px; }
+      .aero-lab-scale-bar { border:1px solid rgba(255,255,255,.28); border-radius:2px;
+        background:linear-gradient(to bottom,#ef476f 0%,#ffd166 48%,#35d39b 70%,#247ba0 100%); }
+      .aero-lab-scale[data-mode='flow'] .aero-lab-scale-bar { width:2px; justify-self:center; border:0;
+        background:linear-gradient(to bottom,rgba(241,255,210,.95),#8de7bd 45%,rgba(76,159,178,.2));
+        box-shadow:0 0 8px rgba(141,231,189,.55); }
+      .aero-lab-scale-labels { display:flex; flex-direction:column; justify-content:space-between;
+        color:#91aab4; font:7px var(--ui-mono); }
+      .aero-lab-scale-note { margin:9px 0 0; color:#607c87; font-size:8px; line-height:1.35; }
       .aero-lab-hint { position:absolute; z-index:2; left:50%; bottom:15px; transform:translateX(-50%);
         padding:6px 10px; border:1px solid #244452; border-radius:5px; background:rgba(4,12,17,.84);
         color:#71909d; font:8px var(--ui-mono); letter-spacing:1px; white-space:nowrap; }
       @media (max-width:760px) {
-        .aero-lab-header { left:8px; right:8px; top:8px; }
+        .aero-lab-header { height:52px; padding:0 8px; }
         .aero-lab-status { display:none; }
-        .aero-lab-panel { top:78px; width:calc(50% - 12px); max-height:calc(100dvh - 118px); padding:9px; }
-        .aero-lab-controls { left:8px; }
-        .aero-lab-results { right:8px; }
+        .aero-lab-header h1 { font-size:12px; letter-spacing:2px; }
+        .aero-lab-kicker { display:none; }
+        .aero-lab-controls { top:52px; min-height:72px; padding:8px; }
+        .aero-lab-results { right:8px; bottom:8px; width:238px; max-height:42dvh; padding:9px; }
+        .aero-lab-scale { left:8px; top:142px; }
         .aero-lab-hint { display:none; }
       }
 
