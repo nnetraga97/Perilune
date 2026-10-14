@@ -75,7 +75,7 @@ export class TerrestrialCloudDeck {
       mesh.name = `terrestrial-cloud:${body.id}:${name}`;
       mesh.scale.setScalar(shellRadius);
       // Default launch ordering: render the farther outer wisps first.
-      mesh.renderOrder = name === 'wisps' ? 30 : 31;
+      mesh.renderOrder = name === 'wisps' ? 50 : 51;
       this.diagnostics?.record({
         subsystem: 'clouds',
         event: 'cloud-shell-created',
@@ -132,8 +132,8 @@ export class TerrestrialCloudDeck {
       && (this.diagnostics.detailed || diagnosticNow - this.lastDiagnosticObservationAt >= 100);
     const outsideDeck = frame.altitude >= this.shells[1].altitude;
     // Back-to-front ordering reverses when the camera moves outside both shells.
-    this.shells[0].mesh.renderOrder = outsideDeck ? 30 : 31;
-    this.shells[1].mesh.renderOrder = outsideDeck ? 31 : 30;
+    this.shells[0].mesh.renderOrder = outsideDeck ? 50 : 51;
+    this.shells[1].mesh.renderOrder = outsideDeck ? 51 : 50;
     for (const shell of this.shells) {
       DRIFT_QUATERNION.setFromAxisAngle(DRIFT_AXIS, frame.time * shell.driftRate);
       shell.mesh.quaternion

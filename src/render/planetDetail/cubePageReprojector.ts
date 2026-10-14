@@ -67,12 +67,23 @@ function sampleBilinear(atlas: Readonly<EquirectAtlasPixels>, x: number, y: numb
   const y1 = Math.min(atlas.height - 1, y0 + 1);
   const fx = Math.max(0, Math.min(1, x - 0.5 - x0));
   const fy = Math.max(0, Math.min(1, y - 0.5 - y0));
-  for (let channel = 0; channel < 4; channel++) {
-    const a = atlas.pixels[(y0 * atlas.width + x0) * 4 + channel];
-    const b = atlas.pixels[(y0 * atlas.width + x1) * 4 + channel];
-    const c = atlas.pixels[(y1 * atlas.width + x0) * 4 + channel];
-    const d = atlas.pixels[(y1 * atlas.width + x1) * 4 + channel];
-    output[offset + channel] = (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+  const a = (y0 * atlas.width + x0) * 4;
+  const b = (y0 * atlas.width + x1) * 4;
+  const c = (y1 * atlas.width + x0) * 4;
+  const d = (y1 * atlas.width + x1) * 4;
+  // Filter premultiplied colour, then return straight alpha for the page.
+  // Otherwise transparent black no-data texels darken their valid neighbours.
+  const wa = (1 - fx) * (1 - fy) * atlas.pixels[a + 3];
+  const wb = fx * (1 - fy) * atlas.pixels[b + 3];
+  const wc = (1 - fx) * fy * atlas.pixels[c + 3];
+  const wd = fx * fy * atlas.pixels[d + 3];
+  const alpha = wa + wb + wc + wd;
+  output[offset + 3] = alpha;
+  for (let channel = 0; channel < 3; channel++) {
+    output[offset + channel] = alpha > 0
+      ? (atlas.pixels[a + channel] * wa + atlas.pixels[b + channel] * wb
+        + atlas.pixels[c + channel] * wc + atlas.pixels[d + channel] * wd) / alpha
+      : 0;
   }
 }
 

@@ -74,6 +74,7 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     : station.timeSeconds;
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const context = await createRenderContext(canvas);
+  context.hdr?.setQuality(quality);
   const boot = document.getElementById('boot');
   if (boot) boot.style.display = 'none';
   context.renderer.shadowMap.enabled = quality !== 'low';

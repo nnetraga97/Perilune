@@ -1,4 +1,4 @@
-import type * as THREE from 'three';
+import { renderScene, type RenderContext } from '../render/context';
 import { buildAeroModel, type AeroModel } from '../sim/aero';
 import {
   evaluateAeroLab,
@@ -73,11 +73,11 @@ export class AeroLab {
   constructor(
     uiRoot: HTMLElement,
     models: PartModelLibrary,
-    private readonly renderer: THREE.WebGLRenderer,
+    private readonly context: RenderContext,
     private readonly callbacks: AeroLabCallbacks,
   ) {
     injectUiStyles();
-    this.scene = new AeroLabScene(models, renderer.domElement);
+    this.scene = new AeroLabScene(models, context.renderer.domElement);
     this.paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.root = el('section', 'aero-lab', uiRoot);
     this.root.setAttribute('aria-label', 'Aerodynamics Lab');
@@ -241,7 +241,7 @@ export class AeroLab {
   }
 
   render(): void {
-    this.renderer.render(this.scene.scene, this.scene.camera);
+    renderScene(this.context, this.scene.scene, this.scene.camera);
   }
 
   togglePaused(): void {

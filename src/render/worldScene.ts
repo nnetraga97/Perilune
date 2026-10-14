@@ -389,6 +389,7 @@ export class WorldScene {
     options: Readonly<WorldSceneOptions>,
   ) {
     this.quality = options.quality;
+    this.context.hdr?.setQuality(this.quality);
     this.diagnostics = options.diagnostics;
     this.reentryEffectsEnabled = options.reentryEffectsEnabled ?? true;
     this.srbSmoke = new SrbSmokePool(this.quality);
@@ -489,6 +490,7 @@ export class WorldScene {
       : q.gridRes <= 9 ? 'low' : q.gridRes >= 33 ? 'high' : 'medium';
     const qualityChanged = this.quality !== tier;
     this.quality = tier;
+    this.context?.hdr?.setQuality(tier);
     this.configureShadowRenderer();
     this.srbSmoke?.setQuality(tier);
     if (qualityChanged) this.clearReentryEffect();

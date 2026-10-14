@@ -41,7 +41,7 @@ const TRANSMITTANCE_FRAGMENT = /* glsl */ `
     if (groundHit.x > 0.0 && groundHit.x < rayEnd) rayEnd = groundHit.x;
     if (rayEnd <= rayStart) discard;
     vec3 transmittance = atmoTransmittanceAlong(camera, rayDirection, rayStart, rayEnd,
-      ATMOSPHERE_TRANSMITTANCE_SAMPLES);
+      groundHit.x > 0.0 && groundHit.x <= rayEnd ? 6 : ATMOSPHERE_TRANSMITTANCE_SAMPLES);
     gl_FragColor = vec4(mix(vec3(1.0), transmittance, uPresentationVisibility), 1.0);
   }
 `;
@@ -164,7 +164,7 @@ export function createAtmosphereMaterial(
         vec3 inscatter;
         vec3 viewTransmittance;
         atmoIntegrate(camera, rayDirection, rayStart, rayEnd, sun,
-          ATMOSPHERE_VIEW_SAMPLES, inscatter, viewTransmittance);
+          hitsGround ? 6 : ATMOSPHERE_VIEW_SAMPLES, inscatter, viewTransmittance);
         if (hitsGround) {
           inscatter *= atmoSurfaceHazeScale(normalize(camera + rayDirection * rayEnd), rayDirection);
         }

@@ -28,7 +28,7 @@ import { updateTerrestrialCloudLighting } from '../render/terrestrial/globalMate
 export const MAP_ATMOSPHERE_EXAGGERATION = 3;
 
 /** Draw order below map markers and labels (sprites use 10). */
-const MAP_CLOUD_RENDER_ORDER = 4;
+const MAP_CLOUD_RENDER_ORDER = 6;
 const MAP_ATMOSPHERE_RENDER_ORDER = 5;
 
 export interface MapGlobeState {

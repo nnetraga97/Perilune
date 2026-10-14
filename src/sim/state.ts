@@ -1532,21 +1532,26 @@ export class GameState {
     // cadence and bisect the first sign change so short flybys cannot jump
     // across an entire SOI in one high-warp frame.
     const span = endTime - startTime;
-    if (span > 0 && body.children.length) {
+    // The clock can already be exactly at entry; process that zero-length
+    // interval too, otherwise every subsequent tick stops at the same event.
+    if (span >= 0 && body.children.length) {
       const period = periodOf(elements);
       const step = Math.max(0.25, Math.min(15, Number.isFinite(period) ? period / 4096 : 15));
       const samples = Math.max(1, Math.min(8192, Math.ceil(span / step)));
       for (const child of body.children) {
         let previousTime = startTime;
         let previous = this.childSoiDistance(elements, child, previousTime);
-        if (previous <= 0) {
+        // Within a millimetre, crossing direction disambiguates entry from
+        // an outbound vessel just handed back to the parent.
+        if (previous < -1e-3 || (previous <= 1e-3 &&
+          (_eventDelta.dot(_eventV) - _eventDelta.dot(_eventBodyV)) < 0)) {
           consider({ time: startTime, kind: 'child-entry', child });
           continue;
         }
         for (let sample = 1; sample <= samples; sample++) {
           const time = startTime + (span * sample) / samples;
           const distance = this.childSoiDistance(elements, child, time);
-          if (distance <= 0) {
+          if (previous > 0 && distance <= 0) {
             let low = previousTime;
             let high = time;
             for (let iteration = 0; iteration < 36; iteration++) {
@@ -1645,7 +1650,8 @@ function radialCrossingEvent(
   elementsAtTime(elements, startTime, _eventR, _eventV);
   const startRadius = _eventR.length();
   if (inbound && startRadius <= radius) return { time: startTime, kind };
-  if (!inbound && startRadius >= radius) return { time: startTime, kind };
+  if (!inbound && (startRadius > radius + 1e-3
+    || (startRadius >= radius - 1e-3 && _eventR.dot(_eventV) > 0))) return { time: startTime, kind };
   if (elements.e < 1e-12) return null;
   const p = elements.a * (1 - elements.e * elements.e);
   const cosNu = (p / radius - 1) / elements.e;

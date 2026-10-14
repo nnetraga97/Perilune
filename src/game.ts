@@ -1868,7 +1868,7 @@ class PeriluneGame {
     try {
       if (!this.aeroLab) {
         const { AeroLab } = await import('./ui/aeroLab');
-        this.aeroLab = new AeroLab(this.uiRoot, this.partModels, this.ctx.renderer, {
+        this.aeroLab = new AeroLab(this.uiRoot, this.partModels, this.ctx, {
           onBack: () => this.restoreEditorFromAeroLab(),
           onAnalysisError: (errorType) => clientLog.warn('sim.boundary.error', {
             boundary: 'aero-lab-worker',
@@ -3119,7 +3119,7 @@ class PeriluneGame {
       this.perf.setGpuMetrics(this.gpuProfiler.metrics());
     } else if (this.screen === 'editor') {
       this.editor.update();
-      if (!this.ctx.renderPaused) this.ctx.renderer.render(this.editor.scene, this.editor.camera);
+      if (!this.ctx.renderPaused) renderScene(this.ctx, this.editor.scene, this.editor.camera);
     } else if (this.screen === 'aero-lab') {
       this.aeroLab?.update(dt);
       if (!this.ctx.renderPaused) {

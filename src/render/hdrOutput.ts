@@ -37,14 +37,16 @@ export class HdrOutput {
   private readonly outputCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly size = new THREE.Vector2();
 
-  constructor(samples = 4) {
+  private quality: 'low' | 'medium' | 'high' = 'high';
+
+  constructor(private readonly maxSamples = 4, type: THREE.TextureDataType = THREE.HalfFloatType) {
     this.target = new THREE.WebGLRenderTarget(1, 1, {
-      type: THREE.HalfFloatType,
+      type,
       format: THREE.RGBAFormat,
       colorSpace: THREE.LinearSRGBColorSpace,
       depthBuffer: true,
       stencilBuffer: false,
-      samples,
+      samples: maxSamples,
     });
     this.target.texture.name = 'hdr-scene';
     this.target.texture.generateMipmaps = false;
@@ -66,17 +68,39 @@ export class HdrOutput {
     this.outputScene.add(this.quad);
   }
 
+  setQuality(quality: 'low' | 'medium' | 'high'): void {
+    this.quality = quality;
+    const samples = quality === 'low' ? 0 : this.maxSamples;
+    if (samples !== this.target.samples) {
+      this.target.dispose();
+      this.target.samples = samples;
+    }
+  }
+
   /** Renders `scene` linearly, then writes the tone-mapped image to the canvas. */
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
     renderer.getDrawingBufferSize(this.size);
+    // Bound the offscreen allocation independently of the display's DPR.
+    const maxPixels = this.quality === 'low' ? 1280 * 720
+      : this.quality === 'medium' ? 1920 * 1080 : 2560 * 1440;
+    const scale = Math.min(1, Math.sqrt(maxPixels / (this.size.x * this.size.y)));
+    this.size.set(Math.max(1, Math.floor(this.size.x * scale)), Math.max(1, Math.floor(this.size.y * scale)));
     if (this.target.width !== this.size.x || this.target.height !== this.size.y) {
       this.target.setSize(this.size.x, this.size.y);
     }
     const previousTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(this.target);
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(previousTarget);
-    renderer.render(this.outputScene, this.outputCamera);
+    const autoReset = renderer.info.autoReset;
+    if (autoReset) renderer.info.reset();
+    renderer.info.autoReset = false;
+    try {
+      renderer.setRenderTarget(this.target);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(previousTarget);
+      renderer.render(this.outputScene, this.outputCamera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      renderer.info.autoReset = autoReset;
+    }
   }
 
   dispose(): void {

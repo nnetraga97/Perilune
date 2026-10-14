@@ -167,17 +167,20 @@ export function createCloudMaterial(
           cloudSkyFill(unitPosition, sun), viewSunCosine, thinness);
       }
 
-      // Haze between an in-atmosphere camera and the cloud. From orbit the sky
-      // shell, rendered after the deck, owns this path.
+      // Clouds composite after the sky and own only camera-to-cloud haze.
       vec3 cloudAerial(vec3 unitPoint, vec3 color) {
         vec3 camera = uCameraCloudFixed / uBodyRadius;
-        if (uHasAtmosphere < 0.5 || length(camera) >= atmoTopRadius) return color;
+        if (uHasAtmosphere < 0.5) return color;
         vec3 segment = unitPoint - camera;
         float distance = length(segment);
         if (distance <= 1e-9) return color;
         vec3 inscatter;
         vec3 transmittance;
-        atmoIntegrate(camera, segment / distance, 0.0, distance, normalize(uSunCloudFixed), 4,
+        vec2 top = atmoRaySphere(camera, segment / distance, atmoTopRadius);
+        float start = max(0.0, top.x);
+        float end = min(distance, top.y);
+        if (end <= start) return color;
+        atmoIntegrate(camera, segment / distance, start, end, normalize(uSunCloudFixed), 6,
           inscatter, transmittance);
         return color * transmittance + inscatter * uSolarVisibility;
       }
