@@ -81,6 +81,7 @@ export interface SavedVessel {
   sas: SasMode;
   throttle: number;
   currentStage: number;
+  padSequence?: { startedAt: number | null; releasedAt: number | null };
   isDebris: boolean;
   crew: string[];
   charge: number;

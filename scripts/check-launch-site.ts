@@ -1,0 +1,12 @@
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { NodeIO } from '@gltf-transform/core';
+import { validateLaunchDocument } from './compile-launch-site';
+import manifest from '../src/generated/launch-site-manifest.json';
+import recipe from '../assets/launch-site/recipe.json';
+const bytes = await readFile(new URL('../public/launch-site/launch-pad.glb', import.meta.url));
+if (bytes.length !== manifest.bytes || createHash('sha256').update(bytes).digest('hex') !== manifest.sha256) throw new Error('Stale launch pad artifact: run npm run compile:launch-site');
+if (bytes.length > recipe.transferByteLimit || manifest.gpuBytes > recipe.gpuByteLimit) throw new Error('Launch pad exceeds budget');
+const stats = validateLaunchDocument(await new NodeIO().readBinary(bytes));
+if (stats.triangles !== manifest.triangles) throw new Error('Stale launch pad statistics');
+console.log(`Launch pad verified: ${stats.triangles} triangles, ${manifest.clips.length} rigid clips`);

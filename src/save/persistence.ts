@@ -149,6 +149,7 @@ export function serializeGame(game: GameState, label: string): SaveGame {
       sas: v.sas,
       throttle: v.controls.throttle,
       currentStage: v.currentStage,
+      ...(v.padSequence ? { padSequence: { ...v.padSequence } } : {}),
       isDebris: v.isDebris,
       crew: [...v.crew],
       charge: v.charge.amount,
@@ -250,6 +251,7 @@ export function restoreGame(save: SaveGame, options: Readonly<GameStateOptions> 
     runtime.sas = sv.sas;
     runtime.controls.throttle = sv.throttle;
     runtime.currentStage = sv.currentStage;
+    runtime.padSequence = sv.padSequence ? { ...sv.padSequence } : undefined;
     runtime.isDebris = sv.isDebris;
     runtime.crew = [...sv.crew];
     runtime.charge.amount = sv.charge;

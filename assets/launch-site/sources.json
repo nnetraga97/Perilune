@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "assetId": "ksc-launch-pad",
+  "provider": "Tripo Studio",
+  "generationTaskId": "da42f717-12d7-48cd-bf41-d8f994528f76",
+  "bridgeConversionTaskId": "b52d67d1-93a8-4f8c-b8ef-021a044d389e",
+  "date": "2026-10-14",
+  "model": "H3.1 Generate in Parts, Balanced",
+  "sourceKind": "User-textured Studio model imported through Blender bridge; preserved raw Blender GLB export",
+  "rawFile": "~/Desktop/perilunetemp/launch-pad-raw-bridge.glb",
+  "rawSha256": "5d1b86a38e61fa3ab2117e26e143a1a3ee880c3e058697b93c5f340289359d9c",
+  "referenceImage": "~/Desktop/perilunetemp/launch-pad-52m-reference.png",
+  "referenceSha256": "7b2b5869b623228fada735ed0492afd2f7c968788110a08795423da75496e4a3",
+  "plan": "Tripo Studio Pro (observed in Studio)",
+  "usageTerms": {
+    "url": "https://www.tripo3d.ai/terms",
+    "commercialUseGuidance": "https://www.tripo3d.ai/help/privacy-policy/how-to-use-tripo-models-commercially",
+    "note": "Paid-plan commercial use guidance; retain source account and applicable terms. No third-party asset redistribution licence asserted."
+  },
+  "cost": {
+    "generationCreditsObserved": 0,
+    "generationOffer": "Studio first-generation trial; 60-credit price crossed out",
+    "userTextureAndBridgeCredits": null,
+    "additionalApiCreditsSpentByRepair": 0,
+    "note": "Studio balance decreased by 15 credits across the user texture/bridge workflow; no itemized charge verified. Repair, rigging and integration added no Tripo API charges.",
+    "studioBalanceBefore": 3000,
+    "studioBalanceAfter": 2985,
+    "observedStudioBalanceDecrease": 15
+  }
+}

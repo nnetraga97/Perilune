@@ -404,7 +404,7 @@ describe('planet content validator', () => {
   it('validates content before syncing renderer assets in the production build entry', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: { prebuild: string } };
     expect(packageJson.scripts.prebuild)
-      .toBe('npm run validate:content && npm run sync:renderer-assets');
+      .toBe('npm run validate:content && npm run sync:renderer-assets && npm run check:launch-site');
 
     const dir = mkdtempSync(join(tmpdir(), 'perilune-invalid-build-'));
     const manifestPath = join(dir, 'manifest.json');

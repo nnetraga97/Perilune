@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "assetId": "ksc-launch-pad",
+  "url": "/launch-site/launch-pad.glb",
+  "sha256": "8e6aa10520f065862736eaa2458673ee0dfbdbf72123bca34314e24b1c8ef521",
+  "bytes": 7879200,
+  "triangles": 37107,
+  "textureBytes": 6513429,
+  "gpuBytes": 68460088,
+  "clips": [
+    "clamp-ne",
+    "clamp-nw",
+    "clamp-se",
+    "clamp-sw",
+    "crew-access",
+    "umbilical-lower",
+    "umbilical-upper"
+  ],
+  "joints": [
+    "clamp-ne",
+    "clamp-nw",
+    "clamp-se",
+    "clamp-sw",
+    "crew-access",
+    "umbilical-lower",
+    "umbilical-upper"
+  ]
+}

@@ -164,7 +164,11 @@ describe('M2 release blockers', () => {
 
     gv.runtime.controls.throttle = 1;
     expect(game.fireStage(gv)).toBe(true);
-    for (let step = 0; step < 250; step++) game.update(PHYSICS_DT);
+    // The launch mechanism clears for four seconds before powered flight.
+    for (let step = 0; step < Math.ceil(3.5 / PHYSICS_DT); step++) game.update(PHYSICS_DT);
+    expect(gv.runtime.situation).toBe('prelaunch');
+    expect(gv.runtime.pos.length()).toBeCloseTo(launchRadius, 5);
+    for (let step = 0; step < Math.ceil(5.5 / PHYSICS_DT); step++) game.update(PHYSICS_DT);
     expect(game.active).toBe(gv);
     expect(gv.runtime.situation).not.toBe('prelaunch');
     expect(gv.runtime.landedBodyFixed).toBeNull();

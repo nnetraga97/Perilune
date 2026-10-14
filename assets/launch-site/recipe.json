@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "assetId": "ksc-launch-pad",
+  "animationPolicy": "clips",
+  "triangleLimit": 40000,
+  "textureMaxDimension": 2048,
+  "transferByteLimit": 8388608,
+  "gpuByteLimit": 73400320,
+  "foundationRadius": 9.8,
+  "contactRadius": 9,
+  "towerHeight": 52,
+  "clips": ["clamp-ne", "clamp-nw", "clamp-se", "clamp-sw", "crew-access", "umbilical-lower", "umbilical-upper"],
+  "joints": ["clamp-ne", "clamp-nw", "clamp-se", "clamp-sw", "crew-access", "umbilical-lower", "umbilical-upper"]
+}

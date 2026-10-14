@@ -7,7 +7,7 @@
   "scripts": {
     "predev": "npm run sync:renderer-assets",
     "dev": "vite",
-    "prebuild": "npm run validate:content && npm run sync:renderer-assets",
+    "prebuild": "npm run validate:content && npm run sync:renderer-assets && npm run check:launch-site",
     "build": "tsc --noEmit && vite build",
     "migrate:cloud": "node scripts/apply-cloud-migration.mjs",
     "backfill:cloud-fingerprints": "tsx scripts/backfill-cloud-save-fingerprints.mjs",
@@ -49,7 +49,9 @@
     "probe:planet-sources": "node scripts/probe-planet-detail-sources.mjs",
     "probe:moon-sun-sources": "node scripts/probe-moon-sun-sources.mjs",
     "inspect:planet-authority": "node --import tsx scripts/inspect-planet-authority.mjs",
-    "fetch:surface-class-sources": "node scripts/fetch-surface-class-sources.mjs"
+    "fetch:surface-class-sources": "node scripts/fetch-surface-class-sources.mjs",
+    "compile:launch-site": "tsx scripts/compile-launch-site.ts",
+    "check:launch-site": "tsx scripts/check-launch-site.ts"
   },
   "dependencies": {
     "@sentry/browser": "^10.65.0",

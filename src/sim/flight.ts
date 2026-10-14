@@ -7,6 +7,7 @@
  * parachutes, RCS, reaction wheels, ground contact. Includes convective
  * heating with ablative shields and per-part temperature limits.
  */
+import { advancePadSequence, type PadLaunchSequence } from './launchSequence';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import {
@@ -132,6 +133,8 @@ export interface VesselRuntime {
   crew: string[];
   charge: { amount: number; capacity: number };
   landedBodyFixed: Vec3 | null;
+  /** Present only for a vessel explicitly spawned on the launch pad. */
+  padSequence?: PadLaunchSequence;
   /** Optional mission-only four-pad contact; stock vessels leave this absent. */
   externalLandingFootprint?: ExternalLandingFootprint;
   /** Proper acceleration magnitude (for g-force display + structure). */
@@ -387,11 +390,17 @@ export function stepVessel(
   // The simplified single-point stack contact cannot statically balance tall
   // rockets. While a vessel is explicitly prelaunch, hold its authored pad
   // pose in the rotating frame until an ignited engine produces thrust.
-  if (v.situation === 'prelaunch' && !releasesPrelaunchClamp(v)) {
+  const thrustReady = v.situation === 'prelaunch' && releasesPrelaunchClamp(v);
+  const padReady = v.situation !== 'prelaunch' || !v.padSequence
+    ? thrustReady
+    : advancePadSequence(v.padSequence, time, thrustReady);
+  if (v.situation === 'prelaunch' && !padReady) {
     if (!v.landedBodyFixed) {
       v.landedBodyFixed = inertialToBodyFixed(body, time, v.pos, new Vec3());
     }
-    bodyFixedToInertial(body, time, v.landedBodyFixed, v.pos);
+    // Like integrated flight, the returned pose belongs to the end of this step.
+    // Using its start leaves an Earth pad vessel about 8 m behind the rotating pad.
+    bodyFixedToInertial(body, time + dt, v.landedBodyFixed, v.pos);
     surfaceVelocity(body, v.pos, v.vel);
     _up.copy(v.pos).normalize();
     _tmp.set(-_up.y, _up.x, 0);

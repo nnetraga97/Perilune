@@ -83,6 +83,12 @@ export function validateSave(raw: unknown): raw is SaveGame {
     if (!REGIMES.has(vessel.regime) || !SITUATIONS.has(vessel.situation) || !SAS_MODES.has(vessel.sas)) return false;
     if (!vector(vessel.pos) || !vector(vessel.vel) || !quaternion(vessel.att) || !vector(vessel.angVel)) return false;
     if (!finite(vessel.throttle) || vessel.throttle < 0 || vessel.throttle > 1) return false;
+    if (vessel.padSequence !== undefined) {
+      const p = vessel.padSequence;
+      if (!record(p) || (p.startedAt !== null && !finite(p.startedAt)) || (p.releasedAt !== null && !finite(p.releasedAt))) return false;
+      if (p.startedAt !== null && p.startedAt > s.time) return false;
+      if (p.releasedAt !== null && (p.startedAt === null || p.releasedAt < p.startedAt || p.releasedAt > s.time)) return false;
+    }
     if (!integer(vessel.currentStage) || typeof vessel.isDebris !== 'boolean') return false;
     if (!stringArray(vessel.crew, 64) || !finite(vessel.charge) || vessel.charge < 0) return false;
     if (!validCraft(vessel.craft, s.saveVersion, vessel.currentStage)) return false;

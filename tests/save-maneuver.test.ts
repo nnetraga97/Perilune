@@ -50,6 +50,7 @@ describe('save system', () => {
     const restored = restoreLegacyGame(JSON.parse(json));
 
     expect(restored.time).toBeCloseTo(game.time, 9);
+    expect(restored.active!.runtime.padSequence).toEqual(gv.runtime.padSequence);
     expect(restored.sciencePoints).toBe(42);
     expect(restored.scienceLedger.get(scienceKey)).toEqual({ cap: 8, deliveredByTransmit: 3, deliveredByRecovery: 5 });
     expect(restored.active!.runtime.scienceBuffer).toEqual(gv.runtime.scienceBuffer);

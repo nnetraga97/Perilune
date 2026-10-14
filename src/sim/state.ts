@@ -359,6 +359,7 @@ export class GameState {
     // setLookRotation points +Z forward/+Y up; craft nose is +Y so this works:
     // +Y (nose) now points along `dirI` (up).
     runtime.situation = 'prelaunch';
+    runtime.padSequence = { startedAt: null, releasedAt: null };
     runtime.crew = craftHasCrewPod(craft) ? pickCrew(craft) : [];
 
     const gv: GameVessel = {

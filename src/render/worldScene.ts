@@ -7,14 +7,13 @@
  * frame before being written into f32 scene positions.
  */
 import * as THREE from 'three';
+import { LaunchSiteVisual } from './launchSiteVisual';
 import { Vec3 } from '../core/vec3';
 import { Quat } from '../core/quat';
 import { wrapOrbitAngle } from '../core/cameraOrbit';
 import {
   GameState,
   GameVessel,
-  LAUNCH_PAD_CONTACT_RADIUS,
-  LAUNCH_PAD_FOOTPRINT_RADIUS,
   launchSiteDirection,
 } from '../sim/state';
 import { groundRadiusInertial, launchPadTerrainEnvelope } from '../sim/terrain';
@@ -283,6 +282,7 @@ export class WorldScene {
   private vesselVisuals = new Map<string, VesselVisual>();
   private readonly srbSmoke: SrbSmokePool;
   private readonly launchSite: THREE.Group;
+  private readonly launchSiteVisual: LaunchSiteVisual;
   private readonly flightAerial = new FlightAerialPerspectiveController();
   private quality: QualityTier;
   private readonly diagnostics: RenderDiagnosticsPort;
@@ -437,7 +437,8 @@ export class WorldScene {
     this.scene.background = new THREE.Color(SPACE_BACKGROUND);
     this.starfield = makeStarfield(4200);
     this.scene.add(this.starfield);
-    this.launchSite = this.buildLaunchSite();
+    this.launchSiteVisual = new LaunchSiteVisual(material => bindFlightAerialPerspective(material, this.flightAerial));
+    this.launchSite = this.launchSiteVisual.root;
     this.scene.add(this.launchSite);
     this.scene.add(this.srbSmoke.points);
     this.environment = new THREE.HemisphereLight('#0b1016', '#020304', 0.045);
@@ -457,31 +458,6 @@ export class WorldScene {
     this.landingLight.castShadow = false;
     this.scene.add(this.landingLight, this.landingLight.target);
     this.configureShadowRenderer();
-  }
-
-  private buildLaunchSite(): THREE.Group {
-    const group = new THREE.Group();
-    const concrete = new THREE.MeshStandardMaterial({ color: '#68717a', roughness: 0.92, metalness: 0.05 });
-    const structure = new THREE.MeshStandardMaterial({ color: '#c7d0d5', roughness: 0.65, metalness: 0.35 });
-    bindFlightAerialPerspective(concrete, this.flightAerial);
-    bindFlightAerialPerspective(structure, this.flightAerial);
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(LAUNCH_PAD_CONTACT_RADIUS, LAUNCH_PAD_FOOTPRINT_RADIUS, 1, 32),
-      concrete,
-    );
-    pad.castShadow = true;
-    pad.receiveShadow = true;
-    pad.name = 'launch-pad-foundation';
-    // The final depth is set from the complete terrain footprint each frame.
-    pad.position.y = -0.5;
-    group.add(pad);
-    const deck = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.12, 32), structure);
-    deck.castShadow = true;
-    deck.receiveShadow = true;
-    deck.position.y = 0.06;
-    group.add(deck);
-    group.visible = false;
-    return group;
   }
 
   setQuality(q: PlanetQuality | QualityTier): void {
@@ -1380,6 +1356,9 @@ export class WorldScene {
     if (body.def.launchSite) {
       const siteDir = launchSiteDirection(body, t, _tmp);
       const padEnvelope = launchPadTerrainEnvelope(body);
+      const padVessel = game.vessels.find(gv => gv.runtime.bodyId === body.id && gv.runtime.situation === 'prelaunch' && gv.runtime.padSequence)
+        ?? [...game.vessels].reverse().find(gv => gv.runtime.bodyId === body.id && gv.runtime.padSequence);
+      this.launchSiteVisual.update(padVessel?.runtime.padSequence, t);
       // Model origin and physics both own the deck top. The foundation extends
       // below the lowest sampled terrain so the hillside cannot clip or expose
       // a floating underside anywhere across the footprint.
@@ -1580,7 +1559,7 @@ export class WorldScene {
     this.scene.remove(this.srbSmoke.points);
     this.srbSmoke.dispose();
     this.flightAerial.dispose();
-    disposeOwnedGroup(this.launchSite);
+    this.launchSiteVisual.dispose();
     this.starfield.geometry.dispose();
     const starfieldMaterials = Array.isArray(this.starfield.material) ? this.starfield.material : [this.starfield.material];
     for (const material of starfieldMaterials) material.dispose();
