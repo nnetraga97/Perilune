@@ -11,6 +11,10 @@ import type {
 } from './bodyRenderer';
 import { createCoronaMaterial, type CoronaMaterial } from './solar/coronaMaterial';
 import { createPhotosphereMaterial, type PhotosphereMaterial } from './solar/photosphereMaterial';
+import { createSolarGlareMaterial, type SolarGlareMaterial } from './solar/glareMaterial';
+
+/** Glare quad radius on screen; the falloff itself is defined in pixels. */
+const SOLAR_GLARE_PIXELS = 480;
 
 const _occluderDirection = new THREE.Vector3();
 const _inverseProxyRotation = new THREE.Quaternion();
@@ -26,6 +30,9 @@ export class SolarBodyRenderer implements BodyRenderer {
   private readonly coronaGeometry = new THREE.CircleGeometry(1.85, 128);
   private readonly diskMaterial: PhotosphereMaterial;
   private readonly coronaMaterial: CoronaMaterial;
+  private readonly glareGeometry = new THREE.PlaneGeometry(2, 2);
+  private readonly glareMaterial: SolarGlareMaterial;
+  private readonly glare: THREE.Mesh<THREE.PlaneGeometry, SolarGlareMaterial>;
   private readonly neutralActivity = new THREE.DataTexture(new Uint8Array([128]), 1, 1, THREE.RedFormat);
   private readonly light = new THREE.DirectionalLight('#fff4df', 3.1);
   private readonly lastMode = 'proxy' as const;
@@ -52,12 +59,17 @@ export class SolarBodyRenderer implements BodyRenderer {
     const corona = new THREE.Mesh(this.coronaGeometry, this.coronaMaterial);
     corona.renderOrder = 19;
     this.proxy.add(corona, disk);
+    this.glareMaterial = createSolarGlareMaterial();
+    this.glare = new THREE.Mesh(this.glareGeometry, this.glareMaterial);
+    this.glare.name = `solar-glare:${body.id}`;
+    this.glare.renderOrder = 21;
+    this.glare.frustumCulled = false;
 
     this.light.name = `solar-direct:${body.id}`;
     this.light.userData.solarDirect = true;
     this.light.castShadow = quality !== 'low';
     this.shadowLight = this.light;
-    this.root.add(this.proxy, this.light, this.light.target);
+    this.root.add(this.proxy, this.glare, this.light, this.light.target);
   }
 
   get ready(): boolean { return !this.disposed; }
@@ -106,6 +118,7 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.coronaMaterial.uniforms.uVisibleSolarFraction.value = frame.solarVisibleFraction;
     this.coronaMaterial.uniforms.uProjectedRadiusPixels.value = projection.projectedPixelRadius;
     this.updateOccluderMask(frame);
+    this.updateGlare(frame);
 
     this.light.position.set(
       frame.cameraSunDirection.x * 1e4,
@@ -115,6 +128,25 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.light.target.position.set(0, 0, 0);
     this.light.intensity = 3.1 * frame.solarVisibleFraction;
     this.light.target.updateMatrixWorld();
+  }
+
+  private updateGlare(frame: Readonly<BodyRenderFrame>): void {
+    const { projection } = frame;
+    const visibleFraction = THREE.MathUtils.clamp(frame.solarVisibleFraction, 0, 1);
+    const diskPixels = Math.max(projection.projectedPixelRadius, 0.35);
+    const extent = Math.max(1.85, 1 + SOLAR_GLARE_PIXELS / diskPixels);
+    const radius = projection.proxyRadius * extent;
+    this.glare.visible = projection.visibility !== 'inside'
+      && visibleFraction > 0.001
+      && Number.isFinite(radius) && radius > 0;
+    if (!this.glare.visible) return;
+    this.glare.position.copy(this.proxy.position);
+    this.glare.quaternion.copy(this.proxy.quaternion);
+    this.glare.scale.setScalar(radius);
+    this.glareMaterial.uniforms.uExtent.value = extent;
+    this.glareMaterial.uniforms.uDiskPixels.value = diskPixels;
+    // Partial occultation leaves a bright sliver; glare falls faster than area.
+    this.glareMaterial.uniforms.uIntensity.value = Math.pow(visibleFraction, 1.5);
   }
 
   private updateOccluderMask(frame: Readonly<BodyRenderFrame>): void {
@@ -160,7 +192,11 @@ export class SolarBodyRenderer implements BodyRenderer {
       angularRadius: this.lastAngularRadius,
       assetTier: this.assetTier,
       assetBytes: this.assetBytes,
-      solarRegionLuminance: Object.freeze({ disk: 1, corona: 0.18, glare: 0 }),
+      solarRegionLuminance: Object.freeze({
+        disk: 1,
+        corona: 0.18,
+        glare: this.glare.visible ? this.glareMaterial.uniforms.uIntensity.value : 0,
+      }),
       lutBytes: 0,
       cloudHistoryBytes: 0,
       heightCacheBytes: 0,
@@ -175,6 +211,8 @@ export class SolarBodyRenderer implements BodyRenderer {
     this.coronaGeometry.dispose();
     this.diskMaterial.dispose();
     this.coronaMaterial.dispose();
+    this.glareGeometry.dispose();
+    this.glareMaterial.dispose();
     this.neutralActivity.dispose();
     this.light.dispose();
     this.root.clear();

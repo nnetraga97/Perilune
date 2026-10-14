@@ -132,7 +132,7 @@ describe('Veyra global coordinates and material', () => {
     expect(firstMaterial).not.toBe(material);
     expect(secondMaterial).not.toBe(firstMaterial);
     expect(firstMaterial.customProgramCacheKey()).toBe(secondMaterial.customProgramCacheKey());
-    expect(firstMaterial.customProgramCacheKey()).toContain('terrestrial-global-v4:palette');
+    expect(firstMaterial.customProgramCacheKey()).toContain('terrestrial-global-v5:palette');
     expect(firstMaterial.customProgramCacheKey()).toContain('terrain-lod-dither:color');
     expect(firstMaterial.vertexColors).toBe(material.vertexColors);
     expect(firstMaterial.userData.maps).toBe(material.userData.maps);

@@ -8,7 +8,8 @@ import type { BodyRenderFrame, QualityTier, RuntimeBodyAssetPack } from '../rend
 import { createBodyRendererCandidate } from '../render/bodyRendererFactory';
 import { computeCelestialProjection } from '../render/celestialProjection';
 import { celestialOcclusion } from '../render/celestialOcclusion';
-import { createRenderContext } from '../render/context';
+import { createRenderContext, renderScene } from '../render/context';
+import { terrestrialAerialPerspectiveState } from '../render/terrestrial/aerialPerspective';
 import { environmentLighting, localShadowPolicy } from '../render/lightingPolicy';
 import { checkPlanetManifest } from '../render/planetAssetLoader';
 import { BODY_VISUALS } from '../content/bodyVisuals';
@@ -236,6 +237,9 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     scene.add(direct, direct.target);
   }
   context.renderer.toneMappingExposure = environment.exposure;
+  const outputContext = new URLSearchParams(window.location.search).get('hdr') === '0'
+    ? { renderer: context.renderer, hdr: null }
+    : context;
 
   const api: ReferenceApi = { ready: false, metadata: {} };
   (window as Window & { __solVisualReference?: ReferenceApi }).__solVisualReference = api;
@@ -258,6 +262,15 @@ export async function runSolVisualReferenceProto(): Promise<void> {
     previousFrameAt = frameAt;
     renderer.update(frame);
     if (secondaryRenderer && secondaryFrame) secondaryRenderer.update(secondaryFrame);
+    if (diagnosticLayer === 'no-surface-aerial') {
+      renderer.root.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+          const state = terrestrialAerialPerspectiveState(material);
+          if (state) state.presentationVisibility.value = 0;
+        }
+      });
+    }
     if (diagnosticLayer === 'surface-class') {
       renderer.root.getObjectByName(`terrestrial-ocean:${station.bodyId}`)?.removeFromParent();
       renderer.root.getObjectByName(`terrestrial-cloud-deck:${station.bodyId}`)?.removeFromParent();
@@ -326,7 +339,7 @@ outgoingLight = surfaceClassDebugColor;
         object.visible = object.name.startsWith(`terrestrial-cloud:${station.bodyId}:`);
       });
     }
-    context.renderer.render(scene, camera);
+    renderScene(outputContext, scene, camera);
     frames++;
     const rendererStats = renderer.stats();
     const secondaryRendererStats = secondaryRenderer?.stats() ?? null;

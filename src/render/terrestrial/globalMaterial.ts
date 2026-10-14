@@ -73,6 +73,14 @@ uniform float globalCloudShadowStrength;
 uniform mat3 normalMatrix;
 varying vec3 vBodyDirection;
 varying float vGlobalSurfaceAltitude;
+// Blue Marble-style albedo maps are display-stretched imagery, not
+// reflectance: decoded as sRGB, Florida vegetation lands near 0.02 green where
+// measured canopy reflectance is ~0.08. A per-channel power fitted to
+// vegetation (0.017 -> 0.07), desert (0.41 -> 0.42) and ice (0.87 -> 0.75)
+// restores physical reflectance and the natural blue of vegetation.
+vec3 terrestrialLandReflectance(vec3 albedo) {
+  return 0.81 * pow(max(albedo, vec3(0.0)), vec3(0.6));
+}
 ${BODY_FIXED_UV_GLSL}
 ${SURFACE_CLASS_GLSL}
 ${PLANET_DETAIL_GLSL}
@@ -88,13 +96,15 @@ vec2 globalUv = bodyFixedUv(vBodyDirection);
 vec4 authoredMaterial = texture2D(globalMaterialMap, globalUv);
 float authoredSurfaceClass = resolvedSurfaceClass(vBodyDirection);
 float globalOceanOwnership = useGlobalSurfaceClassMap > 0.5
-  ? surfaceClassOcean(authoredSurfaceClass)
+  ? surfaceClassOceanCoverage(vBodyDirection)
   : authoredMaterial.b;
 if (useAuthoredGlobalMaps > 0.5) {
   vec4 authoredAlbedo = texture2D(globalAlbedoMap, globalUv);
   vec4 globalDetail = samplePlanetDetail(vBodyDirection);
-  vec3 globalLandAlbedo = mix(authoredAlbedo.rgb, globalDetail.rgb, globalDetail.a);
-  vec3 globalOceanColor = mix(vec3(0.008, 0.035, 0.075), vec3(0.018, 0.09, 0.16),
+  vec3 globalLandAlbedo = terrestrialLandReflectance(
+    mix(authoredAlbedo.rgb, globalDetail.rgb, globalDetail.a));
+  // Open-ocean diffuse reflectance: deep navy, a few percent in blue only.
+  vec3 globalOceanColor = mix(vec3(0.004, 0.013, 0.03), vec3(0.007, 0.03, 0.055),
     0.5 + 0.5 * abs(normalize(vBodyDirection).z));
   diffuseColor.rgb *= mix(globalLandAlbedo, globalOceanColor, globalOceanOwnership);
   diffuseColor.rgb *= mix(0.55, 1.0, authoredMaterial.g);
@@ -114,14 +124,29 @@ if (useAuthoredGlobalMaps > 0.5 && useGlobalEmissiveMap > 0.5) {
   float globalNight = 1.0 - smoothstep(-0.18, 0.08, globalSolarCosine);
   float globalCloudOcclusion = texture2D(globalCloudMap, globalUv).g;
   vec3 globalNightEmission = texture2D(globalEmissiveMap, globalUv).rgb;
-  totalEmissiveRadiance += globalNightEmission * globalNight * (1.0 - globalCloudOcclusion * 0.72) * 1.35;
+  // Sodium/LED city light: lift dense cores more than sparse rural glow.
+  vec3 globalCityLight = globalNightEmission * (0.6 + 2.4 * smoothstep(0.02, 0.5, globalNightEmission.r));
+  globalCityLight *= vec3(1.0, 0.84, 0.62);
+  totalEmissiveRadiance += globalCityLight * globalNight * (1.0 - globalCloudOcclusion * 0.78) * 2.2;
 }`;
 
 export const GLOBAL_ROUGHNESS_APPLY = /* glsl */ `
 if (useAuthoredGlobalMaps > 0.5) {
-  float globalResolvedRoughness = max(authoredMaterial.r, globalOceanOwnership * 0.42);
+  // Open water reads as a defined sun glint from high orbit. Near the ground
+  // the streamed ocean owns the glint, so the compact cover keeps the matte
+  // value that matches it wherever the two meet.
+  float globalViewAltitude = length(terrestrialAerialCameraBodyFixed) - terrestrialAerialBodyRadius;
+  float globalOceanRoughness = mix(0.42, 0.13, smoothstep(150000.0, 600000.0, globalViewAltitude));
+  float globalResolvedRoughness = mix(authoredMaterial.r, globalOceanRoughness, globalOceanOwnership);
   roughnessFactor *= mix(0.2, 1.0, globalResolvedRoughness);
 }`;
+
+/** Direct sunlight passes through the atmosphere column: sunset colour near the terminator. */
+export const GLOBAL_SUN_TINT_APPLY = /* glsl */ `
+vec3 terrestrialDirectSunTint = terrestrialSurfaceSunTint(
+  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude));
+reflectedLight.directDiffuse *= terrestrialDirectSunTint;
+reflectedLight.directSpecular *= terrestrialDirectSunTint;`;
 
 export const GLOBAL_NORMAL_APPLY = /* glsl */ `
 vec3 globalBodyNormal = normalize(vBodyDirection);
@@ -314,7 +339,7 @@ export function createTerrestrialGlobalMaterial(
   // levels average across those folds into sun-dependent wedges, so the
   // compact globe keeps its smooth geometric normal. Streamed near-field
   // terrain still applies the authored relief normal.
-  material.customProgramCacheKey = () => `terrestrial-global-v4:${pack ? 'authored' : 'palette'}`;
+  material.customProgramCacheKey = () => `terrestrial-global-v5:${pack ? 'authored' : 'palette'}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
     bindPlanetDetailUniforms(shader, detail);
@@ -330,7 +355,8 @@ uniform float terrestrialAerialBodyRadius;`)
       .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}`)
       .replace('#include <map_fragment>', GLOBAL_ALBEDO_APPLY)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
-      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}`);
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${GLOBAL_SUN_TINT_APPLY}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <opaque_fragment>', `outgoingLight = applyTerrestrialAerialPerspective(\n  normalize(vBodyDirection) * (terrestrialAerialBodyRadius + vGlobalSurfaceAltitude),\n  outgoingLight\n);\n#include <opaque_fragment>`);
   };

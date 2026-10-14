@@ -1,6 +1,18 @@
 import * as THREE from 'three';
-import type { Body } from '../../sim/universe';
+import type { AtmosphereDef, Body } from '../../sim/universe';
 import type { BodyRenderFrame } from '../bodyRenderer';
+import { BODY_VISUALS, type BodyId } from '../../content/bodyVisuals';
+import {
+  ATMOSPHERE_SCATTERING_GLSL,
+  applyAtmosphereScatteringProfile,
+  bindAtmosphereScatteringUniforms,
+  createAtmosphereScatteringState,
+  atmosphereSurfaceHazeScale,
+  integrateAtmosphere,
+  type AtmosphereScatteringProfile,
+  type AtmosphereScatteringState,
+} from '../atmosphereScattering';
+import { terrestrialScatteringProfile } from './atmosphereLuts';
 
 /** Stable material.userData key shared by every terrestrial aerial consumer. */
 export const TERRESTRIAL_AERIAL_USER_DATA_KEY = 'terrestrialAerialPerspective' as const;
@@ -16,6 +28,8 @@ export interface TerrestrialAerialPerspectiveState {
   readonly presentationVisibility: { value: number };
   readonly lookup: { value: THREE.Texture | null };
   readonly useLookup: { value: number };
+  readonly scattering: AtmosphereScatteringState;
+  profileKey: string | null;
 }
 
 export function createTerrestrialAerialPerspectiveState(
@@ -37,7 +51,37 @@ export function createTerrestrialAerialPerspectiveState(
     presentationVisibility: { value: 1 },
     lookup: { value: null },
     useLookup: { value: 0 },
+    scattering: createAtmosphereScatteringState(),
+    profileKey: null,
   };
+}
+
+const PROFILE_CACHE = new Map<string, AtmosphereScatteringProfile>();
+
+/** Scattering profile for an atmosphere-bearing body, shared by all consumers. */
+export function bodyScatteringProfile(body: Readonly<Body>): AtmosphereScatteringProfile | null {
+  const physical = body.def.atmosphere;
+  if (!physical) return null;
+  const visual = BODY_VISUALS[body.id as BodyId]?.atmosphereVisual ?? { wavelengthTint: [1, 1, 1] as const, strength: 1 };
+  const key = `${body.id}:${body.radius}:${physical.height}:${physical.scaleHeight}:${physical.seaLevelDensity}`;
+  let profile = PROFILE_CACHE.get(key);
+  if (!profile) {
+    profile = terrestrialScatteringProfile(body.radius, physical, visual);
+    PROFILE_CACHE.set(key, profile);
+  }
+  return profile;
+}
+
+/** Load the body's scattering coefficients into an aerial state when they change. */
+export function syncAerialScatteringProfile(
+  state: TerrestrialAerialPerspectiveState,
+  body: Readonly<Body>,
+): void {
+  const profile = bodyScatteringProfile(body);
+  const key = profile ? `${body.id}:${profile.radius}` : null;
+  if (key === state.profileKey) return;
+  state.profileKey = key;
+  if (profile) applyAtmosphereScatteringProfile(state.scattering, profile);
 }
 
 export function attachTerrestrialAerialPerspective(
@@ -68,6 +112,7 @@ export function bindTerrestrialAerialPerspectiveUniforms(
   shader.uniforms.terrestrialAerialPresentationVisibility = state.presentationVisibility;
   shader.uniforms.terrestrialAerialLut = state.lookup;
   shader.uniforms.useTerrestrialAerialLut = state.useLookup;
+  bindAtmosphereScatteringUniforms(shader, state.scattering);
 }
 
 export function updateTerrestrialAerialPerspective(
@@ -94,10 +139,11 @@ export function updateTerrestrialAerialPerspective(
   ).normalize();
   state.solarVisibleFraction.value = Math.max(0, Math.min(1, frame.solarVisibleFraction));
   const cameraAltitude = Math.max(0, state.cameraBodyFixed.value.length() - body.radius);
-  state.presentationVisibility.value = atmospherePresentationVisibility(
+  state.presentationVisibility.value = surfaceAerialPerspectiveWeight(
     cameraAltitude,
     body.def.atmosphere?.height ?? 0,
   );
+  syncAerialScatteringProfile(state, body);
   state.lookup.value = lookup ?? null;
   state.useLookup.value = lookup ? 1 : 0;
 }
@@ -107,6 +153,7 @@ export function updateTerrestrialAerialPerspective(
  * so no material has to infer coordinate conventions from another shader.
  */
 export const TERRESTRIAL_AERIAL_FRAGMENT_GLSL = /* glsl */ `
+${ATMOSPHERE_SCATTERING_GLSL}
 uniform vec3 terrestrialAerialCameraBodyFixed;
 uniform float terrestrialAerialBodyRadius;
 uniform float terrestrialAerialAtmosphereHeight;
@@ -116,41 +163,40 @@ uniform float terrestrialAerialSolarVisibleFraction;
 uniform float terrestrialAerialPresentationVisibility;
 uniform sampler2D terrestrialAerialLut;
 uniform float useTerrestrialAerialLut;
+#ifndef TERRESTRIAL_AERIAL_STEPS
+#define TERRESTRIAL_AERIAL_STEPS 6
+#endif
 
+// Physically integrated haze between the camera and an opaque surface point.
+// The camera-inside-atmosphere case is owned here; from above the atmosphere
+// the sky shell integrates the identical path, so this returns the base colour.
 vec3 applyTerrestrialAerialPerspective(vec3 shadedPointBodyFixed, vec3 baseColor) {
-  if (terrestrialAerialAtmosphereHeight <= 0.0) return baseColor;
-  vec3 radialDirection = normalize(shadedPointBodyFixed);
-  vec3 viewSegment = terrestrialAerialCameraBodyFixed - shadedPointBodyFixed;
-  float viewDistance = length(viewSegment);
-  vec3 viewRay = viewDistance > 0.0 ? viewSegment / viewDistance : radialDirection;
-  float viewUpCosine = max(0.025, abs(dot(viewRay, radialDirection)));
-  float airPath = min(viewDistance, terrestrialAerialAtmosphereHeight / viewUpCosine);
-  float cameraAltitude = max(0.0,
-    length(terrestrialAerialCameraBodyFixed) - terrestrialAerialBodyRadius);
-  float observerDensity = exp(-min(cameraAltitude, terrestrialAerialAtmosphereHeight)
-    / max(terrestrialAerialScaleHeight, 1.0));
-  float opticalDepth = airPath * 0.0000105 * mix(0.52, 1.0, observerDensity);
-  float aerialAmount = clamp(1.0 - exp(-opticalDepth), 0.0, 0.94);
-  vec2 aerialUv = vec2(clamp(airPath / 200000.0, 0.0, 1.0),
-    clamp(cameraAltitude / max(terrestrialAerialAtmosphereHeight, 1.0), 0.0, 1.0));
-  vec4 aerialLut = texture2D(terrestrialAerialLut, aerialUv);
-  // The LUT alpha is average extinction, not a presentation opacity. Keeping
-  // it below full replacement preserves terrain/ocean contrast on long,
-  // low-altitude sight lines.
-  aerialAmount = mix(aerialAmount, min(0.86, aerialLut.a * 0.88),
-    useTerrestrialAerialLut);
-  aerialAmount *= terrestrialAerialPresentationVisibility;
-  float sunElevation = dot(radialDirection, normalize(terrestrialAerialSunDirection));
-  vec3 hazeColor = mix(vec3(0.30, 0.43, 0.62), vec3(0.48, 0.68, 0.96),
-    smoothstep(-0.18, 0.34, sunElevation));
-  // LUT RGB stores per-channel extinction. Treating it as emissive radiance
-  // makes saturated long paths converge on white. Use it only to shape the
-  // wavelength tint while the bounded analytic haze owns the sky color.
-  vec3 lookupHazeColor = hazeColor * mix(vec3(0.72), vec3(1.0), aerialLut.rgb);
-  hazeColor = mix(hazeColor, lookupHazeColor, useTerrestrialAerialLut);
-  float occlusionLight = mix(0.08, 1.0, terrestrialAerialSolarVisibleFraction);
-  return baseColor * (1.0 - aerialAmount * 0.86)
-    + hazeColor * aerialAmount * occlusionLight;
+  if (terrestrialAerialAtmosphereHeight <= 0.0 || terrestrialAerialPresentationVisibility <= 0.0) return baseColor;
+  float inverseRadius = 1.0 / max(terrestrialAerialBodyRadius, 1.0);
+  vec3 camera = terrestrialAerialCameraBodyFixed * inverseRadius;
+  vec3 segment = shadedPointBodyFixed * inverseRadius - camera;
+  float distance = length(segment);
+  if (distance <= 1e-9) return baseColor;
+  vec3 direction = segment / distance;
+  vec2 top = atmoRaySphere(camera, direction, atmoTopRadius);
+  float tStart = max(0.0, top.x);
+  float tEnd = min(distance, top.y);
+  if (tEnd <= tStart) return baseColor;
+  vec3 inscatter;
+  vec3 transmittance;
+  atmoIntegrate(camera, direction, tStart, tEnd, normalize(terrestrialAerialSunDirection),
+    TERRESTRIAL_AERIAL_STEPS, inscatter, transmittance);
+  inscatter *= terrestrialAerialSolarVisibleFraction
+    * atmoSurfaceHazeScale(normalize(shadedPointBodyFixed), direction);
+  vec3 hazed = baseColor * transmittance + inscatter;
+  return mix(baseColor, hazed, terrestrialAerialPresentationVisibility);
+}
+
+// Direct-light colour reaching a surface point through the atmosphere.
+vec3 terrestrialSurfaceSunTint(vec3 shadedPointBodyFixed) {
+  if (terrestrialAerialAtmosphereHeight <= 0.0) return vec3(1.0);
+  return atmoSurfaceSunTint(shadedPointBodyFixed / max(terrestrialAerialBodyRadius, 1.0),
+    normalize(terrestrialAerialSunDirection));
 }
 `;
 
@@ -172,24 +218,19 @@ export interface CpuAerialPerspectiveResult {
   readonly airPath: number;
 }
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
 /**
- * Keep atmospheric wash in low flight, then remove it before the body becomes
- * an orbital presentation. The smooth band avoids a visible boundary pop.
+ * Ownership of ground haze. Inside the atmosphere opaque consumers integrate
+ * camera-to-surface haze themselves; above it the sky shell is rasterized in
+ * front of the planet and integrates the same path. The switch happens at the
+ * exact altitude where the shell flips from back to front faces, so the two
+ * presentations agree at the boundary instead of double-counting below it.
  */
-export function atmospherePresentationVisibility(
+export function surfaceAerialPerspectiveWeight(
   altitudeMeters: number,
   atmosphereHeightMeters: number,
 ): number {
   if (!(atmosphereHeightMeters > 0)) return 0;
-  const start = atmosphereHeightMeters;
-  const end = atmosphereHeightMeters * 2;
-  const t = clamp01((altitudeMeters - start) / Math.max(end - start, 1));
-  const smooth = t * t * (3 - 2 * t);
-  return 1 - smooth;
+  return altitudeMeters < atmosphereHeightMeters ? 1 : 0;
 }
 
 function normalized(
@@ -201,64 +242,62 @@ function normalized(
     : [1, 0, 0];
 }
 
-function smoothstep(edge0: number, edge1: number, value: number): number {
-  const t = clamp01((value - edge0) / (edge1 - edge0));
-  return t * t * (3 - 2 * t);
-}
-
-/** CPU mirror of the analytic fallback and optional sampled-LUT blend. */
+/** CPU mirror of applyTerrestrialAerialPerspective for an Earth-like profile. */
 export function evaluateTerrestrialAerialPerspective(
   input: Readonly<CpuAerialPerspectiveInput>,
 ): CpuAerialPerspectiveResult {
-  if (!(input.atmosphereHeight > 0)) {
+  const cameraAltitude = Math.hypot(input.cameraBodyFixed.x, input.cameraBodyFixed.y, input.cameraBodyFixed.z)
+    - input.bodyRadius;
+  const weight = surfaceAerialPerspectiveWeight(cameraAltitude, input.atmosphereHeight);
+  if (!(input.atmosphereHeight > 0) || weight <= 0) {
     return Object.freeze({ color: input.baseColor, amount: 0, airPath: 0 });
   }
-  const radial = normalized(input.shadedPointBodyFixed);
-  const segment = {
-    x: input.cameraBodyFixed.x - input.shadedPointBodyFixed.x,
-    y: input.cameraBodyFixed.y - input.shadedPointBodyFixed.y,
-    z: input.cameraBodyFixed.z - input.shadedPointBodyFixed.z,
-  };
-  const viewDistance = Math.hypot(segment.x, segment.y, segment.z);
-  const viewRay = viewDistance > 0
-    ? [segment.x / viewDistance, segment.y / viewDistance, segment.z / viewDistance] as const
-    : radial;
-  const viewUpCosine = Math.max(0.025, Math.abs(
-    viewRay[0] * radial[0] + viewRay[1] * radial[1] + viewRay[2] * radial[2],
-  ));
-  const airPath = Math.min(viewDistance, input.atmosphereHeight / viewUpCosine);
-  const cameraAltitude = Math.max(
-    0,
-    Math.hypot(input.cameraBodyFixed.x, input.cameraBodyFixed.y, input.cameraBodyFixed.z)
-      - input.bodyRadius,
-  );
-  const observerDensity = Math.exp(
-    -Math.min(cameraAltitude, input.atmosphereHeight) / Math.max(input.scaleHeight, 1),
-  );
-  let amount = clamp01(1 - Math.exp(
-    -airPath * 0.0000105 * (0.52 + (1 - 0.52) * observerDensity),
-  ));
-  amount = Math.min(amount, 0.94);
-  const lookup = input.lookupSample;
-  if (lookup) amount = Math.min(0.86, lookup[3] * 0.88);
-  amount *= atmospherePresentationVisibility(cameraAltitude, input.atmosphereHeight);
-  const sun = normalized(input.sunDirection);
-  const sunElevation = radial[0] * sun[0] + radial[1] * sun[1] + radial[2] * sun[2];
-  const day = smoothstep(-0.18, 0.34, sunElevation);
-  const haze: [number, number, number] = [
-    0.30 + (0.48 - 0.30) * day,
-    0.43 + (0.68 - 0.43) * day,
-    0.62 + (0.96 - 0.62) * day,
+  const profile = terrestrialScatteringProfile(input.bodyRadius, {
+    seaLevelPressure: 101_325,
+    scaleHeight: input.scaleHeight,
+    height: input.atmosphereHeight,
+    seaLevelDensity: 1.225,
+    seaLevelTemperature: 288.15,
+    hasOxygen: true,
+  } satisfies AtmosphereDef, { wavelengthTint: [1, 1, 1], strength: 1 });
+  const inverseRadius = 1 / input.bodyRadius;
+  const camera = [
+    input.cameraBodyFixed.x * inverseRadius,
+    input.cameraBodyFixed.y * inverseRadius,
+    input.cameraBodyFixed.z * inverseRadius,
+  ] as const;
+  const segment = [
+    input.shadedPointBodyFixed.x * inverseRadius - camera[0],
+    input.shadedPointBodyFixed.y * inverseRadius - camera[1],
+    input.shadedPointBodyFixed.z * inverseRadius - camera[2],
   ];
-  if (lookup) {
-    haze[0] *= 0.72 + 0.28 * lookup[0];
-    haze[1] *= 0.72 + 0.28 * lookup[1];
-    haze[2] *= 0.72 + 0.28 * lookup[2];
-  }
-  const visibility = clamp01(input.solarVisibleFraction);
-  const occlusionLight = 0.08 + (1 - 0.08) * visibility;
+  const distance = Math.hypot(segment[0], segment[1], segment[2]);
+  if (!(distance > 0)) return Object.freeze({ color: input.baseColor, amount: 0, airPath: 0 });
+  const direction = [segment[0] / distance, segment[1] / distance, segment[2] / distance] as const;
+  const top = 1 + input.atmosphereHeight * inverseRadius;
+  const b = camera[0] * direction[0] + camera[1] * direction[1] + camera[2] * direction[2];
+  const c = camera[0] ** 2 + camera[1] ** 2 + camera[2] ** 2 - top * top;
+  const discriminant = b * b - c;
+  if (discriminant < 0) return Object.freeze({ color: input.baseColor, amount: 0, airPath: 0 });
+  const root = Math.sqrt(discriminant);
+  const tStart = Math.max(0, -b - root);
+  const tEnd = Math.min(distance, -b + root);
+  if (tEnd <= tStart) return Object.freeze({ color: input.baseColor, amount: 0, airPath: 0 });
+  const result = integrateAtmosphere(profile, camera, direction, tStart, tEnd, normalized(input.sunDirection), 6);
+  const pointRadius = Math.hypot(input.shadedPointBodyFixed.x, input.shadedPointBodyFixed.y, input.shadedPointBodyFixed.z) || 1;
+  const viewCosine = -(
+    input.shadedPointBodyFixed.x * direction[0]
+    + input.shadedPointBodyFixed.y * direction[1]
+    + input.shadedPointBodyFixed.z * direction[2]
+  ) / pointRadius;
+  const visibility = Math.max(0, Math.min(1, input.solarVisibleFraction)) * atmosphereSurfaceHazeScale(viewCosine);
   const color = input.baseColor.map((channel, index) => (
-    channel * (1 - amount * 0.86) + haze[index] * amount * occlusionLight
+    channel * result.transmittance[index] + result.inscatter[index] * visibility
   )) as [number, number, number];
-  return Object.freeze({ color: Object.freeze(color), amount, airPath });
+  const amount = 1 - (result.transmittance[0] + result.transmittance[1] + result.transmittance[2]) / 3;
+  return Object.freeze({
+    color: Object.freeze(color),
+    amount,
+    airPath: (tEnd - tStart) * input.bodyRadius,
+  });
 }

@@ -5,6 +5,7 @@ import {
   GLOBAL_ALBEDO_APPLY,
   GLOBAL_FRAGMENT_HEADER,
   GLOBAL_EMISSIVE_APPLY,
+  GLOBAL_SUN_TINT_APPLY,
   GLOBAL_NORMAL_APPLY,
   GLOBAL_ROUGHNESS_APPLY,
   GLOBAL_VERTEX_BEGIN,
@@ -377,7 +378,7 @@ float surfLatitude = asin(clamp(abs(normalize(vBodyDirection).z), 0.0, 1.0)) * 0
 float surfBiome = 0.5;
 float surfShore = 0.0;
 float surfOcean = useGlobalSurfaceClassMap > 0.5
-  ? surfaceClassOcean(authoredSurfaceClass)
+  ? surfaceClassOceanCoverage(vBodyDirection)
   : (useAuthoredGlobalMaps > 0.5 ? authoredMaterial.b : 0.0);
 float surfIce = useAuthoredGlobalMaps > 0.5 ? authoredMaterial.a * useGlobalIceMap : 0.0;
 float surfMoisture = deterministicMoisture(vBodyDirection);
@@ -413,7 +414,7 @@ vec3 surfTint = surfWeights.soil * vec3(1.0, 0.98, 0.95)
   + surfWeights.vegetation * vec3(0.9, 1.02, 0.86);
 diffuseColor.rgb *= surfTint;
 vec4 surfTerrainDetail = sampleTerrainDetail(vBodyDirection);
-diffuseColor.rgb = mix(diffuseColor.rgb, surfTerrainDetail.rgb * surfTint, surfTerrainDetail.a * (1.0 - surfOcean));
+diffuseColor.rgb = mix(diffuseColor.rgb, terrestrialLandReflectance(surfTerrainDetail.rgb) * surfTint, surfTerrainDetail.a * (1.0 - surfOcean));
 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.94, 0.98, 1.03), surfIce * 0.32);
 diffuseColor.rgb *= 1.0 + surfDetail * mix(0.04, 0.14, surfWeights.rock) * surfNearGroundFade;
 diffuseColor.rgb *= mix(1.0, mix(0.9, 1.1, surfLocalDetail.r), surfLocalFade * 0.5);
@@ -492,7 +493,7 @@ export function createTerrestrialSurfaceMaterial(
     terrainDetail,
   });
   attachTerrestrialAerialPerspective(material, aerialPerspective);
-  material.customProgramCacheKey = () => `terrestrial-surface-v4:${pack ? 'authored' : 'palette'}:${tier}`;
+  material.customProgramCacheKey = () => `terrestrial-surface-v5:${pack ? 'authored' : 'palette'}:${tier}`;
   material.onBeforeCompile = (shader) => {
     bindTerrestrialAuthoredUniforms(shader, textures, cloudLighting);
     bindPlanetDetailUniforms(shader, detail);
@@ -523,6 +524,7 @@ export function createTerrestrialSurfaceMaterial(
       .replace('#include <common>', `#include <common>\n${GLOBAL_FRAGMENT_HEADER}\n${TERRAIN_DETAIL_GLSL}\n${TERRESTRIAL_AERIAL_FRAGMENT_GLSL}\n${SURFACE_FRAGMENT_FUNCTIONS}`)
       .replace('#include <map_fragment>', `${GLOBAL_ALBEDO_APPLY}\n${SURFACE_ALBEDO_APPLY}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOBAL_EMISSIVE_APPLY}`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${GLOBAL_SUN_TINT_APPLY}`)
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>${GLOBAL_ROUGHNESS_APPLY}\n${SURFACE_ROUGHNESS_APPLY}`,

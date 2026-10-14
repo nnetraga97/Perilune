@@ -1,12 +1,13 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 
-function flightDirectorDevApi(): Plugin {
+/** Serves a Vercel web-handler route from the Vite dev server. */
+function devApiRoute(path: string, load: () => Promise<{ default: { fetch(request: Request): Promise<Response> } }>): Plugin {
   return {
-    name: 'perilune-flight-director-dev-api',
+    name: `perilune-dev-api:${path}`,
     apply: 'serve',
     configureServer(server) {
-      server.middlewares.use('/api/flight-director', async (request, response) => {
+      server.middlewares.use(path, async (request, response) => {
         try {
           const chunks: Uint8Array[] = [];
           for await (const chunk of request) {
@@ -18,12 +19,14 @@ function flightDirectorDevApi(): Plugin {
             else if (value !== undefined) headers.set(key, value);
           }
           const bytes = chunks.length ? Buffer.concat(chunks) : null;
-          const webRequest = new Request('http://127.0.0.1/api/flight-director', {
+          // Connect strips the mount path; keep the query string for the handler.
+          const suffix = (request.url ?? '/').replace(/^\/(?=\?|$)/, '');
+          const webRequest = new Request(`http://127.0.0.1${path}${suffix}`, {
             method: request.method ?? 'GET',
             headers,
             body: bytes?.length ? new Uint8Array(bytes) : undefined,
           });
-          const route = await import('./api/flight-director.ts');
+          const route = await load();
           const webResponse = await route.default.fetch(webRequest);
           response.statusCode = webResponse.status;
           webResponse.headers.forEach((value, key) => response.setHeader(key, value));
@@ -53,7 +56,10 @@ export default defineConfig(({ mode }) => {
     : null;
   return ({
   base: './',
-  plugins: [flightDirectorDevApi(), ...(sentryUpload ? [sentryUpload] : [])],
+  plugins: [
+    devApiRoute('/api/flight-director', () => import('./api/flight-director.ts')),
+    devApiRoute('/api/planet-data', () => import('./api/planet-data.ts')),
+    ...(sentryUpload ? [sentryUpload] : [])],
   define: {
     __SUPABASE_URL__: JSON.stringify(process.env.SUPABASE_URL ?? ''),
     __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(

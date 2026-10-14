@@ -5,8 +5,8 @@ import { Body } from '../src/sim/universe';
 import { bodyMaterialDescriptor } from '../src/render/bodyMaterial';
 import {
   createTerrestrialAerialPerspectiveState,
-  atmospherePresentationVisibility,
   evaluateTerrestrialAerialPerspective,
+  surfaceAerialPerspectiveWeight,
   terrestrialAerialPerspectiveState,
   updateTerrestrialAerialPerspective,
 } from '../src/render/terrestrial/aerialPerspective';
@@ -31,12 +31,12 @@ function shaderSource(): {
 }
 
 describe('shared terrestrial aerial perspective', () => {
-  it('limits atmospheric presentation to low altitude with a smooth exit band', () => {
-    expect(atmospherePresentationVisibility(0, 100_000)).toBe(1);
-    expect(atmospherePresentationVisibility(100_000, 100_000)).toBe(1);
-    expect(atmospherePresentationVisibility(150_000, 100_000)).toBeCloseTo(0.5);
-    expect(atmospherePresentationVisibility(200_000, 100_000)).toBe(0);
-    expect(atmospherePresentationVisibility(1, 0)).toBe(0);
+  it('hands ground haze to the sky shell exactly where the shell flips faces', () => {
+    expect(surfaceAerialPerspectiveWeight(0, 100_000)).toBe(1);
+    expect(surfaceAerialPerspectiveWeight(99_999, 100_000)).toBe(1);
+    expect(surfaceAerialPerspectiveWeight(100_000, 100_000)).toBe(0);
+    expect(surfaceAerialPerspectiveWeight(400_000, 100_000)).toBe(0);
+    expect(surfaceAerialPerspectiveWeight(1, 0)).toBe(0);
   });
 
   it('owns independent state per consumer material', () => {
@@ -98,22 +98,38 @@ describe('shared terrestrial aerial perspective', () => {
       .toBeLessThan(contrast(nearWhite.color, nearBlack.color));
   });
 
-  it('keeps saturated low-altitude LUT haze blue and below white', () => {
+  it('keeps long low-altitude daylight haze blue and below white', () => {
     const bodyRadius = 6_378_137;
     const result = evaluateTerrestrialAerialPerspective({
       shadedPointBodyFixed: { x: bodyRadius, y: 0, z: 0 },
-      baseColor: [0.08, 0.21, 0.47],
+      baseColor: [0, 0, 0],
       cameraBodyFixed: { x: bodyRadius + 5_000, y: 120_000, z: 0 },
       bodyRadius,
       atmosphereHeight: 100_000,
       scaleHeight: 8_500,
       sunDirection: { x: 1, y: 0, z: 0 },
       solarVisibleFraction: 1,
-      lookupSample: [1, 1, 1, 1],
     });
-    expect(result.amount).toBe(0.86);
+    expect(result.amount).toBeGreaterThan(0.3);
     expect(Math.max(...result.color)).toBeLessThan(1);
-    expect(result.color[2] - result.color[0]).toBeGreaterThan(0.4);
+    expect(result.color[2]).toBeGreaterThan(result.color[1]);
+    expect(result.color[1]).toBeGreaterThan(result.color[0]);
+  });
+
+  it('adds no in-scattered light on the night side', () => {
+    const bodyRadius = 6_378_137;
+    const night = evaluateTerrestrialAerialPerspective({
+      shadedPointBodyFixed: { x: bodyRadius, y: 0, z: 0 },
+      baseColor: [0, 0, 0],
+      cameraBodyFixed: { x: bodyRadius + 5_000, y: 120_000, z: 0 },
+      bodyRadius,
+      atmosphereHeight: 100_000,
+      scaleHeight: 8_500,
+      sunDirection: { x: -1, y: 0, z: 0 },
+      solarVisibleFraction: 1,
+    });
+    expect(Math.max(...night.color)).toBeLessThan(1e-4);
+    expect(night.amount).toBeGreaterThan(0.3);
   });
 
   it('is a strict color no-op from orbital altitude', () => {
@@ -179,8 +195,8 @@ describe('shared terrestrial aerial perspective', () => {
     expect(surfaceShader.fragmentShader).toContain('terrestrialAerialBodyRadius + vGlobalSurfaceAltitude');
     const ocean = new TerrestrialOcean(body, 'medium', null);
     expect(ocean.material.fragmentShader).toContain('normalize(vBodyDirection) * uBodyRadius');
-    expect(compact.customProgramCacheKey()).toContain('terrestrial-global-v4');
-    expect(surface.customProgramCacheKey()).toContain('terrestrial-surface-v4');
+    expect(compact.customProgramCacheKey()).toContain('terrestrial-global-v5');
+    expect(surface.customProgramCacheKey()).toContain('terrestrial-surface-v5');
     expect(ocean.material.customProgramCacheKey()).toContain('terrestrial-ocean-v5');
     compact.dispose();
     surface.dispose();

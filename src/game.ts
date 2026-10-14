@@ -17,7 +17,7 @@ import {
   defOf,
   type ActionGroupId,
 } from './sim/vessel';
-import { createRenderContext, RenderContext } from './render/context';
+import { createRenderContext, RenderContext, renderScene } from './render/context';
 import { WorldScene } from './render/worldScene';
 import { checkPartModelManifest } from './render/partModelManifest';
 import { createBrowserPartModelLibrary, type PartModelLibrary } from './render/partModelLibrary';
@@ -3088,7 +3088,7 @@ class PeriluneGame {
       if (this.map.visible) {
         this.map.update(this.game);
         if (!this.ctx.renderPaused) {
-          this.gpuProfiler.submit('map', () => this.ctx.renderer.render(this.map.scene, this.map.camera));
+          this.gpuProfiler.submit('map', () => renderScene(this.ctx, this.map.scene, this.map.camera));
         }
       } else {
         this.world.update(this.game, dt, this.paused ? 0 : realDt);

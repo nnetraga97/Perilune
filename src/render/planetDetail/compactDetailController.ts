@@ -8,7 +8,7 @@ import { PersistentPlanetTileCache } from './persistentTileCache';
 import { planetVisualDetailSource, planetVisualDetailSourceForView } from './sourceRegistry';
 import { requestPlanetTile } from './tileRequest';
 import type { DetailTileAddress, PlanetDetailSourceAdapter } from './sourceAdapter';
-import { detailColorTransform } from './detailColorTransform';
+import { detailColorTransform, maskSourceNoData, sourceHasBlackNoData } from './detailColorTransform';
 
 const COMPACT_DETAIL_GRID_SIZE = 3;
 const DEFAULT_DRAWING_BUFFER_ASPECT = 16 / 9;
@@ -237,6 +237,10 @@ export class CompactDetailController {
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Planet detail atlas requires a 2D context');
       for (const item of decoded) context.drawImage(item.bitmap, item.x * source.tileSize, item.y * source.tileSize);
+      if (sourceHasBlackNoData(source.datasetId)) {
+        const fullImage = context.getImageData(0, 0, canvas.width, canvas.height);
+        if (maskSourceNoData(source.datasetId, fullImage.data) > 0) context.putImageData(fullImage, 0, 0);
+      }
       const decodedBytes = canvas.width * canvas.height * 4;
       const bytes = decodedBytes * 4 / 3;
       if (bytes > this.budget.gpuBytes || decodedBytes > this.budget.decodedCpuBytes) throw new Error('Planet detail atlas exceeds tier budget');

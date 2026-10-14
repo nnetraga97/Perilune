@@ -32,7 +32,7 @@ describe('Veyra atmosphere', () => {
       expect(layer.material.userData.atmosphereModel).toBe('hillaire-lut-foundation');
       expect(layer.material.userData.quality).toBe('medium');
       expect(layer.material.defines.ATMOSPHERE_VIEW_SAMPLES).toBe(
-        path === 'analytic' ? 8 : path === 'lookup' ? 6 : 5,
+        path === 'analytic' ? 12 : path === 'lookup' ? 10 : 6,
       );
       expect(layer.material.uniforms.uAtmosphereHeight.value).toBe(physical.height);
       expect(layer.material.uniforms.uSeaLevelPressure.value).toBe(physical.seaLevelPressure);
@@ -72,16 +72,19 @@ describe('Veyra atmosphere', () => {
     });
     expect(layer.material.uniforms.uInsideAtmosphere.value).toBe(0);
     expect(layer.material.side).toBe(THREE.FrontSide);
-    expect(layer.material.uniforms.uPresentationVisibility.value).toBeLessThan(1);
+    // From orbit the shell is the limb, terminator, and ground haze.
+    expect(layer.material.uniforms.uPresentationVisibility.value).toBe(1);
+    expect(layer.mesh.visible).toBe(true);
 
     layer.update({
       cameraRelativeOrigin: { x: 0, y: 0, z: 0 },
-      cameraBodyFixed: { x: veyra.radius + physical.height * 2, y: 0, z: 0 },
+      cameraBodyFixed: { x: veyra.radius + physical.height * 40, y: 0, z: 0 },
       orientation: { x: 0, y: 0, z: 0, w: 1 },
       bodySunDirection: { x: 1, y: 0, z: 0 },
     });
-    expect(layer.material.uniforms.uPresentationVisibility.value).toBe(0);
-    expect(layer.mesh.visible).toBe(false);
+    expect(layer.material.uniforms.uPresentationVisibility.value).toBe(1);
+    expect(layer.mesh.visible).toBe(true);
+    expect(layer.material.side).toBe(THREE.FrontSide);
     layer.dispose();
   });
 

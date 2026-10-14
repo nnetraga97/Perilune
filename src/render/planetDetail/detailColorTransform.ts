@@ -13,6 +13,30 @@ function srgbByteToLinear(value: number): number {
   return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
 }
 
+/** Sources whose image service fills no-data areas with opaque black. */
+const BLACK_NODATA_DATASETS = new Set(['usda-naip-ksc-2025-29992']);
+
+export function sourceHasBlackNoData(datasetId: string): boolean {
+  return BLACK_NODATA_DATASETS.has(datasetId);
+}
+
+/**
+ * Mark black no-data fill as transparent so the resident parent shows through
+ * instead of an opaque black page. Returns the number of masked texels.
+ */
+export function maskSourceNoData(datasetId: string, pixels: Uint8ClampedArray): number {
+  if (!BLACK_NODATA_DATASETS.has(datasetId)) return 0;
+  let masked = 0;
+  for (let offset = 0; offset + 3 < pixels.length; offset += 4) {
+    // JPEG ringing keeps no-data fill a few counts above zero; real imagery
+    // (water, asphalt, shadow) stays well above this floor.
+    if (pixels[offset] + pixels[offset + 1] + pixels[offset + 2] > 9) continue;
+    pixels[offset + 3] = 0;
+    masked++;
+  }
+  return masked;
+}
+
 /**
  * Match a visual source's low-frequency exposure to its checked resident
  * parent while preserving the newly resolved spatial frequency. This is an

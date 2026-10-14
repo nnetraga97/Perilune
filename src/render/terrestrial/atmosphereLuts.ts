@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { AtmosphereDef } from '../../sim/universe';
 import type { AtmosphereVisualCoefficients } from './atmosphereMaterial';
+import {
+  EARTH_OZONE_ABSORPTION,
+  type AtmosphereScatteringProfile,
+} from '../atmosphereScattering';
 
 export interface AtmosphereLutSet {
   readonly transmittance: THREE.DataTexture;
@@ -29,6 +33,11 @@ interface CachedAtmosphereLutData {
 }
 const LUT_DATA_CACHE = new Map<string, CachedAtmosphereLutData>();
 
+function smoothstep01(edge0: number, edge1: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
 function raySphereFar(radial: number, mu: number, sphereRadius: number): number {
   const discriminant = radial * radial * (mu * mu - 1) + sphereRadius * sphereRadius;
   return discriminant <= 0 ? 0 : -radial * mu + Math.sqrt(discriminant);
@@ -52,6 +61,45 @@ export function atmosphereScatteringCoefficients(
     mie: EARTH_MIE * densityScale * visual.strength,
     mieScaleHeight: Math.max(800, physical.scaleHeight * 0.16),
   };
+}
+
+/** Clear-day aerosol load (vertical optical depth ~0.013); heavier loads grey the sky and the ground beneath it. */
+const TERRESTRIAL_AEROSOL_SCATTERING = 1.2e-5;
+
+/** Matches the solar key light so sky radiance and lit ground share one scale. */
+export const TERRESTRIAL_SUN_ILLUMINANCE = 3.1;
+
+/**
+ * Metre-based scattering profile for the shared GLSL core. Density and
+ * thickness stay physical; the visual tint only shapes Rayleigh colour.
+ */
+export function terrestrialScatteringProfile(
+  radius: number,
+  physical: Readonly<AtmosphereDef>,
+  visual: Readonly<AtmosphereVisualCoefficients>,
+): AtmosphereScatteringProfile {
+  const densityScale = Math.max(0.05, physical.seaLevelDensity / 1.225);
+  // Physical Rayleigh already yields the sky's hue. The authored tint is an
+  // art-direction nudge only; applying it at full strength removes most red
+  // scattering and turns daylight skies into saturated navy.
+  const tint = visual.wavelengthTint.map((value) => 1 + (value - 1) * 0.15);
+  const rayleigh = EARTH_RAYLEIGH.map((value, channel) => value * densityScale * tint[channel] * visual.strength);
+  const mie = TERRESTRIAL_AEROSOL_SCATTERING * densityScale * visual.strength;
+  const mieExtinction = mie * 1.11;
+  return Object.freeze({
+    radius,
+    height: physical.height,
+    rayleighScaleHeight: physical.scaleHeight,
+    mieScaleHeight: 1_200 * physical.scaleHeight / 8_500,
+    rayleigh: [rayleigh[0], rayleigh[1], rayleigh[2]] as const,
+    mieScattering: [mie, mie, mie] as const,
+    mieExtinction: [mieExtinction, mieExtinction, mieExtinction] as const,
+    absorption: EARTH_OZONE_ABSORPTION.map((value) => value * densityScale) as unknown as readonly [number, number, number],
+    mieG: 0.8,
+    // Art-directed below a full Hillaire fill so oceans stay deep blue from orbit.
+    multipleScattering: 0.35,
+    sunIlluminance: TERRESTRIAL_SUN_ILLUMINANCE,
+  });
 }
 
 function encodeTexture(data: Uint8Array<ArrayBuffer>, width: number, height: number, kind: string): THREE.DataTexture {
@@ -133,12 +181,16 @@ export function createAtmosphereLuts(
       for (let x = 0; x < MULTI_SCATTER_WIDTH; x++) {
         const heightUnit = (x + 0.5) / MULTI_SCATTER_WIDTH;
         const altitude = heightUnit * heightUnit * physical.height;
-        const direct = transmittanceAt(radius, physical, rayleigh, mie, mieScaleHeight, altitude, sunMu);
+        // Energy scattered out of the overhead column feeds the isotropic
+        // fill, but only while that column is sunlit; it fades through
+        // twilight instead of peaking when the sun is below the horizon.
+        const column = transmittanceAt(radius, physical, rayleigh, mie, mieScaleHeight, altitude, 1);
+        const sunlit = smoothstep01(-0.28, 0.12, sunMu);
         const density = Math.exp(-altitude / physical.scaleHeight);
         const recovery = 0.12 + density * 0.24;
         const offset = (y * MULTI_SCATTER_WIDTH + x) * 4;
         for (let channel = 0; channel < 3; channel++) {
-          multipleData[offset + channel] = Math.round(Math.min(1, (1 - direct[channel]) * recovery) * 255);
+          multipleData[offset + channel] = Math.round(Math.min(1, (1 - column[channel]) * recovery * sunlit) * 255);
         }
         multipleData[offset + 3] = 255;
       }
@@ -147,6 +199,8 @@ export function createAtmosphereLuts(
     for (let y = 0; y < SKY_VIEW_HEIGHT; y++) {
       const sunMu = ((y + 0.5) / SKY_VIEW_HEIGHT) * 2 - 1;
       const sunTransmittance = transmittanceAt(radius, physical, rayleigh, mie, mieScaleHeight, 0, sunMu);
+      const column = transmittanceAt(radius, physical, rayleigh, mie, mieScaleHeight, 0, 1);
+      const sunlit = smoothstep01(-0.28, 0.12, sunMu);
       for (let x = 0; x < SKY_VIEW_WIDTH; x++) {
         const viewMu = ((x + 0.5) / SKY_VIEW_WIDTH) * 2 - 1;
         const horizon = Math.exp(-Math.abs(viewMu) * 3.2);
@@ -154,8 +208,8 @@ export function createAtmosphereLuts(
           Math.sqrt(Math.max(0, 1 - sunMu * sunMu))), 6);
         const offset = (y * SKY_VIEW_WIDTH + x) * 4;
         for (let channel = 0; channel < 3; channel++) {
-          const rayleighSky = (1 - sunTransmittance[channel]) * (0.22 + horizon * 0.78);
-          const mieGlow = forward * (1 - sunTransmittance[channel]) * 0.34;
+          const rayleighSky = (1 - column[channel]) * (0.22 + horizon * 0.78) * sunlit;
+          const mieGlow = forward * (1 - column[channel]) * 0.34 * sunTransmittance[channel];
           skyViewData[offset + channel] = Math.round(Math.min(1, rayleighSky + mieGlow) * 255);
         }
         skyViewData[offset + 3] = 255;

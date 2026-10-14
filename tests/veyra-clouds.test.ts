@@ -63,8 +63,9 @@ describe('Veyra two-scale clouds', () => {
     expect(deck.shells[1].mesh.material.userData.cloudModel).toBe('parallax-shell');
     expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec3 direction = normalize(vBodyDirection)');
     expect(deck.shells[0].mesh.material.fragmentShader).toContain('vec2 field3 = sampleCloud');
-    expect(deck.shells[0].mesh.material.fragmentShader)
-      .toContain('dot(normalize(vViewDirection), -viewSunDirection)');
+    // Clouds are lit through the shared atmosphere column, not a daylight floor.
+    expect(deck.shells[0].mesh.material.fragmentShader).toContain('atmoSunTransmittance');
+    expect(deck.shells[0].mesh.material.fragmentShader).toContain('cloudPhase(');
     deck.dispose();
   });
 

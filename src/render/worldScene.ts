@@ -30,7 +30,7 @@ import type { PartModelLibrary } from './partModelLibrary';
 import { makeStarfield } from './starfield';
 import { SPACE_BACKGROUND } from './spaceBackground';
 import { bodyOrientation, inertialToBodyFixed, surfaceVelocity } from '../sim/bodyOrientation';
-import type { RenderContext } from './context';
+import { renderScene, type RenderContext } from './context';
 import type { BodyRenderer, BodyRenderFrame, QualityTier, RuntimeBodyAssetPack, VectorCoordinates } from './bodyRenderer';
 import { BODY_VISUALS, DEFAULT_ENTRY_VISUAL, type BodyId, type BodyRendererKind } from '../content/bodyVisuals';
 import { createBodyRendererCandidate } from './bodyRendererFactory';
@@ -633,7 +633,7 @@ export class WorldScene {
   /** One profiled flight submission: occlusion prepass followed by the main scene. */
   render(): void {
     this.reentryEffect?.prepareOcclusion(this.context.renderer, this.reentryVelocityOS);
-    this.context.renderer.render(this.scene, this.camera);
+    renderScene(this.context, this.scene, this.camera);
   }
 
   renderStats(): Readonly<WorldRendererStats> {

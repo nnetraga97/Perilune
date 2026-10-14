@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import type { Body } from '../../sim/universe';
 import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
 import { createCloudMaterial } from './cloudMaterial';
+import { bodyScatteringProfile } from './aerialPerspective';
 import type { RenderDiagnosticsPort } from '../renderDiagnostics';
 
 const DRIFT_AXIS = new THREE.Vector3(0, 0, 1);
 const DRIFT_QUATERNION = new THREE.Quaternion();
 const INVERSE_DRIFT_QUATERNION = new THREE.Quaternion();
 const CAMERA_CLOUD_FIXED = new THREE.Vector3();
+const SUN_CLOUD_FIXED = new THREE.Vector3();
 export const WEATHER_CLOUD_DRIFT_RATE = 9e-6;
 
 export interface TerrestrialCloudShell {
@@ -57,6 +59,7 @@ export class TerrestrialCloudDeck {
         tint: name === 'weather' ? '#e9edf0' : '#d7e1e8',
         shellRadius,
         parallaxStrength,
+        scattering: bodyScatteringProfile(body) ?? undefined,
         volume: volumetric ? {
           baseRadius: body.radius + volumeBaseAltitude,
           topRadius: body.radius + volumeTopAltitude,
@@ -149,6 +152,13 @@ export class TerrestrialCloudDeck {
         frame.cameraBodyFixed.z,
       ).applyQuaternion(INVERSE_DRIFT_QUATERNION);
       (shell.mesh.material.uniforms.uCameraCloudFixed.value as THREE.Vector3).copy(CAMERA_CLOUD_FIXED);
+      // Shade in the same drifting frame the cloud texture is sampled in.
+      SUN_CLOUD_FIXED.set(
+        frame.bodySunDirection.x,
+        frame.bodySunDirection.y,
+        frame.bodySunDirection.z,
+      ).normalize().applyQuaternion(INVERSE_DRIFT_QUATERNION);
+      (shell.mesh.material.uniforms.uSunCloudFixed.value as THREE.Vector3).copy(SUN_CLOUD_FIXED);
       shell.mesh.material.uniforms.uTime.value = frame.time;
       const distanceFromShell = Math.abs(frame.altitude - shell.altitude);
       const crossingFade = Math.max(0, Math.min(1, (distanceFromShell - 1_200) / 4_000));

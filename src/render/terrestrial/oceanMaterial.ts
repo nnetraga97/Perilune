@@ -291,10 +291,13 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     float exactClass = resolvedSurfaceClass(vBodyDirection);
+    // The class map is ~10 km per texel; discarding against its bilinear
+    // coverage traces a smooth coastline instead of texel stair steps.
     float oceanMask = useGlobalSurfaceClassMap > 0.5
       ? surfaceClassOcean(exactClass)
       : (uHasShoreMask > 0.5 ? texture2D(uShoreMask, bodyUv(vBodyDirection)).b : 1.0);
-    if (oceanMask < 0.5) discard;
+    float oceanCoverage = useGlobalSurfaceClassMap > 0.5 ? surfaceClassOceanCoverage(vBodyDirection) : oceanMask;
+    if (oceanCoverage < 0.5) discard;
     #include <logdepthbuf_fragment>
     float shore = 4.0 * oceanMask * (1.0 - oceanMask);
     vec3 bodyPoint = normalize(vBodyDirection) * uBodyRadius;
@@ -306,8 +309,8 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
     vec3 reflectedSun = reflect(-normalize(uSunDirection), waveBodyNormal);
     vec3 bodyView = normalize(uCameraBodyFixed - vBodyDirection * uBodyRadius);
     float reflectionAlignment = max(0.0, dot(reflectedSun, bodyView));
-    float broadGlint = pow(reflectionAlignment, 28.0) * 0.12;
-    float sharpGlint = pow(reflectionAlignment, 160.0) * 0.72;
+    float broadGlint = pow(reflectionAlignment, 40.0) * 0.07;
+    float sharpGlint = pow(reflectionAlignment, 220.0) * 0.6;
     float glitter = (broadGlint + sharpGlint) * uGlitterStrength * uSolarVisibility;
     float waveSlope = clamp(length(waveBodyNormal - datumNormal) / ${OCEAN_MAX_NORMAL_SLOPE.toFixed(3)}, 0.0, 1.0);
     float sunFacing = max(0.0, dot(waveBodyNormal, normalize(uSunDirection)));
@@ -322,23 +325,35 @@ const OCEAN_FRAGMENT_SHADER = /* glsl */ `
     float swellA = sin(swellPhaseA) * (1.0 - smoothstep(0.75, 2.5, fwidth(swellPhaseA)));
     float swellB = sin(swellPhaseB) * (1.0 - smoothstep(0.3, 1.2, fwidth(swellPhaseB)));
     float swellTint = (swellA * 0.48 + swellB * 0.24 + swellA * swellB * 0.28) * 0.1;
+    // Water-leaving radiance under a 3.1 sun: deep ocean reflects only a few
+    // percent, mostly blue. The authored colour supplies hue, not brightness.
     vec3 deepWater = mix(
       uOceanColor * mix(0.86, 1.3, viewCosine),
       vec3(0.018, 0.085, 0.16),
       0.32
-    );
+    ) * 0.3;
     deepWater *= 0.94 + sunFacing * 0.12 + waveSlope * 0.035 + facetLight * 1.35;
     deepWater *= 1.0 + swellTint;
+    // Water colour and sky reflection follow the light that actually reaches
+    // this point: sunset colour at the terminator, darkness at night.
+    vec3 oceanSunTint = terrestrialSurfaceSunTint(bodyPoint);
+    float oceanSunCosine = dot(datumNormal, normalize(uSunDirection));
+    float oceanSkyLight = atmoMultipleScatteringLight(oceanSunCosine) / max(atmoMultipleScattering, 1e-3);
+    deepWater *= oceanSunTint * mix(0.3, 1.0, sqrt(max(oceanSunCosine, 0.0))) + vec3(0.01);
     vec3 skyReflection = mix(vec3(0.012, 0.045, 0.095), vec3(0.08, 0.24, 0.48),
       pow(1.0 - viewCosine, 0.72));
+    skyReflection *= mix(vec3(0.015), mix(vec3(1.0), oceanSunTint, 0.35), oceanSkyLight);
     vec3 depthTint = mix(deepWater, skyReflection, fresnel * 0.86);
     vec3 foam = vec3(0.72, 0.82, 0.84) * shore;
-    vec3 oceanBaseColor = depthTint + foam * 0.52 + vec3(1.0, 0.86, 0.64) * glitter;
+    foam *= oceanSkyLight * 0.9 + 0.1 * max(oceanSunCosine, 0.0);
+    vec3 oceanBaseColor = depthTint + foam * 0.52 + vec3(1.0, 0.86, 0.64) * oceanSunTint * glitter;
     vec3 oceanShadedColor = applyTerrestrialAerialPerspective(
       normalize(vBodyDirection) * uBodyRadius,
       oceanBaseColor
     );
     gl_FragColor = vec4(oceanShadedColor, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 

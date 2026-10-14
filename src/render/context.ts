@@ -1,6 +1,7 @@
 /** Renderer bootstrap and the WebGL2 capability contract. */
 import * as THREE from 'three';
 import { RenderContextLifecycle } from './contextLifecycle';
+import { HdrOutput } from './hdrOutput';
 
 const ANALYTIC_HIGHP = { precision: 23, rangeMin: 127, rangeMax: 127 } as const;
 const LOOKUP_HIGHP = { precision: 16, rangeMin: 31, rangeMax: 31 } as const;
@@ -31,7 +32,15 @@ export interface RenderContext {
   caps: RenderCaps;
   canvas: HTMLCanvasElement;
   lifecycle: RenderContextLifecycle;
+  /** Linear half-float scene target; null only where float colour buffers are unavailable. */
+  readonly hdr: HdrOutput | null;
   readonly renderPaused: boolean;
+}
+
+/** Scene submission through the linear HDR target when the context has one. */
+export function renderScene(context: Pick<RenderContext, 'renderer' | 'hdr'>, scene: THREE.Scene, camera: THREE.Camera): void {
+  if (context.hdr) context.hdr.render(context.renderer, scene, camera);
+  else context.renderer.render(scene, camera);
 }
 
 export class RenderCapabilityError extends Error {
@@ -83,9 +92,21 @@ export function probeRenderCaps(
   };
 }
 
+function probeFloatColorBuffer(): boolean {
+  if (typeof document === 'undefined') return false;
+  const probe = document.createElement('canvas').getContext('webgl2');
+  if (!probe) return false;
+  const supported = probe.getExtension('EXT_color_buffer_float') !== null;
+  probe.getExtension('WEBGL_lose_context')?.loseContext();
+  return supported;
+}
+
 export async function createRenderContext(canvas: HTMLCanvasElement): Promise<RenderContext> {
+  // The HDR scene target carries its own MSAA, so the canvas only needs it
+  // when float colour buffers are missing and scenes draw to it directly.
+  const hdrSupported = probeFloatColorBuffer();
   const gl = canvas.getContext('webgl2', {
-    antialias: true,
+    antialias: !hdrSupported,
     powerPreference: 'high-performance',
   });
   if (!gl) {
@@ -95,7 +116,7 @@ export async function createRenderContext(canvas: HTMLCanvasElement): Promise<Re
   const renderer = new THREE.WebGLRenderer({
     canvas,
     context: gl,
-    antialias: true,
+    antialias: !hdrSupported,
     logarithmicDepthBuffer: true,
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -116,11 +137,16 @@ export async function createRenderContext(canvas: HTMLCanvasElement): Promise<Re
     renderer.setSize(window.innerWidth, window.innerHeight, false);
   });
 
+  const hdr = hdrSupported && gl.getExtension('EXT_color_buffer_float')
+    ? new HdrOutput(Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number))
+    : null;
+
   return {
     renderer,
     caps,
     canvas,
     lifecycle,
+    hdr,
     get renderPaused() { return lifecycle.renderPaused; },
   };
 }

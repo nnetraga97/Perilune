@@ -48,9 +48,15 @@ import {
   type BodyMaterialDescriptor,
 } from '../render/bodyMaterial';
 import { installBodyFixedDirectionAttribute } from '../render/terrestrial/globalCoordinates';
-import { createTerrestrialGlobalMaterial, updateTerrestrialCloudLighting } from '../render/terrestrial/globalMaterial';
+import { createTerrestrialGlobalMaterial } from '../render/terrestrial/globalMaterial';
 import { createAirlessGlobalMaterial } from '../render/airless/globalMaterial';
-import { WEATHER_CLOUD_DRIFT_RATE } from '../render/terrestrial/cloudLayer';
+import { createCompactShadingState } from '../render/compactPlanetBodyRenderer';
+import {
+  createMapCompactSurfaceMaterial,
+  disposeMapGlobe,
+  dressMapGlobe,
+  updateMapGlobe,
+} from './mapGlobe';
 import { createGlobalSphereGeometry } from '../render/terrestrial/globalGeometry';
 import type { QualityTier, RuntimeBodyAssetPack } from '../render/bodyRenderer';
 import { el, injectUiStyles } from './kit';
@@ -327,8 +333,14 @@ export function compactBodyMesh(
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   if (!geometry.getAttribute('bodyDirection')) installBodyFixedDirectionAttribute(geometry);
 
+  const shading = createCompactShadingState();
+  const compactSurface = pack && (descriptor.identity === 'gas' || descriptor.renderer === 'compact-planet')
+    ? createMapCompactSurfaceMaterial(descriptor.bodyId, pack, shading)
+    : null;
   const material: THREE.Material = descriptor.identity === 'star'
     ? new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })
+    : compactSurface
+      ? compactSurface
     : descriptor.identity === 'gas' && pack
       ? new THREE.MeshLambertMaterial({
         color: '#ffffff',
@@ -355,6 +367,7 @@ export function compactBodyMesh(
   mesh.userData.orientationConvention = descriptor.orientationConvention;
   mesh.userData.assetPack = pack;
   mesh.userData.quality = quality;
+  if (compactSurface) mesh.userData.mapShading = shading;
   return mesh;
 }
 
@@ -715,8 +728,10 @@ export class MapView {
     this.scene.background = new THREE.Color(SPACE_BACKGROUND);
     this.starfield = makeStarfield(2600, 777);
     this.scene.add(this.starfield);
-    this.scene.add(new THREE.AmbientLight('#8899aa', 1.6));
-    this.sun = new THREE.DirectionalLight('#fff4e0', 1.4);
+    // Match the flight key light so lit hemispheres read the same in both
+    // views; the dim fill keeps night-side silhouettes legible for navigation.
+    this.scene.add(new THREE.AmbientLight('#8fa3ba', 0.28));
+    this.sun = new THREE.DirectionalLight('#fff4df', 3.1);
     this.sun.position.set(1, 0.3, 0.5);
     this.scene.add(this.sun, this.sun.target);
     this.scene.add(
@@ -1812,6 +1827,10 @@ export class MapView {
 
     // Bodies in the active body's frame; camera focus may move among them.
     const shown = new Set<string>();
+    const rootPosition = body === game.universe.root
+      ? new THREE.Vector3()
+      : mapBodyScenePosition(game.universe, game.universe.root, body, t);
+    const bodySunDirection = new THREE.Vector3();
     const place = (b: Body, pos: THREE.Vector3) => {
       shown.add(b.id);
       let mesh = this.bodyMeshes.get(b.id);
@@ -1820,11 +1839,10 @@ export class MapView {
       if (!mesh || mesh.userData.assetPack !== pack || mesh.userData.quality !== quality) {
         if (mesh) {
           this.scene.remove(mesh);
-          mesh.geometry.dispose();
-          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const material of materials) material.dispose();
+          disposeMapGlobe(mesh);
         }
         mesh = compactBodyMesh(bodyMaterialDescriptor(b), pack, this.cb.maxAnisotropy ?? 1, quality, b.radius);
+        dressMapGlobe(mesh, b, pack, quality);
         this.bodyMeshes.set(b.id, mesh);
         this.scene.add(mesh);
       }
@@ -1836,10 +1854,12 @@ export class MapView {
       );
       mesh.position.copy(pos);
       updateCompactBodyOrientation(mesh, b, t);
-      const bodyMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const material of bodyMaterials) {
-        updateTerrestrialCloudLighting(material, starDirection, t * WEATHER_CLOUD_DRIFT_RATE);
-      }
+      // Each globe is lit from its own direction to the star, which matters
+      // once the map spans the solar system.
+      bodySunDirection.subVectors(rootPosition, pos);
+      if (bodySunDirection.lengthSq() > 0) bodySunDirection.normalize();
+      else bodySunDirection.set(starDirection.x, starDirection.y, starDirection.z);
+      if (b !== game.universe.root) updateMapGlobe(mesh, b, this.camera.position, bodySunDirection, t);
       // SOI sphere (children only, subtle).
       if (b.soiRadius !== Infinity && b.id !== body.id) {
         let soi = this.soiMeshes.get(b.id);

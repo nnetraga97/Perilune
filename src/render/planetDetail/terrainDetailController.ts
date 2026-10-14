@@ -25,7 +25,7 @@ import {
   type TerrainDetailMaterialState,
 } from './terrainDetailMaterial';
 import { requestPlanetTile, type PlanetTileResponse } from './tileRequest';
-import { detailColorTransform } from './detailColorTransform';
+import { detailColorTransform, maskSourceNoData } from './detailColorTransform';
 
 export interface TerrainDetailStats {
   readonly state: 'disabled' | 'resident-parent' | 'requesting' | 'reprojecting' | 'crossfading' | 'ready' | 'failed';
@@ -302,6 +302,7 @@ export class TerrainDetailController {
       for (const item of decoded) context.drawImage(item.bitmap, item.x * source.tileSize, item.y * source.tileSize);
       const image = context.getImageData(0, 0, canvas.width, canvas.height);
       decodedCpuBytes += image.data.byteLength;
+      maskSourceNoData(source.datasetId, image.data);
       const colorTransform = detailColorTransform(source.datasetId, image.data);
       timings.decode += performance.now() - decodeStarted;
 

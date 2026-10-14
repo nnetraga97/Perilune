@@ -4,12 +4,14 @@ import type { BodyRenderFrame, QualityTier } from '../bodyRenderer';
 import type { RenderCaps } from '../context';
 import {
   createAtmosphereMaterial,
+  createAtmosphereTransmittanceMaterial,
   type AtmosphereVisualCoefficients,
 } from './atmosphereMaterial';
-import { atmospherePresentationVisibility } from './aerialPerspective';
 
 export class TerrestrialAtmosphere {
   readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
+  /** Per-channel attenuation of everything behind the shell; drawn just before it. */
+  readonly transmittanceMesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   readonly path: RenderCaps['atmospherePath'];
   readonly shellRadius: number;
   private readonly lookupTextures: readonly THREE.DataTexture[];
@@ -40,6 +42,11 @@ export class TerrestrialAtmosphere {
     this.mesh.scale.setScalar(this.shellRadius);
     this.mesh.renderOrder = 40;
     this.mesh.frustumCulled = true;
+    this.transmittanceMesh = new THREE.Mesh(geometry, createAtmosphereTransmittanceMaterial(bundle.material));
+    this.transmittanceMesh.name = `terrestrial-atmosphere-transmittance:${body.id}`;
+    this.transmittanceMesh.renderOrder = 39;
+    this.transmittanceMesh.frustumCulled = true;
+    this.mesh.add(this.transmittanceMesh);
   }
 
   get material(): THREE.ShaderMaterial { return this.mesh.material; }
@@ -70,17 +77,16 @@ export class TerrestrialAtmosphere {
     const sun = this.material.uniforms.uSunDirection.value as THREE.Vector3;
     sun.set(sunDirection.x, sunDirection.y, sunDirection.z).normalize();
     const cameraRadius = Math.hypot(cameraBodyFixed.x, cameraBodyFixed.y, cameraBodyFixed.z);
-    const presentationVisibility = atmospherePresentationVisibility(
-      Math.max(0, cameraRadius - this.body.radius),
-      this.body.def.atmosphere!.height,
-    );
-    this.material.uniforms.uPresentationVisibility.value = presentationVisibility;
-    this.mesh.visible = presentationVisibility > 0;
+    // The shell is the sky from below and the limb, terminator, and ground
+    // haze from above, so it stays visible at every altitude.
+    this.material.uniforms.uPresentationVisibility.value = 1;
+    this.mesh.visible = true;
     const inside = cameraRadius < this.shellRadius;
     const shellSide = inside ? THREE.BackSide : THREE.FrontSide;
-    if (this.material.side !== shellSide) {
-      this.material.side = shellSide;
-      this.material.needsUpdate = true;
+    for (const material of [this.material, this.transmittanceMesh.material]) {
+      if (material.side === shellSide) continue;
+      material.side = shellSide;
+      material.needsUpdate = true;
     }
     this.material.uniforms.uInsideAtmosphere.value = inside ? 1 : 0;
     this.material.uniforms.uSolarVisibility.value = Math.max(0, Math.min(1, frame.solarVisibleFraction ?? 1));
@@ -91,6 +97,7 @@ export class TerrestrialAtmosphere {
     this.disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    this.transmittanceMesh.material.dispose();
     for (const texture of this.lookupTextures) texture.dispose();
   }
 }

@@ -55,6 +55,35 @@ export function validateEntryVisual(value: Readonly<EntryVisualDef>): string[] {
   return errors;
 }
 
+/** Thin scattering layer drawn above a compact globe (metres, per-metre coefficients). */
+export interface CompactAtmosphereVisual {
+  readonly height: number;
+  readonly scaleHeight: number;
+  readonly rayleigh: readonly [number, number, number];
+  readonly mieScattering: readonly [number, number, number];
+  readonly mieExtinction: readonly [number, number, number];
+  readonly mieG: number;
+  readonly multipleScattering: number;
+}
+
+export interface CompactPlanetVisualDef {
+  limbColor: string;
+  limbStrength: number;
+  pointColor: string;
+  /**
+   * Disk-resolved reflectance model: Lunar-Lambert regolith, Mars-like dusty
+   * rock, an opaque cloud deck, or a limb-darkened gas giant.
+   */
+  photometry?: 'airless' | 'rocky' | 'cloud-deck' | 'gas-giant';
+  /** Relief recovered from albedo gradients; 0 keeps the sphere smooth. */
+  relief?: number;
+  /** Linear albedo gain applied after decoding the source mosaic. */
+  gain?: number;
+  /** Saturation multiplier for over-processed source colour. */
+  saturation?: number;
+  atmosphere?: CompactAtmosphereVisual;
+}
+
 export interface BodyVisualDef {
   renderer: BodyRendererKind;
   targetArchetype: BodyTargetArchetype;
@@ -66,16 +95,8 @@ export interface BodyVisualDef {
     wavelengthTint: readonly [number, number, number];
     strength: number;
   };
-  compactPlanetVisual?: {
-    limbColor: string;
-    limbStrength: number;
-    pointColor: string;
-  };
-  gasGiantVisual?: {
-    limbColor: string;
-    limbStrength: number;
-    pointColor: string;
-  };
+  compactPlanetVisual?: CompactPlanetVisualDef;
+  gasGiantVisual?: CompactPlanetVisualDef;
   /** Renderer-only atmospheric-entry art direction. Physical heating remains simulation-owned. */
   entryVisual?: EntryVisualDef;
 }
@@ -113,6 +134,9 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#b6aa9c',
       limbStrength: 0.04,
       pointColor: '#c2b29d',
+      photometry: 'airless',
+      relief: 0.6,
+      gain: 1.2,
     },
   },
   venus: {
@@ -123,6 +147,20 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#ffe4a3',
       limbStrength: 0.42,
       pointColor: '#ffe1a0',
+      photometry: 'cloud-deck',
+      gain: 0.7,
+      saturation: 1.2,
+      // Sulfuric-acid haze above the cloud tops: a bright, soft limb and a
+      // terminator that wraps well past the geometric edge.
+      atmosphere: {
+        height: 110_000,
+        scaleHeight: 6_000,
+        rayleigh: [2.9e-6, 6.8e-6, 16.6e-6],
+        mieScattering: [2.6e-5, 2.45e-5, 2.0e-5],
+        mieExtinction: [2.8e-5, 2.75e-5, 2.6e-5],
+        mieG: 0.7,
+        multipleScattering: 1.4,
+      },
     },
   },
   earth: {
@@ -145,6 +183,20 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#d98b68',
       limbStrength: 0.22,
       pointColor: '#e59262',
+      photometry: 'rocky',
+      relief: 0.4,
+      gain: 1.3,
+      // Thin CO2 with suspended dust: butterscotch daylight haze and a pale
+      // limb, with Rayleigh only a few percent of Earth's.
+      atmosphere: {
+        height: 90_000,
+        scaleHeight: 11_100,
+        rayleigh: [2.3e-7, 5.4e-7, 1.32e-6],
+        mieScattering: [1.9e-5, 1.45e-5, 0.95e-5],
+        mieExtinction: [2.1e-5, 1.95e-5, 1.75e-5],
+        mieG: 0.65,
+        multipleScattering: 0.8,
+      },
     },
   },
   jupiter: {
@@ -155,6 +207,9 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#d8c4a4',
       limbStrength: 0.34,
       pointColor: '#dfc69f',
+      photometry: 'gas-giant',
+      gain: 1.1,
+      saturation: 0.82,
     },
   },
   callisto: {
@@ -165,6 +220,9 @@ export const BODY_VISUALS: Readonly<Record<BodyId, BodyVisualDef>> = Object.free
       limbColor: '#8d8175',
       limbStrength: 0.035,
       pointColor: '#a99c8f',
+      photometry: 'airless',
+      relief: 0.5,
+      gain: 1.45,
     },
   },
   auren: { renderer: 'star', targetArchetype: 'star', materialId: 'auren-star' },

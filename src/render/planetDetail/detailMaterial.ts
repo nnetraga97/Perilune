@@ -95,14 +95,16 @@ vec4 samplePlanetDetailLayer(
     return vec4(0.0);
   }
   vec2 atlasUv = local / detailAtlasGrid;
-  vec3 color = clamp(texture2D(detailAtlas, atlasUv).rgb * detailColorScale + detailColorBias, 0.0, 1.0);
+  vec4 texel = texture2D(detailAtlas, atlasUv);
+  vec3 color = clamp(texel.rgb * detailColorScale + detailColorBias, 0.0, 1.0);
   float edge = min(min(local.x, detailAtlasGrid.x - local.x), min(local.y, detailAtlasGrid.y - local.y));
   // Blend through a substantial part of the prediction ring. A one-texel
   // feather exposes the rectangular page allocation whenever source and
   // resident-parent color transforms differ even slightly.
   float footprint = max(length(fwidth(page.x)), length(fwidth(page.y)));
   float coverage = smoothstep(0.0, max(0.45, footprint * 2.0), edge);
-  return vec4(color, coverage * detailOpacity);
+  // Texel alpha carries source no-data masks; opaque sources are unaffected.
+  return vec4(color, coverage * detailOpacity * texel.a);
 }
 
 vec4 samplePlanetDetail(vec3 direction) {

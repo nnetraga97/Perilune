@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import type { Body } from '../sim/universe';
 import type { BodyRenderFrame, QuaternionCoordinates, VectorCoordinates } from './bodyRenderer';
 import {
-  atmospherePresentationVisibility,
   bindTerrestrialAerialPerspectiveUniforms,
   createTerrestrialAerialPerspectiveState,
+  surfaceAerialPerspectiveWeight,
+  syncAerialScatteringProfile,
   TERRESTRIAL_AERIAL_FRAGMENT_GLSL,
   type TerrestrialAerialPerspectiveState,
 } from './terrestrial/aerialPerspective';
@@ -59,10 +60,11 @@ export class FlightAerialPerspectiveController {
       1,
     );
     const cameraAltitude = Math.max(0, this.aerial.cameraBodyFixed.value.length() - body.radius);
-    this.aerial.presentationVisibility.value = atmospherePresentationVisibility(
+    this.aerial.presentationVisibility.value = surfaceAerialPerspectiveWeight(
       cameraAltitude,
       atmosphere?.height ?? 0,
     );
+    syncAerialScatteringProfile(this.aerial, body);
     this.aerial.lookup.value = atmosphere ? lookup ?? null : null;
     this.aerial.useLookup.value = atmosphere && lookup ? 1 : 0;
     this.setInverseOrientation(frame.orientation);

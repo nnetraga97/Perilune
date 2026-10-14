@@ -90,7 +90,10 @@ describe('GasGiantBodyRenderer', () => {
       textures: new Map([['albedo', albedo], ['normal', albedo]]),
     })).toThrow(/exact channel albedo/i);
     const surface = subject.root.getObjectByName('gas-giant-surface:jupiter:physical') as THREE.Mesh;
-    expect((surface.material as THREE.ShaderMaterial).fragmentShader).toContain('0.24 + diffuse * 0.96');
+    const material = surface.material as THREE.ShaderMaterial;
+    expect(material.userData.photometry).toBe('gas-giant');
+    expect(material.defines.COMPACT_PHOTOMETRY).toBe(3);
+    expect(material.fragmentShader).toContain('#include <tonemapping_fragment>');
     subject.dispose();
     albedo.dispose();
   });

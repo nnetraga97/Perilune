@@ -1,4 +1,4 @@
-import type { BodyVisualDef } from '../content/bodyVisuals';
+import type { CompactPlanetVisualDef } from '../content/bodyVisuals';
 import type { Body } from '../sim/universe';
 import type { BodyMaterialDescriptor } from './bodyMaterial';
 import type { QualityTier } from './bodyRenderer';
@@ -13,7 +13,7 @@ export class GasGiantBodyRenderer extends CompactPlanetBodyRenderer {
   constructor(
     body: Body,
     descriptor: Readonly<BodyMaterialDescriptor>,
-    visual: Readonly<NonNullable<BodyVisualDef['gasGiantVisual']>>,
+    visual: Readonly<CompactPlanetVisualDef>,
     caps: Readonly<RenderCaps>,
     quality: QualityTier,
   ) {

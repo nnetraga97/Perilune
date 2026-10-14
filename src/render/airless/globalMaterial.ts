@@ -50,7 +50,7 @@ export function createAirlessGlobalMaterial(
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 }) as AirlessGlobalMaterial;
   const detail = createPlanetDetailMaterialState();
   Object.assign(material.userData, { airlessGlobal: true, bodyId: pack.bodyId, bodyRadius, planetDetail: detail });
-  material.customProgramCacheKey = () => 'airless-global-v2:tangent-slope';
+  material.customProgramCacheKey = () => 'airless-global-v3:lunar-lambert';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.airlessAlbedoMap = { value: albedo };
     shader.uniforms.airlessNormalMap = { value: normal };
@@ -121,6 +121,24 @@ float airlessPolarNormalFade = 1.0 - smoothstep(0.965, 0.99, abs(airlessRadialNo
 float airlessPolarNormalWeight = mix(0.25, 1.0, airlessPolarNormalFade);
 airlessBodyNormal = normalize(mix(airlessRadialNormal, airlessBodyNormal, 0.28 * airlessPolarNormalWeight));
 normal = normalize(normalMatrix * airlessBodyNormal);`,
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+#if NUM_DIR_LIGHTS > 0
+// Lunar-Lambert photometry (McEwen 1991): regolith backscatter keeps the full
+// disk bright to the limb and leaves Lambert shading for crescent phases.
+// Three.js already applied the Lambert cosine, so scale by LL / cos(i).
+float airlessIncidence = max(dot(geometryNormal, directionalLights[0].direction), 0.0);
+float airlessEmission = max(dot(geometryNormal, geometryViewDir), 0.0);
+float airlessPhase = degrees(acos(clamp(dot(directionalLights[0].direction, geometryViewDir), -1.0, 1.0)));
+float airlessLimbParameter = clamp(1.0 - 0.019 * airlessPhase + 2.42e-4 * airlessPhase * airlessPhase
+  - 1.46e-6 * airlessPhase * airlessPhase * airlessPhase, 0.0, 1.0);
+float airlessLunarLambert = (1.0 - airlessLimbParameter)
+  + 2.0 * airlessLimbParameter / max(airlessIncidence + airlessEmission, 0.05);
+airlessLunarLambert *= 1.0 + 0.25 * exp(-airlessPhase / 6.0);
+reflectedLight.directDiffuse *= min(airlessLunarLambert, 4.0);
+#endif`,
       );
   };
   return material;
