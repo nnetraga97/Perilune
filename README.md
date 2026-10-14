@@ -16,6 +16,14 @@ step while the player flies it.
 
 ## Start here
 
+Use **Node.js 24.22.0 LTS** (pinned in `.nvmrc` and `.node-version`). With nvm,
+run `nvm install` and `nvm use` from this directory. CI reads the same pin;
+Vercel uses the latest available Node 24 patch through `engines.node`.
+
+The asset compiler container and compiler locks retain Node 22 as the provenance
+for existing checked assets. Updating that reproducible toolchain requires a
+separate asset rebuild; it is not the application runtime.
+
 ```bash
 npm install
 npm run dev
